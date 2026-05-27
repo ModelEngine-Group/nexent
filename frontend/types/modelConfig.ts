@@ -31,6 +31,8 @@ export type ModelType =
   | "stt"
   | "tts"
   | "vlm"
+  | "vlm2"
+  | "vlm3"
   | "multi_embedding";
 
 // Model option interface
@@ -47,9 +49,12 @@ export interface ModelOption {
   expectedChunkSize?: number;
   maximumChunkSize?: number;
   chunkingBatchSize?: number;
-  // STT specific fields
+  // STT/TTS specific fields
+  modelFactory?: string;
   modelAppid?: string;
   accessToken?: string;
+  timeoutSeconds?: number;
+  concurrencyLimit?: number;
 }
 
 // Application configuration interface
@@ -86,6 +91,7 @@ export interface TTSModelConfig extends SingleModelConfig {
 
 // Single model configuration interface
 export interface SingleModelConfig {
+  id?: number;
   modelName: string;
   displayName: string;
   apiConfig: ModelApiConfig;
@@ -99,6 +105,8 @@ export interface ModelConfig {
   multiEmbedding: SingleModelConfig;
   rerank: SingleModelConfig;
   vlm: SingleModelConfig;
+  vlm2: SingleModelConfig;
+  vlm3: SingleModelConfig;
   stt: STTModelConfig;
   tts: TTSModelConfig;
 }

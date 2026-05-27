@@ -352,6 +352,7 @@ def get_llm_model(tenant_id: str):
     # Get the tenant config
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    timeout_seconds = main_model_config.get("timeout_seconds") if main_model_config else None
     long_text_to_text_model = OpenAILongContextModel(
         observer=MessageObserver(),
         model_id=get_model_name_from_config(main_model_config),
@@ -359,6 +360,7 @@ def get_llm_model(tenant_id: str):
         api_key=main_model_config.get("api_key"),
         max_context_tokens=main_model_config.get("max_tokens"),
         ssl_verify=main_model_config.get("ssl_verify", True),
+        timeout_seconds=timeout_seconds,
     )
     return long_text_to_text_model
 

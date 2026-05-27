@@ -15,7 +15,7 @@
 更新之前，先记录下当前部署的版本和数据目录信息。
 
 - 当前部署版本信息的位置：`backend/consts/const.py` 中的 `APP_VERSION`
-- 数据目录信息的位置：`k8s/helm/nexent/values.yaml` 中的 `global.dataDir`
+- 本地卷目录信息的位置：各 Helm 子 chart 的 `storage.hostPath`，默认位于 `/var/lib/nexent-data/nexent-*`
 
 **git 方式下载的代码**
 
@@ -28,7 +28,7 @@ git pull
 **zip 包等方式下载的代码**
 
 1. 需要去 GitHub 上重新下载一份最新代码，并解压缩。
-2. 将之前执行部署脚本目录下 `k8s/helm` 目录中的 `.deploy.options` 文件拷贝到新代码目录的 `k8s/helm` 目录中。（如果不存在该文件则忽略此步骤）。
+2. 将之前执行部署脚本目录下 `k8s/helm` 目录中的 `deploy.options` 文件拷贝到新代码目录的 `k8s/helm` 目录中。（如果不存在该文件则忽略此步骤）。
 
 ## 🔄 步骤二：执行升级
 
@@ -36,10 +36,10 @@ git pull
 
 ```bash
 cd k8s/helm
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
-脚本会自动检测您之前的部署设置（版本、镜像源等）。如果 `.deploy.options` 文件不存在，系统会提示您输入配置信息。
+脚本会自动检测您之前保存的部署设置（组件组合、端口策略、镜像来源等）。如果 `deploy.options` 文件不存在，系统会提示您输入配置信息。
 
 > 💡 提示
 > - 若需配置语音模型（STT/TTS），请在对应的 `values.yaml` 中修改相关配置，或通过命令行参数传入。
@@ -137,7 +137,7 @@ kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0
    kubectl exec nexent/$POSTGRES_POD -n nexent -- pg_dump -U root nexent > backup_$(date +%F).sql
    ```
 
-> - 对于 Supabase 数据库（仅完整版本），请使用 `nexent-supabase-db` Pod：
+> - 对于 Supabase 数据库（选择 `supabase` 组件时），请使用 `nexent-supabase-db` Pod：
 
    ```bash
    SUPABASE_POD=$(kubectl get pods -n nexent -l app=nexent-supabase-db -o jsonpath='{.items[0].metadata.name}')

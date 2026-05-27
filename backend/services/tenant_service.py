@@ -3,9 +3,12 @@ Tenant service for managing tenant operations
 """
 import asyncio
 import logging
+import os
+import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
+from database import skill_db
 from database.tenant_config_db import (
     get_single_config_info,
     insert_config,
@@ -23,8 +26,9 @@ from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by
 from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from database.invitation_db import query_invitations_by_tenant, remove_invitation
 from database.tool_db import delete_tools_by_agent_id
-from consts.const import TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID
+from consts.const import TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID, CONTAINER_SKILLS_PATH
 from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
+from services.skill_service import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +172,13 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     }
 
 
-def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[str, Any]:
+def create_tenant(
+    tenant_name: str,
+    created_by: Optional[str] = None,
+    skill_ids: Optional[List[int]] = None,
+    skill_names: Optional[List[str]] = None,
+    locale: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Create a new tenant with default group
 
@@ -233,10 +243,39 @@ def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[st
         if not group_success:
             raise ValidationError("Failed to create tenant default group configuration")
 
+        # Install requested skills for the new tenant
+        # Prefer skill_names (ZIP-based installation) over skill_ids (legacy record-copy)
+        installed_skill_names: List[str] = []
+        if skill_names:
+            try:
+                installed_skill_names = install_skills_from_zip_for_tenant(
+                    skill_names=skill_names,
+                    tenant_id=tenant_id,
+                    user_id=created_by,
+                    locale=locale
+                )
+            except Exception as e:
+                logger.warning(f"Failed to install skills from ZIP for tenant {tenant_id}: {e}")
+        elif skill_ids:
+            try:
+                from services.skill_service import install_skills_for_tenant as install_by_ids
+                installed_by_ids = install_by_ids(
+                    skill_ids=skill_ids,
+                    tenant_id=tenant_id,
+                    user_id=created_by
+                )
+                logger.info(
+                    f"Legacy install_skills_for_tenant installed IDs: {installed_by_ids} "
+                    f"for tenant {tenant_id}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
+
         tenant_info = {
             "tenant_id": tenant_id,
             "tenant_name": tenant_name.strip(),
-            "default_group_id": str(default_group_id)
+            "default_group_id": str(default_group_id),
+            "installed_skill_names": installed_skill_names,
         }
 
         logger.info(f"Created tenant {tenant_id} with name '{tenant_name}' and default group {default_group_id}")
@@ -302,6 +341,50 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
     return updated_tenant
 
 
+async def _delete_skills_for_tenant(tenant_id: str, actor: str) -> None:
+    """
+    Delete all skills, skill instances, and local skill files for a tenant.
+
+    This performs cascade cleanup of:
+    - All skill instances (ag_skill_instance_t) for the tenant
+    - All skills (ag_skill_info_t) for the tenant
+    - All local skill directories and files under CONTAINER_SKILLS_PATH/{tenant_id}/
+
+    Args:
+        tenant_id: Tenant ID to delete skills for
+        actor: User ID performing the deletion (for audit trail)
+    """
+    logger.info(f"Deleting skills and local files for tenant {tenant_id}")
+
+    # 1. Soft-delete all skill instances for the tenant (regardless of skill source)
+    try:
+        deleted_count = skill_db.delete_skill_instances_by_tenant(tenant_id, actor)
+        logger.info(f"Soft-deleted {deleted_count} skill instances for tenant {tenant_id}")
+    except Exception as e:
+        logger.warning(f"Failed to soft-delete skill instances for tenant {tenant_id}: {str(e)}")
+
+    # 2. Soft-delete all skills for the tenant
+    skills = skill_db.list_skills(tenant_id)
+    for skill in skills:
+        try:
+            skill_name = skill.get("name")
+            if skill_name:
+                skill_db.delete_skill(skill_name, tenant_id, actor)
+                logger.info(f"Soft-deleted skill '{skill_name}' for tenant {tenant_id}")
+        except Exception as e:
+            logger.warning(f"Failed to soft-delete skill {skill.get('name')}: {str(e)}")
+
+    # 3. Delete the tenant's local skill directory and all its contents
+    if CONTAINER_SKILLS_PATH:
+        tenant_skill_root = os.path.join(CONTAINER_SKILLS_PATH, tenant_id)
+        if os.path.exists(tenant_skill_root):
+            try:
+                shutil.rmtree(tenant_skill_root)
+                logger.info(f"Deleted tenant skill root directory: {tenant_skill_root}")
+            except Exception as e:
+                logger.warning(f"Failed to delete tenant skill root directory {tenant_skill_root}: {str(e)}")
+
+
 async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
     """
     Delete tenant and all associated resources
@@ -312,6 +395,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
     - All models in the tenant
     - All knowledge bases in the tenant
     - All agents in the tenant (including tool instances)
+    - All skills, skill instances, and local skill files for the tenant
     - All MCP configurations in the tenant
     - All invitation codes in the tenant
     - All tenant configurations
@@ -408,6 +492,9 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
             except Exception as e:
                 logger.warning(f"Failed to delete published agent {agent.get('agent_id')}: {str(e)}")
+
+        # 5b. Delete all skills, skill instances, and local skill files for the tenant
+        _delete_skills_for_tenant(tenant_id, deleted_by or "system")
 
         # 6. Delete all MCP configurations in the tenant
         logger.info(f"Deleting MCP records for tenant {tenant_id}")

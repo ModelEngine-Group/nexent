@@ -19,10 +19,9 @@
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
-cp .env.example .env # Configure environment variables
 ```
 
-> **💡 Tip**: If there are no special requirements, you can directly use `.env.example` for deployment without making any changes. If you need to configure voice models (STT/TTS), you will need to set the relevant parameters in `.env`. We will work on making this configuration available through the frontend soon—stay tuned.
+> **💡 Tip**: `deploy.sh` automatically copies `.env.example` to `docker/.env` when `docker/.env` does not exist. If you need to configure voice models (STT/TTS), update the related values in `docker/.env` before or after deployment.
 
 ### 2. Deployment Options
 
@@ -32,20 +31,42 @@ Run the following command to start deployment:
 bash deploy.sh
 ```
 
-After executing this command, the system will provide two different versions for you to choose from:
+After running the command, the script opens Bash TUI menus for deployment options. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
 
-**Version Selection:**
-- **Speed version (Lightweight & Fast Deployment, Default)**: Quick startup of core features, suitable for individual users and small teams
-- **Full version (Complete Feature Edition)**: Provides enterprise-level tenant management and resource isolation features, but takes longer to install, suitable for enterprise users
+**Deployment Components:**
+- **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
+- **application (selected by default, optional)**: config, runtime, mcp, northbound, web
+- **data-process (optional)**: data processing service
+- **supabase (optional)**: enables user, tenant, and authentication features
+- **terminal (optional)**: enables the OpenSSH terminal tool
+- **monitoring (optional)**: enables observability components and then prompts for a provider
 
-**Deployment Modes:**
-- **Development mode (default)**: Exposes all service ports for debugging
-- **Infrastructure mode**: Only starts infrastructure services
-- **Production mode**: Only exposes port 3000 for security
+**Port Policy:**
+- **development (default)**: publishes debug and internal service ports for local troubleshooting
+- **production**: publishes only production entry ports
 
-**Optional Components:**
-- **Terminal Tool**: Enables openssh-server for AI agent shell command execution
-- **Regional optimization**: Mainland China users can use optimized image sources
+**Image Source:**
+- **general (default)**: uses standard public registries
+- **mainland**: uses mainland China mirrors
+- **local-latest**: uses local `latest` Nexent images and avoids pulling Nexent application images
+
+You can also pass options directly:
+
+```bash
+# Default component set, development port policy, standard image source
+bash deploy.sh --components infrastructure,application --port-policy development --image-source general
+
+# Enable user/tenant features, data processing, and terminal
+bash deploy.sh --components infrastructure,application,supabase,data-process,terminal
+
+# Use mainland China image sources
+bash deploy.sh --image-source mainland
+
+# Use local latest images
+bash deploy.sh --image-source local-latest
+```
+
+After a successful deployment, non-sensitive choices are saved to `docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 #### ⚠️ Important Notes
 
@@ -102,7 +123,7 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | nexent-minio | S3-compatible object storage |
 | redis | Caching layer |
 
-**Supabase Services (Full Version Only):**
+**Supabase Services (when `supabase` is selected):**
 | Service | Description |
 |---------|-------------|
 | supabase-kong | API Gateway |
@@ -113,6 +134,7 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | Service | Description |
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
+| nexent-monitoring | Optional observability stack |
 
 Internal services communicate using the Docker internal network.
 
@@ -126,9 +148,11 @@ Nexent uses Docker volumes for data persistence:
 | Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
-| Supabase DB (Full) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
+| Supabase DB (when `supabase` is selected) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `.env`).
+
+Uninstall is handled by `docker/uninstall.sh`. It prompts before deleting persistent data by default; you can also pass `--delete-volumes true|false`, `--remove-volumes`, `--keep-volumes`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
 
 ## 🔌 Port Mapping
 

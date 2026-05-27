@@ -17,6 +17,7 @@ from apps.model_managment_app import router as model_manager_router
 from apps.oauth_app import router as oauth_router
 from apps.prompt_app import router as prompt_router
 from apps.prompt_template_app import router as prompt_template_router
+from apps.mcp_management_app import router as mcp_management_router
 from apps.remote_mcp_app import router as remote_mcp_router
 from apps.skill_app import router as skill_router
 from apps.tenant_config_app import router as tenant_config_router
@@ -30,6 +31,7 @@ from apps.invitation_app import router as invitation_router
 from apps.a2a_client_app import router as a2a_client_router
 from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
+from apps.haotian_app import router as haotian_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
 
@@ -77,6 +79,7 @@ app.include_router(prompt_router)
 app.include_router(prompt_template_router)
 app.include_router(skill_router)
 app.include_router(tenant_config_router)
+app.include_router(mcp_management_router)
 app.include_router(remote_mcp_router)
 app.include_router(tenant_router)
 app.include_router(group_router)
@@ -84,3 +87,4 @@ app.include_router(user_router)
 app.include_router(invitation_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
+app.include_router(haotian_router)

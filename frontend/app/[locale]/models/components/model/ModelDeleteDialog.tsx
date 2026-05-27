@@ -52,11 +52,9 @@ export const ModelDeleteDialog = ({
   const [isConfirmLoading, setIsConfirmLoading] = useState<boolean>(false);
   const [maxTokens, setMaxTokens] = useState<number>(0);
 
-  // Settings modal state
-  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-  const [selectedModelForSettings, setSelectedModelForSettings] =
-    useState<any>(null);
-  const [modelMaxTokens, setModelMaxTokens] = useState("4096");
+  // Single model settings modal state
+  const [isSingleModelSettingsOpen, setIsSingleModelSettingsOpen] = useState<boolean>(false);
+  const [selectedSingleModel, setSelectedSingleModel] = useState<any>(null);
   const [providerModelSearchTerm, setProviderModelSearchTerm] = useState("");
 
   // Embedding model chunk config modal state
@@ -101,6 +99,8 @@ export const ModelDeleteDialog = ({
           border: "border-purple-100",
         };
       case MODEL_TYPES.VLM:
+      case MODEL_TYPES.VLM2:
+      case MODEL_TYPES.VLM3:
         return {
           bg: "bg-yellow-50",
           text: "text-yellow-600",
@@ -143,6 +143,8 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.TTS:
         return "🔊";
       case MODEL_TYPES.VLM:
+      case MODEL_TYPES.VLM2:
+      case MODEL_TYPES.VLM3:
         return "👁️";
       default:
         return "⚙️";
@@ -167,6 +169,10 @@ export const ModelDeleteDialog = ({
         return t("model.type.tts");
       case MODEL_TYPES.VLM:
         return t("model.type.vlm");
+      case MODEL_TYPES.VLM2:
+        return `${t("model.type.vlm")}2`;
+      case MODEL_TYPES.VLM3:
+        return `${t("model.type.vlm")}3`;
       default:
         return t("model.type.unknown");
     }
@@ -346,7 +352,10 @@ export const ModelDeleteDialog = ({
         if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
       }
       if (type === MODEL_TYPES.VLM) {
-        const cfgUrl = modelConfig?.vlm?.apiConfig?.modelUrl;
+        const cfgUrl =
+          modelConfig?.vlm?.apiConfig?.modelUrl ||
+          modelConfig?.vlm2?.apiConfig?.modelUrl ||
+          modelConfig?.vlm3?.apiConfig?.modelUrl;
         if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
       }
       if (type === MODEL_TYPES.LLM) {
@@ -503,6 +512,22 @@ export const ModelDeleteDialog = ({
         };
       }
 
+      if (modelConfig.vlm2?.displayName === displayName) {
+        configUpdates.vlm2 = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
+      if (modelConfig.vlm3?.displayName === displayName) {
+        configUpdates.vlm3 = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+      }
+
       if (modelConfig.stt.displayName === displayName) {
         configUpdates.stt = { modelName: "", displayName: "" };
       }
@@ -589,9 +614,13 @@ export const ModelDeleteDialog = ({
   const handleProviderConfigSave = async ({
     apiKey,
     maxTokens,
+    timeoutSeconds,
+    concurrencyLimit,
   }: {
-    apiKey: string;
+    apiKey?: string;
     maxTokens: number;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
   }) => {
     setMaxTokens(maxTokens);
     if (
@@ -622,8 +651,10 @@ export const ModelDeleteDialog = ({
           )
           .map((m) => ({
             model_id: String(m.id),
-            apiKey: apiKey || m.apiKey,
+            apiKey: apiKey ?? m.apiKey,
             maxTokens: maxTokens || m.maxTokens,
+            ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+            ...(concurrencyLimit !== undefined ? { concurrencyLimit } : {}),
           }));
 
         await modelService.updateBatchModel(
@@ -639,6 +670,8 @@ export const ModelDeleteDialog = ({
           prev.map((model) => ({
             ...model,
             max_tokens: maxTokens || model.max_tokens || 4096,
+            timeout_seconds: timeoutSeconds || model.timeout_seconds,
+            concurrency_limit: concurrencyLimit !== undefined ? concurrencyLimit : model.concurrency_limit,
           }))
         );
       } catch (e) {
@@ -647,29 +680,6 @@ export const ModelDeleteDialog = ({
     }
     await onSuccess();
     setIsProviderConfigOpen(false);
-  };
-
-  // Handle settings button click
-  const handleSettingsClick = (model: any) => {
-    setSelectedModelForSettings(model);
-    setModelMaxTokens(model.max_tokens?.toString() || "4096");
-    setSettingsModalVisible(true);
-  };
-
-  // Handle settings save
-  const handleSettingsSave = () => {
-    if (selectedModelForSettings) {
-      // Update the model in the list with new max_tokens
-      setProviderModels((prev) =>
-        prev.map((model) =>
-          model.id === selectedModelForSettings.id
-            ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
-            : model
-        )
-      );
-    }
-    setSettingsModalVisible(false);
-    setSelectedModelForSettings(null);
   };
 
   // Handle embedding model click to open config modal
@@ -727,6 +737,12 @@ export const ModelDeleteDialog = ({
       }
       setEmbeddingConfigModalVisible(true);
     }
+  };
+
+  // Handle single model settings button click
+  const handleSingleModelSettingsClick = (model: any) => {
+    setSelectedSingleModel(model);
+    setIsSingleModelSettingsOpen(true);
   };
 
   // Handle embedding config save
@@ -1028,6 +1044,8 @@ export const ModelDeleteDialog = ({
                 MODEL_TYPES.MULTI_EMBEDDING,
                 MODEL_TYPES.RERANK,
                 MODEL_TYPES.VLM,
+                MODEL_TYPES.VLM2,
+                MODEL_TYPES.VLM3,
                 MODEL_TYPES.STT,
                 MODEL_TYPES.TTS,
               ] as ModelType[]
@@ -1053,10 +1071,10 @@ export const ModelDeleteDialog = ({
                     setMaxTokens(existingModel?.maxTokens || 0);
                   }}
                   disabled={
-                    type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS
+                    type === MODEL_TYPES.STT
                   }
                   className={`p-3 flex justify-between rounded-md border transition-colors ${
-                    type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS
+                    type === MODEL_TYPES.STT
                       ? `${colorScheme.border} bg-gray-100 cursor-not-allowed opacity-60`
                       : `${colorScheme.border} ${colorScheme.bg} hover:bg-opacity-80`
                   }`}
@@ -1075,8 +1093,7 @@ export const ModelDeleteDialog = ({
                         {t("model.dialog.delete.customModelCount", {
                           count: modelsByType.length,
                         })}
-                        {(type === MODEL_TYPES.STT ||
-                          type === MODEL_TYPES.TTS) &&
+                        {type === MODEL_TYPES.STT &&
                           t("model.dialog.delete.unsupportedType")}
                       </div>
                     </div>
@@ -1330,7 +1347,7 @@ export const ModelDeleteDialog = ({
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent switch toggle
-                                handleSettingsClick(providerModel);
+                                handleSingleModelSettingsClick(providerModel);
                               }}
                             />
                           </Tooltip>
@@ -1414,18 +1431,15 @@ export const ModelDeleteDialog = ({
                         }}
                         disabled={
                           deletingModels.has(model.displayName || model.name) ||
-                          model.type === MODEL_TYPES.STT ||
-                          model.type === MODEL_TYPES.TTS
+                          model.type === MODEL_TYPES.STT
                         }
                         className={`p-1 ${
-                          model.type === MODEL_TYPES.STT ||
-                          model.type === MODEL_TYPES.TTS
+                          model.type === MODEL_TYPES.STT
                             ? "text-gray-400 cursor-not-allowed"
                             : "text-red-500 hover:text-red-700"
                         }`}
                         title={
-                          model.type === MODEL_TYPES.STT ||
-                          model.type === MODEL_TYPES.TTS
+                          model.type === MODEL_TYPES.STT
                             ? t("model.dialog.delete.unsupportedTypeHint")
                             : t("model.dialog.delete.deleteHint")
                         }
@@ -1516,34 +1530,78 @@ export const ModelDeleteDialog = ({
               m.source === (selectedSource || MODEL_SOURCES.SILICON)
           )?.maxTokens || 4096
         ).toString()}
+        initialTimeoutSeconds={(
+          models.find(
+            (m) =>
+              m.type === deletingModelType &&
+              m.source === (selectedSource || MODEL_SOURCES.SILICON)
+          )?.timeoutSeconds?.toString() || "120"
+        )}
+        initialConcurrencyLimit={(
+          models.find(
+            (m) =>
+              m.type === deletingModelType &&
+              m.source === (selectedSource || MODEL_SOURCES.SILICON)
+          )?.concurrencyLimit?.toString() || ""
+        )}
         modelType={deletingModelType || undefined}
         onSave={handleProviderConfigSave}
       />
 
-      {/* Settings Modal */}
-      <Modal
-        title={t("model.dialog.settings.title")}
-        open={settingsModalVisible}
-        onCancel={() => setSettingsModalVisible(false)}
-        onOk={handleSettingsSave}
-        cancelText={t("common.button.cancel")}
-        okText={t("common.button.save")}
-        destroyOnHidden
-      >
-        <div className="space-y-3">
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.settings.label.maxTokens")}
-            </label>
-            <Input
-              type="number"
-              value={modelMaxTokens}
-              onChange={(e) => setModelMaxTokens(e.target.value)}
-              placeholder={t("model.dialog.placeholder.maxTokens")}
-            />
-          </div>
-        </div>
-      </Modal>
+      {/* Single Model Settings Modal */}
+      <ProviderConfigEditDialog
+        isOpen={isSingleModelSettingsOpen}
+        onClose={() => {
+          setIsSingleModelSettingsOpen(false);
+          setSelectedSingleModel(null);
+        }}
+        initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || "4096"}
+        initialTimeoutSeconds={selectedSingleModel?.timeout_seconds?.toString() || "120"}
+        initialConcurrencyLimit={selectedSingleModel?.concurrency_limit?.toString() || ""}
+        modelType={deletingModelType || undefined}
+        showApiKeyField={false}
+        onSave={async (config) => {
+          if (!selectedSingleModel) return;
+          try {
+            const modelName = selectedSingleModel.model_name || selectedSingleModel.id;
+
+            const updatePayload: any = {
+              model_id: modelName,
+              maxTokens: config.maxTokens,
+              timeoutSeconds: config.timeoutSeconds,
+              concurrencyLimit: config.concurrencyLimit,
+            };
+
+            if (config.apiKey) {
+              updatePayload.apiKey = config.apiKey;
+            }
+
+            await modelService.updateBatchModel(
+              [updatePayload],
+              selectedSingleModel.model_factory
+            );
+
+            // Update the model in the list
+            setProviderModels((prev) =>
+              prev.map((model) =>
+                model.id === selectedSingleModel.id
+                  ? {
+                      ...model,
+                      max_tokens: config.maxTokens,
+                      timeout_seconds: config.timeoutSeconds,
+                      concurrency_limit: config.concurrencyLimit,
+                    }
+                  : model
+              )
+            );
+
+            message.success(t("model.message.updateSuccess") || "Update successful");
+          } catch (error) {
+            console.error("Failed to update model settings:", error);
+            message.error(t("model.message.updateFailed") || "Failed to update settings");
+          }
+        }}
+      />
 
       {/* Embedding Model Config Modal */}
       <Modal

@@ -111,6 +111,8 @@ def setup_common_mocks():
         "multiEmbedding": "MULTI_EMBEDDING_ID",
         "rerank": "RERANK_ID",
         "vlm": "VLM_ID",
+        "vlm2": "VLM2_ID",
+        "vlm3": "VLM3_ID",
         "stt": "STT_ID",
         "tts": "TTS_ID"
     }

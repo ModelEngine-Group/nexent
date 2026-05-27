@@ -38,7 +38,7 @@ from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from database.client import minio_client
-from services.image_service import get_vlm_model
+from services.image_service import get_video_understanding_model, get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
@@ -130,11 +130,15 @@ def get_local_tools() -> List[ToolInfo]:
                 if hasattr(param.default, 'exclude') and param.default.exclude:
                     continue
 
+            # Check if default is a Pydantic FieldInfo (has .default attribute)
+            is_pydantic_field = hasattr(param.default, 'default')
+
             # Get description in both languages
-            param_description = param.default.description if hasattr(param.default, 'description') else ""
+            param_description = param.default.description if is_pydantic_field else ""
 
             # First try to get from param.default.description_zh (FieldInfo)
-            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+            # Note: Pydantic Field doesn't have description_zh attribute, so use getattr with default
+            param_description_zh = getattr(param.default, 'description_zh', None) if is_pydantic_field else None
 
             # Fallback to init_param_descriptions if not found
             if param_description_zh is None and param_name in init_param_descriptions:
@@ -146,11 +150,21 @@ def get_local_tools() -> List[ToolInfo]:
                 "description": param_description,
                 "description_zh": param_description_zh
             }
-            if param.default.default is PydanticUndefined:
-                param_info["optional"] = False
+
+            # Handle both Pydantic FieldInfo and simple defaults
+            if is_pydantic_field:
+                if param.default.default is PydanticUndefined:
+                    param_info["optional"] = False
+                else:
+                    param_info["default"] = param.default.default
+                    param_info["optional"] = True
             else:
-                param_info["default"] = param.default.default
-                param_info["optional"] = True
+                # Simple default value (not a FieldInfo)
+                if param.default == inspect.Parameter.empty:
+                    param_info["optional"] = False
+                else:
+                    param_info["default"] = param.default
+                    param_info["optional"] = True
 
             init_params_list.append(param_info)
 
@@ -262,8 +276,8 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
     tools_info = []
     for record in mcp_info:
-        # only update connected server
-        if record["status"]:
+        # Only scan MCP services that are explicitly enabled and currently healthy.
+        if bool(record.get("enabled")) and bool(record.get("status")):
             try:
                 tools_info.extend(await get_tool_from_remote_mcp_server(
                     mcp_server_name=record["mcp_name"],
@@ -765,6 +779,7 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
+            # get_vlm_model reads the first multimodal slot, now shown as image understanding.
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
@@ -774,6 +789,23 @@ def _validate_local_tool(
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["analyze_audio", "analyze_video"]:
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id)
+            model_display_name = getattr(
+                video_understanding_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=model_display_name)
+            params = {
+                **instantiation_params,
+                'vlm_model': video_understanding_model,
                 'storage_client': minio_client,
                 'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }

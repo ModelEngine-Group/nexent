@@ -1,4 +1,4 @@
-{{- if eq .Values.global.deploymentVersion "full" }}
+{{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
 ---
 apiVersion: v1
 kind: ConfigMap

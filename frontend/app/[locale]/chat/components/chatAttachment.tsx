@@ -87,6 +87,14 @@ const getFileIcon = (name: string, contentType?: string) => {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
+  // Audio and video files are uploaded as regular attachments for multimodal tools.
+  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
+    return <FileTextFilled size={iconSize} color="#16a085" />;
+  }
+  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
+    return <FileTextFilled size={iconSize} color="#8e44ad" />;
+  }
+
   // Compressed file
   if (chatConfig.fileIcons.compressed.includes(extension)) {
     return <FileZipFilled size={iconSize} color="#f39c12" />;

@@ -2,7 +2,74 @@
 global:
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
-  deploymentVersion: "full"
+  deploymentVersion: "speed"
+  deploymentComponents:
+    infrastructure: true
+    application: true
+    data-process: false
+    supabase: false
+    terminal: false
+    monitoring: false
+  portPolicy: "development"
+  imageSource: "registry"
+  monitoring:
+    enabled: false
+    provider: otlp
+    projectName: "nexent"
+    serviceName: nexent-backend
+    otlpEndpoint: http://nexent-otel-collector:4318
+    otlpTracesEndpoint: ""
+    otlpMetricsEndpoint: ""
+    otlpProtocol: http
+    otlpHeaders: ""
+    otlpAuthorization: ""
+    otlpApiKey: ""
+    otlpLangfuseIngestionVersion: ""
+    langsmithApiKey: ""
+    langsmithProject: "nexent"
+    otlpMetricsEnabled: true
+    instrumentRequests: false
+    fastapiIncludedUrls: "/agent/run"
+    fastapiExcludedUrls: ""
+    fastapiExcludeSpans: "receive,send"
+    dashboardUrl: ""
+    telemetrySampleRate: "1.0"
+    traceContentMode: "full"
+    traceMaxChars: "4000"
+    traceMaxItems: "20"
+
+# Optional monitoring stack. Set provider to one of:
+# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
+nexent-elasticsearch:
+  enabled: true
+nexent-postgresql:
+  enabled: true
+nexent-redis:
+  enabled: true
+nexent-minio:
+  enabled: true
+nexent-config:
+  enabled: true
+nexent-runtime:
+  enabled: true
+nexent-mcp:
+  enabled: true
+nexent-northbound:
+  enabled: true
+nexent-web:
+  enabled: true
+nexent-data-process:
+  enabled: false
+nexent-supabase-kong:
+  enabled: false
+nexent-supabase-auth:
+  enabled: false
+nexent-supabase-db:
+  enabled: false
+nexent-openssh:
+  enabled: false
+nexent-monitoring:
+  enabled: false
 
 # Ingress configuration
 ingress:

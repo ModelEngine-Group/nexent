@@ -33,6 +33,7 @@ export const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
   EXPIRES_AT: "nexent_token_expires_at",
+  OAUTH_PENDING: "nexent_oauth_pending",
 } as const;
 
 // Type-safe authentication events (used with authEvents emitter)
@@ -52,4 +53,3 @@ export const AUTHZ_EVENTS = {
   PERMISSIONS_READY: "authz:permissions-ready",
   PERMISSIONS_UPDATED: "authz:permissions-updated",
 } as const;
-

@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import yaml from "js-yaml";
 import type { SkillFileNode, ExtendedSkillFileNode } from "@/types/skill";
 import React from "react";
-import { FileTerminal, FileText, Folder, File } from "lucide-react";
+import { FileTerminal, FileText, FileCog, Folder, File } from "lucide-react";
 
 export type { ExtendedSkillFileNode } from "@/types/skill";
 
@@ -432,16 +432,19 @@ export const normalizeSkillFiles = (data: unknown): SkillFileNode[] => {
  */
 export const getFileIcon = (name: string, type: string): React.ReactNode => {
   if (type === "directory") {
-    return <Folder size={14} className="text-amber-500" />;
+    return <Folder size={14} color="#f59e0b" />;
   }
   const lower = name.toLowerCase();
   if (lower.endsWith(".md") || lower.endsWith(".mdx") || lower.endsWith(".markdown")) {
-    return <FileText size={14} className="text-blue-500" />;
+    return <FileText size={14} color="#3b82f6" />;
   }
   if (lower.endsWith(".sh") || lower.endsWith(".py")) {
-    return <FileTerminal size={14} className="text-green-600" />;
+    return <FileTerminal size={14} color="#16a34a" />;
   }
-  return <File size={14} className="text-gray-400" />;
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
+    return <FileCog size={14} color="#06b6d4" />;
+  }
+  return <File size={14} color="#9ca3af" />;
 };
 
 let nodeIdCounter = 0;

@@ -38,7 +38,7 @@ class SkillManager:
 
     def __init__(
         self,
-        local_skills_dir: Optional[str] = None,
+        base_skills_dir: Optional[str] = None,
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
@@ -46,12 +46,18 @@ class SkillManager:
         """Initialize SkillManager with local directory.
 
         Args:
-            local_skills_dir: Local directory for skills storage
+            base_skills_dir: Base directory for skills storage. Actual path is
+                base_skills_dir / tenant_id when tenant_id is provided.
             agent_id: Agent ID for filtering skills during error messages
-            tenant_id: Tenant ID for filtering skills during error messages
+            tenant_id: Tenant ID for directory isolation. When provided, skills
+                are stored under base_skills_dir / tenant_id /
             version_no: Version number for filtering skills (default 0 = draft)
         """
-        self.local_skills_dir = local_skills_dir
+        self.base_skills_dir = base_skills_dir
+        if tenant_id and base_skills_dir:
+            self.local_skills_dir = os.path.join(base_skills_dir, tenant_id)
+        else:
+            self.local_skills_dir = base_skills_dir
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
@@ -175,7 +181,7 @@ class SkillManager:
             file_path: Relative path inside the skill (e.g. "scripts/run.py", "README.md")
             content: File content to write
         """
-        if not self.local_skills_dir:
+        if not self.base_skills_dir:
             return
         local_dir = os.path.join(self.local_skills_dir, skill_name)
         normalized_path = file_path.replace("/", os.sep).replace("\\", os.sep)

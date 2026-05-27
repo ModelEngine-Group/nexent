@@ -69,6 +69,19 @@ export const uploadAttachments = async (
       });
     }
 
+    const failedResults = uploadResult.results.filter((result) => !result.success);
+    if (failedResults.length > 0 || uploadResult.success_count < attachments.length) {
+      const failedMessage = failedResults
+        .map((result) => `${result.file_name || "file"}: ${result.error || "Upload failed"}`)
+        .join("; ");
+      return {
+        uploadedFileUrls,
+        objectNames,
+        presignedUrls,
+        error: failedMessage || "Upload failed",
+      };
+    }
+
     return { uploadedFileUrls, objectNames, presignedUrls };
   } catch (error) {
     log.error(t("chatPreprocess.fileUploadFailed"), error);

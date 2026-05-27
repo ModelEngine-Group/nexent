@@ -73,6 +73,8 @@ def call_llm_for_system_prompt(
     set_monitoring_operation("system_prompt_generation",
                              display_name=display_name or None)
 
+    timeout_seconds = llm_model_config.get("timeout_seconds") if llm_model_config else None
+
     llm = OpenAIModel(
         model_id=get_model_name_from_config(llm_model_config) if llm_model_config else "",
         api_base=llm_model_config.get("base_url", "") if llm_model_config else "",
@@ -82,6 +84,7 @@ def call_llm_for_system_prompt(
         model_factory=llm_model_config.get("model_factory") if llm_model_config else None,
         ssl_verify=llm_model_config.get("ssl_verify", True) if llm_model_config else True,
         display_name=display_name or None,
+        timeout_seconds=timeout_seconds,
     )
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},

@@ -10,10 +10,14 @@ export interface Tenant {
   updated_at?: string;
   user_count?: number;
   group_count?: number;
+  installed_skill_names?: string[];
 }
 
 export interface CreateTenantRequest {
   tenant_name: string;
+  skill_ids?: number[];
+  skill_names?: string[];
+  locale?: string;
 }
 
 export interface UpdateTenantRequest {

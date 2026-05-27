@@ -8,18 +8,20 @@ from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.model import UserSignInRequest, UserSignUpRequest
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
+from consts.model import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
+from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError
+from consts.error_code import ErrorCode
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token
+    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
+    update_password
 from services.user_service import delete_user_and_cleanup
-from consts.exceptions import UnauthorizedError
 from utils.auth_utils import get_current_user_id
 
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = logging.getLogger("user_management_app")
 router = APIRouter(prefix="/user", tags=["user"])
 
 
@@ -62,14 +64,14 @@ async def signup(request: UserSignUpRequest):
         logging.error(f"User registration failed by registration service: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="REGISTRATION_SERVICE_ERROR")
-    except AuthApiError as e:
-        logging.error(f"User registration failed by email already exists: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.CONFLICT,
-                            detail="EMAIL_ALREADY_EXISTS")
     except AuthWeakPasswordError as e:
         logging.error(f"User registration failed by weak password: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail="WEAK_PASSWORD")
+    except AuthApiError as e:
+        logging.error(f"User registration failed by auth error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                            detail="EMAIL_ALREADY_EXISTS")
     except Exception as e:
         logging.error(f"User registration failed, unknown error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -379,3 +381,48 @@ async def delete_token_endpoint(
         logging.error(f"Failed to delete token: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.put("/password")
+async def update_password_endpoint(
+    request: UpdatePasswordRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Update current user's password.
+
+    This endpoint requires the user to provide their current password for verification
+    before setting a new password.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization token provided")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        await update_password(
+            user_id=str(user_id),
+            old_password=request.old_password,
+            new_password=request.new_password
+        )
+
+        logger.info(f"Password updated successfully for user {user_id}")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Password updated successfully"}
+        )
+
+    except UnauthorizedError as e:
+        logger.warning(f"Password update unauthorized for user: {str(e)}")
+        raise AppException(ErrorCode.PROFILE_INVALID_CREDENTIALS, str(e))
+    except AppException as e:
+        logger.warning(f"Password update business error: {e.error_code} - {str(e)}")
+        raise e  # Let app_exception_handler format the response
+    except Exception as e:
+        logging.error(f"Failed to update password: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Internal Server Error")

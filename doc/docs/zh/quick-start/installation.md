@@ -19,10 +19,9 @@
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
-cp .env.example .env # 复制环境变量配置文件
 ```
 
-> **💡 提示**: 若无特殊需求，您可直接使用 `.env.example` 进行部署，无需进行任何修改。若您需要配置语音模型（STT/TTS），则需要在 `.env` 中配置相关参数。我们会尽快将此部分配置前端化，敬请期待。
+> **💡 提示**: `deploy.sh` 会在 `docker/.env` 不存在时自动从 `.env.example` 复制一份。若无特殊需求，可直接部署；若需要配置语音模型（STT/TTS），请部署前或部署后修改 `docker/.env` 中的相关参数。
 
 ### 2. 部署选项
 
@@ -32,20 +31,42 @@ cp .env.example .env # 复制环境变量配置文件
 bash deploy.sh
 ```
 
-执行此命令后，系统会提供两个不同的版本供您选择：
+执行此命令后，系统会通过 Bash TUI 选择部署参数。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
 
-**版本选择:**
-- **Speed version（轻量快速部署，默认）**: 快速启动核心功能，适合个人用户和小团队使用
-- **Full version（完整功能版）**: 提供企业级租户管理和资源隔离等高级功能，但安装时间略长，适合企业用户
+**组件组合:**
+- **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
+- **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
+- **data-process（可选）**: 数据处理服务
+- **supabase（可选）**: 启用用户、租户和认证能力
+- **terminal（可选）**: 启用 OpenSSH 终端工具
+- **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
-**部署模式:**
-- **开发模式 (默认)**: 暴露所有服务端口以便调试
-- **基础设施模式**: 仅启动基础设施服务
-- **生产模式**: 为安全起见仅暴露端口 3000
+**端口策略:**
+- **development（默认）**: 暴露调试和内部服务端口，便于本地排查
+- **production**: 仅发布生产入口端口
 
-**可选组件:**
-- **终端工具**: 启用 openssh-server 供 AI 智能体执行 shell 命令
-- **区域优化**: 中国大陆用户可使用优化的镜像源
+**镜像来源:**
+- **general（默认）**: 使用标准公开镜像仓库
+- **mainland**: 使用中国大陆镜像源
+- **local-latest**: 使用本地 `latest` 镜像，避免拉取 Nexent 应用镜像
+
+您也可以通过参数跳过交互：
+
+```bash
+# 默认组件组合，development 端口策略，标准镜像源
+bash deploy.sh --components infrastructure,application --port-policy development --image-source general
+
+# 启用用户/租户能力、数据处理和终端工具
+bash deploy.sh --components infrastructure,application,supabase,data-process,terminal
+
+# 使用中国大陆镜像源
+bash deploy.sh --image-source mainland
+
+# 使用本地 latest 镜像
+bash deploy.sh --image-source local-latest
+```
+
+部署成功后，非敏感部署选项会保存到 `docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 
 #### ⚠️ 重要提示
@@ -100,7 +121,7 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-minio | S3 兼容对象存储 |
 | redis | 缓存层 |
 
-**Supabase 服务（完整版独有）:**
+**Supabase 服务（选择 `supabase` 组件时）:**
 | 服务 | 描述 |
 |---------|-------------|
 | supabase-kong | API 网关 |
@@ -111,6 +132,7 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | 服务 | 描述 |
 |---------|-------------|
 | nexent-openssh-server | AI 智能体 SSH 终端 |
+| nexent-monitoring | 可选观测组件 |
 
 ## 💾 数据持久化
 
@@ -122,9 +144,11 @@ Nexent 使用 Docker volumes 进行数据持久化：
 | Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
-| Supabase DB（完整版）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
+| Supabase DB（选择 supabase 时）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 默认 `dataDir` 为 `./volumes`（可在 `.env` 中配置 `ROOT_DIR`）。
+
+卸载由 `docker/uninstall.sh` 负责。默认交互询问是否删除持久化数据；也可使用 `--delete-volumes true|false`、`--remove-volumes`、`--keep-volumes`，或使用 `bash uninstall.sh delete-all` 删除容器和持久化数据。
 
 ## 🔌 端口映射
 

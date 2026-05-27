@@ -104,6 +104,9 @@ class ErrorMessage:
         ErrorCode.PROFILE_UPDATE_FAILED: "Profile update failed.",
         ErrorCode.PROFILE_USER_ALREADY_EXISTS: "User already exists.",
         ErrorCode.PROFILE_INVALID_CREDENTIALS: "Invalid username or password.",
+        # Profile - Password
+        ErrorCode.PROFILE_PASSWORD_WEAK: "Password does not meet security requirements. Please use a stronger password.",
+        ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD: "New password cannot be the same as the old password.",
 
         # ==================== 12 TenantResource / 租户资源 ====================
         ErrorCode.TENANT_NOT_FOUND: "Tenant not found.",

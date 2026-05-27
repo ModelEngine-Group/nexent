@@ -11,6 +11,7 @@ import { ChatAgentSelectorProps } from "@/types/chat";
 import { Agent } from "@/types/agentConfig";
 import { clearAgentNewMark } from "@/services/agentConfigService";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 export function ChatAgentSelector({
   selectedAgentId,
@@ -355,7 +356,11 @@ export function ChatAgentSelector({
                       if (isDuplicateDisabled) {
                         unavailableReason = t("subAgentPool.tooltip.duplicateNameDisabled");
                       } else if (!isAvailableTool) {
-                        unavailableReason = t("subAgentPool.tooltip.hasUnavailableTools");
+                        const reasons = agent.unavailable_reasons || [];
+                        const labels = getUnavailableReasonLabels(reasons, t);
+                        unavailableReason = labels.length > 0
+                          ? labels.join(", ")
+                          : t("agentSelector.agentUnavailable");
                       }
                     }
 

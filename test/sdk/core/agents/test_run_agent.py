@@ -788,14 +788,12 @@ def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatc
     captured_value = {}
 
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
-    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
-
-    original_run = run_agent.agent_run_thread.__wrapped__
-
-    def capturing_run(info):
+    def create_nexent_agent(*args, **kwargs):
         captured_value["val"] = test_var.get()
-        return original_run(info)
+        return mock_nexent_instance
+
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(side_effect=create_nexent_agent))
 
     test_var.set("preserved!")
-    capturing_run(basic_agent_run_info)
+    run_agent.agent_run_thread(basic_agent_run_info)
     assert captured_value.get("val") == "preserved!"

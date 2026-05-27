@@ -1,6 +1,6 @@
 apiVersion: v2
 name: nexent-common
-description: Nexent Common - Shared resources including ConfigMap, Secret, RBAC, PVC, and Namespace
+description: Nexent Common - Shared resources including ConfigMap, Secret, RBAC, and init SQL
 type: application
 version: 0.1.0
 appVersion: "latest"
