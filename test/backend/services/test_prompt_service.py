@@ -719,9 +719,9 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
             "agent_variable_name_system_prompt": "Generate agent var name",
             "agent_display_name_system_prompt": "Generate agent display name",
             "agent_description_system_prompt": "Generate agent description"
@@ -845,9 +845,9 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
             "agent_variable_name_system_prompt": "Generate agent var name",
             "agent_display_name_system_prompt": "Generate agent display name",
             "agent_description_system_prompt": "Generate agent description"
@@ -1150,9 +1150,9 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
             "agent_variable_name_system_prompt": "Generate agent var name",
             "agent_display_name_system_prompt": "Generate agent display name",
             "agent_description_system_prompt": "Generate agent description"
@@ -1203,9 +1203,9 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
             "user_prompt": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
             "agent_variable_name_system_prompt": "Generate agent var name",
             "agent_display_name_system_prompt": "Generate agent display name",
             "agent_description_system_prompt": "Generate agent description"
@@ -1949,9 +1949,9 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = None
         mock_resolve.return_value = {
             "user_prompt": "Test",
-            "DUTY_SYSTEM_PROMPT": "duty",
-            "CONSTRAINT_SYSTEM_PROMPT": "constraint",
-            "FEW_SHOTS_SYSTEM_PROMPT": "few shots",
+            "duty_system_prompt": "duty",
+            "constraint_system_prompt": "constraint",
+            "few_shots_system_prompt": "few shots",
             "agent_variable_name_system_prompt": "var name",
             "agent_display_name_system_prompt": "display name",
             "agent_description_system_prompt": "description",
@@ -1999,9 +1999,9 @@ class TestPromptService(unittest.TestCase):
         mock_get_model.return_value = {"concurrency_limit": 2}
         mock_resolve.return_value = {
             "user_prompt": "Test",
-            "DUTY_SYSTEM_PROMPT": "duty",
-            "CONSTRAINT_SYSTEM_PROMPT": "constraint",
-            "FEW_SHOTS_SYSTEM_PROMPT": "few shots",
+            "duty_system_prompt": "duty",
+            "constraint_system_prompt": "constraint",
+            "few_shots_system_prompt": "few shots",
             "agent_variable_name_system_prompt": "var name",
             "agent_display_name_system_prompt": "display name",
             "agent_description_system_prompt": "description",
