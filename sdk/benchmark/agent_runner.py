@@ -191,7 +191,7 @@ def build_agent_run_info(
     context_manager_config: Optional[ContextManagerConfig] = None,
     user_id: str = "",
     skills: list = None,
-    max_tokens: Optional[int] = 4096,
+    max_tokens: Optional[int] = None,
 ) -> AgentRunInfo:
     """
     Construct AgentRunInfo with template-based system prompt.
@@ -214,8 +214,11 @@ def build_agent_run_info(
         context_manager_config: Context manager config (None uses default)
         user_id: User ID
         skills: Skill list
-        max_tokens: Per-call completion output cap forwarded to the main LLM
-                    (default 4096 — bounds runaway / degenerate-loop probes).
+        max_tokens: Per-call completion output cap forwarded to the main LLM.
+                    Default None leaves the provider default (unbounded /
+                    model max), matching the SDK back-port. Benchmarks that
+                    want to bound runaway / degenerate-loop probes set this
+                    explicitly (e.g. 4096).
 
     Returns:
         AgentRunInfo object
