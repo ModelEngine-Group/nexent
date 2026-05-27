@@ -15,6 +15,11 @@ from utils.config_utils import get_model_name_from_config
 
 logger = logging.getLogger("model_health_service")
 
+DASHSCOPE_MODEL_FACTORY = "dashscope"
+TOKENPONY_MODEL_FACTORY = "tokenpony"
+PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
+PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3"}
+
 
 def _mask_secret(value: Optional[str]) -> str:
     """Mask a secret value, showing only first and last 4 characters."""
@@ -62,6 +67,31 @@ async def _embedding_dimension_check(
         return 0
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
+
+
+async def _provider_catalog_connectivity_check(
+    model_name: str,
+    model_type: str,
+    model_api_key: str,
+    model_factory: Optional[str],
+) -> bool:
+    """Validate provider-managed multimodal models through their model catalog."""
+    provider = (model_factory or "").lower()
+    if provider not in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES:
+        return False
+
+    from services.model_provider_service import get_provider_models
+
+    model_list = await get_provider_models({
+        "provider": provider,
+        "model_type": model_type,
+        "api_key": model_api_key,
+    })
+    if not model_list or any(model.get("_error") for model in model_list):
+        return False
+
+    expected_model_id = model_name.lower()
+    return any(str(model.get("id", "")).lower() == expected_model_id for model in model_list)
 
 
 async def _perform_connectivity_check(
@@ -135,6 +165,18 @@ async def _perform_connectivity_check(
         )
         connectivity = await rerank_model.connectivity_check()
     elif model_type in ("vlm", "vlm2", "vlm3"):
+        if (
+            model_type in PROVIDER_CATALOG_HEALTHCHECK_TYPES
+            and (model_factory or "").lower() in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES
+        ):
+            connectivity = await _provider_catalog_connectivity_check(
+                model_name=model_name,
+                model_type=model_type,
+                model_api_key=model_api_key,
+                model_factory=model_factory,
+            )
+            return connectivity
+
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)

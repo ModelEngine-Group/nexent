@@ -8,7 +8,6 @@ from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, 
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
-    get_model_by_display_name,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
@@ -31,6 +30,23 @@ from services.vectordatabase_service import get_vector_db_core
 from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
+
+INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
+
+
+def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
+    """Allow the three multimodal slots to share display names across slots."""
+    if not existing_models:
+        return False
+
+    if model_type in INDEPENDENT_MULTIMODAL_MODEL_TYPES:
+        return any(
+            existing.get("model_type") == model_type
+            or existing.get("model_type") not in INDEPENDENT_MULTIMODAL_MODEL_TYPES
+            for existing in existing_models
+        )
+
+    return True
 
 
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
@@ -77,9 +93,9 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
 
         # Check display name conflict scoped by tenant
         if model_data.get("display_name"):
-            existing_model_by_display = get_model_by_display_name(
+            existing_models_by_display = get_models_by_display_name(
                 model_data["display_name"], tenant_id)
-            if existing_model_by_display:
+            if _has_display_name_conflict(existing_models_by_display, model_data.get("model_type")):
                 logging.error(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
                 raise ValueError(
