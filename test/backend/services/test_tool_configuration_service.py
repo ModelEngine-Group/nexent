@@ -3611,6 +3611,7 @@ class TestGetLlmModel:
             api_key="test_api_key",
             max_context_tokens=4096,
             ssl_verify=True,
+            timeout_seconds=None,
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
@@ -3650,6 +3651,42 @@ class TestGetLlmModel:
         call_kwargs = mock_openai_model.call_args[1]
         assert call_kwargs["api_key"] is None
         assert call_kwargs["max_context_tokens"] is None
+        assert call_kwargs["timeout_seconds"] is None
+
+    @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
+    @patch('backend.services.file_management_service.MessageObserver')
+    @patch('backend.services.file_management_service.OpenAILongContextModel')
+    @patch('backend.services.file_management_service.get_model_name_from_config')
+    @patch('backend.services.file_management_service.tenant_config_manager')
+    def test_get_llm_model_with_timeout_seconds(self, mock_tenant_config, mock_get_model_name, mock_openai_model, mock_message_observer):
+        """Test get_llm_model passes configured timeout_seconds."""
+        from backend.services.file_management_service import get_llm_model
+
+        mock_config = {
+            "base_url": "http://api.example.com",
+            "api_key": "test_api_key",
+            "max_tokens": 4096,
+            "timeout_seconds": 30,
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+        mock_get_model_name.return_value = "gpt-4"
+        mock_observer_instance = Mock()
+        mock_message_observer.return_value = mock_observer_instance
+        mock_model_instance = Mock()
+        mock_openai_model.return_value = mock_model_instance
+
+        result = get_llm_model("tenant123")
+
+        assert result == mock_model_instance
+        mock_openai_model.assert_called_once_with(
+            observer=mock_observer_instance,
+            model_id="gpt-4",
+            api_base="http://api.example.com",
+            api_key="test_api_key",
+            max_context_tokens=4096,
+            ssl_verify=True,
+            timeout_seconds=30,
+        )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
     @patch('backend.services.file_management_service.MessageObserver')
