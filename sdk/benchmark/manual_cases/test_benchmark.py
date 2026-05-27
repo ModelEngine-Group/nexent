@@ -158,8 +158,6 @@ BENCHMARK_SUMMARY_SCHEMA = {
         "如果没有额外需要保留的事实，写 'None'。"
     ),
 }
-
-
 def history_to_text(history: list[AgentHistory]) -> str:
     return "\n".join([f"{h.role}: {h.content}" for h in history])
 
@@ -431,8 +429,12 @@ def eval_task_outputs(case: dict, run_outputs: list):
     return eval_results
 
 
-def _resolve_compressed_config(case: dict, use_custom_prompts: bool = False) -> ContextManagerConfig:
-    """Build compressed config from case definition, with sensible defaults."""
+def _resolve_compressed_config(case: dict, use_default_prompts: bool = False) -> ContextManagerConfig:
+    """Build compressed config from case definition, with sensible defaults.
+
+    By default uses the benchmark-optimized custom summary schema and prompts.
+    Set use_default_prompts=True to fall back to the original ContextManager defaults.
+    """
     case_cfg = case.get("compressed_config", {})
     kwargs = dict(
         enabled=True,
@@ -441,7 +443,7 @@ def _resolve_compressed_config(case: dict, use_custom_prompts: bool = False) -> 
         keep_recent_steps=case_cfg.get("keep_recent_steps", 4),
         max_observation_length=case_cfg.get("max_observation_length", 20000),
     )
-    if use_custom_prompts:
+    if not use_default_prompts:
         kwargs.update(
             summary_json_schema=BENCHMARK_SUMMARY_SCHEMA,
             summary_system_prompt=BENCHMARK_SUMMARY_SYSTEM_PROMPT,
@@ -450,7 +452,7 @@ def _resolve_compressed_config(case: dict, use_custom_prompts: bool = False) -> 
     return ContextManagerConfig(**kwargs)
 
 
-async def run_one_case(case_dir: str, use_custom_prompts: bool = False):
+async def run_one_case(case_dir: str, use_default_prompts: bool = False):
     """Load and run a single benchmark case from its directory.
 
     Each case directory contains:
@@ -481,7 +483,7 @@ async def run_one_case(case_dir: str, use_custom_prompts: bool = False):
     )
 
     # P5: Allow per-case config override
-    compressed_config = _resolve_compressed_config(case, use_custom_prompts=use_custom_prompts)
+    compressed_config = _resolve_compressed_config(case, use_default_prompts=use_default_prompts)
 
     print(f"\n===== CASE: {case['id']} =====")
 
@@ -642,7 +644,7 @@ async def run_one_case(case_dir: str, use_custom_prompts: bool = False):
     return report
 
 
-async def main(case_names: list[str] = None, use_custom_prompts: bool = False):
+async def main(case_names: list[str] = None, use_default_prompts: bool = False):
     # Discover cases: use specified names if provided, otherwise find all cases under ./cases/*/case.json
     if case_names:
         case_dirs = [os.path.join("./cases", name) for name in case_names]
@@ -661,7 +663,7 @@ async def main(case_names: list[str] = None, use_custom_prompts: bool = False):
 
     reports = []
     for case_dir in case_dirs:
-        report = await run_one_case(case_dir, use_custom_prompts=use_custom_prompts)
+        report = await run_one_case(case_dir, use_default_prompts=use_default_prompts)
         reports.append(report)
 
         # Write per-case report
@@ -716,9 +718,9 @@ if __name__ == "__main__":
              "if omitted, run all cases under .cases/."
     )
     parser.add_argument(
-        "--custom-prompts", action="store_true", default=False,
-        help="Use custom summary schema and prompts optimized for knowledge-discussion benchmarks "
-             "(leaner 7-field schema with 800-word cap and merge-condense incremental updates)."
+        "--default-summary", action="store_true", default=False,
+        help="Use the original ContextManager summary defaults instead of the benchmark-optimized "
+             "custom schema (leaner 7-field, 800-word cap, merge-condense incremental updates)."
     )
     args = parser.parse_args()
-    asyncio.run(main(case_names=args.cases, use_custom_prompts=args.custom_prompts))
+    asyncio.run(main(case_names=args.cases, use_default_prompts=args.default_summary))
