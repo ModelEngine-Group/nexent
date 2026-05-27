@@ -135,6 +135,24 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(response.json()["data"]["revoked"], 1)
         cas_service_mock.revoke_from_logout_request.assert_called_once_with(xml)
 
+    def test_callback_post_accepts_cas_single_logout_request(self):
+        xml = """
+        <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+          xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+          <saml:NameID>cas-user-1</saml:NameID>
+          <samlp:SessionIndex>ST-1</samlp:SessionIndex>
+        </samlp:LogoutRequest>
+        """
+
+        response = client.post(
+            "/user/cas/callback",
+            data={"logoutRequest": xml},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertEqual(response.json()["data"]["revoked"], 1)
+        cas_service_mock.revoke_from_logout_request.assert_called_once_with(xml)
+
 
 if __name__ == "__main__":
     unittest.main()

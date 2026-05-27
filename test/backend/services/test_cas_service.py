@@ -28,6 +28,7 @@ consts_mock.const.CAS_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.CAS_EMAIL_ATTRIBUTE = "mail"
 consts_mock.const.CAS_ENABLED = True
 consts_mock.const.CAS_LOGIN_MODE = "button"
+consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300
 consts_mock.const.CAS_RENEW_TIMEOUT_SECONDS = 10
 consts_mock.const.CAS_ROLE_ATTRIBUTE = "memberOf"
@@ -55,6 +56,7 @@ sys.modules["utils.auth_utils"] = MagicMock()
 from services.cas_service import (  # noqa: E402
     CasAuthenticationError,
     build_login_url,
+    build_logout_url,
     parse_logout_request,
     parse_service_validate_response,
 )
@@ -124,6 +126,61 @@ class TestCasServiceParsing(unittest.TestCase):
         self.assertIn("https://cas.example.com/cas/login?", url)
         self.assertIn("service=", url)
         self.assertIn("redirect%3D%252Fspace", url)
+
+    def test_build_logout_url_returns_empty_when_logout_url_is_not_configured(self):
+        url = build_logout_url()
+
+        self.assertEqual(url, "")
+
+    def test_build_logout_url_adds_login_service_to_configured_bare_logout_url(self):
+        original = build_logout_url.__globals__["CAS_LOGOUT_URL"]
+        build_logout_url.__globals__["CAS_LOGOUT_URL"] = "https://sso.example.com/cas/logout"
+        try:
+            url = build_logout_url()
+        finally:
+            build_logout_url.__globals__["CAS_LOGOUT_URL"] = original
+
+        self.assertEqual(
+            url,
+            "https://sso.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin",
+        )
+
+    def test_build_logout_url_resolves_absolute_path_against_cas_server_url(self):
+        original = build_logout_url.__globals__["CAS_LOGOUT_URL"]
+        build_logout_url.__globals__["CAS_LOGOUT_URL"] = "/logout"
+        try:
+            url = build_logout_url()
+        finally:
+            build_logout_url.__globals__["CAS_LOGOUT_URL"] = original
+
+        self.assertEqual(
+            url,
+            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin",
+        )
+
+    def test_build_logout_url_resolves_relative_path_against_cas_server_url(self):
+        original = build_logout_url.__globals__["CAS_LOGOUT_URL"]
+        build_logout_url.__globals__["CAS_LOGOUT_URL"] = "logout"
+        try:
+            url = build_logout_url()
+        finally:
+            build_logout_url.__globals__["CAS_LOGOUT_URL"] = original
+
+        self.assertEqual(
+            url,
+            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin",
+        )
+
+    def test_build_logout_url_preserves_configured_logout_url_with_query(self):
+        original = build_logout_url.__globals__["CAS_LOGOUT_URL"]
+        configured = "https://sso.example.com/cas/logout?redirect=https%3A%2F%2Fidp.example.com%2Flogin"
+        build_logout_url.__globals__["CAS_LOGOUT_URL"] = configured
+        try:
+            url = build_logout_url()
+        finally:
+            build_logout_url.__globals__["CAS_LOGOUT_URL"] = original
+
+        self.assertEqual(url, configured)
 
 
 if __name__ == "__main__":

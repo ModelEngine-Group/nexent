@@ -475,6 +475,69 @@ class TestLogout:
         mock_get_client.assert_called_once_with("Bearer token")
         mock_client.auth.sign_out.assert_called_once()
 
+    @patch('database.cas_session_db.revoke_cas_session_by_session_id')
+    @patch('apps.user_management_app.build_logout_url')
+    @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_authorized_client')
+    def test_logout_returns_cas_logout_url_for_cas_session(
+        self,
+        mock_get_client,
+        mock_extract_session_id,
+        mock_build_logout_url,
+        mock_revoke_cas_session,
+    ):
+        """Test logout returns CAS logout URL when the JWT carries a CAS session id."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_extract_session_id.return_value = "sid-1"
+        mock_build_logout_url.return_value = (
+            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin"
+        )
+
+        response = client.post(
+            "/user/logout",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert (
+            data["data"]["cas_logout_url"]
+            == "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin"
+        )
+        mock_revoke_cas_session.assert_called_once_with("sid-1", actor="user")
+        mock_build_logout_url.assert_called_once_with()
+        mock_client.auth.sign_out.assert_called_once()
+
+    @patch('database.cas_session_db.revoke_cas_session_by_session_id')
+    @patch('apps.user_management_app.build_logout_url')
+    @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_authorized_client')
+    def test_logout_does_not_return_cas_logout_url_when_not_configured(
+        self,
+        mock_get_client,
+        mock_extract_session_id,
+        mock_build_logout_url,
+        mock_revoke_cas_session,
+    ):
+        """Test logout skips CAS server logout redirect when CAS_LOGOUT_URL is empty."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_extract_session_id.return_value = "sid-1"
+        mock_build_logout_url.return_value = ""
+
+        response = client.post(
+            "/user/logout",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"]["cas_logout_url"] == ""
+        mock_revoke_cas_session.assert_called_once_with("sid-1", actor="user")
+        mock_build_logout_url.assert_called_once_with()
+        mock_client.auth.sign_out.assert_called_once()
+
     @patch('apps.user_management_app.get_authorized_client')
     def test_logout_error(self, mock_get_client):
         """Test logout with error"""

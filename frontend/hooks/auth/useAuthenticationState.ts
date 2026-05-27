@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
 
@@ -8,7 +8,12 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { authService } from "@/services/authService";
 import { casService } from "@/services/casService";
-import { getSessionFromStorage, removeSessionFromStorage, checkSessionValid, getTokenExpiresAt } from "@/lib/session";
+import {
+  getSessionFromStorage,
+  removeSessionFromStorage,
+  checkSessionValid,
+  getTokenExpiresAt,
+} from "@/lib/session";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 import { authEventUtils } from "@/lib/authEvents";
@@ -31,6 +36,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const [session, setSession] = useState<Session | null>(null);
   const [authServiceUnavailable, setAuthServiceUnavailable] =
     useState<boolean>(false);
+  const isCasLoginInProgressRef = useRef(false);
 
   // Speed mode: skip authentication checks, consider user as authenticated
   useEffect(() => {
@@ -53,13 +59,42 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   }, [isSpeedMode]);
 
   useEffect(() => {
+    if (isSpeedMode || isAuthChecking || isAuthenticated) return;
+    if (isCasLoginInProgressRef.current) return;
+    if (typeof window === "undefined") return;
+
+    const pathname = window.location.pathname;
+    if (pathname.includes("/oauth/complete")) return;
+
+    let cancelled = false;
+    casService.getConfig().then((config) => {
+      if (
+        cancelled ||
+        isCasLoginInProgressRef.current ||
+        !config.enabled ||
+        config.login_mode !== "force"
+      ) {
+        return;
+      }
+
+      isCasLoginInProgressRef.current = true;
+      casService.startLogin();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSpeedMode, isAuthChecking, isAuthenticated]);
+
+  useEffect(() => {
     if (isSpeedMode || !isAuthenticated) return;
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
 
     casService.getConfig().then((config) => {
-      if (cancelled || !config.enabled || config.login_mode === "disabled") return;
+      if (cancelled || !config.enabled || config.login_mode === "disabled")
+        return;
       const expiresAt = getTokenExpiresAt();
       if (!expiresAt) return;
 
@@ -146,11 +181,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
 
   // Register method
   const register = useCallback(
-    async (
-      email: string,
-      password: string,
-      inviteCode?: string
-    ) => {
+    async (email: string, password: string, inviteCode?: string) => {
       setIsLoading(true);
 
       try {
@@ -189,47 +220,44 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   );
 
   // Logout method
-  const logout = useCallback(
-    async (options: { silent?: boolean } = {}) => {
-      const { silent = false } = options;
+  const logout = useCallback(async (options: { silent?: boolean } = {}) => {
+    const { silent = false } = options;
 
-      try {
-        setIsLoading(true);
+    try {
+      setIsLoading(true);
 
-        if (!silent) {
-          // Call logout API
-          await authService.signOut();
-        }
-
-        // Clear local session
-        removeSessionFromStorage();
-        setSession(null);
-        setIsAuthenticated(false);
-
-        queryClient.clear();
-        if (!silent) {
-          message.success(t("auth.logoutSuccess"));
-        }
-
-        // Emit logout event
-        authEventUtils.emitLogout();
-      } catch (error: any) {
-        log.error("Logout failed:", error?.message || error);
-        // Even if API call fails, clear local session
-        removeSessionFromStorage();
-        setSession(null);
-        setIsAuthenticated(false);
-
-        queryClient.clear();
-        if (!silent) {
-          message.error(t("auth.logoutFailed"));
-        }
-      } finally {
-        setIsLoading(false);
+      if (!silent) {
+        // Call logout API
+        await authService.signOut();
       }
-    },
-    []
-  );
+
+      // Clear local session
+      removeSessionFromStorage();
+      setSession(null);
+      setIsAuthenticated(false);
+
+      queryClient.clear();
+      if (!silent) {
+        message.success(t("auth.logoutSuccess"));
+      }
+
+      // Emit logout event
+      authEventUtils.emitLogout();
+    } catch (error: any) {
+      log.error("Logout failed:", error?.message || error);
+      // Even if API call fails, clear local session
+      removeSessionFromStorage();
+      setSession(null);
+      setIsAuthenticated(false);
+
+      queryClient.clear();
+      if (!silent) {
+        message.error(t("auth.logoutFailed"));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   // Revoke method
   const revoke = useCallback(async () => {
@@ -265,6 +293,6 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     register,
     logout,
     clearLocalSession,
-    revoke
+    revoke,
   };
 }

@@ -16,6 +16,7 @@ from consts.const import (
     CAS_EMAIL_ATTRIBUTE,
     CAS_ENABLED,
     CAS_LOGIN_MODE,
+    CAS_LOGOUT_URL,
     CAS_RENEW_BEFORE_SECONDS,
     CAS_RENEW_TIMEOUT_SECONDS,
     CAS_ROLE_ATTRIBUTE,
@@ -92,6 +93,26 @@ def build_renew_url() -> str:
     service_url = _build_callback_url("/api/user/cas/renew_callback", {})
     params = urllib.parse.urlencode({"service": service_url, "gateway": "true"})
     return f"{CAS_SERVER_URL}/login?{params}"
+
+
+def build_logout_url() -> str:
+    _ensure_enabled()
+    configured_logout_url = CAS_LOGOUT_URL.strip()
+    if not configured_logout_url:
+        return ""
+
+    parsed_config = urllib.parse.urlsplit(configured_logout_url)
+    if parsed_config.scheme and parsed_config.netloc:
+        logout_url = configured_logout_url
+    else:
+        logout_url = f"{CAS_SERVER_URL}/{configured_logout_url.lstrip('/')}"
+
+    parsed = urllib.parse.urlsplit(logout_url)
+    if parsed.query:
+        return logout_url
+
+    query = urllib.parse.urlencode({"service": f"{CAS_SERVER_URL}/login"})
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
 
 async def login_with_ticket(ticket: str, redirect: str = "/") -> Dict[str, Any]:

@@ -8,10 +8,10 @@ from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.const import CAS_LOGOUT_URL
 from consts.model import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError
 from consts.error_code import ErrorCode
+from services.cas_service import build_logout_url, CasAuthenticationError
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
@@ -129,12 +129,17 @@ async def logout(request: Request):
     try:
         # Make logout idempotent: if no token or token expired, still return success
         session_id = None
+        cas_logout_url = ""
         if authorization:
             session_id = extract_session_id_from_authorization(authorization)
             if session_id:
                 from database.cas_session_db import revoke_cas_session_by_session_id
 
                 revoke_cas_session_by_session_id(session_id, actor="user")
+                try:
+                    cas_logout_url = build_logout_url()
+                except CasAuthenticationError as cas_err:
+                    logging.warning(f"CAS logout URL is unavailable: {str(cas_err)}")
             client = get_authorized_client(authorization)
             try:
                 client.auth.sign_out()
@@ -146,7 +151,7 @@ async def logout(request: Request):
                             content={
                                 "message": "Logout successful",
                                 "data": {
-                                    "cas_logout_url": CAS_LOGOUT_URL if session_id and CAS_LOGOUT_URL else ""
+                                    "cas_logout_url": cas_logout_url
                                 }
                             })
 

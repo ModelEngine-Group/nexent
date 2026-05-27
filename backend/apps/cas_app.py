@@ -52,6 +52,11 @@ async def callback(ticket: str = "", redirect: str = "/"):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="CAS login failed")
 
 
+@router.post("/callback")
+async def callback_logout(request: Request, logout_request: Optional[str] = None):
+    return await _handle_logout_request(request, logout_request)
+
+
 @router.get("/renew")
 async def renew():
     try:
@@ -80,16 +85,33 @@ async def logout_callback(
     request: Request,
     logout_request: Optional[str] = None,
 ):
-    if logout_request is None:
-        body = await request.body()
-        raw_body = body.decode("utf-8") if body else ""
-        parsed = parse_qs(raw_body)
-        logout_request = (parsed.get("logoutRequest") or [raw_body])[0]
+    return await _handle_logout_request(request, logout_request)
+
+
+async def _handle_logout_request(request: Request, logout_request: Optional[str] = None):
+    logout_request = await _extract_logout_request(request, logout_request)
     result = revoke_from_logout_request(logout_request)
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"message": "success", "data": result},
     )
+
+
+async def _extract_logout_request(request: Request, logout_request: Optional[str] = None) -> str:
+    if logout_request:
+        return logout_request
+
+    query_logout_request = request.query_params.get("logoutRequest") or request.query_params.get("logout_request")
+    if query_logout_request:
+        return query_logout_request
+
+    body = await request.body()
+    raw_body = body.decode("utf-8") if body else ""
+    if not raw_body:
+        return ""
+
+    parsed = parse_qs(raw_body)
+    return (parsed.get("logoutRequest") or parsed.get("logout_request") or [raw_body])[0]
 
 
 def _renew_html(success: bool, reason: str = "") -> HTMLResponse:
