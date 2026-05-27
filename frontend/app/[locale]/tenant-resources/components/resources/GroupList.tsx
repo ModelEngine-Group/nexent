@@ -316,14 +316,14 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           setModalVisible(false);
           editGroupForm.resetFields();
         }}
-        destroyOnHidden
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}
       >
-        {editingGroup ? (
+        {/* Edit mode form - always mounted to keep form instance connected */}
+        <div hidden={!editingGroup}>
           <Form
-            key={editingGroup.group_id}
+            key={editingGroup?.group_id ?? "edit"}
             layout="vertical"
             form={editGroupForm}
           >
@@ -358,14 +358,16 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
               />
             </Form.Item>
           </Form>
-        ) : (
+        </div>
+        {/* Create mode form - always mounted to keep form instance connected */}
+        <div hidden={!!editingGroup}>
           <Form layout="vertical" form={form}>
             <Form.Item
               name="name"
               label={t("tenantResources.groups.name")}
               rules={[{ required: true }]}
             >
-            <Input placeholder={t("tenantResources.groups.enterName")} />
+              <Input placeholder={t("tenantResources.groups.enterName")} />
             </Form.Item>
             <Form.Item name="description" label={t("common.description")}>
               <Input.TextArea
@@ -374,7 +376,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
               />
             </Form.Item>
           </Form>
-        )}
+        </div>
       </Modal>
 
       {/* User List Modal */}

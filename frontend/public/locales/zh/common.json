@@ -355,6 +355,7 @@
   "agent.error.fetchAgentListRetry": "获取智能体列表失败，请稍后重试",
   "agent.debug.title": "智能体调试",
   "agent.noEditPermission": "无智能体编辑权限",
+  "agent.prompts.noPermission": "您无权查看提示词内容。",
   "mcpConfig.permission.noEdit": "无MCP编辑权限",
   "agent.action.create": "创建智能体",
   "agent.action.modify": "编辑智能体信息",
@@ -1085,6 +1086,7 @@
   "auth.su": "超级管理员",
   "auth.dev": "开发者",
   "auth.speed": "默认角色",
+  "auth.assetOwner": "资产管理员",
   "auth.inviteCodeLabel": "邀请码",
   "auth.inviteCodeRequired": "请输入邀请码",
   "auth.inviteCodePlaceholder": "请输入邀请码",
@@ -1554,12 +1556,17 @@
   "sidebar.memoryManagement": "记忆管理",
   "sidebar.userManagement": "个人信息",
   "sidebar.tenantResources": "租户资源",
+  "sidebar.assetOwnerResources": "资产管理员资源",
   "sidebar.mcpToolsManagement": "MCP 工具",
   "sidebar.monitoringManagement": "监控与运维",
 
   "tenantResources.create": "创建",
   "tenantResources.subtitle": "管理租户、用户、用户组和资源",
   "tenantResources.title": "租户资源管理",
+
+  "assetOwnerResources.subtitle": "管理资产管理员的用户、模型、知识库和资源",
+  "assetOwnerResources.tenantName": "资产管理员",
+  "assetOwnerResources.title": "资产管理员资源管理",
 
   "tenantResources.tabs.groups": "用户组",
   "tenantResources.tabs.knowledge": "知识库",
@@ -1768,6 +1775,8 @@
   "tenantResources.invitation.codeType.ADMIN_INVITE": "管理员邀请",
   "tenantResources.invitation.codeType.DEV_INVITE": "开发者邀请",
   "tenantResources.invitation.codeType.USER_INVITE": "用户邀请",
+  "tenantResources.invitation.codeType.ASSET_OWNER_INVITE": "资产管理员邀请",
+  "tenantResources.invitation.assetOwnerTab": "资产管理员邀请码",
 
   "tenantResources.invitation.status.IN_USE": "可用",
   "tenantResources.invitation.status.EXPIRE": "已过期",
@@ -2347,6 +2356,7 @@
   "user.role.admin": "管理员",
   "user.role.dev": "开发者",
   "user.role.user": "普通用户",
+  "user.role.assetOwner": "资产管理员",
 
   "profile.title": "个人信息",
   "profile.subtitle": "管理您的账户设置和偏好",

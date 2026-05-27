@@ -113,8 +113,9 @@ export const fetchTools = async () => {
  */
 export const fetchAgentList = async (tenantId?: string) => {
   try {
-    const url = tenantId
-      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(tenantId)}`
+    const trimmedTenantId = tenantId?.trim();
+    const url = trimmedTenantId
+      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(trimmedTenantId)}`
       : API_ENDPOINTS.agent.list;
     const response = await fetch(url, {
       headers: getAuthHeaders(),
@@ -493,7 +494,8 @@ export const exportAgent = async (agentId: number) => {
 
     if (contentType.includes("application/zip")) {
       const blob = await response.blob();
-      const filename = response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
+      const filename =
+        response.headers.get("Content-Disposition") || `agent_${agentId}.zip`;
       downloadBlob(blob, filename.replace("attachment; filename=", ""));
       return {
         success: true,
@@ -550,7 +552,10 @@ const downloadBlob = (blob: Blob, filename: string) => {
  */
 export const importAgent = async (
   agentInfo: any,
-  options?: { forceImport?: boolean; skillZips?: Array<{ skill_name: string; skill_zip_base64: string }> }
+  options?: {
+    forceImport?: boolean;
+    skillZips?: Array<{ skill_name: string; skill_zip_base64: string }>;
+  }
 ) => {
   try {
     const payload: any = {
@@ -573,9 +578,11 @@ export const importAgent = async (
         return {
           success: false,
           data: { detail: errMsg },
-          message: errMsg?.type === "skill_duplicate"
-            ? "Skill name conflict detected"
-            : (errorData?.message ?? "Failed to import Agent, please try again later"),
+          message:
+            errMsg?.type === "skill_duplicate"
+              ? "Skill name conflict detected"
+              : (errorData?.message ??
+                "Failed to import Agent, please try again later"),
         };
       }
       const error = new Error(`Request failed: ${response.status}`);
@@ -604,9 +611,10 @@ export const importAgent = async (
  */
 export const clearAgentNewMark = async (agentId: string | number) => {
   try {
-    const url = typeof API_ENDPOINTS.agent.clearNew === 'function'
-      ? API_ENDPOINTS.agent.clearNew(agentId)
-      : `${API_ENDPOINTS.agent.clearNew}/${agentId}`;
+    const url =
+      typeof API_ENDPOINTS.agent.clearNew === "function"
+        ? API_ENDPOINTS.agent.clearNew(agentId)
+        : `${API_ENDPOINTS.agent.clearNew}/${agentId}`;
     const response = await fetch(url, {
       method: "PUT",
       headers: getAuthHeaders(),
@@ -709,7 +717,11 @@ export const regenerateAgentNameBatch = async (payload: {
  * @param versionNo optional version number (default 0 for current/draft version)
  * @returns agent detail info
  */
-export const searchAgentInfo = async (agentId: number, tenantId?: string, versionNo?: number) => {
+export const searchAgentInfo = async (
+  agentId: number,
+  tenantId?: string,
+  versionNo?: number
+) => {
   try {
     const url = tenantId
       ? `${API_ENDPOINTS.agent.searchInfo}?tenant_id=${encodeURIComponent(tenantId)}`
@@ -755,6 +767,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
       group_ids: data.group_ids || [],
       ingroup_permission: data.ingroup_permission || "READ_ONLY",
       permission: data.permission, // Per-agent edit permission
+      prompts_hidden: data.prompts_hidden === true,
       tools: data.tools
         ? data.tools.map((tool: any) => {
             const params =
@@ -784,7 +797,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
           })
         : [],
       skills: data.skills || [],
-      current_version_no: data.current_version_no
+      current_version_no: data.current_version_no,
     };
 
     return {
@@ -849,9 +862,12 @@ export const fetchAllAgents = async () => {
  */
 export const fetchAgentCallRelationship = async (agentId: number) => {
   try {
-    const response = await fetch(`${API_ENDPOINTS.agent.callRelationship}/${agentId}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_ENDPOINTS.agent.callRelationship}/${agentId}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
@@ -862,14 +878,14 @@ export const fetchAgentCallRelationship = async (agentId: number) => {
     return {
       success: true,
       data: data,
-      message: ''
+      message: "",
     };
   } catch (error) {
-    log.error('Failed to fetch agent call relationship:', error);
+    log.error("Failed to fetch agent call relationship:", error);
     return {
       success: false,
       data: null,
-      message: 'agentConfig.agents.callRelationshipFetchFailed'
+      message: "agentConfig.agents.callRelationshipFetchFailed",
     };
   }
 };
@@ -991,7 +1007,7 @@ export const validateTool = async (
  * @param tenantId - Optional tenant ID. If not provided, fetches for the current user's tenant.
  * @returns list of skills with skill_id, name, description, source, etc.
  */
-export const fetchSkills = async (tenantId?: string) => {
+export const fetchSkills = async (tenantId?: string | null) => {
   try {
     const url = tenantId
       ? `${API_ENDPOINTS.skills.list}?tenant_id=${encodeURIComponent(tenantId)}`
@@ -1205,7 +1221,8 @@ export const createSkill = async (skillData: {
     return {
       success: false,
       data: null,
-      message: error instanceof Error ? error.message : "Failed to create skill",
+      message:
+        error instanceof Error ? error.message : "Failed to create skill",
     };
   }
 };
@@ -1225,18 +1242,26 @@ export const updateSkill = async (
     content?: string;
     config_values?: Record<string, unknown>;
     files?: Array<{ path: string; content: string }>;
-  }
+  },
+  tenantId?: string | null
 ) => {
   try {
     const requestBody: Record<string, any> = {};
-    if (skillData.description !== undefined) requestBody.description = skillData.description;
+    if (skillData.description !== undefined)
+      requestBody.description = skillData.description;
     if (skillData.source !== undefined) requestBody.source = skillData.source;
-    if (skillData.tags !== undefined) requestBody.tags = normalizeTags(skillData.tags);
-    if (skillData.content !== undefined) requestBody.content = skillData.content;
-    if (skillData.config_values !== undefined) requestBody.config_values = skillData.config_values;
+    if (skillData.tags !== undefined)
+      requestBody.tags = normalizeTags(skillData.tags);
+    if (skillData.content !== undefined)
+      requestBody.content = skillData.content;
+    if (skillData.config_values !== undefined)
+      requestBody.config_values = skillData.config_values;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
-    const response = await fetch(API_ENDPOINTS.skills.update(skillName), {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.update(skillName)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.update(skillName);
+    const response = await fetch(url, {
       method: "PUT",
       headers: {
         ...getAuthHeaders(),
@@ -1262,7 +1287,8 @@ export const updateSkill = async (
     return {
       success: false,
       data: null,
-      message: error instanceof Error ? error.message : "Failed to update skill",
+      message:
+        error instanceof Error ? error.message : "Failed to update skill",
     };
   }
 };
@@ -1286,9 +1312,10 @@ export const createSkillFromFile = async (
       formData.append("skill_name", skillName);
     }
 
-    const endpoint = isUpdate && skillName
-      ? API_ENDPOINTS.skills.updateUpload(skillName)
-      : API_ENDPOINTS.skills.upload;
+    const endpoint =
+      isUpdate && skillName
+        ? API_ENDPOINTS.skills.updateUpload(skillName)
+        : API_ENDPOINTS.skills.upload;
 
     const method = isUpdate ? "PUT" : "POST";
 
@@ -1311,11 +1338,14 @@ export const createSkillFromFile = async (
         // JSON parse failed
       }
 
-      const errorMessage = typeof errorData.detail === 'string'
-        ? errorData.detail
-        : Array.isArray(errorData.detail)
-          ? errorData.detail.map((e: any) => e.msg || JSON.stringify(e)).join('; ')
-          : JSON.stringify(errorData.detail);
+      const errorMessage =
+        typeof errorData.detail === "string"
+          ? errorData.detail
+          : Array.isArray(errorData.detail)
+            ? errorData.detail
+                .map((e: any) => e.msg || JSON.stringify(e))
+                .join("; ")
+            : JSON.stringify(errorData.detail);
       throw new Error(errorMessage || `Request failed: ${response.status}`);
     }
 
@@ -1331,7 +1361,10 @@ export const createSkillFromFile = async (
     return {
       success: false,
       data: null,
-      message: error instanceof Error ? error.message : "Failed to create skill from file",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to create skill from file",
     };
   }
 };
@@ -1366,7 +1399,16 @@ export interface SkillFileNode {
   children?: SkillFileNode[];
 }
 
-export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[]> => {
+export class SkillFilesAccessDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SkillFilesAccessDeniedError";
+  }
+}
+
+export const fetchSkillFiles = async (
+  skillName: string
+): Promise<SkillFileNode[]> => {
   try {
     const response = await fetch(API_ENDPOINTS.skills.files(skillName), {
       headers: getAuthHeaders(),
@@ -1375,6 +1417,9 @@ export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[
       throw new Error(`Request failed: ${response.status}`);
     }
     const data = await response.json();
+    if (data && typeof data === "object" && typeof data.content === "string") {
+      throw new SkillFilesAccessDeniedError(data.content);
+    }
     // SDK returns a single root object { name, type, children };
     // normalize to array so callers can always iterate over an array.
     if (Array.isArray(data)) {
@@ -1385,6 +1430,9 @@ export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[
     }
     return [];
   } catch (error) {
+    if (error instanceof SkillFilesAccessDeniedError) {
+      throw error;
+    }
     log.error("Error fetching skill files:", error);
     return [];
   }
@@ -1396,7 +1444,9 @@ export const fetchSkillFiles = async (skillName: string): Promise<SkillFileNode[
  * @param filePath file path relative to skill directory
  * @returns file content
  */
-export const getAgentByName = async (agentName: string): Promise<{
+export const getAgentByName = async (
+  agentName: string
+): Promise<{
   agent_id: number;
   latest_version_no: number | null;
 } | null> => {
@@ -1425,12 +1475,18 @@ export const getAgentByName = async (agentName: string): Promise<{
  * @param filePath file path relative to skill directory
  * @returns file content
  */
-export const fetchSkillFileContent = async (skillName: string, filePath: string): Promise<string | null> => {
+export const fetchSkillFileContent = async (
+  skillName: string,
+  filePath: string
+): Promise<string | null> => {
   try {
     const encodedPath = encodeURIComponent(filePath);
-    const response = await fetch(`${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_ENDPOINTS.skills.fileContent(skillName, encodedPath)}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
     }
@@ -1448,13 +1504,19 @@ export const fetchSkillFileContent = async (skillName: string, filePath: string)
  * @param filePath file path relative to skill directory
  * @returns delete result
  */
-export const deleteSkillTempFile = async (skillName: string, filePath: string): Promise<boolean> => {
+export const deleteSkillTempFile = async (
+  skillName: string,
+  filePath: string
+): Promise<boolean> => {
   try {
     const encodedPath = encodeURIComponent(filePath);
-    const response = await fetch(`${API_ENDPOINTS.skills.deleteFile(skillName, encodedPath)}`, {
-      method: "DELETE",
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_ENDPOINTS.skills.deleteFile(skillName, encodedPath)}`,
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }
+    );
     if (!response.ok) {
       log.warn(`Failed to delete skill temp file: ${response.status}`);
       return false;
@@ -1476,7 +1538,9 @@ export const deleteSkillTempFile = async (skillName: string, filePath: string): 
  * @param skillName The skill name
  * @returns Parsed config object with temp_filename and progress info
  */
-export const fetchSkillConfig = async (skillName: string): Promise<Record<string, unknown> | null> => {
+export const fetchSkillConfig = async (
+  skillName: string
+): Promise<Record<string, unknown> | null> => {
   try {
     const response = await fetch(
       `${API_ENDPOINTS.skills.fileContent(skillName, "config.yaml")}`,
@@ -1524,7 +1588,8 @@ export const deleteSkill = async (skillName: string) => {
     log.error("Error deleting skill:", error);
     return {
       success: false,
-      message: error instanceof Error ? error.message : "Failed to delete skill",
+      message:
+        error instanceof Error ? error.message : "Failed to delete skill",
     };
   }
 };

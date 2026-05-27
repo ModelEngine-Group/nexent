@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
+from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
@@ -17,10 +18,11 @@ from services.vectordatabase_service import (
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
 )
+from services.file_management_service import check_file_access
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
-from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
+from database.knowledge_db import get_knowledge_record
 from database.model_management_db import get_model_by_model_id
 
 router = APIRouter(prefix="/indices")
@@ -243,7 +245,8 @@ def get_embedding_model_status(
         # Get the knowledge base record by index_name
         knowledge_record = get_knowledge_record({
             "index_name": index_name,
-            "tenant_id": tenant_id
+            "tenant_id": tenant_id,
+            "include_asset_owner_assets": True,
         })
 
         if not knowledge_record:
@@ -357,6 +360,35 @@ def update_embedding_model(
         )
 
 
+def _apply_read_only_to_asset_indices_info(asset_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Force READ_ONLY permission on asset-owner indices_info before merge."""
+    indices_info = asset_result.get("indices_info")
+    if not indices_info:
+        return asset_result
+    normalized = dict(asset_result)
+    normalized["indices_info"] = [
+        {**info, "permission": PERMISSION_READ} for info in indices_info
+    ]
+    return normalized
+
+
+def _merge_list_indices_results(
+        primary: Dict[str, Any],
+        asset_owner: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge tenant and ASSET_OWNER list_indices responses (concat, no dedup)."""
+    merged_indices = primary.get("indices", []) + asset_owner.get("indices", [])
+    merged: Dict[str, Any] = {
+        "indices": merged_indices,
+        "count": len(merged_indices),
+    }
+    if "indices_info" in primary or "indices_info" in asset_owner:
+        merged["indices_info"] = (
+            primary.get("indices_info", []) + asset_owner.get("indices_info", [])
+        )
+    return merged
+
+
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
@@ -370,9 +402,20 @@ def get_list_indices(
     """List all user indices with optional stats"""
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
-        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
-        effective_tenant_id = tenant_id or auth_tenant_id
-        return ElasticSearchService.list_indices(pattern, include_stats, effective_tenant_id, user_id, vdb_core)
+        if tenant_id is None:
+            result = ElasticSearchService.list_indices(
+                pattern, include_stats, auth_tenant_id, user_id, vdb_core
+            )
+            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                asset_result = ElasticSearchService.list_indices(
+                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core
+                )
+                asset_result = _apply_read_only_to_asset_indices_info(asset_result)
+                return _merge_list_indices_results(result, asset_result)
+            return result
+        return ElasticSearchService.list_indices(
+            pattern, include_stats, tenant_id, user_id, vdb_core
+        )
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
@@ -571,7 +614,7 @@ def health_check(vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)):
 @router.post("/{index_name}/chunks")
 def get_index_chunks(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name) to get chunks from"),
+                               description="Internal index_name from knowledge_record_t"),
         page: int = Query(
             None, description="Page number (1-based) for pagination"),
         page_size: int = Query(
@@ -583,12 +626,23 @@ def get_index_chunks(
 ):
     """Get chunks from the specified index, with optional pagination support"""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        if path_or_url is not None and not check_file_access(
+            path_or_url, user_id, tenant_id
+        ):
+            logger.warning(
+                "[get_index_chunks] Access denied: path_or_url=%s, user_id=%s",
+                path_or_url,
+                user_id,
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to access this file",
+            )
 
         result = ElasticSearchService.get_index_chunks(
-            index_name=actual_index_name,
+            index_name=index_name,
             page=page,
             page_size=page_size,
             path_or_url=path_or_url,
@@ -611,7 +665,7 @@ def get_index_chunks(
 @router.post("/{index_name}/chunk")
 def create_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description="Internal index_name from knowledge_record_t"),
         payload: ChunkCreateRequest = Body(..., description="Chunk data"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
@@ -619,10 +673,8 @@ def create_chunk(
     """Create a manual chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
         result = ElasticSearchService.create_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
@@ -646,7 +698,7 @@ def create_chunk(
 @router.put("/{index_name}/chunk/{chunk_id}")
 def update_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description="Internal index_name from knowledge_record_t"),
         chunk_id: str = Path(..., description="Chunk identifier"),
         payload: ChunkUpdateRequest = Body(...,
                                            description="Chunk update payload"),
@@ -655,11 +707,9 @@ def update_chunk(
 ):
     """Update an existing chunk."""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        user_id, _ = get_current_user_id(authorization)
         result = ElasticSearchService.update_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_id=chunk_id,
             chunk_request=payload,
             vdb_core=vdb_core,
@@ -687,18 +737,16 @@ def update_chunk(
 @router.delete("/{index_name}/chunk/{chunk_id}")
 def delete_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description="Internal index_name from knowledge_record_t"),
         chunk_id: str = Path(..., description="Chunk identifier"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """Delete a chunk."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        get_current_user_id(authorization)
         result = ElasticSearchService.delete_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_id=chunk_id,
             vdb_core=vdb_core,
         )

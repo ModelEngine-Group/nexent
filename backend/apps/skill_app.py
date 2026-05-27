@@ -1,5 +1,6 @@
 """Skill management HTTP endpoints."""
 
+from nexent.core.agents.agent_model import ModelConfig
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +20,9 @@ from services.skill_service import (
 )
 from consts.model import SkillInstanceInfoRequest, SkillCreateRequest, SkillCreateInteractiveRequest, SkillUpdateRequest, SkillResponse
 from utils.auth_utils import get_current_user_id, get_current_user_info
-from nexent.core.agents.agent_model import ModelConfig
+from services.asset_owner_visibility import can_view_skill
+
+ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +30,18 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
 
 
+def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], tenant_id: str):
+    """Return a denial JSONResponse when the caller cannot view an ASSET_OWNER-scoped skill."""
+    if skill and not can_view_skill(tenant_id, skill.get("tenant_id")):
+        return JSONResponse(content=ASSET_OWNER_SKILL_VIEW_DENIED)
+    return None
+
+
 # List routes first (no path parameters)
 @router.get("")
 async def list_skills(
-    tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for super admin to query specific tenant's skills"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
@@ -50,7 +61,8 @@ async def list_skills(
 
 @router.get("/official")
 async def list_official_skills(
-    tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for super admin to query specific tenant's skills"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """List all official skills with installation status for the current tenant (or a specific tenant for super admin).
@@ -70,14 +82,17 @@ async def list_official_skills(
 
 
 class InstallSkillsRequest(BaseModel):
-    skill_names: List[str] = Field(..., description="List of skill names to install")
-    locale: Optional[str] = Field(default="en", description="Frontend locale (zh or en)")
+    skill_names: List[str] = Field(...,
+                                   description="List of skill names to install")
+    locale: Optional[str] = Field(
+        default="en", description="Frontend locale (zh or en)")
 
 
 @router.post("/install")
 async def install_skills(
     request: InstallSkillsRequest,
-    tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to install skills for a specific tenant"),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for super admin to install skills for a specific tenant"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Install official skills for the current tenant (or a specific tenant for super admin).
@@ -120,7 +135,8 @@ async def create_skill(
         # Convert tool_names to tool_ids if provided
         tool_ids = request.tool_ids or []
         if request.tool_names:
-            raise NotImplementedError("Tool names are not supported for skill creation")
+            raise NotImplementedError(
+                "Tool names are not supported for skill creation")
 
         skill_data = {
             "name": request.name,
@@ -133,7 +149,8 @@ async def create_skill(
             "config_values": request.config_values,
             "files": request.files if request.files else [],
         }
-        skill = service.create_skill(skill_data, tenant_id=tenant_id, user_id=user_id)
+        skill = service.create_skill(
+            skill_data, tenant_id=tenant_id, user_id=user_id)
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -150,7 +167,8 @@ async def create_skill(
 @router.post("/upload")
 async def create_skill_from_file(
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
-    skill_name: Optional[str] = Form(None, description="Optional skill name override"),
+    skill_name: Optional[str] = Form(
+        None, description="Optional skill name override"),
     source: Optional[str] = Form("自定义", description="Skill source"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
@@ -191,7 +209,8 @@ async def create_skill_from_file(
             raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -205,12 +224,24 @@ async def get_skill_file_tree(
     try:
         _, tenant_id = get_current_user_id(authorization)
         service = SkillService(tenant_id=tenant_id)
+        skill = service.get_skill(skill_name)
+        if not skill:
+            raise HTTPException(
+                status_code=404, detail=f"Skill not found: {skill_name}")
+
+        denied = _asset_owner_skill_view_denied_response(skill, tenant_id)
+        if denied:
+            return denied
+
         tree = service.get_skill_file_tree(skill_name)
         if not tree:
-            raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+            raise HTTPException(
+                status_code=404, detail=f"Skill not found: {skill_name}")
         return JSONResponse(content=tree)
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -233,12 +264,24 @@ async def get_skill_file_content(
     try:
         _, tenant_id = get_current_user_id(authorization)
         service = SkillService(tenant_id=tenant_id)
+        skill = service.get_skill(skill_name)
+        if not skill:
+            raise HTTPException(
+                status_code=404, detail=f"Skill not found: {skill_name}")
+
+        denied = _asset_owner_skill_view_denied_response(skill, tenant_id)
+        if denied:
+            return denied
+
         content = service.get_skill_file_content(skill_name, file_path)
         if content is None:
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+            raise HTTPException(
+                status_code=404, detail=f"File not found: {file_path}")
         return JSONResponse(content={"content": content})
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -359,7 +402,8 @@ async def update_skill_instance(
         service = SkillService(tenant_id=tenant_id)
         skill = service.get_skill_by_id(request.skill_id, tenant_id)
         if not skill:
-            raise HTTPException(status_code=404, detail=f"Skill with ID {request.skill_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Skill with ID {request.skill_id} not found")
 
         # Create or update skill instance
         instance = service.create_or_update_skill_instance(
@@ -395,7 +439,8 @@ async def update_skill_instance(
 
 @router.get("/instance/list")
 async def list_skill_instances(
-    agent_id: int = Query(..., description="Agent ID to query skill instances"),
+    agent_id: int = Query(...,
+                          description="Agent ID to query skill instances"),
     version_no: int = Query(0, description="Version number (0 for draft)"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
@@ -415,7 +460,8 @@ async def list_skill_instances(
         # Also include config_schemas and config_values from the template (via YAML enrichment).
         # The instance's per-agent overrides (config_values) are used as-is for the frontend.
         for instance in instances:
-            skill = service.get_skill_by_id(instance.get("skill_id"), tenant_id)
+            skill = service.get_skill_by_id(
+                instance.get("skill_id"), tenant_id)
             if skill:
                 instance["skill_name"] = skill.get("name")
                 instance["skill_description"] = skill.get("description", "")
@@ -423,7 +469,8 @@ async def list_skill_instances(
                 # Template defaults from YAML-enriched skill
                 instance["config_schemas"] = skill.get("config_schemas") or []
                 # Per-agent config_values from SkillInstance override template defaults
-                instance["config_values"] = instance.get("config_values") or skill.get("config_values") or {}
+                instance["config_values"] = instance.get(
+                    "config_values") or skill.get("config_values") or {}
 
         return JSONResponse(content={"instances": instances})
     except UnauthorizedError as e:
@@ -445,7 +492,8 @@ async def scan_and_update_skill(authorization: Optional[str] = Header(None)):
         )
     except Exception as e:
         logger.error(f"Failed to update skill: {e}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update skill")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update skill")
 
 
 @router.get("/{skill_name}")
@@ -456,7 +504,8 @@ async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)
         service = SkillService(tenant_id=tenant_id)
         skill = service.get_skill(skill_name, tenant_id=tenant_id)
         if not skill:
-            raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+            raise HTTPException(
+                status_code=404, detail=f"Skill not found: {skill_name}")
         return JSONResponse(content=skill)
     except HTTPException:
         raise
@@ -499,13 +548,12 @@ async def update_skill(
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
 
-        print(
-            f"[DEBUG skill_app.update_skill] skill={skill_name} tenant={tenant_id} "
-            f"keys={list(update_data.keys())} has_cval={'config_values' in update_data}",
-            flush=True,
+        skill = service.update_skill(
+            skill_name,
+            update_data,
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
-
-        skill = service.update_skill(skill_name, update_data, tenant_id=tenant_id, user_id=user_id)
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))

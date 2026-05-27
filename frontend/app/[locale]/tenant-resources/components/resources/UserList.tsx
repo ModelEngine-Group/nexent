@@ -152,12 +152,14 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
             ADMIN: t("user.role.admin"),
             DEV: t("user.role.dev"),
             USER: t("user.role.user"),
+            ASSET_OWNER: t("user.role.assetOwner"),
           };
           const color =
             role === "SUPER_ADMIN" ? "magenta" :
             role === "ADMIN" ? "purple" :
             role === "DEV" ? "cyan" :
-            role === "USER" ? "blue" : "gray";
+            role === "USER" ? "blue" :
+            role === "ASSET_OWNER" ? "gold" : "gray";
           return <Tag color={color}>
               {roleLabels[role] || role}
             </Tag>;

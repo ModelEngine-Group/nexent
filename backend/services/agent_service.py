@@ -23,7 +23,6 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
 from consts.exceptions import MemoryPreparationException, SkillDuplicateError
-from consts.exceptions import MemoryPreparationException
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from consts.model import (
     AgentInfoRequest,
@@ -38,6 +37,7 @@ from consts.model import (
     ToolInstanceInfoRequest,
     ToolSourceEnum, ModelConnectStatusEnum
 )
+from services.asset_owner_visibility import resolve_agent_list_permission
 from database.agent_db import (
     create_agent,
     delete_agent_by_id,
@@ -385,7 +385,8 @@ def _regenerate_agent_value_with_llm(
                 callback=None,
                 tenant_id=tenant_id
             )
-            candidate = (regenerated_value or "").strip().splitlines()[0].strip()
+            candidate = (regenerated_value or "").strip().splitlines()[
+                0].strip()
             if candidate in value_set:
                 raise ValueError(f"Generated duplicate value '{candidate}'")
             return candidate
@@ -446,7 +447,6 @@ def _regenerate_agent_name_with_llm(
     )
 
 
-
 def _regenerate_agent_display_name_with_llm(
     original_display_name: str,
     existing_display_names: list[str],
@@ -488,7 +488,6 @@ def _regenerate_agent_display_name_with_llm(
         prompt_template_id=prompt_template_id,
         user_id=user_id,
     )
-
 
 
 async def check_agent_name_conflict_batch_impl(
@@ -548,17 +547,21 @@ async def regenerate_agent_name_batch_impl(
     _, tenant_id, _ = get_current_user_info(authorization)
     agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
 
-    existing_names = [agent.get("name") for agent in agents_cache if agent.get("name")]
-    existing_display_names = [agent.get("display_name") for agent in agents_cache if agent.get("display_name")]
+    existing_names = [agent.get("name")
+                      for agent in agents_cache if agent.get("name")]
+    existing_display_names = [agent.get(
+        "display_name") for agent in agents_cache if agent.get("display_name")]
 
     # Always use tenant quick-config LLM model
     quick_config_model = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id
     )
-    resolved_model_id = quick_config_model.get("model_id") if quick_config_model else None
+    resolved_model_id = quick_config_model.get(
+        "model_id") if quick_config_model else None
     if not resolved_model_id:
-        raise ValueError("No available model for regeneration. Please configure an LLM model first.")
+        raise ValueError(
+            "No available model for regeneration. Please configure an LLM model first.")
 
     results: list[dict] = []
     # Use local mutable caches to avoid regenerated duplicates in the same batch
@@ -588,7 +591,8 @@ async def regenerate_agent_name_batch_impl(
                     exclude_agent_id=exclude_agent_id
                 )
             except Exception as e:
-                logger.error(f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
+                logger.error(
+                    f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
                 agent_name = _generate_unique_agent_name_with_suffix(
                     agent_name,
                     tenant_id=tenant_id,
@@ -613,7 +617,8 @@ async def regenerate_agent_name_batch_impl(
                     exclude_agent_id=exclude_agent_id
                 )
             except Exception as e:
-                logger.error(f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
+                logger.error(
+                    f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
                 agent_display_name = _generate_unique_display_name_with_suffix(
                     agent_display_name,
                     tenant_id=tenant_id,
@@ -726,7 +731,8 @@ async def _stream_agent_chunks(
             # Create and store the background task to avoid warnings
             background_task = asyncio.create_task(_add_memory_background())
             # Add done callback to handle any exceptions that might occur
-            background_task.add_done_callback(lambda t: t.exception() if t.exception() else None)
+            background_task.add_done_callback(
+                lambda t: t.exception() if t.exception() else None)
         except Exception as schedule_err:
             logger.error(
                 f"Failed to schedule background memory addition: {schedule_err}")
@@ -756,7 +762,9 @@ async def get_creating_sub_agent_id_service(tenant_id: str, user_id: str = None)
 
 async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0, user_id: Optional[str] = None):
     try:
-        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+        agent_info = search_agent_info_by_agent_id(
+            agent_id, tenant_id, version_no)
+        tenant_id = agent_info.get("tenant_id")
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
@@ -819,14 +827,17 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
 
     if agent_info["model_id"] is not None:
         model_info = get_model_by_model_id(agent_info["model_id"])
-        agent_info["model_name"] = model_info.get("display_name", None) if model_info is not None else None
+        agent_info["model_name"] = model_info.get(
+            "display_name", None) if model_info is not None else None
     else:
         agent_info["model_name"] = None
 
     # Get business logic model display name from model_id
     if agent_info.get("business_logic_model_id") is not None:
-        business_logic_model_info = get_model_by_model_id(agent_info["business_logic_model_id"])
-        agent_info["business_logic_model_name"] = business_logic_model_info.get("display_name", None) if business_logic_model_info is not None else None
+        business_logic_model_info = get_model_by_model_id(
+            agent_info["business_logic_model_id"])
+        agent_info["business_logic_model_name"] = business_logic_model_info.get(
+            "display_name", None) if business_logic_model_info is not None else None
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
@@ -836,7 +847,8 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         agent_info["prompt_template_name"] = SYSTEM_PROMPT_TEMPLATE_NAME
 
     if agent_info.get("group_ids") is not None:
-        agent_info["group_ids"] = convert_string_to_list(agent_info.get("group_ids"))
+        agent_info["group_ids"] = convert_string_to_list(
+            agent_info.get("group_ids"))
 
     # Check agent availability
     is_available, unavailable_reasons = check_agent_availability(
@@ -996,7 +1008,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                         skill_info=SkillInstanceInfoRequest(
                             skill_id=inst_skill_id,
                             agent_id=agent_id,
-                            skill_description=instance.get("skill_description"),
+                            skill_description=instance.get(
+                                "skill_description"),
                             skill_content=instance.get("skill_content"),
                             enabled=False,
                             config_values=instance.get("config_values"),
@@ -1013,7 +1026,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                      if inst.get("skill_id") == skill_id),
                     None
                 )
-                skill_description = (existing_instance or {}).get("skill_description")
+                skill_description = (existing_instance or {}).get(
+                    "skill_description")
                 skill_content = (existing_instance or {}).get("skill_content")
                 skill_db.create_or_update_skill_by_skill_info(
                     skill_info=SkillInstanceInfoRequest(
@@ -1022,7 +1036,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                         skill_description=skill_description,
                         skill_content=skill_content,
                         enabled=True,
-                        config_values=(existing_instance or {}).get("config_values"),
+                        config_values=(existing_instance or {}
+                                       ).get("config_values"),
                     ),
                     tenant_id=tenant_id,
                     user_id=user_id
@@ -1042,7 +1057,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             while len(search_list):
                 left_ele = search_list.popleft()
                 if left_ele == agent_id:
-                    raise ValueError("Circular dependency detected: Agent cannot be related to itself or create circular calls")
+                    raise ValueError(
+                        "Circular dependency detected: Agent cannot be related to itself or create circular calls")
                 if left_ele in agent_id_set:
                     continue
                 else:
@@ -1077,7 +1093,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             current_external_ids = {
                 rel["external_agent_id"] for rel in current_relations
             }
-            new_external_ids = set(related_external_agent_ids) if related_external_agent_ids else set()
+            new_external_ids = set(
+                related_external_agent_ids) if related_external_agent_ids else set()
 
             # Find IDs to delete (in current but not in new)
             ids_to_delete = current_external_ids - new_external_ids
@@ -1261,7 +1278,8 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
                 if name:
                     skill_names.append(name)
     except Exception as e:
-        logger.warning(f"Failed to collect skill instances for agent {agent_id}: {e}")
+        logger.warning(
+            f"Failed to collect skill instances for agent {agent_id}: {e}")
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
@@ -1273,14 +1291,17 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
     model_display_name = None
     if model_id is not None:
         model_info = get_model_by_model_id(model_id)
-        model_display_name = model_info.get("display_name") if model_info is not None else None
+        model_display_name = model_info.get(
+            "display_name") if model_info is not None else None
 
     # Get business_logic_model_id and business logic model display name
     business_logic_model_id = agent_info.get("business_logic_model_id")
     business_logic_model_display_name = None
     if business_logic_model_id is not None:
-        business_logic_model_info = get_model_by_model_id(business_logic_model_id)
-        business_logic_model_display_name = business_logic_model_info.get("display_name") if business_logic_model_info is not None else None
+        business_logic_model_info = get_model_by_model_id(
+            business_logic_model_id)
+        business_logic_model_display_name = business_logic_model_info.get(
+            "display_name") if business_logic_model_info is not None else None
 
     agent_info = ExportAndImportAgentInfo(agent_id=agent_id,
                                           name=agent_info["name"],
@@ -1304,7 +1325,8 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
                                           business_logic_model_id=business_logic_model_id,
                                           business_logic_model_name=business_logic_model_display_name,
                                           skill_names=skill_names,
-                                          prompt_template_id=agent_info.get("prompt_template_id"),
+                                          prompt_template_id=agent_info.get(
+                                              "prompt_template_id"),
                                           prompt_template_name=agent_info.get("prompt_template_name"))
     return agent_info
 
@@ -1466,7 +1488,8 @@ async def import_agent_by_agent_id(
             release_note="Initial version from Agent Market"
         )
     except Exception as e:
-        logger.warning(f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
+        logger.warning(
+            f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 
@@ -1495,10 +1518,9 @@ async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str)
         user_id (str): User ID (for audit purposes)
     """
     rowcount = clear_agent_new_mark(agent_id, tenant_id, user_id)
-    logger.info(f"clear_agent_new_mark_impl called for agent_id={agent_id}, tenant_id={tenant_id}, user_id={user_id}, affected_rows={rowcount}")
+    logger.info(
+        f"clear_agent_new_mark_impl called for agent_id={agent_id}, tenant_id={tenant_id}, user_id={user_id}, affected_rows={rowcount}")
     return rowcount
-
-
 
 
 async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
@@ -1546,7 +1568,8 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
-                agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
+                agent_group_ids = set(
+                    convert_string_to_list(agent.get("group_ids")))
                 ingroup_permission = agent.get("ingroup_permission")
                 is_creator = str(agent.get("created_by")) == str(user_id)
                 # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
@@ -1574,23 +1597,24 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         simple_agent_list: list[dict] = []
         for entry in enriched_agents:
             agent = entry["raw_agent"]
-            unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
+            unavailable_reasons = list(
+                dict.fromkeys(entry["unavailable_reasons"]))
 
             model_id = agent.get("model_id")
             model_info = None
             if model_id is not None:
                 if model_id not in model_cache:
-                    model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
+                    model_cache[model_id] = get_model_by_model_id(
+                        model_id, tenant_id)
                 model_info = model_cache.get(model_id)
 
-            # Permission logic:
-            # - If creator or can_edit_all: PERMISSION_EDIT
-            # - Otherwise: use ingroup_permission, default to PERMISSION_READ if None
-            if can_edit_all or str(agent.get("created_by")) == str(user_id):
-                permission = PERMISSION_EDIT
-            else:
-                ingroup_permission = agent.get("ingroup_permission")
-                permission = ingroup_permission if ingroup_permission is not None else PERMISSION_READ
+            # Permission logic (ASSET_OWNER-scoped + non-ASSET_OWNER role => READ_ONLY first):
+            permission = resolve_agent_list_permission(
+                user_role=user_role,
+                agent=agent,
+                user_id=user_id,
+                can_edit_all=can_edit_all,
+            )
 
             simple_agent_list.append({
                 "agent_id": agent["agent_id"],
@@ -1653,7 +1677,8 @@ def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> Non
                 duplicate_entry["unavailable_reasons"].append(reason_key)
 
     _mark_duplicates(name_groups, AgentUnavailableReason.DUPLICATE_NAME)
-    _mark_duplicates(display_name_groups, AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)
+    _mark_duplicates(display_name_groups,
+                     AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)
 
 
 def _collect_model_availability_reasons(agent: dict, tenant_id: str, model_cache: Dict[int, Optional[dict]]) -> list[str]:
@@ -1726,8 +1751,10 @@ def check_agent_availability(
         return False, [AgentUnavailableReason.AGENT_NOT_FOUND]
 
     # Check tool availability
-    tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
-    tool_id_list = [tool["tool_id"] for tool in tool_info if tool.get("tool_id") is not None]
+    tool_info = search_tools_for_sub_agent(
+        agent_id=agent_id, tenant_id=tenant_id)
+    tool_id_list = [tool["tool_id"]
+                    for tool in tool_info if tool.get("tool_id") is not None]
     if tool_id_list:
         tool_statuses = check_tool_is_available(tool_id_list)
         if not all(tool_statuses):
@@ -1808,7 +1835,8 @@ async def prepare_agent_run(
     )
 
     # Mount conversation-level reusable ContextManager if enabled
-    cm_config = getattr(agent_run_info.agent_config, 'context_manager_config', None)
+    cm_config = getattr(agent_run_info.agent_config,
+                        'context_manager_config', None)
     if cm_config and cm_config.enabled:
         cm = agent_run_manager.get_or_create_context_manager(
             conversation_id=str(agent_request.conversation_id),
@@ -2009,8 +2037,10 @@ async def run_agent_stream(
         is_debug=agent_request.is_debug,
         language=language,
         memory_enabled=memory_enabled,
-        history_count=len(agent_request.history) if agent_request.history else 0,
-        minio_files_count=len(agent_request.minio_files) if agent_request.minio_files else 0,
+        history_count=len(
+            agent_request.history) if agent_request.history else 0,
+        minio_files_count=len(
+            agent_request.minio_files) if agent_request.minio_files else 0,
         extra_metadata={
             "agent_share_option": getattr(
                 memory_ctx_preview.user_config,
@@ -2278,7 +2308,8 @@ async def export_agent_with_skills_impl(agent_id: int, authorization: str) -> di
     agent_json_str = await export_agent_impl(agent_id, authorization)
 
     skill_service = SkillService(tenant_id=tenant_id)
-    skill_zip_entries = skill_service.export_skills_by_names(skill_names, tenant_id)
+    skill_zip_entries = skill_service.export_skills_by_names(
+        skill_names, tenant_id)
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -2290,8 +2321,10 @@ async def export_agent_with_skills_impl(agent_id: int, authorization: str) -> di
     zip_buffer.seek(0)
     zip_data = zip_buffer.read()
 
-    agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id)
-    agent_name = agent_info.get("name", "anonymous") if agent_info else "anonymous"
+    agent_info = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id)
+    agent_name = agent_info.get(
+        "name", "anonymous") if agent_info else "anonymous"
 
     filename = f"{agent_name}.zip"
 
@@ -2322,7 +2355,8 @@ async def import_agent_with_skills_impl(
 
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
-    skill_name_to_zip_base64 = {entry.skill_name: entry.skill_zip_base64 for entry in skills}
+    skill_name_to_zip_base64 = {
+        entry.skill_name: entry.skill_zip_base64 for entry in skills}
 
     existing_skills = skill_db.list_skills(tenant_id)
     existing_skill_names = {s.get("name") for s in existing_skills}

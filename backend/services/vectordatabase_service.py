@@ -26,7 +26,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ
+from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ, ASSET_OWNER_TENANT_ID
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -46,6 +46,7 @@ from database.group_db import query_group_ids_by_user
 from database.model_management_db import get_model_by_display_name, get_model_by_model_id, get_model_records
 from services.redis_service import get_redis_service
 from services.group_service import get_tenant_default_group_id
+from services.asset_owner_visibility import postprocess_knowledge_visibility
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.str_utils import convert_string_to_list
@@ -134,7 +135,8 @@ def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[
     try:
         knowledge_record = get_knowledge_record({
             "index_name": index_name,
-            "tenant_id": tenant_id
+            "tenant_id": tenant_id,
+            "include_asset_owner_assets": True,
         })
 
         if not knowledge_record:
@@ -855,7 +857,9 @@ class ElasticSearchService:
         Permission logic:
         - SU: All knowledgebases visible, all editable
         - ADMIN: Knowledgebases from same tenant visible, all editable
-        - USER/DEV: Knowledgebases where user belongs to intersecting groups, permission determined by:
+        - DEV on ASSET_OWNER-scoped records: all visible, read-only (READ_ONLY)
+        - SU/ADMIN/SPEED cross-tenant view of ASSET_OWNER records: read-only
+        - USER/DEV (non-ASSET_OWNER records): group intersection required; permission by:
             * If user is creator: editable
             * If ingroup_permission=EDIT: editable
             * If ingroup_permission=READ_ONLY: read-only
@@ -887,7 +891,9 @@ class ElasticSearchService:
         es_indices_list = vdb_core.get_user_indices(pattern)
 
         # Get all knowledgebase records from database (for cleanup and permission checking)
-        all_db_records = get_knowledge_info_by_tenant_id(target_tenant_id)
+        all_db_records = get_knowledge_info_by_tenant_id(
+            target_tenant_id
+        )
 
         # Filter visible knowledgebases based on user role and permissions
         visible_knowledgebases = []
@@ -903,6 +909,8 @@ class ElasticSearchService:
 
             # Check permission based on user role
             permission = None
+            record_tenant_id = str(record.get("tenant_id") or "")
+            is_asset_owner_record = record_tenant_id == ASSET_OWNER_TENANT_ID
 
             # Fallback logic: if user_id equals user_tenant_id, treat as legacy admin user
             # even if user_role is None or empty
@@ -914,7 +922,12 @@ class ElasticSearchService:
                 effective_user_role = "SPEED"
                 logger.info("User under SPEED version is treated as admin")
 
-            if effective_user_role in ["SU", "ADMIN", "SPEED"]:
+            if is_asset_owner_record:
+                if effective_user_role in ["ASSET_OWNER"]:
+                    permission = PERMISSION_EDIT
+                elif effective_user_role in ["SU", "ADMIN", "SPEED", "DEV"]:
+                    permission = PERMISSION_READ
+            elif effective_user_role in ["SU", "ADMIN", "SPEED", "ASSET_OWNER"]:
                 # SU, ADMIN and SPEED roles can see all knowledgebases
                 permission = PERMISSION_EDIT
             elif effective_user_role in ["USER", "DEV"]:
@@ -980,6 +993,11 @@ class ElasticSearchService:
                     model_name_is_none_list.append(index_name)
 
         # Build response
+        visible_knowledgebases = postprocess_knowledge_visibility(
+            visible_knowledgebases,
+            caller_role=user_role,
+            caller_tenant_id=target_tenant_id,
+        )
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         response = {

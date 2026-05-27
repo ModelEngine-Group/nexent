@@ -22,7 +22,6 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
     with get_db_session() as session:
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y'
         ).first()

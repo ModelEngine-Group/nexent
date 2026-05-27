@@ -353,6 +353,7 @@
   "agent.error.fetchAgentListRetry": "Failed to get agent list, please try again later",
   "agent.debug.title": "Agent Debug",
   "agent.noEditPermission": "No permission to edit this agent",
+  "agent.prompts.noPermission": "You do not have permission to view prompts.",
   "mcpConfig.permission.noEdit": "No permission to edit MCP",
   "agent.action.create": "Create Agent",
   "agent.action.modify": "Edit Agent Information",
@@ -1094,6 +1095,7 @@
   "auth.su": "Super Admin",
   "auth.dev": "Developer",
   "auth.speed": "Default Role",
+  "auth.assetOwner": "Asset Owner",
   "auth.inviteCodeLabel": "Invite Code",
   "auth.inviteCodeRequired": "Invite code is required",
   "auth.inviteCodePlaceholder": "Please enter invite code",
@@ -1563,12 +1565,17 @@
   "sidebar.memoryManagement": "Memory Management",
   "sidebar.userManagement": "Profile",
   "sidebar.tenantResources": "Tenant Resources",
+  "sidebar.assetOwnerResources": "Asset Administrator Resources",
   "sidebar.mcpToolsManagement": "MCP Tools",
   "sidebar.monitoringManagement": "Monitoring & Ops",
 
   "tenantResources.create": "Create",
   "tenantResources.subtitle": "Manage tenants, users, groups and resources",
   "tenantResources.title": "Tenant Resource Management",
+
+  "assetOwnerResources.subtitle": "Manage asset administrator users, models, knowledge bases, and resources",
+  "assetOwnerResources.tenantName": "Asset Administrator",
+  "assetOwnerResources.title": "Asset Administrator Resource Management",
 
   "tenantResources.tabs.groups": "Groups",
   "tenantResources.tabs.knowledge": "Knowledge Base",
@@ -1777,6 +1784,8 @@
   "tenantResources.invitation.codeType.ADMIN_INVITE": "Admin Invite",
   "tenantResources.invitation.codeType.DEV_INVITE": "Dev Invite",
   "tenantResources.invitation.codeType.USER_INVITE": "User Invite",
+  "tenantResources.invitation.codeType.ASSET_OWNER_INVITE": "Asset Owner Invite",
+  "tenantResources.invitation.assetOwnerTab": "Asset Owner Invitations",
 
   "tenantResources.invitation.status.IN_USE": "Available",
   "tenantResources.invitation.status.EXPIRE": "Expired",
@@ -2300,6 +2309,7 @@
   "user.role.admin": "Admin",
   "user.role.dev": "Developer",
   "user.role.user": "User",
+  "user.role.assetOwner": "Asset Owner",
 
   "profile.title": "Profile",
   "profile.subtitle": "Manage your account settings and preferences",

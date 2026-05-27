@@ -201,14 +201,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   // Load chunks for active document with server-side pagination
   const loadChunks = React.useCallback(async () => {
-    if (!knowledgeBaseName || !activeDocumentKey) {
+    if (!knowledgeBaseId || !activeDocumentKey) {
       return;
     }
 
     setLoading(true);
     try {
       const result = await knowledgeBaseService.previewChunksPaginated(
-        knowledgeBaseName,
+        knowledgeBaseId,
         pagination.page,
         pagination.pageSize,
         activeDocumentKey
@@ -240,7 +240,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setLoading(false);
     }
   }, [
-    knowledgeBaseName,
+    knowledgeBaseId,
     activeDocumentKey,
     pagination.page,
     pagination.pageSize,
@@ -330,7 +330,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
-    if (!knowledgeBaseName) {
+    if (!knowledgeBaseId) {
       message.error(t("document.chunk.error.searchFailed"));
       return;
     }
@@ -373,7 +373,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setChunkSearchLoading(false);
     }
   }, [
-    knowledgeBaseName,
     knowledgeBaseId,
     message,
     pagination.pageSize,
@@ -454,7 +453,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   };
 
   const handleChunkSubmit = async () => {
-    if (!knowledgeBaseName) {
+    if (!knowledgeBaseId) {
       message.error(t("document.chunk.error.loadFailed"));
       return;
     }
@@ -482,7 +481,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setChunkSubmitting(true);
       if (chunkModalMode === "create") {
         const filenamePayload = values.filename?.trim() || undefined;
-        await knowledgeBaseService.createChunk(knowledgeBaseName, {
+        await knowledgeBaseService.createChunk(knowledgeBaseId, {
           content: values.content,
           filename: filenamePayload,
           path_or_url: activeDocumentKey,
@@ -503,7 +502,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           return;
         }
         await knowledgeBaseService.updateChunk(
-          knowledgeBaseName,
+          knowledgeBaseId,
           editingChunk.id,
           {
             content: values.content,
@@ -541,7 +540,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       message.error(t("document.chunk.error.missingChunkId"));
       return;
     }
-    if (!knowledgeBaseName) {
+    if (!knowledgeBaseId) {
       message.error(t("document.chunk.error.deleteFailed"));
       return;
     }
@@ -556,7 +555,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       danger: true,
       onOk: async () => {
         try {
-          await knowledgeBaseService.deleteChunk(knowledgeBaseName, chunk.id);
+          await knowledgeBaseService.deleteChunk(knowledgeBaseId, chunk.id);
           message.success(t("document.chunk.success.delete"));
           forceCloseTooltips();
           // Update chunk count immediately for better UX
