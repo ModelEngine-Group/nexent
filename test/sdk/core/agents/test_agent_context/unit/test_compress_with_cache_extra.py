@@ -232,7 +232,7 @@ class TestCompressCurrentExtra:
         with patch.object(cm, '_generate_summary', return_value=None):
             result = cm._compress_current_with_cache(TaskStep(task="t"), actions, MagicMock())
 
-        assert "Truncated" in result
+        assert "[CONTEXT COMPACTION" in result
         assert cm._current_summary_cache is None
 
     def test_C6_vs_previous_asymmetry(self):

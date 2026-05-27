@@ -83,7 +83,6 @@ class AgentConfig(BaseModel):
     max_steps: int = Field(description="Maximum number of steps for current Agent", default=5)
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
-    managed_agents: List[AgentConfig] = Field(description="Managed Agents", default=[])
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
     managed_agents: List["AgentConfig"] = Field(
         description="Internal managed sub-agents created locally",
@@ -577,3 +576,6 @@ class PriorityWeightedStrategy(ContextStrategy):
 
 
 
+
+
+AgentConfig.model_rebuild()
