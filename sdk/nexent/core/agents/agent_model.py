@@ -35,7 +35,7 @@ class ModelConfig(BaseModel):
         description="Model provider identifier (e.g., openai, modelengine)",
         default=None
     )
-extra_body: Optional[Dict[str, Any]] = Field(
+    extra_body: Optional[Dict[str, Any]] = Field(
         description=(
             "Optional dict merged into every OpenAI-compatible "
             "chat.completions.create request body. Used for provider-specific "
