@@ -24,6 +24,7 @@ sys.modules['database.model_management_db'] = MockModule()
 sys.modules['utils'] = MockModule()
 sys.modules['utils.auth_utils'] = MockModule()
 sys.modules['utils.config_utils'] = MockModule()
+sys.modules['utils.memory_utils'] = MockModule()
 sys.modules['utils.model_name_utils'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
@@ -219,6 +220,51 @@ async def test_perform_connectivity_check_vlm():
             ssl_verify=True
         )
         mock_model_instance.check_connectivity.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_catalog():
+    model_provider_service = types.ModuleType("services.model_provider_service")
+    model_provider_service.get_provider_models = mock.AsyncMock(return_value=[
+        {"id": "qwen-image-max", "model_type": "vlm2"},
+    ])
+
+    with mock.patch.dict(sys.modules, {"services.model_provider_service": model_provider_service}), \
+            mock.patch("backend.services.model_health_service.OpenAIVLModel") as mock_model:
+        result = await _perform_connectivity_check(
+            "qwen-image-max",
+            "vlm2",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "test-key",
+            model_factory="dashscope",
+        )
+
+    assert result is True
+    model_provider_service.get_provider_models.assert_awaited_once_with({
+        "provider": "dashscope",
+        "model_type": "vlm2",
+        "api_key": "test-key",
+    })
+    mock_model.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_returns_false():
+    model_provider_service = types.ModuleType("services.model_provider_service")
+    model_provider_service.get_provider_models = mock.AsyncMock(return_value=[
+        {"_error": "authentication_failed", "_message": "Invalid API key"},
+    ])
+
+    with mock.patch.dict(sys.modules, {"services.model_provider_service": model_provider_service}):
+        result = await _perform_connectivity_check(
+            "qwen-vl-plus",
+            "vlm3",
+            "https://api.tokenpony.cn/v1/",
+            "bad-key",
+            model_factory="tokenpony",
+        )
+
+    assert result is False
 
 
 @pytest.mark.asyncio
