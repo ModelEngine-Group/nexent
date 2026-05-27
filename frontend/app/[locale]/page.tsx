@@ -11,8 +11,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button, Row, Col } from "antd";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button, Row, Col, Card } from "antd";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -205,8 +204,11 @@ interface FeatureCardProps {
 
 function FeatureCard({ icon, title, description }: FeatureCardProps) {
   return (
-    <Card className="overflow-hidden border border-slate-200 dark:border-slate-700 transition-all duration-300 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/30 group h-32">
-      <CardContent className="p-5 flex flex-row items-center gap-4 h-full">
+    <Card
+      className="transition-all duration-300 hover:shadow-md group h-32 [&_.ant-card-body]:!p-5"
+      styles={{ body: { padding: 20 } }}
+    >
+      <div className="flex flex-row items-center gap-4 h-full">
         <div className="flex-shrink-0 p-3 bg-slate-100 dark:bg-slate-800 rounded-full group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors">
           {icon}
         </div>
@@ -218,7 +220,7 @@ function FeatureCard({ icon, title, description }: FeatureCardProps) {
             {description}
           </p>
         </div>
-      </CardContent>
+      </div>
     </Card>
   );
 }

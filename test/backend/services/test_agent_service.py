@@ -70,6 +70,8 @@ sys.modules['services'] = services_module
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
 agent_version_service_mock = MagicMock()
+skill_service_mock = MagicMock()
+skill_service_mock.SkillService.return_value.list_skill_instances.return_value = []
 prompt_template_service_mock = MagicMock()
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_NAME = "system_default"
@@ -79,6 +81,7 @@ prompt_template_service_mock.resolve_prompt_generate_template = MagicMock(return
 sys.modules['services.conversation_management_service'] = conversation_management_service_mock
 sys.modules['services.memory_config_service'] = memory_config_service_mock
 sys.modules['services.agent_version_service'] = agent_version_service_mock
+sys.modules['services.skill_service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 sys.modules['services.skill_service'] = MagicMock()
 setattr(services_module, 'skill_service', sys.modules['services.skill_service'])
@@ -401,13 +404,15 @@ async def test_get_creating_sub_agent_id_service_new_agent(mock_search, mock_cre
     )
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test successful retrieval of an agent's information by ID.
 
@@ -431,6 +436,14 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     mock_sub_agent_ids = [456, 789]
     mock_query_sub_agents_id.return_value = mock_sub_agent_ids
 
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     # Mock get_model_by_model_id - return None for model_id=None
     mock_get_model_by_model_id.return_value = None
 
@@ -447,6 +460,8 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": None,
         "business_logic_model_name": None,
         "prompt_template_id": 0,
@@ -463,13 +478,15 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     mock_check_availability.assert_called_once()
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with explicit version_no parameter.
 
@@ -491,6 +508,14 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
     mock_sub_agent_ids = [456, 789]
     mock_query_sub_agents_id.return_value = mock_sub_agent_ids
 
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     # Mock get_model_by_model_id - return None for model_id=None
     mock_get_model_by_model_id.return_value = None
 
@@ -507,6 +532,8 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": None,
         "business_logic_model_name": None,
         "prompt_template_id": 0,
@@ -1556,13 +1583,15 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
         main_agent_id=123, tenant_id="test_tenant")
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with a valid model_id.
 
@@ -1593,6 +1622,14 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     }
     mock_get_model_by_model_id.return_value = mock_model_info
 
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     # Mock check_agent_availability - agent is available
     mock_check_availability.return_value = (True, [])
 
@@ -1606,6 +1643,8 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
         "business_logic_model_name": None,
         "prompt_template_id": 0,
@@ -1649,13 +1688,15 @@ async def test_get_agent_info_impl_converts_group_ids_when_present(
     mock_convert_string_to_list.assert_called_once_with("1,2")
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with model_id but model has no display_name.
 
@@ -1684,6 +1725,15 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         # No display_name field
     }
     mock_get_model_by_model_id.return_value = mock_model_info
+
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     mock_check_availability.return_value = (True, [])
 
     # Execute
@@ -1696,6 +1746,8 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": None,
         "business_logic_model_name": None,
         "prompt_template_id": 0,
@@ -1707,13 +1759,15 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
     mock_get_model_by_model_id.assert_called_once_with(456)
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with model_id but get_model_by_model_id returns None.
 
@@ -1737,6 +1791,15 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
 
     # Mock get_model_by_model_id to return None
     mock_get_model_by_model_id.return_value = None
+
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     mock_check_availability.return_value = (True, [])
 
     # Execute
@@ -1749,6 +1812,8 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": None,
         "business_logic_model_name": None,
         "prompt_template_id": 0,
@@ -1760,13 +1825,15 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
     mock_get_model_by_model_id.assert_called_once_with(456)
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with business_logic_model_id.
 
@@ -1813,6 +1880,15 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         return None
 
     mock_get_model_by_model_id.side_effect = mock_get_model
+
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     mock_check_availability.return_value = (True, [])
 
     # Execute
@@ -1826,6 +1902,8 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
         "business_logic_model_name": "Claude-3.5",
         "prompt_template_id": 0,
@@ -1841,13 +1919,15 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     mock_get_model_by_model_id.assert_any_call(789)
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with business_logic_model_id but get_model_by_model_id returns None.
 
@@ -1886,6 +1966,15 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         return None
 
     mock_get_model_by_model_id.side_effect = mock_get_model
+
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     mock_check_availability.return_value = (True, [])
 
     # Execute
@@ -1899,6 +1988,8 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
         "business_logic_model_name": None,  # Should be None when model info is not found
         "prompt_template_id": 0,
@@ -1914,13 +2005,15 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     mock_get_model_by_model_id.assert_any_call(789)
 
 
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_business_logic_model_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+async def test_get_agent_info_impl_with_business_logic_model_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
     Test get_agent_info_impl with business_logic_model_id but model has no display_name.
 
@@ -1966,6 +2059,15 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         return None
 
     mock_get_model_by_model_id.side_effect = mock_get_model
+
+    # Mock SkillService to return empty list for skills
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Mock query_external_sub_agents
+    mock_query_external_sub_agents.return_value = []
+
     mock_check_availability.return_value = (True, [])
 
     # Execute
@@ -1979,6 +2081,8 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "skills": [],
+        "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
         "business_logic_model_name": None,  # Should be None when display_name is not in model_info
         "prompt_template_id": 0,

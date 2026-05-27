@@ -17,7 +17,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { Avatar } from "antd";
-import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
+import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import AgentDetailModal from "./AgentDetailModal";
 import {
   deleteAgent,

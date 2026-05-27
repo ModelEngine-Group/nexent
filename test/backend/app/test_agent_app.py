@@ -232,7 +232,8 @@ def test_search_agent_info_api_success(mocker, mock_auth_header):
 
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
-    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 0)
+    # Should use auth tenant_id when query parameter is not provided, and default version_no=0
+    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 0, "user_id")
     assert response.json()["agent_id"] == 123
     assert response.json()["name"] == "Test Agent"
 
@@ -258,7 +259,9 @@ def test_search_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header)
     )
 
     assert response.status_code == 200
-    mock_get_agent_info.assert_called_once_with(456, explicit_tenant_id, 0)
+    mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
+    # Should use explicit tenant_id when provided, not auth tenant_id, and default version_no=0
+    mock_get_agent_info.assert_called_once_with(456, explicit_tenant_id, 0, "user_id")
     assert response.json()["agent_id"] == 456
 
 
@@ -277,6 +280,35 @@ def test_search_agent_info_api_exception(mocker, mock_auth_header):
     )
 
     assert response.status_code == 500
+    mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
+    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 0, "user_id")
+    assert "Agent search info error" in response.json()["detail"]
+
+
+def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
+    """Test search_agent_info_api exception handling with explicit tenant_id query parameter and default version_no=0."""
+    # Setup mocks using pytest-mock
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl", new_callable=mocker.AsyncMock)
+    # Mock return values and exception
+    mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
+    mock_get_agent_info.side_effect = Exception("Test error with explicit tenant")
+
+    # Test the endpoint with explicit tenant_id query parameter
+    explicit_tenant_id = "explicit_tenant_999"
+    response = config_client.post(
+        "/agent/search_info",
+        json={"agent_id": 789},  # version_no defaults to 0
+        params={"tenant_id": explicit_tenant_id},
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 500
+    mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
+    # Should use explicit tenant_id even when exception occurs, and default version_no=0
+    mock_get_agent_info.assert_called_once_with(789, explicit_tenant_id, 0, "user_id")
     assert "Agent search info error" in response.json()["detail"]
 
 
@@ -295,7 +327,7 @@ def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 2)
+    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 2, "user_id")
 
 
 # get_agent_by_name_api Tests
@@ -317,6 +349,8 @@ def test_get_agent_by_name_api_success(mocker, mock_auth_header):
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     mock_get_agent_by_name.assert_called_once_with("TestAgent", "auth_tenant_id")
+    assert response.json()["agent_id"] == 123
+    assert response.json()["version_no"] == 1
 
 
 def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header):
