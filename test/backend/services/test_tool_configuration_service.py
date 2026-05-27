@@ -4296,35 +4296,66 @@ class TestCreateMcpTransport:
 
     def test_create_mcp_transport_with_custom_headers(self):
         """Test creating transport with custom headers."""
+        from unittest.mock import MagicMock, patch
         from backend.services.tool_configuration_service import _create_mcp_transport
-        custom_headers = {"X-Custom-Header": "custom_value", "X-Another-Header": "another_value"}
-        transport = _create_mcp_transport("http://server/sse", "auth_token", custom_headers)
 
-        from fastmcp.client.transports import SSETransport
-        assert isinstance(transport, SSETransport)
-        assert transport.headers.get("Authorization") == "auth_token"
-        assert transport.headers.get("X-Custom-Header") == "custom_value"
-        assert transport.headers.get("X-Another-Header") == "another_value"
+        mock_sse = MagicMock()
+        mock_sse_instance = MagicMock()
+        mock_sse_instance.headers = {
+            "Authorization": "auth_token",
+            "X-Custom-Header": "custom_value",
+            "X-Another-Header": "another_value",
+        }
+        mock_sse.return_value = mock_sse_instance
+
+        with patch("backend.services.tool_configuration_service.SSETransport", mock_sse):
+            custom_headers = {"X-Custom-Header": "custom_value", "X-Another-Header": "another_value"}
+            transport = _create_mcp_transport("http://server/sse", "auth_token", custom_headers)
+
+            mock_sse.assert_called_once()
+            call_kwargs = mock_sse.call_args.kwargs
+            assert call_kwargs["headers"]["Authorization"] == "auth_token"
+            assert call_kwargs["headers"]["X-Custom-Header"] == "custom_value"
+            assert call_kwargs["headers"]["X-Another-Header"] == "another_value"
 
     def test_create_mcp_transport_with_auth_and_custom_headers(self):
         """Test creating transport with both auth token and custom headers."""
+        from unittest.mock import MagicMock, patch
         from backend.services.tool_configuration_service import _create_mcp_transport
-        custom_headers = {"X-API-Key": "api_key_123"}
-        transport = _create_mcp_transport("http://server/mcp", "Bearer token", custom_headers)
 
-        from fastmcp.client.transports import StreamableHttpTransport
-        assert isinstance(transport, StreamableHttpTransport)
-        assert transport.headers.get("Authorization") == "Bearer token"
-        assert transport.headers.get("X-API-Key") == "api_key_123"
+        mock_transport = MagicMock()
+        mock_transport_instance = MagicMock()
+        mock_transport_instance.headers = {
+            "Authorization": "Bearer token",
+            "X-API-Key": "api_key_123",
+        }
+        mock_transport.return_value = mock_transport_instance
+
+        with patch("backend.services.tool_configuration_service.StreamableHttpTransport", mock_transport):
+            custom_headers = {"X-API-Key": "api_key_123"}
+            transport = _create_mcp_transport("http://server/mcp", "Bearer token", custom_headers)
+
+            mock_transport.assert_called_once()
+            call_kwargs = mock_transport.call_args.kwargs
+            assert call_kwargs["headers"]["Authorization"] == "Bearer token"
+            assert call_kwargs["headers"]["X-API-Key"] == "api_key_123"
 
     def test_create_mcp_transport_empty_custom_headers(self):
         """Test creating transport with empty custom headers dict."""
+        from unittest.mock import MagicMock, patch
         from backend.services.tool_configuration_service import _create_mcp_transport
-        transport = _create_mcp_transport("http://server/sse", "token", {})
 
-        from fastmcp.client.transports import SSETransport
-        assert isinstance(transport, SSETransport)
-        assert transport.headers.get("Authorization") == "token"
+        mock_sse = MagicMock()
+        mock_sse_instance = MagicMock()
+        mock_sse_instance.headers = {"Authorization": "token"}
+        mock_sse.return_value = mock_sse_instance
+
+        with patch("backend.services.tool_configuration_service.SSETransport", mock_sse):
+            transport = _create_mcp_transport("http://server/sse", "token", {})
+
+            mock_sse.assert_called_once()
+            call_kwargs = mock_sse.call_args.kwargs
+            assert call_kwargs["headers"]["Authorization"] == "token"
 
 
 class TestValidateMcpToolNexent:

@@ -118,7 +118,9 @@ export default function McpServiceDetailModal({
       try {
         parsedCustomHeaders = JSON.parse(values.customHeaders.trim());
       } catch {
-        modal.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        modal.error({
+          content: t("mcpConfig.message.invalidCustomHeadersJson"),
+        });
         return;
       }
     }
