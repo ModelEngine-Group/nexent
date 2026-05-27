@@ -23,7 +23,7 @@ Before backend work, start core services (PostgreSQL, Redis, Elasticsearch, MinI
 ```bash
 # Run from the docker directory at the project root
 cd docker
-./deploy.sh --mode infrastructure
+./deploy.sh --components infrastructure --port-policy development
 ```
 
 :::: info Important Notes
@@ -139,4 +139,3 @@ This adds:
 - Testing framework (pytest)
 - Data processing dependencies (unstructured)
 - Other developer utilities
-

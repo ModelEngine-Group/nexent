@@ -95,16 +95,6 @@ create_default_super_admin_user() {
       echo "   🔏 Password: ${password}"
     fi
 
-    # Extract access_token from RESPONSE JSON for skill installation
-    local access_token
-    access_token=$(echo "$RESPONSE" | grep -o '"access_token":"[^"]*"' | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
-    if [ -n "$access_token" ]; then
-      # Save access_token to a temp file for skill installation
-      local token_file="${SCRIPT_DIR}/.access_token"
-      echo "$access_token" > "$token_file"
-      echo "   💡 Access token saved for skill installation"
-    fi
-
     # Extract user.id from RESPONSE JSON
     local user_id
     # Try using jq first (if available in the container or on host)

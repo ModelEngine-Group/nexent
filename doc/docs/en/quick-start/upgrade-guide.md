@@ -38,11 +38,11 @@ Navigate to the docker directory of the updated code and run the upgrade script:
 bash upgrade.sh
 ```
 
-If deploy.options is missing, the script will prompt you to manually enter configuration details from the previous deployment, such as the current version and data directory. Enter the information you recorded earlier.
+If deploy.options is missing, the script will prompt you to select deployment settings again, such as components, port policy, and image source. Choose the same options you used for the previous deployment.
 
 >💡 Tip
-> The default scenario is quick deployment, which uses .env.example.
-> If you need to configure voice models (STT/TTS), please add the relevant variables to .env.example in advance. We will provide a front-end configuration interface as soon as possible.
+> If `docker/.env` is missing, the deploy script automatically copies it from `.env.example`.
+> If you need to configure voice models (STT/TTS), add the relevant variables to `docker/.env`. We will provide a front-end configuration interface as soon as possible.
 
 
 ## 🌐 Step 3: Verify the deployment

@@ -1,5 +1,5 @@
 # Nexent Common Chart - Shared resources configuration
-# This chart provides shared resources (ConfigMap, Secret, RBAC, Namespace, init.sql)
+# This chart provides shared resources (ConfigMap, Secret, RBAC, init.sql)
 # that are required by other Nexent charts.
 
 # Images used by common templates
