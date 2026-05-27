@@ -178,6 +178,11 @@ Notes:
 
 ## 🚀 Deployment Recommendations
 
-After building is complete, you can use the docker/deploy.sh script for deployment, or directly start the services using docker-compose.
+After building is complete, you can deploy local images from the `docker` directory:
 
-> When starting a test of locally built images, you need to change APP_VERSION="$(get_app_version)" to APP_VERSION="latest" in docker/deploy.sh, because the deployment will default to using the image corresponding to the current version.
+```bash
+cd docker
+bash deploy.sh --image-source local-latest
+```
+
+> `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `docker/deploy.sh`.

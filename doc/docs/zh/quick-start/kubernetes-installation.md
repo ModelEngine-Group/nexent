@@ -35,21 +35,29 @@ cd nexent/k8s/helm
 运行部署脚本：
 
 ```bash
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
-执行此命令后，系统会提示您选择配置选项：
+执行此命令后，系统会通过 Bash TUI 选择配置选项。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
 
-**版本选择:**
-- **Speed version（轻量快速部署，默认）**: 快速启动核心功能，适合个人用户和小团队使用
-- **Full version（完整功能版）**: 提供企业级租户管理和资源隔离等高级功能，包含 Supabase 认证服务
+**组件组合:**
+- **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
+- **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
+- **data-process（可选）**: 数据处理服务
+- **supabase（可选）**: 启用用户、租户和认证能力
+- **terminal（可选）**: 启用 OpenSSH 终端工具
+- **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
-**镜像源选择:**
-- **中国大陆**: 使用优化的区域镜像源，加快镜像拉取速度
-- **通用**: 使用标准 Docker Hub 镜像源
+**端口策略:**
+- **development（默认）**: 使用 NodePort 暴露 Web 和调试/内部服务
+- **production**: 内部服务使用 ClusterIP，仅暴露生产入口
 
-**可选组件:**
-- **终端工具**: 启用 openssh-server 供 AI 智能体执行 shell 命令
+**镜像来源:**
+- **general（默认）**: 使用标准公开镜像仓库
+- **mainland**: 使用中国大陆镜像源
+- **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
+
+部署成功后，非敏感部署选项会保存到 `k8s/helm/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 ### ⚠️ 重要提示
 
@@ -72,7 +80,7 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
 # Step 3: 重新部署并记录 su 账号密码
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
 ### 4. 访问您的安装
@@ -113,7 +121,7 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 | nexent-redis | 缓存层 |
 | nexent-minio | S3 兼容对象存储 |
 
-**Supabase 服务（完整版独有）:**
+**Supabase 服务（选择 `supabase` 组件时）:**
 | 服务 | 描述 |
 |---------|-------------|
 | nexent-supabase-kong | API 网关 |
@@ -124,13 +132,14 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 | 服务 | 描述 |
 |---------|-------------|
 | nexent-openssh-server | AI 智能体 SSH 终端 |
+| nexent-monitoring | 可选观测组件 |
 
 ## 🔌 端口映射
 
 | 服务 | 内部端口 | NodePort | 描述 |
 |---------|---------------|----------|-------------|
 | Web 界面 | 3000 | 30000 | 主应用程序访问 |
-| Northbound API | 5010 | 30013 | 北向 API 服务 |
+| Northbound API | 5013 | 30013 | 北向 API 服务 |
 | SSH 服务器 | 22 | 30022 | 终端工具访问 |
 
 内部服务通信使用 Kubernetes 内部 DNS（例如 `http://nexent-config:5010`）。
@@ -141,34 +150,49 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 
 | 数据类型 | PersistentVolume | 默认宿主机路径 |
 |-----------|------------------|-------------------|
-| Elasticsearch | nexent-elasticsearch-pv | `{dataDir}/elasticsearch` |
-| PostgreSQL | nexent-postgresql-pv | `{dataDir}/postgresql` |
-| Redis | nexent-redis-pv | `{dataDir}/redis` |
-| MinIO | nexent-minio-pv | `{dataDir}/minio` |
-| Supabase DB（完整版）| nexent-supabase-db-pv | `{dataDir}/supabase-db` |
+| Elasticsearch | nexent-elasticsearch-pv | `/var/lib/nexent-data/nexent-elasticsearch` |
+| PostgreSQL | nexent-postgresql-pv | `/var/lib/nexent-data/nexent-postgresql` |
+| Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
+| MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
+| Supabase DB（选择 supabase 时）| nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 
-默认 `dataDir` 为 `/var/lib/nexent-data`（可在 `values.yaml` 中配置）。
+卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `./uninstall.sh --delete-local-data true` 删除 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
 
 ## 🔧 部署命令
 
 ```bash
 # 交互式部署
-./deploy-helm.sh apply
+./deploy.sh
+
+# 非交互式部署默认组件
+./deploy.sh --components infrastructure,application --port-policy development --image-source general
+
+# 启用用户/租户能力、数据处理和终端工具
+./deploy.sh --components infrastructure,application,supabase,data-process,terminal
 
 # 使用中国大陆镜像源部署
-./deploy-helm.sh apply --is-mainland Y
+./deploy.sh --image-source mainland
 
-# 部署完整版本（包含 Supabase）
-./deploy-helm.sh apply --deployment-version full
+# 使用本地 latest 镜像
+./deploy.sh --image-source local-latest
 
 # 仅清理 Helm 状态（修复卡住的发布）
-./deploy-helm.sh clean
+./uninstall.sh clean
 
-# 卸载但保留数据
-./deploy-helm.sh delete
+# 卸载，默认保留本地数据；交互确认是否删除 namespace 和本地数据
+./uninstall.sh
 
-# 完全卸载包括所有数据
-./deploy-helm.sh delete-all
+# 卸载并删除 namespace
+./uninstall.sh --delete-namespace true
+
+# 卸载并删除本地 hostPath 数据
+./uninstall.sh --delete-local-data true
+
+# 完全卸载，包括 namespace 和本地 hostPath 数据
+./uninstall.sh delete-all
+
+# 完全卸载但保留本地 hostPath 数据
+./uninstall.sh delete-all --keep-local-data
 ```
 
 ## 🔍 故障排查

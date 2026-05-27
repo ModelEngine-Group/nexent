@@ -22,9 +22,10 @@ cd k8s/helm
 | Command | Description |
 |---------|-------------|
 | `./deploy.sh` | Deploy all K8s resources |
-| `./uninstall.sh` | Uninstall resources and preserve data by default |
+| `./uninstall.sh` | Uninstall the Helm release; prompts before deleting namespace or local data |
 | `./uninstall.sh clean` | Clean Helm state only (fixes stuck releases) |
-| `./uninstall.sh delete-all` | Delete ALL resources including data |
+| `./uninstall.sh delete` | Uninstall the Helm release and delete the namespace |
+| `./uninstall.sh delete-all` | Uninstall the Helm release, delete the namespace, and delete local hostPath data |
 
 ### Usage Examples
 
@@ -50,11 +51,23 @@ cd k8s/helm
 # Uninstall but preserve data
 ./uninstall.sh
 
-# Complete uninstall including all data
+# Uninstall and keep local hostPath data without prompting
+./uninstall.sh --keep-local-data --keep-namespace
+
+# Delete namespace after uninstall
+./uninstall.sh --delete-namespace true
+
+# Delete local hostPath data after uninstall
+./uninstall.sh --delete-local-data true
+
+# Complete uninstall including namespace and local hostPath data
 ./uninstall.sh delete-all
+
+# Complete uninstall but preserve local hostPath data
+./uninstall.sh delete-all --keep-local-data
 ```
 
-## Command Line Options
+## Deploy Options
 
 | Option | Description | Values |
 |--------|-------------|--------|
@@ -70,9 +83,26 @@ cd k8s/helm
 | `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
 | `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
 
+## Uninstall Options
+
+| Option | Description | Values |
+|--------|-------------|--------|
+| `--delete-data` | Compatibility option for Helm-managed PV/PVC cleanup behavior | `true` or `false` |
+| `--delete-volumes` | Alias for `--delete-data` | `true` or `false` |
+| `--remove-volumes` | Alias for `--delete-data true` | Flag |
+| `--keep-volumes` | Alias for `--delete-data false` | Flag |
+| `--delete-local-data` | Delete local hostPath data under `/var/lib/nexent-data` after Helm uninstall | `true` or `false` |
+| `--remove-local-data` | Alias for `--delete-local-data true` | Flag |
+| `--keep-local-data` | Alias for `--delete-local-data false` | Flag |
+| `--delete-namespace` | Delete the Kubernetes namespace after Helm uninstall | `true` or `false` |
+| `--remove-namespace` | Alias for `--delete-namespace true` | Flag |
+| `--keep-namespace` | Alias for `--delete-namespace false` | Flag |
+| `--namespace` | Kubernetes namespace | Namespace name; default `nexent` |
+| `--release` | Helm release name | Release name; default `nexent` |
+
 ## Deployment Components
 
-The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. `infrastructure` and `application` are selected by default and are required; CLI or config input that omits either one will have it added automatically.
+The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` is selected by default but can be disabled.
 
 | Component | Services |
 |-----------|----------|
@@ -134,19 +164,22 @@ After successful deployment:
 
 ## Data Persistence
 
-### Preserved Data (with `delete`)
+### Preserved Data
 
-The following PersistentVolumes preserve data when using `delete`:
+By default, `./uninstall.sh` removes the Helm release and preserves local hostPath data. It prompts before deleting the namespace or hostPath contents. In non-interactive environments, both are preserved unless explicitly requested.
+
+The following local hostPath-backed PersistentVolumes can preserve data:
 
 - `nexent-elasticsearch-pv` - Search index data
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
 - `nexent-minio-pv` - Object storage data
 - `nexent-supabase-db-pv` - Supabase database (full version only)
+- Monitoring PVs such as Phoenix, Grafana, Tempo, and Langfuse data when monitoring is enabled
 
-### Deleted Data (with `delete-all`)
+### Deleted Data
 
-Using `delete-all` removes all PVCs, PVs, and the namespace, permanently deleting all data.
+Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent hostPath data under `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local hostPath data by default; add `--keep-local-data` to preserve local volume contents.
 
 ## Services
 

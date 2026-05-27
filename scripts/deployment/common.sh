@@ -241,8 +241,8 @@ deployment_apply_legacy_inputs() {
       [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="production"
       ;;
     infrastructure)
-      deployment_warn "DEPLOYMENT_MODE=infrastructure is deprecated; base components infrastructure,application are always enabled."
-      [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && DEPLOYMENT_COMPONENTS="$DEPLOYMENT_COMPONENTS_DEFAULT"
+      deployment_warn "DEPLOYMENT_MODE=infrastructure is deprecated; use --components infrastructure."
+      [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && DEPLOYMENT_COMPONENTS="infrastructure"
       [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="development"
       ;;
   esac
@@ -291,10 +291,6 @@ deployment_ensure_required_components() {
   if ! deployment_csv_contains "$source_components" "infrastructure"; then
     deployment_warn "Component infrastructure is required and has been added."
     source_components="$(deployment_join_csv "$source_components" "infrastructure")"
-  fi
-  if ! deployment_csv_contains "$source_components" "application"; then
-    deployment_warn "Component application is required and has been added."
-    source_components="$(deployment_join_csv "$source_components" "application")"
   fi
 
   for component in $deployment_component_list; do
@@ -390,7 +386,7 @@ deployment_tui_multiselect_components() {
   local components=(infrastructure application data-process supabase terminal monitoring)
   local details=(
     "required: elasticsearch, postgresql, redis, minio"
-    "required: config, runtime, mcp, northbound, web"
+    "default: config, runtime, mcp, northbound, web"
     "nexent-data-process"
     "user and tenant services"
     "OpenSSH terminal tool"
@@ -453,7 +449,7 @@ deployment_tui_multiselect_components() {
         [ "$cursor" -ge "${#components[@]}" ] && cursor=0
         ;;
       " ")
-        if [ "$cursor" -lt 2 ]; then
+        if [ "$cursor" -eq 0 ]; then
           selected[$cursor]=1
         elif [ "${selected[$cursor]}" = "1" ]; then
           selected[$cursor]=0

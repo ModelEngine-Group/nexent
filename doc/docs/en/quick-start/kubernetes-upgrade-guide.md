@@ -15,7 +15,7 @@ Follow these steps to upgrade Nexent on Kubernetes safely:
 Before updating, record the current deployment version and data directory information.
 
 - Current Deployment Version Location: `APP_VERSION` in `backend/consts/const.py`
-- Data Directory Location: `global.dataDir` in `k8s/helm/nexent/values.yaml`
+- Local volume directories: each Helm sub-chart's `storage.hostPath`, defaulting to `/var/lib/nexent-data/nexent-*`
 
 **Code downloaded via git**
 
@@ -28,7 +28,7 @@ git pull
 **Code downloaded via ZIP package or other means**
 
 1. Re-download the latest code from GitHub and extract it.
-2. Copy the `.deploy.options` file from the `k8s/helm` directory of your previous deployment to the new code directory. (If the file doesn't exist, you can ignore this step).
+2. Copy the `deploy.options` file from the `k8s/helm` directory of your previous deployment to the new code directory. (If the file doesn't exist, you can ignore this step).
 
 ## 🔄 Step 2: Execute the Upgrade
 
@@ -36,10 +36,10 @@ Navigate to the k8s/helm directory of the updated code and run the deployment sc
 
 ```bash
 cd k8s/helm
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
-The script will detect your previous deployment settings (version, image source, etc.) from the `.deploy.options` file. If the file is missing, you will be prompted to enter configuration details.
+The script will detect your saved deployment settings (components, port policy, image source, etc.) from `deploy.options`. If the file is missing, you will be prompted to enter configuration details.
 
 > 💡 Tip
 > If you need to configure voice models (STT/TTS), please edit the corresponding values in `values.yaml` or pass them via command line.
@@ -137,7 +137,7 @@ kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0
    kubectl exec nexent/$POSTGRES_POD -n nexent -- pg_dump -U root nexent > backup_$(date +%F).sql
    ```
 
-> - For Supabase database (full version only), use `nexent-supabase-db` pod instead:
+> - For the Supabase database (when `supabase` is selected), use the `nexent-supabase-db` pod instead:
 
    ```bash
    SUPABASE_POD=$(kubectl get pods -n nexent -l app=nexent-supabase-db -o jsonpath='{.items[0].metadata.name}')
