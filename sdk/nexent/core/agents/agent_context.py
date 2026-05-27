@@ -558,7 +558,7 @@ class ContextManager:
                         pairs_to_compress, model
                     )
                     if summary_text:
-                        if "Truncated" in summary_text:
+                        if "[CONTEXT COMPACTION" in summary_text:
                             prev_summary_step = SummaryTaskStep(task=summary_text, prefix="Context fallback, Truncated raw history:")
                         else:
                             prev_summary_step = SummaryTaskStep(task=summary_text)
@@ -600,7 +600,7 @@ class ContextManager:
                             curr_task, actions_to_compress, model
                         )
                         if curr_summary_text:
-                            if "Truncated" in curr_summary_text:
+                            if "[CONTEXT COMPACTION" in curr_summary_text:
                                 curr_summary_step = SummaryTaskStep(task=curr_summary_text, prefix="Truncated recent action steps:")
                             else:
                                 curr_summary_step = SummaryTaskStep(task=curr_summary_text)
@@ -760,10 +760,19 @@ class ContextManager:
         logger.warning("previous full/truncated history summary generation failed, triggering L3 fallback truncation")
         
         reduced_pairs = self._trim_pairs_to_budget(pairs, self.config.max_summary_reduce_tokens, False)
-        reduced_text = "Truncated: " + self._render_steps_with_truncation(
+        reduced_text = self._render_steps_with_truncation(
             reduced_pairs, fmt="pair", max_tokens=self.config.max_summary_reduce_tokens
         )
-        return reduced_text, False
+        first_task = pairs[0][0].task[:200] if pairs and pairs[0][0].task else ""
+        fallback_text = (
+            "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier steps were removed to free context space. "
+            "The removed content cannot be summarized. Continue based on the steps below.\n\n"
+            f"Original task: {first_task}\n\n"
+            f"Steps removed: {len(pairs) - len(reduced_pairs)} of {len(pairs)}\n\n"
+            "Remaining compressed history:\n"
+            + reduced_text
+        )
+        return fallback_text, False
 
 
     # ============================================================
@@ -850,8 +859,14 @@ class ContextManager:
             actions_text = self._render_steps_with_truncation(
                 reduced_actions, fmt="action", max_tokens=self.config.max_summary_reduce_tokens
             )
-            reduced_text = "Truncated action steps: " + actions_text
-            return reduced_text
+            fallback_text = (
+                "[CONTEXT COMPACTION — REFERENCE ONLY] Some recent action steps were removed to free context space. "
+                "Continue based on the remaining steps below.\n\n"
+                f"Steps removed: {len(actions_to_compress) - len(reduced_actions)} of {len(actions_to_compress)}\n\n"
+                "Remaining steps:\n"
+                + actions_text
+            )
+            return fallback_text
 
     def _actions_to_text(self, actions: List[ActionStep]) -> str:
         parts = []
@@ -983,13 +998,7 @@ class ContextManager:
     # ============================================================
 
     def _is_context_length_error(self, err: Exception) -> bool:
-        msg = str(err).lower()
-        return any(k in msg for k in (
-            "context_length", "context length", "maximum context", "maximum context length",
-            "prompt is too long", "reduce the length", "too many tokens",
-            "token limit", "exceeds the maximum", "input is too long",
-            "input length", "exceeds context", "context window",
-        ))
+        return _is_context_length_error(err)
 
     def _generate_summary(self, text: str, model, call_type: str = "summary",
                           prompt_type: str = "initial") -> Optional[str]:
@@ -1004,10 +1013,27 @@ class ContextManager:
                 try:
                     return self._do_generate_summary(shrunk, model, call_type + "_retry", prompt_type)
                 except Exception as e2:
+                    self._record_failed_compression(call_type + "_retry_failed", str(e2))
                     logger.error(f"Retry still failed: {e2}")
                     return None
+            self._record_failed_compression(call_type + "_failed", str(e))
             logger.error(f"Summary generation exception: {e}")
             return None
+
+    def _record_failed_compression(self, call_type: str, error_msg: str):
+        """Record a failed compression attempt so stats reflect actual compression triggers."""
+
+        record = CompressionCallRecord(
+            call_type=call_type,
+            input_tokens=0,
+            output_tokens=0,
+            input_chars=0,
+            output_chars=0,
+            cache_hit=False,
+            details={"error": error_msg},
+        )
+        self.compression_calls_log.append(record)
+        self._step_local_log.append(record)
 
     def _do_generate_summary(self, text: str, model, call_type: str = "summary",
                              prompt_type: str = "initial") -> Optional[str]:
@@ -1180,6 +1206,7 @@ class ContextManager:
             real_calls = [r for r in self.compression_calls_log if not r.cache_hit]
             return {
                 "total_calls": len(real_calls),
+                "total_attempts": len(self.compression_calls_log),
                 "total_input_tokens": sum(r.input_tokens for r in real_calls),
                 "total_output_tokens": sum(r.output_tokens for r in real_calls),
                 "total_cache_hits": sum(1 for r in self.compression_calls_log if r.cache_hit),
@@ -1188,6 +1215,43 @@ class ContextManager:
     # ============================================================
     #  Benchmark export APIs
     # ============================================================
+
+    def build_compressed_snapshot(
+        self, model, memory: AgentMemory, current_run_start_idx: int,
+    ) -> Tuple[List[ChatMessage], dict]:
+        """Build a frozen compressed message snapshot for probe evaluation.
+
+        Returns (compressed_messages, metadata) without modifying internal
+        cache state. This enables the Probe Evaluation pattern where each
+        probe runs independently against a frozen compressed snapshot.
+
+        metadata contains: token counts, which caches were used, and summary export.
+        """
+        saved_prev_cache = self._previous_summary_cache
+        saved_curr_cache = self._current_summary_cache
+        saved_step_log = list(self._step_local_log)
+        saved_calls_log = list(self.compression_calls_log)
+
+        try:
+            original_messages = memory.system_prompt.to_messages() if memory.system_prompt else []
+            for step in memory.steps:
+                original_messages.extend(step.to_messages())
+
+            compressed_messages = self.compress_if_needed(
+                model, memory, original_messages, current_run_start_idx
+            )
+
+            metadata = {
+                "token_counts": self.get_token_counts(),
+                "summary": self.export_summary(),
+                "compression_stats": self.get_step_compression_stats(),
+            }
+            return compressed_messages, metadata
+        finally:
+            self._previous_summary_cache = saved_prev_cache
+            self._current_summary_cache = saved_curr_cache
+            self._step_local_log = saved_step_log
+            self.compression_calls_log = saved_calls_log
 
     def get_token_counts(self) -> dict:
         """Return token counts from the most recent compression pass.
