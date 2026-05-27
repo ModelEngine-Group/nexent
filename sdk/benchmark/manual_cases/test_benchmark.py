@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import paths  # noqa: F401 — side-effect: adds sdk/, backend/ to sys.path
 
 from agent_runner import (
-    build_agent_run_info,
+    build_agent_run_info_with_custom_prompt,
     run_agent_with_tracking,
     parse_conversation_to_history,
     AgentHistory,
@@ -22,6 +22,143 @@ from nexent.core.utils.token_estimation import estimate_tokens_text
 
 from eval_utils import eval_text, average_score
 
+# Lean benchmark system prompt — generic, not task-specific.
+# Strips the verbose platform scaffolding (File URL Guide, Reference Marks,
+# safety principles, etc.) to minimize token overhead while retaining the
+# core execution loop instructions the agent needs to function.
+BENCHMARK_SYSTEM_PROMPT = """You are a helpful assistant. Answer the user's questions based on the conversation history and your knowledge.
+
+- Be precise and concise.
+- When the answer depends on information from earlier conversation, refer to it accurately.
+- Do not fabricate information you do not know.
+- Use final_answer to submit your response.
+
+Now start!"""
+
+
+# --- Custom summary schema and prompts for knowledge-discussion benchmarks ---
+# These override the default 10-field Hermes schema from summary_config.py
+# with a deduplicated 6-field schema (~620 word budget) that merges
+# completed_work + resolved_questions into "progress" and restricts
+# key_facts to values NOT already stated in progress, eliminating
+# the 3-field redundancy that caused output bloat in incremental updates.
+#
+# KEY DESIGN PRINCIPLE for incremental compression: the output must be
+# approximately the SAME size as the initial summary (~620 words). The
+# incremental prompt treats old+new as a unified corpus and REWRITES the
+# entire summary from scratch, rather than appending to the old one.
+# This prevents output-token linear growth that would itself exceed
+# token_threshold and defeat the purpose of compression.
+
+BENCHMARK_SUMMARY_SYSTEM_PROMPT = (
+    "You are a summarization agent creating a compact working-memory checkpoint. "
+    "Treat the conversation turns below as source material, not as a transcript to preserve. "
+    "Your job is to produce a fixed-size JSON summary that preserves only the information "
+    "needed to continue the conversation correctly later.\n\n"
+
+    "Output rules:\n"
+    "1. Produce only strict JSON. Do not add greeting, preamble, markdown, or explanation.\n"
+    "2. Write in the same language as the user's most recent message. Do not translate unless needed.\n"
+    "3. Never include API keys, tokens, passwords, secrets, credentials, or connection strings. "
+    "Replace any such values with [REDACTED].\n\n"
+
+    "Compression goal:\n"
+    "The summary is working memory, not a historical log. "
+    "Do not list every question, every answer, or every conversation turn. "
+    "Group information by theme and keep only facts that are likely to matter for future continuation.\n\n"
+
+    "Field constraints:\n"
+    "1. 'active_task' must describe only the current unfulfilled user request; if none, write 'None'.\n"
+    "2. 'goal' must describe the current overall objective in <=25 words.\n"
+    "3. 'state' must contain at most 6 numbered items. Never create item 7 or higher. "
+    "Each item must be <=45 words. Merge related topics into one item. "
+    "Do not organize by conversation order; organize by semantic importance.\n"
+    "4. 'decisions' must contain at most 5 short confirmed conclusions or choices. "
+    "Do not repeat facts already fully stated in 'state'.\n"
+    "5. 'open_items' must contain only unresolved questions or pending user requests. "
+    "If none, write 'None'.\n"
+    "6. 'verbatim_facts' may contain at most 12 raw values, formulas, thresholds, exact model names, "
+    "or identifiers that must be copied exactly later. "
+    "Before output, remove any item whose exact value already appears in 'state' or 'decisions'. "
+    "If no extra raw facts remain, write 'None'.\n\n"
+
+    "Information priority:\n"
+    "Critical current task and constraints > final conclusions > decisions > exact values needed later > "
+    "background context. Drop vague descriptions, repeated facts, superseded intermediate reasoning, "
+    "and completed Q&A that no longer affects future work.\n\n"
+
+    "Budget:\n"
+    "The total output must not exceed 620 words. Prefer shorter output. "
+    "If the content is too large, compress in this order: "
+    "(1) merge related state items; "
+    "(2) remove completed historical details; "
+    "(3) keep only the most diagnostic numbers; "
+    "(4) move only non-duplicated raw values to 'verbatim_facts'; "
+    "(5) write 'None' for fields with no current utility.\n\n"
+
+    "Return strict JSON only."
+)
+
+
+BENCHMARK_INCREMENTAL_SUMMARY_SYSTEM_PROMPT = (
+    "You are a summarization agent rewriting a compact working-memory checkpoint. "
+    "You receive a Previous Summary and New Conversations. Produce one fresh JSON summary "
+    "that preserves only the information needed to continue the conversation correctly. "
+    "Do not preserve discussion history for its own sake. The previous summary is source material, "
+    "not text to copy.\n\n"
+
+    "Hard constraints:\n"
+    "1. The output must be no longer than the previous summary and must not exceed 620 words.\n"
+    "2. The 'state' field must contain at most 6 numbered items. Never create item 7 or higher.\n"
+    "3. When new information is added, older lower-utility information MUST be merged, generalized, or deleted.\n"
+    "4. Do not append to the previous summary. Rewrite by theme, not by conversation order.\n"
+    "5. Completed Q&A should become conclusions, not separate historical entries.\n"
+    "6. Preserve exact numbers only when they are needed for future correctness. If multiple numbers support the same conclusion, keep only the most diagnostic ones.\n"
+    "7. 'verbatim_facts' may contain at most 12 raw values/formulas/names. Remove any item already present in 'state' or 'decisions'. If none remain, write 'None'.\n"
+    "8. Update active_task, state, and open_items to reflect the current state.\n"
+    "9. Write in the same language as the user's most recent message.\n"
+    "10. Never include API keys, tokens, passwords, credentials, or connection strings; replace them with [REDACTED].\n\n"
+
+    "Output strict JSON only. No markdown."
+)
+
+BENCHMARK_SUMMARY_SCHEMA = {
+    "active_task": (
+        "用户当前尚未完成的最新请求；如果没有，写 'None'。"
+        "必须是当前任务，不是历史任务。<=25 words"
+    ),
+
+    "goal": (
+        "对话的总体目标或当前工作方向。"
+        "只保留后续继续对话所需的目标。<=25 words"
+    ),
+
+    "state": (
+        "当前压缩后的工作记忆，不是历史日志。"
+        "最多 6 条编号条目；每条 <=45 words。"
+        "按主题合并信息，不按对话顺序罗列。"
+        "包括已经确定的结论、关键设计、关键结果和必要上下文。"
+    ),
+
+    "decisions": (
+        "已经确认、后续可能需要引用的结论或选择。"
+        "最多 5 条；每条 <=25 words。"
+        "不得重复 state 中已经完整表达的信息。"
+    ),
+
+    "open_items": (
+        "尚未解决的问题、待办事项或用户明确要求继续处理的内容。"
+        "如果没有，写 'None'。<=30 words"
+    ),
+
+    "verbatim_facts": (
+        "必须逐字保留的数字、公式、模型名、阈值或专有名词。"
+        "最多 12 项，用分号分隔。"
+        "不得包含已经出现在 state 或 decisions 中的事实。"
+        "如果没有额外需要保留的事实，写 'None'。"
+    ),
+}
+
 
 def history_to_text(history: list[AgentHistory]) -> str:
     return "\n".join([f"{h.role}: {h.content}" for h in history])
@@ -31,7 +168,8 @@ async def run_multi_turn_for_benchmark(
     queries: list[str],
     base_history: list[AgentHistory],
     cm_config: ContextManagerConfig,
-    max_steps: int = 5,
+    max_steps: int = 20,
+    system_prompt: str = BENCHMARK_SYSTEM_PROMPT,
 ):
     conversation_history = list(base_history)
     results = []
@@ -46,8 +184,9 @@ async def run_multi_turn_for_benchmark(
     step_input_tokens = []
 
     for query in queries:
-        agent_run_info = build_agent_run_info(
+        agent_run_info = build_agent_run_info_with_custom_prompt(
             query,
+            system_prompt,
             conversation_history,
             max_steps=max_steps,
             context_manager_config=cm_config,
@@ -148,7 +287,8 @@ def build_precompressed_history(
 async def run_probe_questions(
     probes: list[dict],
     precompressed_history: list[AgentHistory],
-    max_steps: int = 5,
+    max_steps: int = 20,
+    system_prompt: str = BENCHMARK_SYSTEM_PROMPT,
 ):
     """Run probe questions against a pre-compressed history snapshot.
 
@@ -173,8 +313,9 @@ async def run_probe_questions(
         # Each probe gets its own deep copy — fully independent
         probe_history = copy.deepcopy(precompressed_history)
 
-        agent_run_info = build_agent_run_info(
+        agent_run_info = build_agent_run_info_with_custom_prompt(
             question,
+            system_prompt,
             probe_history,
             max_steps=max_steps,
             context_manager_config=no_compression_config,
@@ -199,7 +340,8 @@ async def run_probe_questions(
 async def run_baseline_probes(
     probes: list[dict],
     frozen_history: list[AgentHistory],
-    max_steps: int = 5,
+    max_steps: int = 20,
+    system_prompt: str = BENCHMARK_SYSTEM_PROMPT,
 ):
     """Run probe questions against full uncompressed history (baseline).
 
@@ -213,8 +355,9 @@ async def run_baseline_probes(
         question = probe["question"]
         probe_history = copy.deepcopy(frozen_history)
 
-        agent_run_info = build_agent_run_info(
+        agent_run_info = build_agent_run_info_with_custom_prompt(
             question,
+            system_prompt,
             probe_history,
             max_steps=max_steps,
             context_manager_config=baseline_config,
@@ -288,19 +431,26 @@ def eval_task_outputs(case: dict, run_outputs: list):
     return eval_results
 
 
-def _resolve_compressed_config(case: dict) -> ContextManagerConfig:
+def _resolve_compressed_config(case: dict, use_custom_prompts: bool = False) -> ContextManagerConfig:
     """Build compressed config from case definition, with sensible defaults."""
     case_cfg = case.get("compressed_config", {})
-    return ContextManagerConfig(
+    kwargs = dict(
         enabled=True,
         token_threshold=case_cfg.get("token_threshold", 3600),
         keep_recent_pairs=case_cfg.get("keep_recent_pairs", 1),
         keep_recent_steps=case_cfg.get("keep_recent_steps", 4),
         max_observation_length=case_cfg.get("max_observation_length", 20000),
     )
+    if use_custom_prompts:
+        kwargs.update(
+            summary_json_schema=BENCHMARK_SUMMARY_SCHEMA,
+            summary_system_prompt=BENCHMARK_SUMMARY_SYSTEM_PROMPT,
+            incremental_summary_system_prompt=BENCHMARK_INCREMENTAL_SUMMARY_SYSTEM_PROMPT,
+        )
+    return ContextManagerConfig(**kwargs)
 
 
-async def run_one_case(case_dir: str):
+async def run_one_case(case_dir: str, use_custom_prompts: bool = False):
     """Load and run a single benchmark case from its directory.
 
     Each case directory contains:
@@ -331,7 +481,7 @@ async def run_one_case(case_dir: str):
     )
 
     # P5: Allow per-case config override
-    compressed_config = _resolve_compressed_config(case)
+    compressed_config = _resolve_compressed_config(case, use_custom_prompts=use_custom_prompts)
 
     print(f"\n===== CASE: {case['id']} =====")
 
@@ -349,7 +499,6 @@ async def run_one_case(case_dir: str):
 
     baseline_task_eval = eval_task_outputs(case, baseline["results"])
     compressed_task_eval = eval_task_outputs(case, compressed["results"])
-
     # P1: Baseline probe — agent sees full uncompressed history
     # Same frozen_history, but with compression disabled, so the agent sees
     # the complete unmodified context. This establishes the ceiling for
@@ -357,7 +506,7 @@ async def run_one_case(case_dir: str):
     baseline_probe_eval = await run_baseline_probes(
         probes=case["probes"],
         frozen_history=compressed["conversation_history"],
-        max_steps=5,
+        max_steps=20,
     )
 
     # P0: Compressed probe — agent sees pre-compressed context
@@ -432,7 +581,28 @@ async def run_one_case(case_dir: str):
         token_reduction = 1 - (
             compressed["final_tokens"] / max(baseline["final_tokens"], 1)
         )
-    baseline_failed = baseline_task_score == 0 
+    baseline_failed = baseline_task_score == 0
+
+    # Compute real main-LLM input token totals
+    baseline_real_input = sum(r.total_input_tokens for r in baseline["results"])
+    compressed_real_input = sum(r.total_input_tokens for r in compressed["results"])
+
+    # Compression cost: tokens spent on compression LLM calls
+    compression_cost = 0
+    if compressed.get("cm_stats"):
+        compression_cost = (
+            compressed["cm_stats"].get("total_input_tokens", 0)
+            + compressed["cm_stats"].get("total_output_tokens", 0)
+        )
+
+    # Net token reduction = gross savings - compression cost
+    gross_input_savings = baseline_real_input - compressed_real_input
+    net_input_savings = gross_input_savings - compression_cost
+    net_token_reduction = (
+        net_input_savings / max(baseline_real_input, 1)
+        if baseline_real_input > 0
+        else 0.0
+    )
 
     report = {
         "case_id": case["id"],
@@ -441,6 +611,7 @@ async def run_one_case(case_dir: str):
             "task_score": baseline_task_score,
             "probe_score": baseline_probe_score,
             "final_tokens": baseline["final_tokens"],
+            "real_input_tokens": baseline_real_input,
         },
         "compressed": {
             "task_score": compressed_task_score,
@@ -449,11 +620,14 @@ async def run_one_case(case_dir: str):
             "cm_stats": compressed["cm_stats"],
             "cm_token_counts": compressed["cm_token_counts"],
             "cm_summary": compressed["cm_summary"],
+            "real_input_tokens": compressed_real_input,
         },
         "metrics": {
             "task_success_retention": task_success_retention,
             "probe_retention": probe_retention,
             "token_reduction": token_reduction,
+            "net_token_reduction": net_token_reduction,
+            "compression_cost_tokens": compression_cost,
             "summary_score": summary_score,
         },
         "task_eval": compressed_task_eval,
@@ -468,7 +642,7 @@ async def run_one_case(case_dir: str):
     return report
 
 
-async def main(case_names: list[str] = None):
+async def main(case_names: list[str] = None, use_custom_prompts: bool = False):
     # Discover cases: use specified names if provided, otherwise find all cases under ./cases/*/case.json
     if case_names:
         case_dirs = [os.path.join("./cases", name) for name in case_names]
@@ -487,7 +661,7 @@ async def main(case_names: list[str] = None):
 
     reports = []
     for case_dir in case_dirs:
-        report = await run_one_case(case_dir)
+        report = await run_one_case(case_dir, use_custom_prompts=use_custom_prompts)
         reports.append(report)
 
         # Write per-case report
@@ -516,6 +690,12 @@ async def main(case_names: list[str] = None):
             "avg_token_reduction": sum(
                 r["metrics"]["token_reduction"] for r in valid_reports
             ) / max(len(valid_reports), 1),
+            "avg_net_token_reduction": sum(
+                r["metrics"]["net_token_reduction"] for r in valid_reports
+            ) / max(len(valid_reports), 1),
+            "avg_compression_cost_tokens": sum(
+                r["metrics"]["compression_cost_tokens"] for r in valid_reports
+            ) / max(len(valid_reports), 1),
             "per_case": {
                 r["case_id"]: r["metrics"] for r in reports
             },
@@ -535,5 +715,10 @@ if __name__ == "__main__":
         help="Specific case names to run (e.g. --cases example_infra algotithm_data)."
              "if omitted, run all cases under .cases/."
     )
+    parser.add_argument(
+        "--custom-prompts", action="store_true", default=False,
+        help="Use custom summary schema and prompts optimized for knowledge-discussion benchmarks "
+             "(leaner 7-field schema with 800-word cap and merge-condense incremental updates)."
+    )
     args = parser.parse_args()
-    asyncio.run(main(case_names = args.cases))
+    asyncio.run(main(case_names=args.cases, use_custom_prompts=args.custom_prompts))
