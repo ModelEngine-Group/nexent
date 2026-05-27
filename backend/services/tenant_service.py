@@ -23,7 +23,7 @@ from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by
 from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from database.invitation_db import query_invitations_by_tenant, remove_invitation
 from database.tool_db import delete_tools_by_agent_id
-from consts.const import TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID
+from consts.const import ASSET_OWNER_TENANT_ID, TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID
 from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
 
 logger = logging.getLogger(__name__)
@@ -133,8 +133,11 @@ def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary containing paginated tenant data and pagination info
     """
-    # Get all tenant IDs first
-    all_tenant_ids = get_all_tenant_ids()
+    # Exclude virtual ASSET_OWNER tenant from admin tenant listings
+    all_tenant_ids = [
+        tid for tid in get_all_tenant_ids()
+        if tid != ASSET_OWNER_TENANT_ID
+    ]
     total = len(all_tenant_ids)
 
     # Calculate pagination

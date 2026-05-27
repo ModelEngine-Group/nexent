@@ -530,7 +530,7 @@ export default function SkillList({
     queryKey: ["skills", "list", tenantId],
     queryFn: async () => {
       try {
-        return await fetchSkillsList();
+        return await fetchSkillsList(tenantId);
       } catch (e) {
         log.error("Failed to fetch skills list", e);
         throw e;
@@ -577,7 +577,7 @@ export default function SkillList({
         return;
       }
 
-      await updateSkill(editingSkill.name, { params: merged });
+      await updateSkill(editingSkill.name, { params: merged }, tenantId);
       message.success(t("tenantResources.skills.updateSuccess"));
       // Wait for list refetch so the next "edit config" opens with server params, not stale row data.
       await refetch();

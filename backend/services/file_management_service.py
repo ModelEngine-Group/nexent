@@ -59,23 +59,35 @@ def resolve_minio_upload_folder(
     user_id: Optional[str] = None,
     uploader_tenant_id: Optional[str] = None,
 ) -> str:
-    """
-    Resolve the MinIO prefix for an upload.
+    """Map caller context to the MinIO object prefix used for uploads.
 
-    ASSET_OWNER virtual-tenant uploads use attachments/asset_owner/{user_id}/.
-    Other attachment uploads use attachments/{user_id}/.
+    Resolution order (first match wins):
+    1. Asset-owner tenant → ``attachments/asset_owner/{user_id}``
+    2. ``folder == "knowledge_base"`` → shared ``knowledge_base`` prefix
+    3. Otherwise → per-user ``attachments/{user_id}`` when ``user_id`` is set
+    4. Legacy fallback → ``folder`` if provided, else ``attachments``
+
+    Access control for reads is enforced separately; this function only
+    chooses the storage prefix.
+
+    Args:
+        folder: Requested folder hint (e.g. ``"knowledge_base"`` or a legacy path).
+        user_id: Uploader user ID; required for user-scoped attachment paths.
+        uploader_tenant_id: Uploader tenant ID; asset-owner tenants use a dedicated prefix.
+
+    Returns:
+        Resolved MinIO folder prefix (no leading or trailing slash).
     """
-    normalized = folder or "attachments"
-    if normalized == "knowledge_base":
-        return "knowledge_base"
-    remainder = normalized[len("attachments/"):] if normalized.startswith("attachments/") else ""
-    if normalized.startswith("attachments/") and "/" in remainder:
-        return normalized
-    if uploader_tenant_id == ASSET_OWNER_TENANT_ID and user_id:
+    if uploader_tenant_id == ASSET_OWNER_TENANT_ID:
         return f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/{user_id}"
+
+    if folder == "knowledge_base":
+        return "knowledge_base"
+
     if user_id:
         return f"attachments/{user_id}"
-    return normalized
+
+    return folder or "attachments"
 
 
 def check_file_access(

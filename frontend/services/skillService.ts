@@ -151,8 +151,8 @@ export const processSkillStream = async (
  * Load skills for lists (tenant-resources table, etc.).
  * Maps API payload to {@link SkillListItem} including params for config editing.
  */
-export async function fetchSkillsList(): Promise<SkillListItem[]> {
-  const res = await fetchSkills();
+export async function fetchSkillsList(tenantId?: string | null): Promise<SkillListItem[]> {
+  const res = await fetchSkills(tenantId);
   if (!res.success) {
     throw new Error(res.message || "Failed to fetch skills");
   }

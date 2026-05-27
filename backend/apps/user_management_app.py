@@ -9,7 +9,12 @@ from typing import Optional
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
 from consts.model import UserSignInRequest, UserSignUpRequest
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    ValidationError,
+)
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token
@@ -58,6 +63,9 @@ async def signup(request: UserSignUpRequest):
         logging.error(f"User registration failed by invite code: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
+    except ValidationError as e:
+        logging.warning(f"User registration rejected by feature flag: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except UserRegistrationException as e:
         logging.error(f"User registration failed by registration service: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -88,6 +96,9 @@ async def signin(request: UserSignInRequest):
         logging.error(f"User login failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                         detail="Email or password error")
+    except ValidationError as e:
+        logging.warning(f"User login rejected by feature flag: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"User login failed, unknown error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

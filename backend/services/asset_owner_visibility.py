@@ -1,4 +1,4 @@
-"""ASSET_OWNER tenant visibility filters and response post-processing."""
+"""ASSET_OWNER tenant visibility filters, feature flags, and response post-processing."""
 
 import hashlib
 import re
@@ -12,12 +12,12 @@ from consts.const import (
     ASSET_OWNER_ATTACHMENTS_PREFIX,
     ASSET_OWNER_ROLE,
     ASSET_OWNER_TENANT_ID,
+    ENABLE_ASSET_OWNER_ROLE,
     PERMISSION_EDIT,
     PERMISSION_READ,
 )
+from consts.exceptions import ValidationError
 
-# Prefabricated skill records use source=custom (global, not tenant-owned).
-PREFAB_SKILL_SOURCE = "custom"
 
 _PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
 
@@ -25,6 +25,28 @@ _PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
 _PREVIEW_CACHE_PREFIXES = ("preview/converted/", "preview/converting/")
 _PREVIEW_HASH_PATTERN = re.compile(r"^(.+)_[0-9a-f]{8}(\.pdf|\.pdf\.tmp)?$")
 _OFFICE_EXTENSIONS = (".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls")
+
+ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
+
+
+def is_asset_owner_enabled() -> bool:
+    """Return whether the ASSET_OWNER feature flag is enabled."""
+    return ENABLE_ASSET_OWNER_ROLE
+
+
+def require_asset_owner_enabled() -> None:
+    """Raise ValidationError when the ASSET_OWNER feature is disabled."""
+    if not ENABLE_ASSET_OWNER_ROLE:
+        raise ValidationError("ASSET_OWNER feature is not enabled")
+
+
+def filter_accessible_routes_for_asset_owner_feature(
+    accessible_routes: List[str],
+) -> List[str]:
+    """Remove asset-owner nav route when the ASSET_OWNER feature flag is disabled."""
+    if ENABLE_ASSET_OWNER_ROLE:
+        return accessible_routes
+    return [r for r in accessible_routes if r != ASSET_OWNER_RESOURCES_ROUTE]
 
 
 def _parse_preview_cache_object_name(preview_object_name: str) -> Optional[str]:
@@ -118,11 +140,6 @@ def can_view_skill(caller_tenant_id: Optional[str], skill_tenant_id: Optional[st
     return True
 
 
-def _is_asset_owner_scoped_tenant(tenant_id: Optional[str]) -> bool:
-    """Return True when a record belongs to the ASSET_OWNER virtual tenant scope."""
-    return tenant_id in (ASSET_OWNER_TENANT_ID, "")
-
-
 def resolve_agent_list_permission(
     user_role: str,
     agent: Dict[str, Any],
@@ -136,7 +153,7 @@ def resolve_agent_list_permission(
     user_role is not ASSET_OWNER (overrides can_edit_all, creator, ingroup_permission).
     """
     role = (user_role or "").upper()
-    if _is_asset_owner_scoped_tenant(agent.get("tenant_id")) and role != ASSET_OWNER_ROLE:
+    if agent.get("tenant_id") == ASSET_OWNER_TENANT_ID and role != ASSET_OWNER_ROLE:
         return PERMISSION_READ
     if can_edit_all or str(agent.get("created_by")) == str(user_id):
         return PERMISSION_EDIT
@@ -157,7 +174,7 @@ def apply_agent_detail_prompt_visibility(
     result = dict(agent_info)
     if caller_tenant_id == ASSET_OWNER_TENANT_ID:
         return result
-    if not _is_asset_owner_scoped_tenant(result.get("tenant_id")):
+    if result.get("tenant_id") != ASSET_OWNER_TENANT_ID:
         return result
     for field in _PROMPT_FIELDS:
         result[field] = None

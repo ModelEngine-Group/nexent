@@ -37,6 +37,10 @@ def resolve_tenant_id_from_user_tenant_record(
     Resolve tenant_id from a user_tenant row.
 
     ASSET_OWNER virtual tenant_id is valid for asset administrator users.
+
+    ENABLE_ASSET_OWNER_ROLE gates invites, registrations, and sign-in; existing
+    ASSET_OWNER rows still resolve to the virtual tenant for API paths that read
+    user_tenant_t (e.g. JWT-authenticated requests until tokens expire).
     """
     if user_tenant_record is None:
         return DEFAULT_TENANT_ID

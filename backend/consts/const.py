@@ -117,6 +117,10 @@ ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 # MinIO prefix for ASSET_OWNER-scoped attachment uploads (attachments/asset_owner/{user_id}/...)
 ASSET_OWNER_ATTACHMENTS_PREFIX = "attachments/asset_owner"
 
+# When false, block ASSET_OWNER invites, registrations, and sign-in.
+ENABLE_ASSET_OWNER_ROLE = os.getenv(
+    "ENABLE_ASSET_OWNER_ROLE", "false").lower() == "true"
+
 # Roles that can edit all resources within a tenant (permission = EDIT).
 # Keep this centralized to avoid drifting role logic across modules.
 CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
@@ -384,7 +388,7 @@ NORTHBOUND_EXTERNAL_URL = os.getenv(
 
 
 # APP Version
-APP_VERSION = "latest"
+APP_VERSION = "v2.1.1"
 
 
 # Skill Creation Streaming Configuration

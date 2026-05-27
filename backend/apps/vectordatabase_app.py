@@ -18,10 +18,11 @@ from services.vectordatabase_service import (
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
 )
+from services.file_management_service import check_file_access
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
-from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
+from database.knowledge_db import get_knowledge_record
 from database.model_management_db import get_model_by_model_id
 
 router = APIRouter(prefix="/indices")
@@ -613,7 +614,7 @@ def health_check(vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)):
 @router.post("/{index_name}/chunks")
 def get_index_chunks(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name) to get chunks from"),
+                               description="Internal index_name from knowledge_record_t"),
         page: int = Query(
             None, description="Page number (1-based) for pagination"),
         page_size: int = Query(
@@ -625,12 +626,23 @@ def get_index_chunks(
 ):
     """Get chunks from the specified index, with optional pagination support"""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        if path_or_url is not None and not check_file_access(
+            path_or_url, user_id, tenant_id
+        ):
+            logger.warning(
+                "[get_index_chunks] Access denied: path_or_url=%s, user_id=%s",
+                path_or_url,
+                user_id,
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to access this file",
+            )
 
         result = ElasticSearchService.get_index_chunks(
-            index_name=actual_index_name,
+            index_name=index_name,
             page=page,
             page_size=page_size,
             path_or_url=path_or_url,
@@ -653,7 +665,7 @@ def get_index_chunks(
 @router.post("/{index_name}/chunk")
 def create_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description="Internal index_name from knowledge_record_t"),
         payload: ChunkCreateRequest = Body(..., description="Chunk data"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
@@ -661,10 +673,8 @@ def create_chunk(
     """Create a manual chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
         result = ElasticSearchService.create_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
@@ -688,7 +698,7 @@ def create_chunk(
 @router.put("/{index_name}/chunk/{chunk_id}")
 def update_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description="Internal index_name from knowledge_record_t"),
         chunk_id: str = Path(..., description="Chunk identifier"),
         payload: ChunkUpdateRequest = Body(...,
                                            description="Chunk update payload"),
@@ -697,11 +707,9 @@ def update_chunk(
 ):
     """Update an existing chunk."""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        user_id, _ = get_current_user_id(authorization)
         result = ElasticSearchService.update_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_id=chunk_id,
             chunk_request=payload,
             vdb_core=vdb_core,
@@ -729,18 +737,16 @@ def update_chunk(
 @router.delete("/{index_name}/chunk/{chunk_id}")
 def delete_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description="Internal index_name from knowledge_record_t"),
         chunk_id: str = Path(..., description="Chunk identifier"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """Delete a chunk."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        get_current_user_id(authorization)
         result = ElasticSearchService.delete_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_id=chunk_id,
             vdb_core=vdb_core,
         )

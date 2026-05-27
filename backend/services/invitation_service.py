@@ -20,23 +20,17 @@ from database.invitation_db import (
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.role_permission_db import check_role_permission
-from consts.const import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ENABLE_ASSET_OWNER_ROLE,
+)
 from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from services.group_service import get_tenant_default_group_id
+from services.asset_owner_visibility import require_asset_owner_enabled
 from utils.str_utils import convert_string_to_list
 
 logger = logging.getLogger(__name__)
-
-
-def _require_asset_owner_invite_permission(
-    user_role: str, permission_subtype: str, action: str
-) -> None:
-    if not check_role_permission(
-        user_role, "RESOURCE", "INVITE.ASSET_OWNER", permission_subtype
-    ):
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to {action} {ASSET_OWNER_INVITE_CODE_TYPE} codes"
-        )
 
 
 def create_invitation_code(
@@ -77,9 +71,15 @@ def create_invitation_code(
         "USER_INVITE",
         ASSET_OWNER_INVITE_CODE_TYPE,
     ]
+    if ENABLE_ASSET_OWNER_ROLE:
+        valid_code_types.append(ASSET_OWNER_INVITE_CODE_TYPE)
     if code_type not in valid_code_types:
         raise ValueError(
             f"Invalid code_type: {code_type}. Must be one of {valid_code_types}")
+
+    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and not ENABLE_ASSET_OWNER_ROLE:
+        raise UnauthorizedError(
+            "ASSET_OWNER feature is not enabled")
 
     # Get user information
     user_info = get_user_tenant_by_user_id(user_id)
@@ -89,11 +89,9 @@ def create_invitation_code(
     user_role = user_info.get("user_role", "USER")
 
     # Check permission based on code_type
-    if code_type == "ADMIN_INVITE" and user_role not in ["SU"]:
+    if code_type in ["ADMIN_INVITE", ASSET_OWNER_INVITE_CODE_TYPE] and user_role not in ["SU"]:
         raise UnauthorizedError(
             f"User role {user_role} not authorized to create ADMIN_INVITE codes")
-    elif code_type == ASSET_OWNER_INVITE_CODE_TYPE:
-        _require_asset_owner_invite_permission(user_role, "CREATE", "create")
     elif code_type in ["DEV_INVITE", "USER_INVITE"] and user_role not in ["SU", "ADMIN"]:
         raise UnauthorizedError(
             f"User role {user_role} not authorized to create {code_type} codes")
@@ -189,8 +187,10 @@ def update_invitation_code(
     if not invitation_info:
         raise NotFoundException(f"Invitation {invitation_id} not found")
 
-    if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
-        _require_asset_owner_invite_permission(user_role, "UPDATE", "update")
+    code_type = invitation_info.get("code_type")
+    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and user_role not in ["SU"]:
+        raise UnauthorizedError(
+            f"User role {user_role} not authorized to update invitation codes")
     elif user_role not in ["SU", "ADMIN"]:
         raise UnauthorizedError(
             f"User role {user_role} not authorized to update invitation codes")
@@ -237,11 +237,13 @@ def delete_invitation_code(invitation_id: int, user_id: str) -> bool:
     if not invitation_info:
         raise NotFoundException(f"Invitation {invitation_id} not found")
 
-    if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
-        _require_asset_owner_invite_permission(user_role, "DELETE", "delete")
+    code_type = invitation_info.get("code_type")
+    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and user_role not in ["SU"]:
+        raise UnauthorizedError(
+            f"User role {user_role} not authorized to update invitation codes")
     elif user_role not in ["SU", "ADMIN"]:
         raise UnauthorizedError(
-            f"User role {user_role} not authorized to delete invitation codes")
+            f"User role {user_role} not authorized to update invitation codes")
 
     # Delete invitation code
     success = remove_invitation(

@@ -1474,12 +1474,17 @@
   "sidebar.memoryManagement": "Memory Management",
   "sidebar.userManagement": "Profile",
   "sidebar.tenantResources": "Tenant Resources",
+  "sidebar.assetOwnerResources": "Asset Administrator Resources",
   "sidebar.mcpToolsManagement": "MCP Tools",
   "sidebar.monitoringManagement": "Monitoring & Ops",
 
   "tenantResources.create": "Create",
   "tenantResources.subtitle": "Manage tenants, users, groups and resources",
   "tenantResources.title": "Tenant Resource Management",
+
+  "assetOwnerResources.subtitle": "Manage asset administrator users, models, knowledge bases, and resources",
+  "assetOwnerResources.tenantName": "Asset Administrator",
+  "assetOwnerResources.title": "Asset Administrator Resource Management",
 
   "tenantResources.tabs.groups": "Groups",
   "tenantResources.tabs.knowledge": "Knowledge Base",
@@ -1924,6 +1929,7 @@
   "user.role.admin": "Admin",
   "user.role.dev": "Developer",
   "user.role.user": "User",
+  "user.role.assetOwner": "Asset Owner",
 
   "profile.title": "Profile",
   "profile.subtitle": "Manage your account settings and preferences",

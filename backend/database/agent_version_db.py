@@ -102,7 +102,7 @@ def query_agent_snapshot(
         # Query tool instances snapshot
         tools = session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,
-            ToolInstance.tenant_id == agent.tenant_id, # TODO 需要保留这个条件吗
+            ToolInstance.tenant_id == agent.tenant_id,
             ToolInstance.version_no == version_no,
             ToolInstance.delete_flag == 'N',
         ).all()
@@ -110,7 +110,7 @@ def query_agent_snapshot(
         # Query relations snapshot
         relations = session.query(AgentRelation).filter(
             AgentRelation.parent_agent_id == agent_id,
-            AgentRelation.tenant_id == agent.tenant_id, # TODO 需要保留这个条件吗
+            AgentRelation.tenant_id == agent.tenant_id,
             AgentRelation.version_no == version_no,
             AgentRelation.delete_flag == 'N',
         ).all()

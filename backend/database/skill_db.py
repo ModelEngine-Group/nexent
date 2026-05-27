@@ -184,12 +184,15 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
     }
 
 
-def list_skills() -> List[Dict[str, Any]]:
-    """List all skills from database."""
+def list_skills(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """List skills from database, optionally scoped to a tenant."""
     with get_db_session() as session:
-        skills = session.query(SkillInfo).filter(
+        query = session.query(SkillInfo).filter(
             SkillInfo.delete_flag != 'Y'
-        ).all()
+        )
+        if tenant_id is not None:
+            query = query.filter(SkillInfo.tenant_id == tenant_id)
+        skills = query.all()
         results = []
         for s in skills:
             result = _to_dict(s)
@@ -268,6 +271,7 @@ def update_skill(
     skill_name: str,
     skill_data: Dict[str, Any],
     updated_by: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update an existing skill.
 
@@ -282,10 +286,13 @@ def update_skill(
         params with stale in-memory values, so we avoid ORM writes for this row.
     """
     with get_db_session() as session:
-        skill = session.query(SkillInfo).filter(
+        query = session.query(SkillInfo).filter(
             SkillInfo.skill_name == skill_name,
             SkillInfo.delete_flag != "Y",
-        ).first()
+        )
+        if tenant_id is not None:
+            query = query.filter(SkillInfo.tenant_id == tenant_id)
+        skill = query.first()
 
         if not skill:
             raise ValueError(f"Skill not found: {skill_name}")

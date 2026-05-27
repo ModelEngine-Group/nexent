@@ -941,9 +941,12 @@ export const validateTool = async (
  * Fetch all available skills
  * @returns list of skills with skill_id, name, description, source, etc.
  */
-export const fetchSkills = async () => {
+export const fetchSkills = async (tenantId?: string | null) => {
   try {
-    const response = await fetch(API_ENDPOINTS.skills.list, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -1148,7 +1151,8 @@ export const updateSkill = async (
     content?: string;
     params?: Record<string, unknown>;
     files?: Array<{ path: string; content: string }>;
-  }
+  },
+  tenantId?: string | null
 ) => {
   try {
     const requestBody: Record<string, any> = {};
@@ -1159,7 +1163,10 @@ export const updateSkill = async (
     if (skillData.params !== undefined) requestBody.params = skillData.params;
     if (skillData.files !== undefined) requestBody.files = skillData.files;
 
-    const response = await fetch(API_ENDPOINTS.skills.update(skillName), {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.update(skillName)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.update(skillName);
+    const response = await fetch(url, {
       method: "PUT",
       headers: {
         ...getAuthHeaders(),

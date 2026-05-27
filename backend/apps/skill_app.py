@@ -36,11 +36,14 @@ def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], ten
 
 # List routes first (no path parameters)
 @router.get("")
-async def list_skills() -> JSONResponse:
+async def list_skills(
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering skills"),
+) -> JSONResponse:
     """List all available skills."""
     try:
         service = SkillService()
-        skills = service.list_skills()
+        skills = service.list_skills(tenant_id=tenant_id)
         return JSONResponse(content={"skills": skills})
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -391,6 +394,8 @@ async def get_skill(skill_name: str) -> JSONResponse:
 async def update_skill(
     skill_name: str,
     request: SkillUpdateRequest,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering skills"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Update an existing skill.
@@ -398,7 +403,7 @@ async def update_skill(
     Audit field updated_by is set from the authenticated user only; it is not read from the JSON body.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, _ = get_current_user_id(authorization)
         service = SkillService()
         update_data = {}
         if request.description is not None:
@@ -417,7 +422,12 @@ async def update_skill(
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
 
-        skill = service.update_skill(skill_name, update_data, user_id=user_id)
+        skill = service.update_skill(
+            skill_name,
+            update_data,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))

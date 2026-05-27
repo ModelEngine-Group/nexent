@@ -457,7 +457,7 @@ class SkillService:
             List of skill info dicts
         """
         try:
-            skills = skill_db.list_skills()
+            skills = skill_db.list_skills(tenant_id=tenant_id)
             return [self._overlay_params_from_local_config_yaml(s) for s in skills]
         except Exception as e:
             logger.error(f"Error listing skills: {e}")
@@ -1089,7 +1089,10 @@ class SkillService:
                 raise SkillException(f"Skill not found: {skill_name}")
 
             result = skill_db.update_skill(
-                skill_name, skill_data, updated_by=user_id or None
+                skill_name,
+                skill_data,
+                updated_by=user_id or None,
+                tenant_id=tenant_id,
             )
 
             # Keep config/config.yaml in sync when params are updated (matches ZIP import path).

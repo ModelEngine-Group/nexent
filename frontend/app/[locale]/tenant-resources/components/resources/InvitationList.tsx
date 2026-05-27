@@ -196,16 +196,18 @@ export default function InvitationList({
         await updateInvitation(editingInvitation.invitation_code, updateData);
         message.success(t("tenantResources.invitation.invitationUpdated"));
       } else {
-        // Create invitation
+        // Asset-owner page hides code_type in the form; always send ASSET_OWNER_INVITE on create.
+        const codeType = isAssetOwnerInviteContext
+          ? ASSET_OWNER_INVITE_CODE_TYPE
+          : values.code_type;
         const createData: CreateInvitationRequest = {
-          tenant_id:
-            values.code_type === ASSET_OWNER_INVITE_CODE_TYPE
-              ? ASSET_OWNER_TENANT_ID
-              : tenantId!,
-          code_type: values.code_type,
+          tenant_id: isAssetOwnerInviteContext
+            ? ASSET_OWNER_TENANT_ID
+            : tenantId!,
+          code_type: codeType,
           invitation_code: values.invitation_code?.toUpperCase(),
           capacity: values.capacity,
-          group_ids: values.group_ids || [],
+          group_ids: isAssetOwnerInviteContext ? [] : values.group_ids || [],
           expiry_date: formattedExpiryDate,
         };
         await createInvitation(createData);

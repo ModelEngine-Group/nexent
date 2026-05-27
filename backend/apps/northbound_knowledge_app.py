@@ -5,24 +5,13 @@ from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Body, File, Form, Path, Path as PathParam, Query, Request, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, EmailStr, Field
-from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.const import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, VectorDatabaseType
+from consts.const import ASSET_OWNER_TENANT_ID, VectorDatabaseType
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    NotFoundException,
-    DuplicateError,
 )
 from consts.model import ProcessParams
-from database.client import get_db_session
-from database.db_models import UserTenant
-from services.invitation_service import create_invitation_code
-from services.user_management_service import signup_user_with_invitation
 from services.file_management_service import (
     upload_files_impl,
     get_file_url_impl,
@@ -32,6 +21,7 @@ from services.file_management_service import (
 from services.northbound_service import NorthboundContext
 from services.redis_service import get_redis_service
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from utils.auth_utils import generate_session_jwt
 from utils.file_management_utils import trigger_data_process
 
 from .file_management_app import build_content_disposition_header
@@ -43,106 +33,6 @@ logger = logging.getLogger("northbound_knowledge_app")
 router = APIRouter(prefix="/nb/v1/knowledge", tags=["northbound"])
 
 __all__ = ["router"]
-
-
-class _TempAssetOwnerSignupBody(BaseModel):
-    """Temporary request body; remove when this bootstrap endpoint is retired."""
-    email: EmailStr
-    password: str = Field(..., min_length=6)
-
-
-def _get_first_su_user_id() -> Optional[str]:
-    with get_db_session() as session:
-        row = session.query(UserTenant.user_id).filter(
-            UserTenant.user_role == "SU",
-            UserTenant.delete_flag == "N",
-        ).order_by(UserTenant.create_time.asc()).first()
-        return row[0] if row else None
-
-
-@router.post("/signup_asset_owner")
-async def bootstrap_asset_owner_signup(request: _TempAssetOwnerSignupBody):
-    """Temporary bootstrap endpoint to register an asset owner administrator."""
-    su_user_id = _get_first_su_user_id()
-    if not su_user_id:
-        logger.error("No SU user found; cannot create asset owner invitation code")
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="No super user available to create invitation code",
-        )
-
-    try:
-        invitation_info = create_invitation_code(
-            tenant_id=ASSET_OWNER_TENANT_ID,
-            code_type=ASSET_OWNER_INVITE_CODE_TYPE,
-            user_id=su_user_id,
-        )
-        invite_code = invitation_info["invitation_code"]
-
-        user_data = await signup_user_with_invitation(
-            email=request.email,
-            password=request.password,
-            invite_code=invite_code,
-            auto_login=False,
-        )
-        success_message = (
-            "Asset owner account registered successfully. "
-            "Please sign in to continue."
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"message": success_message, "data": user_data},
-        )
-    except NoInviteCodeException as e:
-        logger.error(f"Asset owner registration failed by invite code: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="INVITE_CODE_NOT_CONFIGURED",
-        )
-    except IncorrectInviteCodeException as e:
-        logger.error(f"Asset owner registration failed by invite code: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="INVITE_CODE_INVALID",
-        )
-    except UserRegistrationException as e:
-        logger.error(
-            f"Asset owner registration failed by registration service: {str(e)}"
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="REGISTRATION_SERVICE_ERROR",
-        )
-    except AuthApiError as e:
-        logger.error(f"Asset owner registration failed, email already exists: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT,
-            detail="EMAIL_ALREADY_EXISTS",
-        )
-    except AuthWeakPasswordError as e:
-        logger.error(f"Asset owner registration failed by weak password: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_ACCEPTABLE,
-            detail="WEAK_PASSWORD",
-        )
-    except ValueError as e:
-        logger.warning(f"Invalid asset owner invitation parameters: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except DuplicateError as e:
-        logger.warning(f"Duplicate invitation code during bootstrap: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
-    except NotFoundException as e:
-        logger.warning(f"User not found during asset owner bootstrap: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
-    except UnauthorizedError as e:
-        logger.warning(f"Unauthorized asset owner bootstrap attempt: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except Exception as e:
-        logger.error(f"Asset owner registration failed, unknown error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="UNKNOWN_ERROR",
-        )
 
 
 async def _require_asset_owner_context(request: Request) -> NorthboundContext:
@@ -436,11 +326,13 @@ async def upload_files(
                 {"path_or_url": path, "filename": name}
                 for path, name in zip(uploaded_file_paths, uploaded_filenames)
             ]
+            # Internal data-process / ES indexing expects JWT, not northbound API key
+            internal_jwt = generate_session_jwt(ctx.user_id)
             process_params = ProcessParams(
                 chunking_strategy="basic",
                 source_type="minio",
                 index_name=index_name,
-                authorization=ctx.authorization,
+                authorization=internal_jwt,
             )
             process_result = await trigger_data_process(files, process_params)
 

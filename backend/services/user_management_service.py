@@ -28,7 +28,17 @@ from consts.const import (
     ASSET_OWNER_INVITE_CODE_TYPE,
     ASSET_OWNER_ROLE,
 )
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    UnauthorizedError,
+    ValidationError,
+)
+from services.asset_owner_visibility import (
+    filter_accessible_routes_for_asset_owner_feature,
+    require_asset_owner_enabled,
+)
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
@@ -172,12 +182,15 @@ async def signup_user_with_invitation(email: EmailStr,
             elif code_type == "DEV_INVITE":
                 user_role = "DEV"
             elif code_type == ASSET_OWNER_INVITE_CODE_TYPE:
+                require_asset_owner_enabled()
                 user_role = ASSET_OWNER_ROLE
 
             logging.info(
                 f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
 
         except IncorrectInviteCodeException:
+            raise
+        except ValidationError:
             raise
         except Exception as e:
             logging.error(
@@ -347,14 +360,24 @@ async def signin_user(email: EmailStr,
         "password": password
     })
 
+    user_tenant = get_user_tenant_by_user_id(response.user.id)
+    if user_tenant and user_tenant.get("user_role") == ASSET_OWNER_ROLE:
+        try:
+            require_asset_owner_enabled()
+        except ValidationError:
+            client.auth.sign_out()
+            raise
+
     # Get actual expiration time from access_token
     expiry_seconds = get_jwt_expiry_seconds(response.session.access_token)
     expires_at = calculate_expires_at(response.session.access_token)
 
-    # Get role information from user metadata
-    user_role = "user"  # Default role
-    if 'role' in response.user.user_metadata:  # Adapt to historical user data
-        user_role = response.user.user_metadata['role']
+    # Prefer user_tenant_t role; fall back to Supabase metadata for legacy users
+    user_role = "user"
+    if user_tenant and user_tenant.get("user_role"):
+        user_role = user_tenant["user_role"]
+    elif "role" in response.user.user_metadata:
+        user_role = response.user.user_metadata["role"]
 
     logging.info(
         f"User {email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
@@ -455,7 +478,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "user_email": user_email,
                 "user_role": user_role,
                 "permissions": permissions_data["permissions"],
-                "accessibleRoutes": permissions_data["accessibleRoutes"]
+                "accessibleRoutes": permissions_data["accessibleRoutes"],
             }
         }
 
@@ -494,9 +517,13 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
             # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
             accessible_routes.append(permission_subtype)
 
+    accessible_routes = filter_accessible_routes_for_asset_owner_feature(
+        accessible_routes
+    )
+
     return {
         "permissions": formatted_permissions,
-        "accessibleRoutes": accessible_routes
+        "accessibleRoutes": accessible_routes,
     }
 
 

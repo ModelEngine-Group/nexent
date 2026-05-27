@@ -987,7 +987,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (196, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
 (197, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
 (198, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
 (199, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'CREATE'),
 (200, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'READ'),
 (201, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1008,7 +1007,10 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (216, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'READ'),
 (217, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'UPDATE'),
 (218, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'DELETE'),
-(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ');
+(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ'),
+(220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(221, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/asset-owner-resources')
+;
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)

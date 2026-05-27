@@ -53,7 +53,7 @@ import McpList from "./resources/McpList";
 import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { ASSET_OWNER_TENANT_ID, USER_ROLES } from "@/const/auth";
+import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 
 // Default page size for pagination
@@ -890,25 +890,6 @@ export default function UserManageComp() {
                     children: (
                       <InvitationList
                         tenantId={tenantId}
-                        refreshKey={invitationListRefreshKey}
-                      />
-                    ),
-                  },
-                ]}
-              />
-            ) : isSuperAdmin ? (
-              <Tabs
-                defaultActiveKey="assetOwnerInvitations"
-                className="h-full flex flex-col"
-                items={[
-                  {
-                    key: "assetOwnerInvitations",
-                    label:
-                      t("tenantResources.invitation.assetOwnerTab") ||
-                      "Asset Owner Invitations",
-                    children: (
-                      <InvitationList
-                        tenantId={ASSET_OWNER_TENANT_ID}
                         refreshKey={invitationListRefreshKey}
                       />
                     ),
