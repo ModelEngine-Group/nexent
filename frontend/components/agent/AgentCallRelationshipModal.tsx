@@ -243,8 +243,8 @@ export default function AgentCallRelationshipModal({
 
   const treeWrapRef = useRef<HTMLDivElement>(null);
   const [translate, setTranslate] = useState<{ x: number; y: number }>({
-    x: 800,
-    y: 120,
+    x: 660,
+    y: 100,
   });
 
   useEffect(() => {
@@ -257,7 +257,7 @@ export default function AgentCallRelationshipModal({
     if (treeWrapRef.current && visible) {
       const { clientWidth } = treeWrapRef.current;
       const x = Math.round(clientWidth / 2);
-      const y = 100;
+      const y = 80;
       setTranslate({ x, y });
     }
   }, [visible]);
@@ -405,10 +405,11 @@ export default function AgentCallRelationshipModal({
         open={visible}
         onCancel={onClose}
         footer={null}
-        width={1800}
+        width={1400}
         destroyOnHidden
         centered
         style={{ top: 20 }}
+        zIndex={1050}
       >
         {loading ? (
           <div style={{ textAlign: "center", padding: "40px" }}>
@@ -429,7 +430,7 @@ export default function AgentCallRelationshipModal({
             <div
               ref={treeWrapRef}
               style={{
-                height: "820px",
+                height: "600px",
                 width: "100%",
                 background:
                   "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%)",
@@ -520,3 +521,4 @@ export default function AgentCallRelationshipModal({
     </>
   );
 }
+

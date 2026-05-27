@@ -38,7 +38,7 @@ from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from database.client import minio_client
-from services.image_service import get_vlm_model
+from services.image_service import get_video_understanding_model, get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
@@ -782,6 +782,7 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
+            # get_vlm_model reads the first multimodal slot, now shown as image understanding.
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
@@ -791,6 +792,23 @@ def _validate_local_tool(
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["analyze_audio", "analyze_video"]:
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id)
+            model_display_name = getattr(
+                video_understanding_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=model_display_name)
+            params = {
+                **instantiation_params,
+                'vlm_model': video_understanding_model,
                 'storage_client': minio_client,
                 'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }

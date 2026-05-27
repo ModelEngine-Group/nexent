@@ -134,7 +134,7 @@ async def _perform_connectivity_check(
             ssl_verify=ssl_verify,
         )
         connectivity = await rerank_model.connectivity_check()
-    elif model_type == "vlm":
+    elif model_type in ("vlm", "vlm2", "vlm3"):
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)

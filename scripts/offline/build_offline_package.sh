@@ -4,6 +4,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEPLOYMENT_COMMON="$PROJECT_ROOT/scripts/deployment/common.sh"
 
 DEFAULT_VERSION="latest"
 DEFAULT_PLATFORM="amd64"
@@ -14,6 +15,16 @@ VERSION=""
 PLATFORM=""
 OUTPUT_DIR=""
 INCLUDE_SOURCE=""
+DRY_RUN="false"
+COMMON_ARGS=()
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+else
+  echo "Error: shared deployment helper not found: $DEPLOYMENT_COMMON"
+  exit 1
+fi
 
 show_help() {
   echo "Usage: $0 [OPTIONS]"
@@ -29,6 +40,10 @@ show_help() {
   echo "                           Default: $DEFAULT_OUTPUT_DIR"
   echo "  --include-source BOOL   Include source code (true or false)"
   echo "                           Default: $DEFAULT_INCLUDE_SOURCE"
+  echo "  --components LIST       Deployment components for image selection"
+  echo "  --image-source SOURCE   general, mainland, or local-latest"
+  echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
+  echo "  --config FILE           Deployment config with components and image source"
   echo "  --dry-run               Show execution plan without actual operations"
   echo "  --help                  Show this help message"
   echo ""
@@ -60,7 +75,15 @@ parse_args() {
         shift 2
         ;;
       --dry-run)
-        dry_run=true
+        DRY_RUN="true"
+        shift
+        ;;
+      --components|--image-source|--registry-profile|--app-version|--monitoring-provider|--port-policy|--config|--local-config)
+        COMMON_ARGS+=("$1" "$2")
+        shift 2
+        ;;
+      --use-local-config|--reconfigure)
+        COMMON_ARGS+=("$1")
         shift
         ;;
       --help)
@@ -84,13 +107,32 @@ parse_args() {
     echo "Error: Platform must be 'amd64' or 'arm64'"
     exit 1
   fi
+}
 
-  if [[ "$dry_run" == "true" ]]; then
+prepare_deployment_image_config() {
+  export APP_VERSION="$VERSION"
+  deployment_prepare_config "${COMMON_ARGS[@]}" --app-version "$VERSION" || exit 1
+
+  case "$DEPLOYMENT_REGISTRY_PROFILE" in
+    mainland)
+      [ -f "$PROJECT_ROOT/docker/.env.mainland" ] && source "$PROJECT_ROOT/docker/.env.mainland"
+      ;;
+    general|local-latest)
+      [ -f "$PROJECT_ROOT/docker/.env.general" ] && source "$PROJECT_ROOT/docker/.env.general"
+      ;;
+  esac
+
+  deployment_apply_image_source
+}
+
+show_dry_run_plan() {
     echo "=== DRY RUN MODE ==="
     echo "Version: $VERSION"
     echo "Platform: $PLATFORM"
     echo "Output directory: $OUTPUT_DIR"
     echo "Include source: $INCLUDE_SOURCE"
+    echo "Components: $DEPLOYMENT_COMPONENTS"
+    echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
     echo ""
     echo "Images to pull:"
     get_nexent_images
@@ -98,38 +140,49 @@ parse_args() {
     echo ""
     echo "No actual operations will be performed."
     exit 0
-  fi
 }
 
 get_nexent_images() {
-  local version_tag="$VERSION"
-
-  local nexent_images=(
-    "nexent/nexent:${version_tag}"
-    "nexent/nexent-web:${version_tag}"
-    "nexent/nexent-data-process:${version_tag}"
-    "nexent/nexent-mcp:${version_tag}"
-  )
-
-  for img in "${nexent_images[@]}"; do
-    echo "$img"
-  done
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_WEB_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && echo "$NEXENT_MCP_DOCKER_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && echo "$NEXENT_DATA_PROCESS_IMAGE"
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && echo "$OPENSSH_SERVER_IMAGE"
+  true
 }
 
 get_third_party_images() {
-  local third_party_images=(
-    "docker.elastic.co/elasticsearch/elasticsearch:8.17.4"
-    "docker.io/library/postgres:15-alpine"
-    "docker.io/library/redis:alpine"
-    "quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z"
-    "docker.io/library/kong:2.8.1"
-    "docker.io/supabase/gotrue:v2.170.0"
-    "docker.io/supabase/postgres:15.8.1.060"
-  )
-
-  for img in "${third_party_images[@]}"; do
-    echo "$img"
-  done
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
+    echo "$ELASTICSEARCH_IMAGE"
+    echo "$POSTGRESQL_IMAGE"
+    echo "$REDIS_IMAGE"
+    echo "$MINIO_IMAGE"
+  fi
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+    echo "$SUPABASE_KONG"
+    echo "$SUPABASE_GOTRUE"
+    echo "$SUPABASE_DB"
+  fi
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    echo "otel/opentelemetry-collector-contrib:0.151.0"
+    case "$DEPLOYMENT_MONITORING_PROVIDER" in
+      phoenix) echo "arizephoenix/phoenix:15" ;;
+      grafana)
+        echo "grafana/tempo:2.10.5"
+        echo "grafana/grafana:12.4"
+        ;;
+      zipkin) echo "openzipkin/zipkin:latest" ;;
+      langfuse)
+        echo "docker.io/langfuse/langfuse-worker:3"
+        echo "docker.io/langfuse/langfuse:3"
+        echo "docker.io/clickhouse/clickhouse-server:26.3-alpine"
+        echo "docker.io/minio/minio:RELEASE.2023-12-20T01-00-02Z"
+        echo "docker.io/redis:alpine"
+        echo "docker.io/postgres:15-alpine"
+        ;;
+    esac
+  fi
+  true
 }
 
 pull_with_retry() {
@@ -362,6 +415,11 @@ LOADSCRIPT
 
 main() {
   parse_args "$@"
+  prepare_deployment_image_config
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    show_dry_run_plan
+  fi
 
   echo ""
   echo "========================================"
@@ -371,6 +429,8 @@ main() {
   echo "Platform: $PLATFORM"
   echo "Output directory: $OUTPUT_DIR"
   echo "Include source: $INCLUDE_SOURCE"
+  echo "Components: $DEPLOYMENT_COMPONENTS"
+  echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
   echo "========================================"
 
   rm -rf "$OUTPUT_DIR"
@@ -405,4 +465,3 @@ main() {
 }
 
 main "$@"
-

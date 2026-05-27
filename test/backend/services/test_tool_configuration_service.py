@@ -36,8 +36,59 @@ except Exception:
 boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
+jsonref_mock = types.ModuleType('jsonref')
+jsonref_mock.replace_refs = lambda value: value
+sys.modules['jsonref'] = jsonref_mock
 
-# Patch smolagents and its sub-modules before importi ng consts.model to avoid ImportError
+fastmcp_mock = types.ModuleType('fastmcp')
+fastmcp_mock.__path__ = []
+
+
+class MockFastMcpClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def is_connected(self):
+        return True
+
+    async def call_tool(self, *args, **kwargs):
+        return MagicMock()
+
+
+class MockSSETransport:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class MockStreamableHttpTransport:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+fastmcp_mock.Client = MockFastMcpClient
+fastmcp_client_mock = types.ModuleType('fastmcp.client')
+fastmcp_client_mock.__path__ = []
+fastmcp_transports_mock = types.ModuleType('fastmcp.client.transports')
+fastmcp_transports_mock.SSETransport = MockSSETransport
+fastmcp_transports_mock.StreamableHttpTransport = MockStreamableHttpTransport
+sys.modules['fastmcp'] = fastmcp_mock
+sys.modules['fastmcp.client'] = fastmcp_client_mock
+sys.modules['fastmcp.client.transports'] = fastmcp_transports_mock
+
+mcpadapt_mock = types.ModuleType('mcpadapt')
+mcpadapt_mock.__path__ = []
+mcpadapt_smolagents_adapter_mock = types.ModuleType('mcpadapt.smolagents_adapter')
+mcpadapt_smolagents_adapter_mock._sanitize_function_name = lambda name: name
+sys.modules['mcpadapt'] = mcpadapt_mock
+sys.modules['mcpadapt.smolagents_adapter'] = mcpadapt_smolagents_adapter_mock
+
+# Patch smolagents and its sub-modules before importing consts.model to avoid ImportError
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 
@@ -344,6 +395,38 @@ sys.modules['nexent.multi_modal'] = MagicMock()
 sys.modules['nexent.multi_modal.utils'] = MagicMock()
 sys.modules['nexent.multi_modal.utils'].parse_s3_url = MagicMock(return_value=("bucket", "key"))
 
+# Mock services modules before importing tool_configuration_service so absolute
+# imports inside that module do not walk into real service dependency chains.
+sys.modules['services'] = _create_package_mock('services')
+services_modules = {
+    'file_management_service': {
+        'get_llm_model': MagicMock(),
+        'validate_urls_access': MagicMock(return_value=True),
+    },
+    'vectordatabase_service': {
+        'get_embedding_model': MagicMock(),
+        'get_embedding_model_by_index_name': MagicMock(),
+        'get_rerank_model': MagicMock(),
+        'get_vector_db_core': MagicMock(),
+        'ElasticSearchService': MagicMock(),
+    },
+    'tenant_config_service': {
+        'get_selected_knowledge_list': MagicMock(),
+        'build_knowledge_name_mapping': MagicMock(),
+    },
+    'image_service': {
+        'get_vlm_model': MagicMock(),
+        'get_video_understanding_model': MagicMock(),
+    },
+}
+for service_name, attrs in services_modules.items():
+    service_module = types.ModuleType(f'services.{service_name}')
+    for attr_name, attr_value in attrs.items():
+        setattr(service_module, attr_name, attr_value)
+    sys.modules[f'services.{service_name}'] = service_module
+    # Expose on parent package for patch resolution
+    setattr(sys.modules['services'], service_name, service_module)
+
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
@@ -366,7 +449,10 @@ services_modules = {
                                'get_rerank_model': MagicMock(), 'get_vector_db_core': MagicMock(),
                                'ElasticSearchService': MagicMock()},
     'tenant_config_service': {'get_selected_knowledge_list': MagicMock(), 'build_knowledge_name_mapping': MagicMock()},
-    'image_service': {'get_vlm_model': MagicMock()},
+    'image_service': {
+        'get_vlm_model': MagicMock(),
+        'get_video_understanding_model': MagicMock(),
+    },
     'redis_service': {'get_redis_service': MagicMock()},
 }
 for service_name, attrs in services_modules.items():
@@ -440,6 +526,7 @@ patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock())
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
 patch('services.image_service.get_vlm_model', MagicMock()).start()
+patch('services.image_service.get_video_understanding_model', MagicMock()).start()
 patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
 # Ensure this module always uses the real consts.model instead of mocks injected by other test files.
@@ -2818,6 +2905,63 @@ class TestValidateLocalToolAnalyzeImage:
                 {"prompt": "describe"},
                 "tenant1",
                 None
+            )
+
+
+class TestValidateLocalToolAnalyzeAudioVideo:
+    """Test cases for _validate_local_tool with analyze_audio/analyze_video tools."""
+
+    @pytest.mark.parametrize("tool_name", ["analyze_audio", "analyze_video"])
+    @patch('backend.services.tool_configuration_service.minio_client')
+    @patch('backend.services.tool_configuration_service.get_video_understanding_model')
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_analyze_audio_video_success(
+            self, mock_signature, mock_get_class, mock_get_video_model, mock_minio_client, tool_name):
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = f"{tool_name} result"
+        mock_tool_class.return_value = mock_tool_instance
+        mock_get_class.return_value = mock_tool_class
+        mock_get_video_model.return_value = "mock_video_model"
+
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            tool_name,
+            {"media": "bytes"},
+            {"prompt": "describe"},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == f"{tool_name} result"
+        mock_get_video_model.assert_called_once_with(tenant_id="tenant1")
+        call_kwargs = mock_tool_class.call_args.kwargs
+        assert call_kwargs["vlm_model"] == "mock_video_model"
+        assert "storage_client" in call_kwargs
+        assert callable(call_kwargs["validate_url_access"])
+        mock_tool_instance.forward.assert_called_once_with(media="bytes")
+
+    @pytest.mark.parametrize("tool_name", ["analyze_audio", "analyze_video"])
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    def test_validate_local_tool_analyze_audio_video_missing_tenant(self, mock_get_class, tool_name):
+        mock_get_class.return_value = Mock()
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException,
+                           match=f"Tenant ID and User ID are required for {tool_name} validation"):
+            _validate_local_tool(
+                tool_name,
+                {"media": "bytes"},
+                {"prompt": "describe"},
+                None,
+                "user1"
             )
 
 

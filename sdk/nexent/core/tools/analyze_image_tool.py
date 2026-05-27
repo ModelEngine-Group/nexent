@@ -24,17 +24,17 @@ logger = logging.getLogger("analyze_image_tool")
 
 
 class AnalyzeImageTool(Tool):
-    """Tool for understanding and analyzing image using a visual language model"""
+    """Tool for understanding and analyzing images using the image understanding model."""
 
     name = "analyze_image"
     description = (
-        "This tool uses a visual language model to understand images based on your query and then returns a description of the image.\n"
+        "This tool uses the configured image understanding model to understand images based on your query and then returns a description of the image.\n"
         "It is used to understand and analyze multiple images, with image sources supporting S3 URLs (s3://bucket/key or /bucket/key), "
         "HTTP, and HTTPS URLs.\n"
         "Use this tool when you want to retrieve information contained in an image and provide the image's URL and your query."
     )
 
-    description_zh = "使用视觉语言模型，根据你的提示词来理解图像，并返回图像的描述。可用于理解和分析多张图片，支持 S3 URLs（s3://bucket/key 或 /bucket/key）、HTTP 和 HTTPS URL。"
+    description_zh = "使用图片理解模型，根据你的提示词来理解图像，并返回图像的描述。可用于理解和分析多张图片，支持 S3 URLs（s3://bucket/key 或 /bucket/key）、HTTP 和 HTTPS URL。"
 
     inputs = {
         "image_urls_list": {
@@ -54,7 +54,7 @@ class AnalyzeImageTool(Tool):
             "description": "Message observer"
         },
         "vlm_model": {
-            "description": "The VLM model to use"
+            "description": "The image understanding model to use"
         },
         "storage_client": {
             "description": "Storage client for downloading files"
@@ -74,7 +74,7 @@ class AnalyzeImageTool(Tool):
                 default=None,
                 exclude=True),
             vlm_model: OpenAIVLModel = Field(
-                description="The VLM model to use",
+                description="The image understanding model to use",
                 default=None,
                 exclude=True),
             storage_client: MinIOStorageClient = Field(
@@ -130,10 +130,10 @@ class AnalyzeImageTool(Tool):
         Raises:
             Exception: If the image cannot be downloaded or analyzed.
         """
-        # Check if VLM model is available
+        # Check if the image understanding model is available.
         if self.vlm_model is None:
-            error_msg_zh = "视觉语言模型(VLM)未配置，请联系管理员配置VLM模型后重试"
-            error_msg_en = "Vision Language Model (VLM) is not configured. Please contact your administrator to configure the VLM model and try again."
+            error_msg_zh = "图片理解模型未配置，请联系管理员配置图片理解模型后重试"
+            error_msg_en = "Image understanding model is not configured. Please contact your administrator to configure the image understanding model and try again."
             error_msg = error_msg_zh if self._is_chinese else error_msg_en
             logger.error(error_msg)
             raise Exception(error_msg)
@@ -170,8 +170,8 @@ class AnalyzeImageTool(Tool):
                         system_prompt=system_prompt
                     )
                 except Exception as e:
-                    error_msg_zh = f"图片{index}分析失败: {str(e)}。请检查VLM模型配置是否正确。"
-                    error_msg_en = f"Failed to analyze image {index}: {str(e)}. Please check if the VLM model is configured correctly."
+                    error_msg_zh = f"图片{index}分析失败: {str(e)}。请检查图片理解模型配置是否正确。"
+                    error_msg_en = f"Failed to analyze image {index}: {str(e)}. Please check if the image understanding model is configured correctly."
                     error_msg = error_msg_zh if self._is_chinese else error_msg_en
                     raise Exception(error_msg)
 

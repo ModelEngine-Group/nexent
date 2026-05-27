@@ -17,23 +17,21 @@ interface SkillManagementProps {
   skillGroups: SkillGroup[];
   isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
+  isReadOnly?: boolean;
 }
 
 export default function SkillManagement({
   skillGroups,
   isCreatingMode,
   currentAgentId,
+  isReadOnly: isReadOnlyProp,
 }: SkillManagementProps) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
-  const currentAgentPermission = useAgentConfigStore(
-    (state) => state.currentAgentPermission
-  );
-
-  const isReadOnly = !isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY";
-
-  const editable = (currentAgentId || isCreatingMode) && !isReadOnly;
+  // Use prop if provided, otherwise fall back to store
+  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
 
   const originalSelectedSkills = useAgentConfigStore(
     (state) => state.editedAgent.skills
@@ -90,7 +88,7 @@ export default function SkillManagement({
   }, [currentAgentId, isCreatingMode]);
 
   const handleSkillClick = (skill: Skill) => {
-    if (!editable || isReadOnly) return;
+    if (isReadOnly) return;
 
     const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
     const isCurrentlySelected = currentSkills.some(
@@ -216,7 +214,7 @@ export default function SkillManagement({
           <span
             style={{
               display: "block",
-              maxWidth: "70px",
+              maxWidth: "100px",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -237,7 +235,6 @@ export default function SkillManagement({
         >
           {group.skills.map((skill) => {
             const isSelected = originalSelectedSkillIdsSet.has(skill.skill_id);
-            const isDisabled = isReadOnly;
             const hasConfigurableParams =
               Array.isArray(skill.config_schemas) && skill.config_schemas.length > 0;
 
@@ -248,7 +245,7 @@ export default function SkillManagement({
                   isSelected
                     ? "bg-blue-100 border-blue-400 shadow-md"
                     : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                } ${editable && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                } ${isReadOnly ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                 onClick={() => handleSkillClick(skill)}
               >
                 <span className="font-medium text-gray-800 truncate">
@@ -288,24 +285,22 @@ export default function SkillManagement({
           <span className="text-gray-500">{t("skillPool.noSkills")}</span>
         </div>
       ) : (
-        <div className="flex-1 overflow-hidden">
-          <Tabs
-            tabPlacement="start"
-            activeKey={activeTabKey}
-            onChange={setActiveTabKey}
-            items={tabItems}
-            className="h-full skill-pool-tabs"
-            style={{
-              height: "100%",
-            }}
-            tabBarStyle={{
-              minWidth: "80px",
-              maxWidth: "100px",
-              padding: "4px 0",
-              margin: 0,
-            }}
-          />
-        </div>
+        <Tabs
+          tabPlacement="start"
+          activeKey={activeTabKey}
+          onChange={setActiveTabKey}
+          items={tabItems}
+          className="h-full skill-pool-tabs"
+          style={{
+            height: "100%",
+          }}
+          tabBarStyle={{
+            minWidth: "120px",
+            maxWidth: "120px",
+            padding: "4px 0",
+            margin: 0,
+          }}
+        />
       )}
 
       <SkillDetailModal

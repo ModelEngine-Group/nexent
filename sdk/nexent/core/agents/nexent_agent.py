@@ -241,7 +241,7 @@ class NexentAgent:
                                        data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
                                        validate_url_access=validate_url_access,
                                        **params)
-            elif class_name == "AnalyzeImageTool":
+            elif class_name in ["AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool"]:
                 # Extract validate_url_access from metadata if it's callable
                 validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
                 if validate_url_access is not None and not callable(validate_url_access):
