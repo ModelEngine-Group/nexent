@@ -680,6 +680,8 @@ class MCPUpdateRequest(BaseModel):
     new_mcp_url: str = Field(..., description="New MCP server URL")
     new_authorization_token: Optional[str] = Field(
         None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
+    custom_headers: Optional[Dict[str, Any]] = Field(
+        None, description="Custom HTTP headers as JSON object")
 
 
 # Tenant Management Data Models
@@ -1119,6 +1121,7 @@ class AddMcpServiceRequest(BaseModel):
     source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
@@ -1158,6 +1161,7 @@ class UpdateMcpServiceRequest(BaseModel):
     server_url: str = Field(..., min_length=1, description="New MCP server URL")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod
