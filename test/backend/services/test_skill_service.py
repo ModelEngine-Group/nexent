@@ -4824,7 +4824,7 @@ class TestInitSkillListForTenantAsync:
             )
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(run_test())
+        result = asyncio.run(run_test())
 
         assert result["status"] == "success"
         mock_update.assert_called_once_with(
