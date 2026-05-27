@@ -136,7 +136,7 @@ class TestAnalyzeImageToolEdgeCases:
         with pytest.raises(Exception) as exc_info:
             tool._forward_impl([b"img"], "question")
 
-        assert "Vision Language Model (VLM) is not configured" in str(
+        assert "Image understanding model is not configured" in str(
             exc_info.value)
 
     def test_forward_impl_vlm_model_none_chinese(self, observer_zh, mock_storage_client):
@@ -150,7 +150,7 @@ class TestAnalyzeImageToolEdgeCases:
         with pytest.raises(Exception) as exc_info:
             tool._forward_impl([b"img"], "问题")
 
-        assert "视觉语言模型(VLM)未配置" in str(exc_info.value)
+        assert "图片理解模型未配置" in str(exc_info.value)
 
     def test_forward_impl_observer_none_uses_english(self, mock_vlm_model, mock_storage_client):
         """Test that English is used when observer is None."""
@@ -353,7 +353,7 @@ class TestAnalyzeImageToolEdgeCases:
     def test_tool_name_and_description(self, tool):
         """Test that tool name and description are set correctly."""
         assert tool.name == "analyze_image"
-        assert "visual language model" in tool.description.lower()
+        assert "image understanding model" in tool.description.lower()
         assert "image" in tool.description.lower()
 
     def test_tool_inputs_schema(self, tool):

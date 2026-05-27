@@ -1,4 +1,4 @@
-{
+﻿{
   "assistant.name": "Nexent",
 
   "mainPage.layout.title": "Nexent | AI Agents",
@@ -830,6 +830,9 @@
   "model.type.llm": "Large Language Model",
   "model.type.embedding": "Embedding Model",
   "model.type.vlm": "Vision Language Model",
+  "model.type.imageUnderstanding": "Image Understanding Model",
+  "model.type.imageGeneration": "Image Generation Model",
+  "model.type.videoUnderstanding": "Video Understanding Model",
   "model.type.rerank": "Rerank Model",
   "model.type.stt": "Speech-to-Text Model",
   "model.type.tts": "Text-to-Speech Model",
@@ -898,6 +901,9 @@
   "modelConfig.option.multiEmbeddingModel": "Multimodal Embedding Model",
   "modelConfig.option.rerankerModel": "Reranker Model",
   "modelConfig.option.vlmModel": "Vision Language Model",
+  "modelConfig.option.imageUnderstandingModel": "Image Understanding Model",
+  "modelConfig.option.imageGenerationModel": "Image Generation Model",
+  "modelConfig.option.videoUnderstandingModel": "Video Understanding Model",
   "modelConfig.option.ttsModel": "Text-to-Speech Model",
   "modelConfig.option.sttModel": "Speech-to-Text Model",
   "modelConfig.error.loadList": "Failed to load model list:",

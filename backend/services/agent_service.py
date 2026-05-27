@@ -1265,7 +1265,7 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
-        if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "DataMateSearchTool"]:
+        if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
 
     # Get model_id and model display name from agent_info

@@ -39,7 +39,9 @@ export const useTokenPonyModelList = ({
     const modelType =
       form.type === "embedding" && form.isMultimodal
         ? ("multi_embedding" as ModelType)
-        : form.type;
+        : form.type === "vlm2" || form.type === "vlm3"
+          ? ("vlm" as ModelType)
+          : form.type;
 
     try {
       // Use manage interface if tenantId is provided (for super admin)
