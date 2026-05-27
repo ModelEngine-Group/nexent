@@ -28,6 +28,7 @@ interface AgentDebuggingProps {
   onInputChange: (value: string) => void;
   onSend: () => void;
   isStreaming: boolean;
+  isCompareStreaming?: boolean;
   messages: ChatMessageType[];
   comparePanel?: React.ReactNode;
   showCompare?: boolean;
@@ -52,6 +53,7 @@ function AgentDebugging({
   onInputChange,
   onSend,
   isStreaming,
+  isCompareStreaming = false,
   messages,
   comparePanel,
   showCompare,
@@ -60,6 +62,7 @@ function AgentDebugging({
   isCompareMode,
 }: AgentDebuggingProps) {
   const { t } = useTranslation();
+  const isInputDisabled = isStreaming || (isCompareMode && isCompareStreaming);
 
   return (
     <div className="flex flex-col h-full min-h-0 p-4">
@@ -81,7 +84,7 @@ function AgentDebugging({
           onChange={(e) => onInputChange(e.target.value)}
           placeholder={t("agent.debug.placeholder")}
           onPressEnter={onSend}
-          disabled={isStreaming}
+          disabled={isInputDisabled}
         />
         <span className="px-2 py-1 text-xs rounded-md bg-gray-100 text-gray-600 whitespace-nowrap">
           {isCompareMode
@@ -122,6 +125,7 @@ function AgentDebugging({
           <button
             onClick={onSend}
             className="min-w-[56px] px-4 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 hover:bg-blue-600 text-white whitespace-nowrap"
+            disabled={isInputDisabled}
             style={{ border: "none" }}
           >
             {t("agent.debug.send")}
@@ -145,6 +149,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const prevAgentIdRef = useRef<number | null | undefined>(undefined);
   // Maintain an independent step ID counter per Agent
   const stepIdCounter = useRef<{ current: number }>({ current: 0 });
   const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
@@ -156,6 +161,12 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     agentId === undefined || agentId === null || Number.isNaN(Number(agentId))
       ? undefined
       : Number(agentId);
+  const comparePersistenceKey =
+    parsedAgentId === undefined
+      ? "debug-compare:anonymous"
+      : `debug-compare:agent-${parsedAgentId}`;
+  const comparePersistenceFallbackKeys =
+    parsedAgentId === undefined ? [] : ["debug-compare:anonymous"];
 
   const {
     leftMessages: compareLeftMessages,
@@ -177,6 +188,8 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       agent_id: parsedAgentId,
       model_id: side === "left" ? compareLeftModelId ?? undefined : compareRightModelId ?? undefined,
     }),
+    persistenceKey: comparePersistenceKey,
+    persistenceFallbackKeys: comparePersistenceFallbackKeys,
     getHistory: () =>
       messages
         .filter((msg) => msg.isComplete !== false && msg.content?.trim())
@@ -185,6 +198,15 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
   // Reset debug state when agentId changes
   useEffect(() => {
+    const normalizedAgentId = parsedAgentId ?? null;
+    const previousAgentId = prevAgentIdRef.current;
+    prevAgentIdRef.current = normalizedAgentId;
+    const hasSwitchedAgent =
+      previousAgentId !== undefined &&
+      previousAgentId !== null &&
+      normalizedAgentId !== null &&
+      previousAgentId !== normalizedAgentId;
+
     // Clear debug history
     setMessages([]);
     // Reset step ID counter
@@ -235,11 +257,14 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       }
     }
 
-    // Reset compare state when switching agents
-    setIsComparePanelOpen(false);
-    stopCompare();
-    resetCompareState();
-  }, [agentId, resetCompareState, stopCompare]);
+    // Reset compare state only when switching to a different agent.
+    // On initial mount/re-mount with the same agent, keep persisted compare history.
+    if (hasSwitchedAgent) {
+      setIsComparePanelOpen(false);
+      stopCompare();
+      resetCompareState();
+    }
+  }, [agentId]);
 
   useEffect(() => {
     if (!hasMultipleLlmModels) {
@@ -326,8 +351,15 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
   // Clear local history and reset the step counter
   const handleClearHistory = async () => {
-    setMessages([]);
-    stepIdCounter.current.current = 0;
+    if (isComparePanelOpen) {
+      if (isCompareStreaming) {
+        stopCompare();
+      }
+      resetCompareState();
+    } else {
+      setMessages([]);
+      stepIdCounter.current.current = 0;
+    }
     setInputQuestion("");
     // Clear cached error for this agent
     if (agentId !== undefined && agentId !== null && !isNaN(Number(agentId))) {
@@ -555,10 +587,8 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       // Enter compare mode: clear default chat history and compare outputs
       setMessages([]);
       stepIdCounter.current.current = 0;
-      if (isCompareStreaming) {
-        stopCompare();
-      }
-      resetCompareState();
+    } else if (isCompareStreaming) {
+      stopCompare();
     }
   };
 
@@ -582,6 +612,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         onInputChange={setInputQuestion}
         onSend={handleSend}
         isStreaming={isStreaming}
+        isCompareStreaming={isCompareStreaming}
         messages={messages}
         comparePanel={comparePanel}
         showCompare={hasMultipleLlmModels}
