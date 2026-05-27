@@ -1,0 +1,431 @@
+{
+  "case_id": "agentrm_001_scheduling",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 0.9166666666666666,
+    "final_tokens": 5286,
+    "real_input_tokens": 14091
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 0.5833333333333334,
+    "final_tokens": 5354,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 3,
+      "total_input_tokens": 4734,
+      "total_output_tokens": 406,
+      "total_cache_hits": 2
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 5040,
+      "last_compressed": 1644
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"Summarize AgentRM paper's scheduling failures, algorithm, and experimental results.\",\n  \"state\": [\n    \"AgentRM identifies three scheduling failures: blocking behaviors, zombie subagents, and rate limit cascades.\",\n    \"AgentRM proposes MLFQ scheduler with three priority queues (Interactive, Sub-agent, Background) and priority boosting to prevent starvation.\",\n    \"Zombie reaper scans every 5s, identifies zombies as turns holding lanes >30s while hanging, uses 50% probabilistic recovery, and terminates failed turns.\",\n    \"Rate limit awareness uses token bucket per model API, AIMD backoff, and admission control to prevent cascading failures.\",\n    \"Fairness via Dominant Resource Fairness (DRF) and work-conserving scheduling; implementation uses priority queues, semaphore lane pool, and background reaper timer.\",\n    \"Experimental results: normal (27 turns, 5% hang) shows 94% P95 reduction; high load (280 turns, 10% hang) shows 50% P95 reduction, 68% throughput increase, 76% zombie reduction; faulty (63 turns, 30% hang) shows 86.2% P95 reduction, 168% throughput increase; cascade (149 turns, 5-40% hang) shows 52% P95 reduction; burst (30 turns, 8% hang) shows minor improvement.\"\n  ],\n  \"decisions\": [\n    \"Abstract's 86% P95 reduction and 168% throughput increase correspond to faulty scenario specifically.\",\n    \"AgentRM complements MemGPT/Letta (single-agent memory) and vLLM/SGLang (inference optimization).\",\n    \"OS analogy limitations: semantic value, coarse granularity, external dependencies.\",\n    \"Configuration via declarative YAML policies with sensible defaults.\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"None\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 18,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 18,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 3279
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 0.6363636363636365,
+    "token_reduction": 0.6738095238095239,
+    "net_token_reduction": 0.40252643531332055,
+    "compression_cost_tokens": 5140,
+    "summary_score": 0.6
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "Based on AgentRM's design, you should enable the following three mechanisms that work together to prevent rate limit cascades:\n\n1. **Token bucket per model API**: Each model endpoint gets a token bucket that tracks remaining capacity. When tokens are exhausted, requests are queued rather than immediately rejected, preventing the system from flooding the API.\n\n2. **AIMD (Additive Increase Multiplicative Decrease) backoff**: When a rate limit error is detected, the system multiplicatively decreases the token refill rate (e.g., halves it), then gradually increases it additively as successful requests proceed. This prevents repeated retries that amplify the cascade.\n\n3. **Admission control**: Before dispatching a turn, the scheduler checks if the target model's token bucket has sufficient capacity. If not, the turn is deferred rather than executed, preventing the system from issuing requests that will fail and trigger further rate limiting.\n\n**How they work together**: The admission control acts as the first line of defense—it prevents turns from being dispatched when capacity is low. If a rate limit error still occurs (e.g., due to shared API quotas), AIMD backoff rapidly reduces the system's request rate, while the token bucket enforces the new, lower rate. This coordinated response prevents the \"rate limit cascade\" failure mode where one agent's retries trigger rate limits for all other agents, causing a system-wide collapse.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "Based on the experimental results, AgentRM-MLFQ shows the **smallest improvement in the burst scenario** (30 turns, 8% hang), where it achieved only \"minor improvement\" over baselines.\n\n**Why**: The burst scenario involves a short, intense spike of 30 turns with only 8% hanging turns. This workload is too brief for AgentRM's scheduling mechanisms to provide significant benefit:\n\n- **MLFQ priority queues** need sustained load to demonstrate differentiation between interactive, sub-agent, and background tasks.\n- **Zombie reaper** (scanning every 5s) has limited impact because the burst is short and the hang rate is low.\n- **Rate limit awareness** provides minimal advantage since the burst doesn't trigger cascading failures.\n- **Priority boosting** to prevent starvation is unnecessary in a short burst where no task is starved long enough to matter.\n\nIn essence, the burst scenario is too small and short-lived for the overhead of AgentRM's scheduling to pay off, and the baseline systems already handle it adequately without specialized scheduling.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "For a simplified system with only 2 execution lanes and no rate limit concerns, here's what to keep and omit:\n\n**Keep:**\n1. **MLFQ with 2 priority queues** (Interactive and Background) — essential for prioritizing user-facing turns over sub-agent tasks, preventing blocking behaviors even with limited lanes.\n2. **Priority boosting** — prevents starvation of background tasks when the interactive queue is continuously occupied.\n3. **Zombie reaper** — still critical because zombie subagents can block one of only 2 lanes, causing 50% throughput loss.\n\n**Safely omit:**\n1. **Third priority queue (Sub-agent)** — with only 2 lanes, a binary priority split is sufficient.\n2. **Token bucket per model API** — no rate limit concerns.\n3. **AIMD backoff** — no rate limit concerns.\n4. **Admission control** — no rate limit concerns.\n5. **Dominant Resource Fairness (DRF)** — with only 2 lanes and no rate limits, resource contention is minimal and simple round-robin suffices.\n6. **Work-conserving scheduling** — with only 2 lanes, idle lanes are immediately visible and don't require explicit work-conserving logic.\n\n**Result**: A minimal scheduler with 2 priority queues, periodic priority boosting (e.g., every 10 turns), and a zombie reaper scanning every 5 seconds. This preserves the core reliability benefits while eliminating complexity from rate limit management and multi-resource fairness.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 5,
+          "total": 5,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "How many priority queues does AgentRM's MLFQ scheduler use?",
+        "answer": "AgentRM's MLFQ scheduler uses **three priority queues**:\n\n- **Queue 0 (Interactive)**: User-facing messages with highest priority\n- **Queue 1 (Sub-agent)**: Computational tasks spawned by agents\n- **Queue 2 (Background)**: Maintenance, logging, and periodic tasks",
+        "passed": false,
+        "score": 0.5,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 2,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "Which OpenClaw issue number documents cross-channel blocking where a user message was blocked for over 6 hours?",
+        "answer": "The OpenClaw issue documenting cross-channel blocking where a user message was blocked for over 6 hours is **issue #12442**.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What scheduling technique from Solaris inspires AgentRM's priority boosting mechanism?",
+        "answer": "AgentRM's priority boosting mechanism is inspired by **Solaris TS (Time-Sharing) scheduling**. In Solaris TS, thread priorities are periodically boosted to prevent starvation of lower-priority threads. AgentRM applies the same principle: it periodically promotes tasks from lower priority queues (Q1, Q2) back to higher priority queues (Q0) to ensure that long-running background tasks eventually get execution time and are not permanently starved by a continuous stream of interactive tasks.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What congestion control algorithm inspired AgentRM's rate limit handling approach?",
+        "answer": "AgentRM's rate limit handling is inspired by **TCP congestion control** (Jacobson, 1988), specifically the **AIMD (Additive Increase Multiplicative Decrease)** algorithm. This is the same mechanism TCP uses to manage network congestion: when a packet loss (or rate limit error) is detected, the sender multiplicatively decreases its window size (halving the sending rate), then gradually increases it additively as successful transmissions continue.\n\nThe paper also draws from **ATM admission control** (ATM Forum, 1996) for the admission control component that checks capacity before dispatching turns.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "In the high-load scenario, how many zombies does the FIFO baseline produce?",
+        "answer": "In the high-load scenario (280 turns, 10 agents, 10% hang rate), the FIFO baseline produces **29 zombies**.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "In the cascade scenario, what was the oscillating hang rate range?",
+        "answer": "In the cascade scenario, the oscillating hang rate ranged from **5% to 40%** over a 10-minute period. This modeled real-world API rate limit waves where failure probability fluctuates dynamically.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 3,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "How many priority queues does AgentRM's MLFQ scheduler use?",
+        "answer": "AgentRM's MLFQ scheduler uses **three** priority queues: Interactive, Sub-agent, and Background.",
+        "passed": false,
+        "score": 0.5,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 2,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "Which OpenClaw issue number documents cross-channel blocking where a user message was blocked for over 6 hours?",
+        "answer": "Based on the conversation history, I do not have information about specific OpenClaw issue numbers. The earlier summary mentions that AgentRM analyzed 40,000+ GitHub issues to identify scheduling failures, but no specific issue numbers were provided in the discussion.\n\nI cannot fabricate an issue number I do not know.",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain": {
+            "matched": 0,
+            "total": 1,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "What scheduling technique from Solaris inspires AgentRM's priority boosting mechanism?",
+        "answer": "AgentRM's priority boosting mechanism is inspired by **Solaris's priority-based scheduling with aging**, specifically the technique where a thread's priority is periodically increased to prevent starvation. In Solaris, threads in lower-priority queues have their priority boosted over time so they eventually get scheduled. AgentRM applies the same principle: sub-agent and background tasks have their priority periodically boosted to the interactive queue, ensuring they are not indefinitely starved when higher-priority tasks continuously occupy the system.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What congestion control algorithm inspired AgentRM's rate limit handling approach?",
+        "answer": "AgentRM's rate limit handling approach is inspired by **TCP congestion control**, specifically the **AIMD (Additive Increase Multiplicative Decrease)** algorithm.\n\nThe paper explicitly uses AIMD backoff: when a rate limit error is detected, the token refill rate is multiplicatively decreased (like TCP's multiplicative decrease on packet loss), and then gradually increased additively as successful requests proceed (like TCP's additive increase during congestion avoidance). This mirrors how TCP probes network capacity while avoiding congestion collapse.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "In the high-load scenario, how many zombies does the FIFO baseline produce?",
+        "answer": "Based on the provided experimental results, the high-load scenario (280 turns, 10% hang) shows a **76% zombie reduction** with AgentRM-MLFQ compared to the FIFO baseline. However, the absolute number of zombies produced by the FIFO baseline is not explicitly stated in the information available.",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain": {
+            "matched": 0,
+            "total": 1,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "In the cascade scenario, what was the oscillating hang rate range?",
+        "answer": "Based on the experimental results summary, in the cascade scenario (149 turns), the hang rate ranged from **5% to 40%**.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 3,
+            "ok": true
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "MLFQ queue count",
+        "must_contain": [
+          "3"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Zombie reaper interval",
+        "must_contain": [
+          "5"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Zombie threshold",
+        "must_contain": [
+          "30"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Recovery probability",
+        "must_contain": [
+          "50"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "OpenClaw blocking issue",
+        "must_contain": [
+          "12442"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain": {
+          "matched": 0,
+          "total": 1,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "CTSS inspiration",
+        "must_contain_any": [
+          "CTSS",
+          "Corbato"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 2,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Token bucket mechanism",
+        "must_contain_any": [
+          "token bucket",
+          "Token bucket"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "DRF fairness",
+        "must_contain_any": [
+          "DRF",
+          "Dominant Resource"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Faulty scenario zombie recovery count",
+        "must_contain": [
+          "15"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain": {
+          "matched": 0,
+          "total": 1,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "High-load P95 latency for AgentRM",
+        "must_contain_any": [
+          "323001",
+          "323,001"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 2,
+          "ok": false
+        }
+      }
+    }
+  ]
+}

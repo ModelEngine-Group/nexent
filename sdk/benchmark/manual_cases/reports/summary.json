@@ -1,15 +1,196 @@
 {
-  "total_cases": 1,
+  "total_cases": 23,
+  "excluded_cases": 0,
   "metrics": {
-    "avg_task_success_retention": 1.0,
-    "avg_probe_retention": 0.9285714285714286,
-    "avg_token_reduction": 0.6566630384077126,
+    "avg_task_success_retention": 0.9855072463768115,
+    "avg_probe_retention": 0.859568511198946,
+    "avg_token_reduction": 0.6218884032380363,
+    "avg_net_token_reduction": 0.33032768080828473,
+    "avg_compression_cost_tokens": 5511.260869565217,
     "per_case": {
+      "agentrm_001_scheduling": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.6363636363636365,
+        "token_reduction": 0.6738095238095239,
+        "net_token_reduction": 0.40252643531332055,
+        "compression_cost_tokens": 5140,
+        "summary_score": 0.6
+      },
+      "agentrm_002_context_management": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.2,
+        "token_reduction": 0.6252019386106624,
+        "net_token_reduction": 0.29540429564118764,
+        "compression_cost_tokens": 4886,
+        "summary_score": 0.9166666666666666
+      },
+      "agentrm_003_empirical_study": {
+        "task_success_retention": 0.6666666666666666,
+        "probe_retention": 0.6666666666666666,
+        "token_reduction": 0.5879013659748094,
+        "net_token_reduction": 0.2728446884081369,
+        "compression_cost_tokens": 4683,
+        "summary_score": 0.6
+      },
+      "algorithm_homework": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.8024106458580088,
+        "net_token_reduction": 0.5534972517098141,
+        "compression_cost_tokens": 15181,
+        "summary_score": 0.36363636363636365
+      },
+      "alphaevolve_001_matrix_mult": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.875,
+        "token_reduction": 0.5234887737478411,
+        "net_token_reduction": 0.3871332383152307,
+        "compression_cost_tokens": 4163,
+        "summary_score": 1.0
+      },
+      "alphaevolve_002_math_problems": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.75,
+        "token_reduction": 0.6754575870891557,
+        "net_token_reduction": 0.5422323681364892,
+        "compression_cost_tokens": 6515,
+        "summary_score": 1.0
+      },
+      "alphaevolve_003_data_center": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.6666666666666666,
+        "token_reduction": 0.7259702575262967,
+        "net_token_reduction": 0.5876946573212971,
+        "compression_cost_tokens": 7349,
+        "summary_score": 1.0
+      },
+      "alphaevolve_004_gemini_kernel": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.5525872442839952,
+        "net_token_reduction": 0.35795020620131357,
+        "compression_cost_tokens": 3170,
+        "summary_score": 0.8
+      },
+      "astro_001_simulation_setup": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.5,
+        "token_reduction": 0.5942962281508739,
+        "net_token_reduction": 0.18488881401617252,
+        "compression_cost_tokens": 4808,
+        "summary_score": 0.7
+      },
+      "astro_002_morphology_metrics": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.48531036006185113,
+        "net_token_reduction": 0.06282193717806282,
+        "compression_cost_tokens": 4052,
+        "summary_score": 1.0
+      },
+      "astro_003_complexity_floor": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.5076464005967922,
+        "net_token_reduction": 0.22372651886952108,
+        "compression_cost_tokens": 4192,
+        "summary_score": 0.8
+      },
+      "brain_001_target_reference": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.6067289117836445,
+        "net_token_reduction": 0.23012057687761053,
+        "compression_cost_tokens": 4948,
+        "summary_score": 1.0
+      },
+      "brain_002_recovery_profile": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.675779939617578,
+        "net_token_reduction": 0.3509834775767113,
+        "compression_cost_tokens": 4660,
+        "summary_score": 0.9166666666666666
+      },
+      "brain_003_pretrained_random": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.6943633850407003,
+        "net_token_reduction": 0.3384061981184283,
+        "compression_cost_tokens": 5554,
+        "summary_score": 1.0
+      },
       "example_infra": {
         "task_success_retention": 1.0,
-        "probe_retention": 0.9285714285714286,
-        "token_reduction": 0.6566630384077126,
-        "summary_score": 0.6
+        "probe_retention": 0.6874999999999999,
+        "token_reduction": 0.6989878908367975,
+        "net_token_reduction": 0.46154614795323584,
+        "compression_cost_tokens": 8359,
+        "summary_score": 0.2
+      },
+      "nasr_001_architecture": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.6007067137809188,
+        "net_token_reduction": 0.21291180683445876,
+        "compression_cost_tokens": 3980,
+        "summary_score": 0.9090909090909091
+      },
+      "nasr_002_ablation_results": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.5016148566814695,
+        "net_token_reduction": 0.28925934383801477,
+        "compression_cost_tokens": 3693,
+        "summary_score": 0.8181818181818182
+      },
+      "neuroai_001_predictive_subspace_framework": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.4545454545454546,
+        "token_reduction": 0.6294223465920448,
+        "net_token_reduction": 0.268630201028518,
+        "compression_cost_tokens": 4152,
+        "summary_score": 0.3181818181818182
+      },
+      "neuroai_002_matched_accuracy_recovery": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.8333333333333334,
+        "token_reduction": 0.5632885632885634,
+        "net_token_reduction": 0.14860738410289628,
+        "compression_cost_tokens": 4451,
+        "summary_score": 0.6666666666666666
+      },
+      "neuroai_003_robustness_controls": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.5,
+        "token_reduction": 0.6231799650553291,
+        "net_token_reduction": 0.33327814569536424,
+        "compression_cost_tokens": 4386,
+        "summary_score": 0.4
+      },
+      "qoulipo_001_rigidity_backbone": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.25,
+        "token_reduction": 0.6167904054825815,
+        "net_token_reduction": 0.2953771289537713,
+        "compression_cost_tokens": 4802,
+        "summary_score": 1.0
+      },
+      "qoulipo_002_quantum_qpu": {
+        "task_success_retention": 1.0,
+        "probe_retention": 0.75,
+        "token_reduction": 0.6246943765281174,
+        "net_token_reduction": 0.3334496962926761,
+        "compression_cost_tokens": 5216,
+        "summary_score": 0.7272727272727273
+      },
+      "sci_paper": {
+        "task_success_retention": 1.0,
+        "probe_retention": 1.0,
+        "token_reduction": 0.7137955940772842,
+        "net_token_reduction": 0.46424614020831795,
+        "compression_cost_tokens": 8419,
+        "summary_score": 0.7272727272727273
       }
     }
   }

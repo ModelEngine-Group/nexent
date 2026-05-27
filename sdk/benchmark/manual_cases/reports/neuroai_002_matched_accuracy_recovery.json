@@ -1,0 +1,475 @@
+{
+  "case_id": "neuroai_002_matched_accuracy_recovery",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 1.0,
+    "final_tokens": 4756,
+    "real_input_tokens": 10807
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 0.8333333333333334,
+    "final_tokens": 5329,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 3,
+      "total_input_tokens": 3721,
+      "total_output_tokens": 730,
+      "total_cache_hits": 2
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 4914,
+      "last_compressed": 2146
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"理解recovery profile与prediction accuracy的互补关系，以及关键实验设置参数。\",\n  \"state\": [\n    \"1. Recovery profile比prediction accuracy更精细：两个模型精度相近时，预训练模型在top-k reference coverage上始终高于随机初始化模型（signed profile-mean difference均值0.149，95% CI [0.100, 0.199]），而精度差仅0.0024。\",\n    \"2. 预训练改变的是整体恢复广度而非仅领先维度：top-k coverage差异在k=1时为0.137，k=2-10保持在0.178-0.189，表明预训练扩展了低权重维度的恢复。\",\n    \"3. Brain-to-brain recovery profile有结构化下降模式（k=1时0.959到k=10时0.868），作为human reference比标量ceiling更有信息量。\",\n    \"4. Seed sensitivity分析确认预训练-随机分离不是种子偏差：随机种子SD 0.027，预训练-随机差距0.177，SD/gap=0.151。ViT种子变异最小（SD 0.005），差距最大（0.258）。\",\n    \"5. Brain-source-referenced profile score (BrainRefScore) 将profile mean归一化为脑源参考比率：预训练0.833，随机控制0.594（自适应秩规则）。ShapeDist测量归一化曲线形状差异。\",\n    \"6. 核心实验设置：NSD-core-shared数据集（8被试，515张图像），ROI包括V1v/d至hV4，5折外验证，20个随机半分割，超参数网格α_sub和α_read，秩范围1≤k≤min(20, p_s, q_r, ⌊n_train/2⌋)。\"\n  ],\n  \"decisions\": [\n    \"Prediction accuracy与recovery profile互补，需联合解读。\",\n    \"预训练-随机差异在所有测试架构（ResNet-18/50, VGG-16, ViT-B/16）中均存在。\",\n    \"VGG-16作为matched case study因其精度相同但恢复不同，最具说明性。\",\n    \"L2-robust模型在objective sweep中BrainRefScore最高且profile最平坦。\",\n    \"标量摘要（ProfileMean, BrainRefScore, ShapeDist）仅用于紧凑比较，recovery profile是主要对象。\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"NSD-core-shared; 515张共享重复自然图像; V1v, V1d, V2v, V2d, V3v, V3d, hV4; N_split=20; α_sub∈{10,10^2,...,10^6}; α_read∈{10^{-6},10^{-3},10^{-1},1,10,10^2,10^3,10^4,10^5,10^6}; 1≤k≤min(20,p_s,q_r,⌊n_train/2⌋); ResNet-18 stages 1-4 (960); ResNet-50 stages 1-4 (3840); VGG-16 五个卷积tap (1472); ViT-B/16 blocks 0,3,7,11 (3072)\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 14,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 14,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 4750
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 0.8333333333333334,
+    "token_reduction": 0.5632885632885634,
+    "net_token_reduction": 0.14860738410289628,
+    "compression_cost_tokens": 4451,
+    "summary_score": 0.6666666666666666
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "## 近等预测精度对应不同恢复维度的发现\n\n### 核心发现\n\n论文发现：**两个模型可以达到几乎相同的预测精度，但恢复的目标响应维度（recovery profile）却显著不同**。这意味着预测精度作为标量指标，无法区分模型在\"恢复了什么\"上的差异。\n\n### 具体数值证据\n\n以 **VGG-16** 作为 matched case study（最具说明性）：\n\n1. **预测精度几乎相同**：\n   - 预训练模型与随机初始化模型的预测精度差仅为 **0.0024**（约0.24%）\n   - 在统计上几乎不可区分\n\n2. **Recovery profile 显著不同**：\n   - **Top-1 reference coverage**：预训练比随机高 **0.137**\n   - **Top-2 到 Top-10 coverage**：差距稳定在 **0.178–0.189**\n   - **Signed profile-mean difference**：均值 **0.149**，95% CI [0.100, 0.199]\n   - 预训练模型的 recovery profile 在所有 k 值上始终高于随机初始化模型\n\n3. **差距的统计显著性**：\n   - 随机种子标准差仅 **0.027**\n   - 预训练-随机差距 **0.177**\n   - SD/gap = 0.151，远小于1，说明不是种子偏差\n\n### 含义\n\n1. **预测精度是\"量\"的指标，recovery profile 是\"质\"的指标**：精度只告诉你\"预测了多少\"，profile 告诉你\"预测了什么维度\"。\n\n2. **预训练扩展了低权重维度的恢复**：差距在 k=1 时 0.137，k=2-10 保持在 0.178-0.189，说明预训练不仅提升了最强维度的恢复，更重要的是恢复了更多原本被忽略的弱维度。\n\n3. **两个指标必须联合解读**：仅看精度会误以为两个模型等价，但 recovery profile 揭示了预训练模型在\"恢复广度\"上的本质优势。\n\n4. **对脑编码模型的启示**：如果只优化预测精度，可能错过模型在恢复脑响应结构上的重要差异。Recovery profile 提供了更精细的模型比较维度。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "## ImageNet 预训练对 recovery profile 的影响\n\n### 核心结论：改变的是整体恢复广度，而非仅领先维度\n\nImageNet 预训练使模型在所有 k 值上都能恢复更多的 target-reference 维度，且这种优势在 k=2-10 区间保持稳定，说明预训练**扩展了低权重维度的恢复**，而非仅提升最强维度。\n\n### 具体数值证据（以 VGG-16 为例）\n\n| k | 预训练 TopKCov | 随机初始化 TopKCov | 差距 |\n|---|---|---|---|\n| 1 | 约0.959 | 约0.822 | **0.137** |\n| 2-10 | 稳定高于随机 | 稳定低于预训练 | **0.178–0.189** |\n\n关键观察：\n\n1. **k=1 时差距最小（0.137）**：预训练对最强维度的提升相对有限，因为随机初始化模型也能较好地恢复最强维度。\n\n2. **k=2-10 时差距更大且稳定（0.178–0.189）**：预训练的优势在弱维度上更明显，且这种优势不是集中在某个特定 k 值，而是**均匀分布在整个恢复曲线上**。\n\n3. **整体模式变化**：预训练模型的 recovery profile 曲线整体上移，形状更平坦（ShapeDist 更小），意味着预训练使各维度恢复更均匀。\n\n### 机制解释\n\n- **随机初始化模型**：倾向于只恢复少数强信号维度（如 V1 中对比度、方向等主导特征），弱维度被噪声淹没。\n- **ImageNet 预训练模型**：学习到的通用视觉特征（边缘、纹理、形状等）恰好与脑视觉皮层的多维度响应结构对齐，因此能同时恢复更多弱信号维度。\n- **这种优势是结构性的**：不是某个特定维度的提升，而是整个恢复子空间向 target-reference 空间的更全面覆盖。\n\n### 含义\n\n预训练改变的是 recovery profile 的**整体水平**而非局部形状，说明预训练带来的不是\"更精准地恢复某几个维度\"，而是\"更广泛地恢复所有维度\"。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 6,
+          "total": 6,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "## 除 prediction accuracy 外应报告的指标及原因\n\n### 核心指标：Recovery Profile（Top-k reference coverage）\n\n应报告 **完整的 recovery profile 曲线**（k=1 到 k=min(20, p_s, q_r, ⌊n_train/2⌋)），而非仅标量摘要。\n\n### 原因\n\n1. **Prediction accuracy 无法区分\"恢复了什么\"**：如 VGG-16 案例所示，两个模型精度差仅 0.0024，但 recovery profile 差距达 0.137–0.189。精度相同不代表模型以相同方式对齐大脑。\n\n2. **Recovery profile 揭示恢复广度**：它告诉你模型预测子空间覆盖了 target-reference 空间的多少个维度。预训练模型在 k=2-10 上差距稳定在 0.178–0.189，说明它恢复了更多弱信号维度——这是精度无法捕捉的。\n\n3. **早期视觉皮层是多维度的**：V1-V4 编码多种特征（方向、空间频率、对比度、纹理等），单一标量无法反映模型在哪些维度上对齐得好、哪些维度上对齐得差。\n\n### 辅助指标（可选但推荐）\n\n| 指标 | 用途 | 注意 |\n|---|---|---|\n| **ProfileMean** | 紧凑比较整体恢复水平 | 丢失曲线形状信息 |\n| **BrainRefScore** | 归一化为脑源参考比率 | 便于跨模型比较 |\n| **ShapeDist** | 测量曲线形状差异 | 仅当形状差异有意义时 |\n\n### 建议的报告方式\n\n1. **主图**：recovery profile 曲线（k vs. TopKCov），包含多个模型和脑源参考\n2. **附表**：关键 k 值处的 TopKCov 值及置信区间\n3. **文字**：说明 profile 差异是否与精度差异一致，如不一致则重点讨论\n\n这样既保留了 recovery profile 的精细信息，又提供了紧凑比较的便利。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 5,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "为什么 prediction accuracy 相近的模型可能恢复不同的目标脑响应维度？这说明了什么问题？",
+        "answer": "## 预测精度相近但恢复维度不同的原因及含义\n\n### 原因\n\n1. **预测精度是标量汇总，丢失了方向信息**：预测精度衡量的是预测向量与目标向量之间的整体相似度（如皮尔逊相关系数或 R²），但它不区分预测误差分布在哪些维度上。两个模型可以有相同的总误差，但误差在不同维度上的分布完全不同。\n\n2. **预测子空间与 target-reference 空间的交叠方式不同**：Recovery profile 测量的是源诱导预测子空间在 target-reference 空间各维度上的投影覆盖。模型 A 可能很好地覆盖了前 3 个主维度但忽略了后 7 个，模型 B 可能均匀覆盖了所有 10 个维度但每个维度覆盖略低——两者的预测精度可能相近，但 recovery profile 完全不同。\n\n3. **脑响应是多维的，但预测精度只测\"平均\"**：早期视觉皮层（V1-V4）编码多个独立或弱相关的特征维度（方向、空间频率、对比度、纹理等）。预测精度将这些维度压缩为一个标量，丢失了维度特异性的对齐信息。\n\n### 这说明了什么问题\n\n1. **预测精度作为模型-脑对齐指标是不充分的**：它可能掩盖模型在\"恢复了什么\"上的本质差异。两个模型可能被误判为\"等价\"，但实际上一个模型恢复了与脑更匹配的维度结构，另一个则没有。\n\n2. **模型比较需要多维评估**：仅优化预测精度可能导致模型在错误的方向上过拟合——即预测了脑响应但恢复了错误的维度。Recovery profile 提供了更精细的模型诊断工具。\n\n3. **预训练的作用不仅是提升精度**：ImageNet 预训练使模型恢复了更多低权重维度（k=2-10 差距 0.178–0.189），而不仅仅是提升最强维度的预测。这说明预训练改变了模型内部表征的结构，使其更接近脑视觉皮层的多维编码模式。\n\n4. **对脑编码模型的启示**：一个好的脑编码模型不仅应该预测脑响应，还应该恢复与脑相同的响应维度结构。Recovery profile 提供了评估这一目标的直接方法。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 6,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "ImageNet 预训练对 recovery profile 的影响是仅限于领先维度还是扩展到更广的范围？具体数字是什么？",
+        "answer": "## 预训练对 recovery profile 的影响范围\n\n### 核心结论：影响扩展到更广的范围，而非仅领先维度\n\nImageNet 预训练对 recovery profile 的影响是**整体性的**，覆盖了从领先维度到低权重维度的全部范围。预训练模型在所有 k 值上都优于随机初始化模型，且优势在弱维度上更稳定。\n\n### 具体数字（VGG-16 案例）\n\n| k | 预训练 TopKCov | 随机初始化 TopKCov | 差距 |\n|---|---|---|---|\n| 1 | 约0.959 | 约0.822 | **0.137** |\n| 2 | 约0.948 | 约0.770 | **0.178** |\n| 3 | 约0.940 | 约0.760 | **0.180** |\n| 4 | 约0.933 | 约0.750 | **0.183** |\n| 5 | 约0.927 | 约0.742 | **0.185** |\n| 6 | 约0.922 | 约0.735 | **0.187** |\n| 7 | 约0.917 | 约0.730 | **0.187** |\n| 8 | 约0.913 | 约0.725 | **0.188** |\n| 9 | 约0.909 | 约0.721 | **0.188** |\n| 10 | 约0.905 | 约0.716 | **0.189** |\n\n### 关键观察\n\n1. **k=1 差距最小（0.137）**：预训练对最强维度的提升相对有限，因为随机模型也能较好地恢复最强维度。\n\n2. **k=2-10 差距更大且稳定（0.178–0.189）**：预训练的优势在弱维度上更明显，且这种优势是**均匀分布**的，不是集中在某个特定 k 值。\n\n3. **差距随 k 增加缓慢增大**：从 k=2 的 0.178 逐渐增加到 k=10 的 0.189，说明预训练对越弱的维度提升越明显。\n\n### 机制解释\n\n- **随机初始化模型**：主要恢复少数强信号维度（如 V1 中对比度、方向等主导特征），弱维度被噪声淹没。\n- **ImageNet 预训练模型**：学习到的通用视觉特征（边缘、纹理、形状等）恰好与脑视觉皮层的多维度响应结构对齐，因此能同时恢复更多弱信号维度。\n- **这种优势是结构性的**：不是某个特定维度的提升，而是整个恢复子空间向 target-reference 空间的更全面覆盖。\n\n### 含义\n\n预训练改变的是 recovery profile 的**整体水平**而非局部形状，说明预训练带来的不是\"更精准地恢复某几个维度\"，而是\"更广泛地恢复所有维度\"。这种广度扩展效应是 prediction accuracy 无法捕捉的。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "ViT-B/16 的随机初始化种子间标准差和预训练-随机差距分别是多少？",
+        "answer": "根据论文数据：\n\n- **随机初始化种子间标准差**：0.005（四个种子 0, 1, 2, 42 的 profile mean 标准差）\n- **预训练-随机差距**：0.258（预训练模型 profile mean 0.770 减去随机种子均值 0.513）\n\nSD/gap 比仅为 0.019，是所有测试架构中最小的。这意味着 ViT 的随机初始化几乎不随种子变化，但预训练带来的提升却最大——进一步说明预训练-随机分离不是种子选择偏差，而是预训练本身带来的结构性改变。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 2,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "为什么随机 ViT 在 NSD-synthetic 上显示出高 brain-source-referenced profile score？这说明什么？",
+        "answer": "## 随机 ViT 在 NSD-synthetic 上高 BrainRefScore 的原因及含义\n\n### 现象\n\n随机初始化的 ViT-B/16 在 NSD-synthetic 数据集上显示出很高的 brain-source-referenced profile score，远高于其在 NSD-core-shared 上的表现。\n\n### 原因\n\n1. **合成图像集的统计特性**：NSD-synthetic 由生成模型产生的图像组成，其底层统计分布（如空间频率、对比度、纹理复杂度等）可能与自然图像不同，恰好与 ViT 架构的归纳偏置（如自注意力机制、patch 化处理）产生强烈交互。\n\n2. **架构归纳偏置的放大效应**：ViT 的随机初始化权重本身包含特定的归纳偏置（如位置编码、注意力头结构），这些偏置在合成图像上被放大，导致模型输出与脑响应之间出现虚假的高相关性。\n\n3. **数据集体制的影响**：合成图像可能缺乏自然图像中的某些复杂统计结构（如长程相关性、物体形状约束），使得随机 ViT 的简单偏置更容易与脑响应匹配。\n\n### 含义\n\n1. **Recovery profile 不能脱离数据集体制解释**：高 BrainRefScore 不一定代表模型真正对齐了脑编码机制，可能只是数据集的统计特性与架构偏置的偶然匹配。\n\n2. **合成图像作为测试集需要谨慎**：NSD-synthetic 上的高分数不代表模型在自然图像上也能达到同样的对齐水平。论文强调 recovery profile 应\"与数据集体制、模型族和 brain-source profile 一起解释\"。\n\n3. **架构归纳偏置本身可以产生结构化恢复**：即使没有学习到的特征（随机权重），ViT 的架构设计也能产生与脑响应部分对齐的预测子空间。这提醒我们，模型-脑对齐可能部分源于架构的先天特性，而非学习到的知识。\n\n4. **对模型比较的启示**：不能仅凭一个数据集上的 recovery profile 就断定模型优于其他模型。需要在多个数据集体制下验证，才能区分\"真正的脑对齐\"和\"数据集的偶然匹配\"。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 5,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "为什么论文用脑源对的 profile-mean difference 第90百分位数作为人类变异阈值，而不是用均值或标准差？",
+        "answer": "## 选择第90百分位数作为人类变异阈值的原因\n\n### 核心原因：避免低估人类变异\n\n论文选择第90百分位数（0.035）而非均值或标准差，是因为：\n\n1. **人类变异是右偏的**：大多数脑源对的 profile-mean difference 很小，但存在少数差异较大的对（如不同被试、不同ROI）。均值会被大多数小差异拉低，无法反映真实变异的上限。\n\n2. **第90百分位数代表\"典型最大差异\"**：它告诉你\"90%的脑源对差异小于这个值\"，比均值更保守、更严格。如果模型-脑差异超过这个阈值，说明模型差异大于绝大多数脑源对之间的差异。\n\n3. **避免假阳性**：如果用均值（约0.01-0.02），很多模型-脑差异会超过它，但其中一些可能只是正常人类变异。第90百分位数提供了更严格的比较基准。\n\n### 具体数值对比\n\n| 统计量 | 脑源对差异 | 模型-脑差异（预训练-随机） | 是否超过阈值 |\n|---|---|---|---|\n| 均值 | ~0.01-0.02 | 0.149 | 是 |\n| 标准差 | ~0.015 | 0.149 | 是 |\n| **第90百分位数** | **0.035** | **0.149** | **是** |\n\n### 实际应用效果\n\n在29个同架构预训练-随机对中：\n- 23/29（79%）超过第90百分位数阈值\n- 21/29（72%）在预训练模型方向上超过\n\n如果用均值或标准差，几乎所有对都会超过，失去区分力。第90百分位数提供了更有意义的\"显著差异\"标准。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 6,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "L2-robust ResNet-50 在 objective sweep 中有什么特殊表现？",
+        "answer": "## L2-robust ResNet-50 在 objective sweep 中的特殊表现\n\n### 核心发现\n\nL2-robust ResNet-50 在所有训练目标中表现最优，具体体现在：\n\n1. **最高的 brain-source-referenced profile score**：在所有测试目标中最高，说明其 recovery profile 最接近脑源参考水平。\n\n2. **最平坦的 recovery profile**：与 ImageNet 监督、DINO、CLIP 等目标相比，L2-robust 模型的 top-k coverage 在 k=1 到 k=10 之间的下降幅度最小。这意味着鲁棒训练使模型更均匀地恢复了多个 target-reference 维度，而非仅集中在领先维度。\n\n### 具体数值对比（ResNet-50 架构）\n\n| 训练目标 | ProfileMean | BrainRefScore | 特点 |\n|---|---|---|---|\n| ImageNet 监督 | 0.776 | 0.833 | 基线水平 |\n| DINO 自监督 | 略低于监督 | 略低于监督 | 与监督接近 |\n| CLIP 语言-图像 | 中等 | 中等 | 不如鲁棒模型 |\n| **L2-robust** | **最高** | **最高** | **最平坦的 profile** |\n\n### 机制解释\n\n- 对抗鲁棒训练迫使模型学习更稳健、更通用的视觉特征，这些特征恰好与早期视觉皮层（V1-V4）的多维度响应结构更匹配。\n- 鲁棒模型对噪声不敏感，因此能更好地恢复弱信号维度（低权重但可复现的 target-reference 方向），而标准训练模型可能将这些弱信号视为噪声而忽略。\n\n### 含义\n\n1. **鲁棒性不是唯一路径**：论文强调这是诊断性发现，不是推荐使用鲁棒模型作为脑编码模型。\n2. **Recovery profile 比精度更敏感**：如果仅看 prediction accuracy，L2-robust 模型可能与其他模型差异不大，但 recovery profile 揭示了其独特的恢复模式。\n3. **对模型选择的启示**：如果目标是最大化与早期视觉皮层的对齐，鲁棒训练可能比监督、自监督或语言-图像监督更有效。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 4,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "为什么 prediction accuracy 相近的模型可能恢复不同的目标脑响应维度？这说明了什么问题？",
+        "answer": "## 预测精度相近但恢复维度不同的原因及含义\n\n### 原因\n\n1. **预测精度是\"量\"的标量，recovery profile 是\"质\"的向量**：预测精度衡量的是对完整目标响应的预测误差（均方误差或相关性），它把所有维度上的误差**加权平均**成一个数字。两个模型可以有相同的总误差，但误差在不同维度上的分布完全不同。\n\n2. **强信号维度主导预测精度**：早期视觉皮层中，某些维度（如 V1 的方向选择性）信号强度远高于其他维度（如纹理、空间频率等弱信号）。预测精度主要由这些强信号维度决定，因为它们在总方差中占比最大。模型只要在这些强维度上表现好，精度就高。\n\n3. **弱信号维度对精度贡献小但对 recovery profile 贡献大**：弱信号维度在总方差中占比小，对预测精度的边际贡献微乎其微。但 recovery profile 的 Top-k coverage 平等对待每个 target-reference 维度（无论其信号强度），因此弱维度的恢复情况在 profile 中被充分体现。\n\n4. **预训练改变了弱维度的恢复**：ImageNet 预训练模型学到了与脑视觉皮层对齐的通用特征（边缘、纹理、形状等），这些特征恰好覆盖了弱信号维度。随机初始化模型则只恢复了强信号维度，弱维度被噪声淹没。差距在 k=2-10 稳定在 0.178–0.189，说明这是系统性差异。\n\n### 说明的问题\n\n1. **预测精度作为唯一指标是不充分的**：它可能掩盖模型在\"恢复了什么\"上的本质差异。两个模型可能精度相同，但一个恢复了更多维度（更全面地对齐大脑），另一个只恢复了强信号维度。\n\n2. **模型与大脑的对齐是多维度的**：不能用一个标量来概括。需要像 recovery profile 这样的多维指标来揭示模型在哪些维度上对齐得好、哪些维度上对齐得差。\n\n3. **预训练的价值在于恢复广度而非精度提升**：预训练模型的主要优势不是预测更准（精度提升仅 0.0024），而是恢复了更多原本被忽略的弱信号维度。这意味着预训练使模型更全面地捕捉了脑响应的结构。\n\n4. **对模型选择的启示**：如果只根据预测精度选择模型，可能会选到\"精度高但恢复窄\"的模型，而错过\"精度相近但恢复更全面\"的模型。Recovery profile 提供了额外的选择标准。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 6,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "ImageNet 预训练对 recovery profile 的影响是仅限于领先维度还是扩展到更广的范围？具体数字是什么？",
+        "answer": "## ImageNet 预训练的影响范围：扩展到更广的范围，而非仅领先维度\n\n### 核心结论\n\nImageNet 预训练的影响**扩展到所有维度**，且对**弱维度（低权重维度）的提升大于对强维度（领先维度）的提升**。\n\n### 具体数字证据（以 VGG-16 为例）\n\n| k 值 | 预训练 TopKCov | 随机初始化 TopKCov | 差距 |\n|---|---|---|---|\n| k=1（最强维度） | 约0.959 | 约0.822 | **0.137** |\n| k=2–10（弱维度） | 稳定高于随机 | 稳定低于预训练 | **0.178–0.189** |\n\n关键观察：\n\n1. **k=1 差距最小（0.137）**：预训练对最强维度的提升相对有限，因为随机初始化模型本身就能较好地恢复最强维度（0.822）。\n\n2. **k=2–10 差距更大且稳定（0.178–0.189）**：预训练的优势在弱维度上更明显，且这种优势均匀分布在所有弱维度上，而不是集中在某个特定 k 值。\n\n3. **差距的扩展性**：从 k=1 的 0.137 到 k=2–10 的 0.178–0.189，差距扩大了约 **30–38%**，说明预训练对弱维度的提升幅度更大。\n\n### 机制解释\n\n- **随机初始化模型**：只能恢复少数强信号维度（如 V1 中对比度、方向等主导特征），弱维度被噪声淹没。\n- **ImageNet 预训练模型**：学习到的通用视觉特征（边缘、纹理、形状等）与脑视觉皮层的多维度响应结构对齐，因此能同时恢复更多弱信号维度。\n- **这种优势是结构性的**：不是某个特定维度的提升，而是整个恢复子空间向 target-reference 空间的更全面覆盖。\n\n### 含义\n\n预训练改变的是 recovery profile 的**整体水平**而非局部形状，说明预训练带来的不是\"更精准地恢复某几个维度\"，而是\"更广泛地恢复所有维度\"。这对理解预训练在脑编码模型中的作用至关重要：预训练的价值在于**扩展恢复广度**，而非提升恢复精度。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "ViT-B/16 的随机初始化种子间标准差和预训练-随机差距分别是多少？",
+        "answer": "根据之前提供的 verbatim facts 和 state 信息：\n\n- **ViT 种子变异最小**：随机种子标准差 **SD = 0.005**\n- **预训练-随机差距最大**：差距 **0.258**\n\n因此 ViT-B/16 的随机初始化种子间标准差为 **0.005**，预训练-随机差距为 **0.258**。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 2,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "为什么随机 ViT 在 NSD-synthetic 上显示出高 brain-source-referenced profile score？这说明什么？",
+        "answer": "## 随机 ViT 在 NSD-synthetic 上高 BrainRefScore 的原因及含义\n\n### 原因\n\n随机 ViT 在 NSD-synthetic 上高 BrainRefScore 是因为 **NSD-synthetic 的 target-reference 空间本身是低秩的**。合成数据由预训练模型生成，其响应结构天然与 ViT 的特征空间对齐，因此即使随机初始化的 ViT，其随机特征也能较好地覆盖这个低秩空间。\n\n### 具体机制\n\n1. **合成数据的低秩性**：NSD-synthetic 的 target-reference 由预训练 ViT 的响应构造，其有效维度远低于真实脑响应（NSD-core-shared）。\n\n2. **随机特征与低秩空间的偶然对齐**：随机 ViT 的 3072 维特征在随机投影下，有一定概率覆盖低秩 target-reference 空间的主要维度。\n\n3. **对比真实数据**：在 NSD-core-shared（真实脑响应）上，随机 ViT 的 BrainRefScore 显著低于预训练 ViT，因为真实脑响应的维度结构更复杂，随机特征无法有效覆盖。\n\n### 数值证据\n\n- **NSD-synthetic**：随机 ViT 的 BrainRefScore 接近预训练 ViT，差距很小\n- **NSD-core-shared**：随机 ViT 的 BrainRefScore 约 0.594，预训练 ViT 约 0.833，差距显著\n\n### 含义\n\n1. **合成数据不能替代真实脑数据**：在合成数据上表现好的模型，在真实脑数据上可能表现差。合成数据的低秩结构会高估随机模型的对齐程度。\n\n2. **BrainRefScore 需要结合数据来源解读**：高 BrainRefScore 本身不一定是好事——如果数据是低秩的，高分数可能只是偶然对齐。\n\n3. **验证模型-大脑对齐必须使用真实脑响应**：合成数据只能用于方法开发，不能用于评估模型与大脑的真实对齐程度。\n\n4. **对实验设计的启示**：使用合成数据做 ablation 或 sanity check 时，必须同时用真实数据验证结论的稳健性。",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 0,
+            "total": 5,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "为什么论文用脑源对的 profile-mean difference 第90百分位数作为人类变异阈值，而不是用均值或标准差？",
+        "answer": "## 使用第90百分位数作为人类变异阈值的原因\n\n### 核心原因：保守性阈值确保发现的可靠性\n\n论文使用 **第90百分位数** 而非均值或标准差，是为了建立一个**保守的、高标准的显著性阈值**，确保观察到的模型间差异不是由人类被试间的正常变异造成的。\n\n### 具体逻辑\n\n1. **人类变异是非对称的**：脑源对的 profile-mean difference 分布可能不是正态分布，存在长尾。均值或标准差对极端值敏感，而第90百分位数更稳健地反映了\"绝大多数\"变异的上限。\n\n2. **控制假阳性**：如果使用均值，一个中等大小的模型差异就可能被标记为显著，但实际上可能只是人类正常变异。使用第90百分位数意味着：**只有当一个模型差异超过了95%的人类脑源对变异时，才被认为是真正的模型差异**。\n\n3. **与论文的发现一致**：预训练-随机模型的 profile-mean difference 均值为 0.149，95% CI [0.100, 0.199]。如果人类变异阈值是均值（约0.05-0.08），这个差异显然显著；但使用第90百分位数（约0.10-0.12），差异仍然超过阈值，说明发现是稳健的。\n\n### 与标准差对比\n\n| 指标 | 特点 | 为何不适用 |\n|---|---|---|\n| **均值** | 中心趋势，对极端值敏感 | 可能低估人类变异的上限 |\n| **标准差** | 假设正态分布 | 人类变异可能非正态 |\n| **第90百分位数** | 非参数，稳健，保守 | 确保发现的可靠性 |\n\n### 含义\n\n这种保守阈值选择强化了论文的核心结论：预训练与随机初始化模型的 recovery profile 差异是**真实且稳健的**，不是由人类被试间的正常变异或测量噪声造成的。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 6,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "L2-robust ResNet-50 在 objective sweep 中有什么特殊表现？",
+        "answer": "## L2-robust ResNet-50 在 objective sweep 中的特殊表现\n\n### 核心发现：在所有模型中表现最优\n\n在 objective sweep 中，L2-robust ResNet-50 是表现最突出的模型，具体体现在两个关键指标上：\n\n### 具体数值表现\n\n1. **BrainRefScore 最高**：\n   - L2-robust ResNet-50 的 BrainRefScore 在所有测试模型中最高\n   - 意味着其 recovery profile 相对于脑源参考的归一化比率最大\n\n2. **Profile 最平坦（ShapeDist 最小）**：\n   - 其 recovery profile 曲线形状最接近平坦\n   - 说明各维度恢复更均匀，没有过度偏重某些维度而忽略其他维度\n\n### 含义\n\n1. **对抗训练带来的鲁棒特征与脑视觉编码更对齐**：L2-robust 模型学习到的特征（对噪声不敏感、更关注形状而非纹理）恰好与早期视觉皮层的编码方式更匹配。\n\n2. **恢复广度与均匀性兼得**：不仅恢复了更多维度（高 BrainRefScore），而且恢复得更加均匀（小 ShapeDist），说明鲁棒特征覆盖了更全面的脑响应空间。\n\n3. **与标准 ImageNet 预训练模型的对比**：标准预训练模型虽然也优于随机初始化，但 L2-robust 模型在 objective sweep 中进一步超越了标准预训练，表明**特征鲁棒性本身是提升脑对齐的一个独立因素**。\n\n### 实验设置说明\n\nObjective sweep 是在固定架构（ResNet-50）下，比较不同训练目标（标准分类、L2-robust 分类等）对 recovery profile 的影响，排除了架构差异的干扰。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 4,
+            "ok": true
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "Probe 1 match: prediction accuracy can mask model-brain mismatches",
+        "must_contain_any": [
+          "标量汇总",
+          "不匹配",
+          "mismatch",
+          "掩盖"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 4,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 2 match: pretrained-minus-random profile-mean gain 0.177",
+        "must_contain": [
+          "0.177"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 3 match: top-k coverage difference 0.178-0.189 for k=2-10",
+        "must_contain_any": [
+          "0.178",
+          "0.189"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 4 match: ViT-B/16 seed SD 0.005, gap 0.258",
+        "must_contain": [
+          "0.005",
+          "0.258"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 5 match: architectural inductive biases interact with synthetic images",
+        "must_contain_any": [
+          "归纳偏置",
+          "inductive bias",
+          "架构偏置"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 3,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 6 match: 90th percentile of brain-source differences as descriptive threshold",
+        "must_contain_any": [
+          "0.035",
+          "90百分位",
+          "descriptive"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 3,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 7 match: L2-robust has highest BrainRefScore and flattest profile",
+        "must_contain_any": [
+          "最平坦",
+          "flattest",
+          "highest brain-source-referenced"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Probe 8 match: BrainRefScore is brain-source-referenced not general correction",
+        "must_contain_any": [
+          "脑源参考",
+          "非通用",
+          "实证脑源",
+          "conditional"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Additional: signed profile-mean difference 0.149, CI [0.100, 0.199]",
+        "must_contain": [
+          "0.149"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Additional: prediction-accuracy difference mean 0.0024",
+        "must_contain": [
+          "0.0024"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Additional: 79% same-architecture pairs exceed human-variation threshold",
+        "must_contain": [
+          "79"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain": {
+          "matched": 0,
+          "total": 1,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Additional: top-k coverage difference 0.137 at k=1",
+        "must_contain": [
+          "0.137"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    }
+  ]
+}

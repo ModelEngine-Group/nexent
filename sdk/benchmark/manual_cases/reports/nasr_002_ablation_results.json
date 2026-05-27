@@ -1,0 +1,406 @@
+{
+  "case_id": "nasr_002_ablation_results",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 0.75,
+    "final_tokens": 6884,
+    "real_input_tokens": 13137
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 0.75,
+    "final_tokens": 5954,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 4,
+      "total_input_tokens": 3236,
+      "total_output_tokens": 457,
+      "total_cache_hits": 3
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 4954,
+      "last_compressed": 2469
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"Summarize nASR ablation study design, results, limitations, and future directions.\",\n  \"state\": [\n    \"1. Five model variants tested: m01 (traditional ASR baseline), m02 (no neighborhood, global mean), m03 (neighborhood reconstruction), m04 (neighborhood + full-window covariance), m05 (no learnable reconstruction weights).\",\n    \"2. nASR variants (m02-m05) achieved 6-8x faster inference (1.0-1.3 ms) vs. m01 (~8-9 ms). m02 was Pareto-optimal across both subjects; m05 also Pareto-optimal for Subject 'a'.\",\n    \"3. For Subject 'a', m05 had highest test Balanced Accuracy (0.677) and Accuracy (0.680); m02 was close second. For Subject 'f', m02 was best (Balanced Accuracy 0.618, F1 0.660, Accuracy 0.623). m01 ranked worst on test metrics for both subjects.\",\n    \"4. Training convergence: nASR variants converged within 5-15 epochs (good zone); m01 converged later (epoch 22 for Subject 'a'). Earlier convergence did not sacrifice accuracy.\",\n    \"5. Noise mask analysis: m01 reconstructed >30% of noisy windows across all channels; m02 selectively reconstructed only artifact-contaminated channels, preserving clean channels.\",\n    \"6. Ablation insights: full-window covariance (m04) detrimental; learnable weights may add unnecessary complexity; neighborhood reconstruction underperforms global mean due to correlated residual noise; traditional ASR overfits.\"\n  ],\n  \"decisions\": [\n    \"m02 (nASR without neighborhood) provides best accuracy-efficiency balance.\",\n    \"Full-window covariance estimation is detrimental and should be avoided.\",\n    \"Global mean reconstruction outperforms neighborhood-based reconstruction.\",\n    \"Learnable reconstruction weights may be unnecessary under certain conditions.\",\n    \"Traditional ASR with fixed threshold over-corrects and generalizes poorly.\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"None\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 13,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 13,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 5644
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 1.0,
+    "token_reduction": 0.5016148566814695,
+    "net_token_reduction": 0.28925934383801477,
+    "compression_cost_tokens": 3693,
+    "summary_score": 0.8181818181818182
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "Based on the ablation results, I would choose **m02 (nASR without neighborhood, using global mean reconstruction)** for deployment in a real-time BCI system with limited compute.\n\n**Reasons:**\n\n1. **Best accuracy-efficiency trade-off across both subjects**: m02 was Pareto-optimal for both Subject 'a' and Subject 'f'. It achieved the highest test Balanced Accuracy (0.618), F1 (0.660), and Accuracy (0.623) for Subject 'f', and was a close second for Subject 'a' (Balanced Accuracy 0.672 vs. m05's 0.677).\n\n2. **Fastest inference**: m02 achieved 1.0–1.3 ms inference time (6–8× faster than traditional ASR), matching the speed of other nASR variants. This is critical for real-time BCI.\n\n3. **Simplest design**: m02 uses global mean reconstruction without neighborhood or learnable weights, reducing computational and memory overhead. The ablation showed that neighborhood reconstruction (m03) underperforms due to correlated residual noise, and learnable weights (m05) add unnecessary complexity without consistent benefit.\n\n4. **Robust noise handling**: m02 selectively reconstructs only artifact-contaminated channels, preserving clean channels — ideal for real-time systems where artifacts are sporadic.\n\n5. **Fast convergence**: m02 converged within 5–15 epochs, enabling quick training or fine-tuning on new subjects without overfitting.\n\nWhile m05 was also Pareto-optimal for Subject 'a', its advantage was marginal (+0.005 Balanced Accuracy) and did not generalize to Subject 'f', making m02 the more reliable and simpler choice for deployment.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 5,
+          "total": 5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "The paper's finding that neighborhood reconstruction underperforms global mean reconstruction is **likely generalizable to scenarios where residual noise is spatially correlated across channels**, as the authors identified. When neighboring channels share similar noise patterns, averaging them amplifies rather than cancels the noise, making global mean (which averages across all channels) more robust by diluting correlated noise.\n\n**Conditions where neighborhood reconstruction might be preferred:**\n\n1. **Spatially localized, uncorrelated noise**: If artifacts affect only a small, contiguous set of channels and the noise in neighboring channels is independent (e.g., a single bad electrode with thermal noise), neighborhood reconstruction could better preserve the local neural signal while removing the artifact.\n\n2. **Heterogeneous noise across the scalp**: If different scalp regions have distinct noise profiles (e.g., frontal eye movement artifacts vs. occipital alpha), a neighborhood approach could adapt reconstruction parameters per region, whereas global mean would blur these differences.\n\n3. **Very high-density EEG with sparse artifacts**: In systems with 128+ channels where only a few channels are contaminated, neighborhood reconstruction using only nearby clean channels might introduce less distortion than averaging across the entire array.\n\n4. **Non-stationary noise with spatial structure**: If noise patterns change over time but remain locally consistent (e.g., muscle tension in temporal regions), neighborhood reconstruction with adaptive weights could track these changes better than a static global mean.\n\nHowever, the paper's results suggest that for typical BCI scenarios with correlated residual noise, global mean is the safer default.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "This pattern — strong validation but poor test performance — implies that **traditional ASR (m01) is overfitting to the specific artifacts present in the validation set**, rather than learning a generalizable denoising strategy. This has several implications for the role of artifact removal in the BCI pipeline:\n\n1. **Artifact removal is not a standalone solution**: The denoising method must be robust to unseen artifact types and distributions. m01's fixed threshold and aggressive reconstruction cause it to memorize validation artifacts, then fail on test data with different noise characteristics. This suggests artifact removal should be integrated with, not separated from, the downstream classifier.\n\n2. **Over-correction harms generalization**: m01 reconstructed >30% of noisy windows across all channels, including clean ones. This excessive denoising likely removed neural signal components that were useful for classification, degrading test performance. A good artifact removal method should be **selective** — only modify channels that are actually contaminated.\n\n3. **Validation metrics can be misleading**: If validation data shares artifact patterns with training data (e.g., recorded in the same session), a method that overfits to those patterns can appear excellent. Test data from different sessions or subjects reveals the true generalization. This highlights the need for **cross-session or cross-subject evaluation** in BCI pipelines.\n\n4. **Simplicity and regularization matter**: nASR variants (especially m02) achieved better test performance with simpler, more regularized approaches (global mean, no learnable weights). This suggests that in BCI pipelines, **denoising should err on the side of under-correction** rather than over-correction, preserving neural signal even if some noise remains.\n\n5. **End-to-end learning may be beneficial**: The paper's nASR approach integrates denoising into a trainable pipeline, allowing the model to learn which channels to reconstruct based on downstream task performance. This contrasts with traditional ASR as a fixed preprocessing step, which cannot adapt to the classifier's needs.\n\nIn summary, the m01 results caution that aggressive, non-adaptive artifact removal can hurt BCI performance by destroying neural information, and that validation performance alone is insufficient to assess a denoising method's utility.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 5,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "Why does m01 (traditional ASR) have competitive validation performance but poor test performance? What does this overfitting pattern imply about artifact removal?",
+        "answer": "m01's competitive validation but poor test performance occurs because:\n\n**Traditional ASR with a fixed threshold (20) is not adaptive to varying artifact distributions.** During validation, the threshold may happen to match the artifact characteristics of that specific data split, leading to seemingly good denoising. However, test data contains different artifact patterns (different amplitudes, spatial distributions, or temporal dynamics), and the fixed threshold causes over-correction — reconstructing >30% of windows across all channels, including clean ones, thereby removing task-relevant neural features.\n\n**Implications for artifact removal in BCI pipelines:**\n\n1. **Fixed preprocessing is brittle**: A static threshold cannot generalize across sessions, subjects, or recording conditions. Artifact removal must adapt to the data.\n\n2. **Over-correction destroys signal**: Aggressive denoising that modifies too many channels removes neural information the classifier needs, degrading generalization.\n\n3. **Validation metrics can mislead**: High validation performance may simply reflect that the threshold matches validation artifacts, not that the method is truly effective. Cross-validation or cross-session evaluation is essential.\n\n4. **Integration over separation**: Artifact removal should be part of an end-to-end trainable pipeline (like nASR) so the model learns which channels to reconstruct based on downstream task performance, rather than being a fixed preprocessing step.\n\n5. **Under-correction is safer**: When in doubt, preserving more neural signal (even with some residual noise) is better than removing signal along with noise.",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 0,
+            "total": 3,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "Which model variant achieved the best test performance across all three metrics for Subject 'f'?",
+        "answer": "For Subject 'f', **m02** achieved the best test performance across all three metrics:\n- Balanced Accuracy: 0.618\n- F1-Score: 0.660\n- Accuracy: 0.623",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What was the inference time for nASR variants (m02-m05)?",
+        "answer": "The inference time for all nASR variants (m02-m05) was **1.0–1.3 ms**, representing a **6–8× reduction** compared to traditional ASR (m01), which required approximately 8.1–8.9 ms total (including ASR processing plus EEGNet inference).",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What was the total inference time for m01 on Subject 'a'?",
+        "answer": "The total inference time for m01 on Subject 'a' was approximately **8.9 ms**, consisting of:\n- ASR processing: ~8.5 ms\n- EEGNet inference: ~0.4 ms",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 2,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "Why does m01 (traditional ASR) have competitive validation performance but poor test performance? What does this overfitting pattern imply about artifact removal?",
+        "answer": "Traditional ASR (m01) has competitive validation performance but poor test performance because it **overfits to the specific artifact patterns present in the validation set**. The fixed threshold and aggressive reconstruction (>30% of windows across all channels) cause m01 to memorize the noise characteristics of the validation data, then fail when test data presents different artifact distributions.\n\nThis overfitting pattern implies several important lessons about artifact removal:\n\n1. **Aggressive denoising destroys neural signal**: m01's excessive reconstruction removes not only artifacts but also neural information useful for classification. The test performance drop shows that over-correction harms the downstream task more than leaving some noise in place.\n\n2. **Validation metrics are unreliable for assessing denoising**: If validation and training data share artifact patterns (e.g., same recording session), a method that overfits to those patterns can appear excellent. Cross-session or cross-subject evaluation is essential to detect overfitting.\n\n3. **Selectivity is critical**: The nASR variants (especially m02) performed better because they selectively reconstructed only artifact-contaminated channels, preserving clean channels. This suggests artifact removal should be **minimal and targeted**, not aggressive and indiscriminate.\n\n4. **Denoising should be integrated with the downstream task**: nASR's trainable pipeline allows the model to learn which channels to reconstruct based on classification performance. Traditional ASR as a fixed preprocessing step cannot adapt, making it prone to either under- or over-correction.\n\n5. **Simplicity and regularization help generalization**: The simpler nASR variants (m02 with global mean, no learnable weights) generalized better than the complex traditional ASR, suggesting that in artifact removal, **under-correction is safer than over-correction**.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "Which model variant achieved the best test performance across all three metrics for Subject 'f'?",
+        "answer": "Based on the ablation results, **m02 (nASR without neighborhood, using global mean reconstruction)** achieved the best test performance across all three metrics for Subject 'f':\n\n- **Balanced Accuracy**: 0.618\n- **F1 Score**: 0.660\n- **Accuracy**: 0.623",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What was the inference time for nASR variants (m02-m05)?",
+        "answer": "The nASR variants (m02-m05) achieved inference times of **1.0–1.3 ms**, which is 6–8× faster than the traditional ASR baseline (m01) at approximately 8–9 ms.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What was the total inference time for m01 on Subject 'a'?",
+        "answer": "Based on the conversation history, the inference time for m01 (traditional ASR baseline) was approximately **8–9 ms**. This is stated in the summary of earlier steps: \"nASR variants (m02-m05) achieved 6-8x faster inference (1.0-1.3 ms) vs. m01 (~8-9 ms).\" The exact value for Subject 'a' specifically was not provided, but the range applies to both subjects.",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 0,
+            "total": 2,
+            "ok": false
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "Best test variant Subject a",
+        "must_contain_any": [
+          "m05",
+          "0.677",
+          "0.680"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Best test variant Subject f",
+        "must_contain": [
+          "m02"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Inference time reduction",
+        "must_contain_any": [
+          "6-8",
+          "6--8",
+          "6x",
+          "8x"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "nASR inference time range",
+        "must_contain_any": [
+          "1.0",
+          "1.3"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "m01 inference time",
+        "must_contain_any": [
+          "8.9",
+          "8.1"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 2,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "m01 overfitting pattern",
+        "must_contain_any": [
+          "0.688",
+          "0.624",
+          "overfit"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Full-window covariance detrimental",
+        "must_contain_any": [
+          "m04",
+          "detrimental",
+          "underperformed"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "m01 ASR threshold",
+        "must_contain": [
+          "20"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain": {
+          "matched": 0,
+          "total": 1,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Noise mask percentage m01",
+        "must_contain_any": [
+          "30%",
+          "30"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Pareto frontier model",
+        "must_contain": [
+          "m02"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Subject f m02 metrics",
+        "must_contain_any": [
+          "0.618",
+          "0.660",
+          "0.623"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 3,
+          "ok": true
+        }
+      }
+    }
+  ]
+}

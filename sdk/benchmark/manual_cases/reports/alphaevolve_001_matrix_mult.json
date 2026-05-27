@@ -1,0 +1,410 @@
+{
+  "case_id": "alphaevolve_001_matrix_mult",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 1.0,
+    "final_tokens": 6343,
+    "real_input_tokens": 20347
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 0.875,
+    "final_tokens": 6322,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 5,
+      "total_input_tokens": 3699,
+      "total_output_tokens": 464,
+      "total_cache_hits": 4
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 5790,
+      "last_compressed": 2759
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"总结 AlphaEvolve 论文在矩阵乘法领域的改进结果、方法和关键概念。\",\n  \"state\": [\n    \"1. AlphaEvolve 改进了 14 个矩阵乘法目标的 SOTA，覆盖多个维度，方法具有泛化性。\",\n    \"2. 4x4 复数矩阵乘法 rank 48，超越 Strassen 的 rank 49（1969 年），56 年来首次突破。\",\n    \"3. 矩阵乘法本质是三维张量低秩分解，rank 等于标量乘法次数。AlphaTensor 的 rank 47 仅适用于 F2 域，不适用于复数。\",\n    \"4. 评估方法：基于梯度的算法（初始化器、重构损失、Adam 优化器），通过进化过程优化评估流程本身。\",\n    \"5. 评估级联：小规模快速筛选后进入主要测试；rounding 到整数或半整数保证精确性。\",\n    \"6. 进化过程需 15 次变异，修改优化器、初始化、损失函数和超参数；人类先验知识作为种子可提升性能。\"\n  ],\n  \"decisions\": [\n    \"Table 2 结果：⟨2,4,5⟩ rank 32（SOTA 33），⟨2,4,7⟩ rank 45（46），⟨3,4,7⟩ rank 63（66），⟨4,4,4⟩ rank 48（49），⟨4,4,5⟩ rank 61（62），⟨4,4,7⟩ rank 85（87），⟨5,5,5⟩ rank 93（持平）。\",\n    \"⟨3,4,7⟩、⟨4,4,4⟩、⟨4,4,8⟩ 使用复数值乘法。\",\n    \"性能指标：最低 rank 和达到该 rank 的种子比例。\",\n    \"复现关键：实现基础梯度算法、评估级联、rounding、进化框架（15 步变异）、种子策略。\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"None\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 20,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 20,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 8307
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 0.875,
+    "token_reduction": 0.5234887737478411,
+    "net_token_reduction": 0.3871332383152307,
+    "compression_cost_tokens": 4163,
+    "summary_score": 1.0
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "根据之前的讨论，建议以**梯度评估**作为起点，理由如下：\n\n1. **基础性**：梯度评估是 AlphaEvolve 整个流程的基础组件，进化搜索是在其之上构建的 meta 优化层。先掌握基础评估，才能理解后续改进的方向。\n\n2. **可复现性**：梯度评估的实现相对明确——初始化器、重构损失、Adam 优化器，这些是标准深度学习工具，容易搭建和调试。\n\n3. **渐进式扩展**：先实现梯度评估，验证能否复现已知结果（如 ⟨4,4,4⟩ 的 rank 48），再逐步加入 rounding、评估级联、进化框架。这种渐进式策略降低了风险。\n\n4. **进化搜索的代价**：进化需要 15 次变异，涉及修改优化器、初始化、损失函数和超参数，计算开销大且调试复杂。直接从头开始进化搜索容易陷入无效探索。\n\n**建议的实验路线**：\n- 第一步：实现基础梯度算法，在小规模目标上验证（如 ⟨2,4,5⟩）。\n- 第二步：加入 rounding 和评估级联，提升精确性。\n- 第三步：在确认基础流程有效后，再引入进化框架，以人类先验知识作为种子加速收敛。\n\n这样既能快速获得可验证的结果，又为后续创新保留了空间。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "**方法论核心差异：**\n\n| 维度 | AlphaTensor | AlphaEvolve |\n|------|-------------|-------------|\n| **优化对象** | 直接搜索矩阵乘法的低秩分解（张量分解） | 优化评估算法本身（优化器、初始化、损失函数等） |\n| **搜索策略** | 强化学习（AlphaZero 框架，MCTS + 神经网络） | 进化算法（15 步变异，修改超参数和组件） |\n| **评估方式** | 固定评估流程，奖励基于分解质量 | 评估流程本身是可变的，通过进化改进 |\n| **层级** | 问题级优化（直接求解） | 元级优化（优化求解器） |\n| **泛化性来源** | 神经网络学习分解模式，可迁移到相似维度 | 进化出的评估流程可复用于不同目标 |\n\n**哪种方法更适合扩展到其他数学优化问题：**\n\n**AlphaEvolve 更优**，理由如下：\n\n1. **通用性更强**：AlphaEvolve 的元优化思想不依赖矩阵乘法的特定结构。只要一个问题可以用梯度方法评估解的质量，就可以套用进化框架改进评估流程。例如组合优化、图优化、多项式优化等。\n\n2. **适应不同领域**：AlphaTensor 的强化学习框架需要精心设计状态表示、动作空间和奖励函数，迁移到新问题成本高。AlphaEvolve 只需定义基础梯度评估器，进化过程自动适配。\n\n3. **人类先验可注入**：AlphaEvolve 支持以种子形式注入人类知识，这在跨领域应用时非常实用——可以用已知的启发式方法作为起点，再通过进化超越。\n\n4. **计算效率**：AlphaTensor 需要训练神经网络，计算开销大；AlphaEvolve 的进化搜索相对轻量，更适合资源有限的研究场景。\n\n**例外情况**：如果目标问题有明确的离散搜索空间且可定义良好的奖励函数（如游戏、定理证明），AlphaTensor 的强化学习框架可能更直接有效。但总体而言，AlphaEvolve 的元优化范式更具扩展潜力。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 6,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "最大的障碍是**理论下界与搜索空间的矛盾**。\n\n具体来说：\n\n1. **理论下界**：4x4 复数矩阵乘法的张量秩存在已知下界。对于复数域，Strassen 的 rank 49 被 AlphaEvolve 打破到 48，但进一步降低意味着需要找到更紧凑的分解结构。如果理论下界就是 48，则无法再突破。\n\n2. **搜索空间指数级增长**：rank 越低，每个分解步骤的约束越强，可行解越稀疏。从 rank 48 到 47，搜索空间可能呈指数级收缩，随机或进化搜索找到有效解的概率急剧下降。\n\n3. **数值稳定性**：复数域中，低 rank 分解往往伴随数值不稳定。AlphaEvolve 使用 rounding 到整数或半整数来保证精确性，但 rank 越低，rounding 后保持精确性的难度越大——舍入误差可能破坏分解的正确性。\n\n4. **进化搜索的边际收益递减**：AlphaEvolve 已经通过 15 步变异优化了评估流程。进一步改进可能需要更多变异步数或更复杂的变异策略，但收益可能越来越小，陷入局部最优。\n\n**突破方向建议**：\n- 先验证 4x4 复数矩阵的理论下界是否确实高于 47，避免徒劳搜索。\n- 如果下界允许，考虑引入更强大的搜索策略（如结合强化学习或更复杂的进化算子）。\n- 或者放弃精确整数/半整数分解，探索近似分解在实际应用中的可行性。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 4,
+      "answer": "根据之前的讨论，AlphaEvolve 在以下维度上 rank 降低了 2 或更多：\n\n| 维度 | 原 SOTA rank | AlphaEvolve rank | 降低幅度 |\n|------|-------------|------------------|---------|\n| ⟨2,4,5⟩ | 33 | 32 | 1 |\n| ⟨2,4,7⟩ | 46 | 45 | 1 |\n| ⟨3,4,7⟩ | 66 | 63 | **3** |\n| ⟨4,4,4⟩ | 49 | 48 | 1 |\n| ⟨4,4,5⟩ | 62 | 61 | 1 |\n| ⟨4,4,7⟩ | 87 | 85 | **2** |\n| ⟨5,5,5⟩ | 93 | 93 | 0 |\n\n其中 rank 降低 2 或更多的维度是：**⟨3,4,7⟩（降低 3）** 和 **⟨4,4,7⟩（降低 2）**。\n\n**共同特征分析：**\n\n1. **非对称维度**：⟨3,4,7⟩ 和 ⟨4,4,7⟩ 都不是对称的方阵乘法（如 ⟨4,4,4⟩ 或 ⟨5,5,5⟩）。非对称结构可能为分解提供了更多自由度，使得进化搜索更容易找到更优解。\n\n2. **较大的第三维（7）**：两个维度中，第三维都是 7，相对较大。较大的维度意味着张量有更多切片，可能隐藏着更紧凑的分解模式，而传统方法未能充分挖掘。\n\n3. **复数域**：⟨3,4,7⟩ 使用复数值乘法（之前讨论中明确提到）。⟨4,4,7⟩ 虽未明确说明，但 ⟨4,4,4⟩ 和 ⟨4,4,8⟩ 均为复数，⟨4,4,7⟩ 很可能也是复数域。复数域的结构可能比实数域更丰富，允许更激进的 rank 压缩。\n\n4. **原 SOTA 相对较高**：这两个维度的原 SOTA rank 都较高（66 和 87），说明此前优化不充分，存在较大的改进空间。相比之下，⟨5,5,5⟩ 的 SOTA 已经很低（93），难以再突破。\n\n**总结**：AlphaEvolve 在非对称、大第三维、复数域且原 SOTA 不够紧的维度上，更容易实现显著突破。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 5,
+          "total": 5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 5,
+      "answer": "**可以，且具有较高的通用性。** 结合 AlphaEvolve 的具体做法分析如下：\n\n**AlphaEvolve 的评估级联策略核心**：\n1. **两阶段筛选**：先在小规模、低计算成本的设置下快速筛选候选解，淘汰明显不合格的；再对通过筛选的候选进行主要测试（更精确、更耗时的评估）。\n2. **rounding 机制**：在主要测试中，将结果 rounding 到整数或半整数，保证最终分解的精确性。\n\n**应用于其他大规模搜索问题的可行性分析**：\n\n1. **通用逻辑成立**：任何大规模搜索问题都可以设计\"粗筛 + 精筛\"的级联策略。粗筛使用简化模型或低精度评估快速过滤，精筛使用完整模型或高精度评估确认。这本质上是计算资源的分层分配。\n\n2. **关键条件**：\n   - 粗筛必须与精筛结果高度相关——即粗筛中表现差的候选在精筛中大概率也差，否则会误删好解。\n   - 粗筛的计算成本应显著低于精筛，否则级联失去意义。\n   - 需要定义明确的通过阈值，避免级联变成单阶段。\n\n3. **适用场景举例**：\n   - **组合优化**（如旅行商问题）：粗筛用贪心或松弛解快速评估，精筛用精确算法验证。\n   - **神经网络架构搜索**：粗筛用少量训练 epoch 评估候选架构，精筛用完整训练。\n   - **蛋白质折叠**：粗筛用粗粒度力场快速打分，精筛用全原子模拟。\n\n4. **潜在风险**：\n   - 粗筛可能过于粗糙，漏掉真正优秀的解（假阴性）。\n   - 粗筛的阈值设置需要经验调参，不当会导致级联失效。\n   - 如果粗筛和精筛的计算成本差距不大，级联反而增加开销。\n\n**结论**：评估级联策略可以迁移到其他大规模搜索问题，但需要根据具体问题设计合理的粗筛指标和阈值，并验证粗筛与精筛的相关性。AlphaEvolve 的成功提供了一个可复用的模板。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 5,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "AlphaTensor（Fawzi 2022）发现的 rank 47 适用于什么数学设定？AlphaEvolve 的 rank 48 适用于什么设定？",
+        "answer": "AlphaTensor（Fawzi et al., 2022）发现的 rank 47 适用于**特征为 2 的域（F2，即 field with 2 elements）**。F2 是一个有限域，元素只有 0 和 1，运算遵循模 2 规则。这个结果在 F2 上有效，但不适用于复数或实数矩阵乘法。\n\nAlphaEvolve 的 rank 48 适用于**复数域（complex field）**，即实际数学和工程中使用的复数矩阵乘法。复数域是特征为 0 的域，与 F2 有本质区别。\n\n**核心区别**：两个结果面对的是不同的数学问题，不能直接比较 rank 数值大小。AlphaEvolve 的 rank 48 是在更严格、更实用的复数域设定下取得的突破，而 AlphaTensor 的 rank 47 是在更宽松的 F2 设定下取得的。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 2,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "Table 2 中哪些维度使用了复数值乘法？",
+        "answer": "根据之前的讨论，论文明确指出以下维度使用了复数值乘法（complex-valued multiplications）：\n\n1. **⟨3,4,7⟩**：rank 从 66 降至 63，降低 3\n2. **⟨4,4,4⟩**：rank 从 49 降至 48，降低 1\n3. **⟨4,4,8⟩**：这个维度在之前的讨论中也被提及使用了复数值乘法\n\n其他维度（如 ⟨2,4,5⟩、⟨2,4,7⟩、⟨4,4,5⟩、⟨4,4,7⟩、⟨5,5,5⟩）未明确说明使用复数值乘法，可能使用的是实数系数。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 在矩阵乘法任务的进化过程中一共进行了多少次变异？",
+        "answer": "AlphaEvolve 在矩阵乘法任务的进化过程中一共进行了 **15 次变异**。这些变异逐步改进了评估流程的各个组件，包括优化器、权重初始化策略、损失函数以及超参数搜索范围，最终使得搜索效果显著超越初始的梯度基线算法。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 的 15 次变异具体修改了评估流程的哪些组件？",
+        "answer": "根据论文，AlphaEvolve 的 15 次变异具体修改了评估流程的以下组件：\n\n1. **优化器（optimizer）**：调整优化器的类型或参数，例如从 Adam 切换到其他优化器，或修改学习率、动量等超参数。\n\n2. **权重初始化（weight initialization）**：改变张量分解参数的初始化策略，例如从随机初始化改为特定分布或基于先验的初始化。\n\n3. **损失函数（loss function）**：修改重构损失的形式，例如加入正则化项、调整损失权重或使用不同的距离度量。\n\n4. **超参数搜索范围（hyperparameter sweep）**：调整超参数搜索的区间或策略，例如扩大学习率搜索范围或改变批量大小。\n\n这些变异不是一次性全部修改，而是通过 15 步逐步累积，每一步在之前成功变异的基础上进一步优化。最终形成的评估流程在搜索低 rank 分解时显著优于初始的梯度基线算法。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 4,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "AlphaTensor（Fawzi 2022）发现的 rank 47 适用于什么数学设定？AlphaEvolve 的 rank 48 适用于什么设定？",
+        "answer": "根据之前的讨论：\n\n- **AlphaTensor（Fawzi 2022）的 rank 47**：适用于 **F₂ 有限域**（二元域，仅包含 0 和 1，加法为 XOR，乘法为 AND）。该结果不适用于复数域或实数域。\n\n- **AlphaEvolve 的 rank 48**：适用于 **复数域**（复数值乘法）。这是 56 年来首次在复数域上超越 Strassen 的 rank 49。\n\n**关键区别**：两个结果针对不同的数学设定，不能直接比较。AlphaTensor 在 F₂ 域上 rank 更低（47），但实际应用价值有限；AlphaEvolve 在复数域上 rank 48，对科学计算和工程应用更有意义。",
+        "passed": false,
+        "score": 0.5,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 2,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "Table 2 中哪些维度使用了复数值乘法？",
+        "answer": "根据之前的讨论，Table 2 中使用复数值乘法的维度是：\n\n- ⟨3,4,7⟩\n- ⟨4,4,4⟩\n- ⟨4,4,8⟩\n\n这三个维度明确使用了复数值乘法。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 3,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 在矩阵乘法任务的进化过程中一共进行了多少次变异？",
+        "answer": "根据之前的讨论，AlphaEvolve 在矩阵乘法任务的进化过程中一共进行了 **15 次变异**。这些变异涉及修改优化器、初始化策略、损失函数和超参数。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 的 15 次变异具体修改了评估流程的哪些组件？",
+        "answer": "根据之前的讨论，AlphaEvolve 的 15 次变异修改了评估流程的以下组件：\n\n1. **优化器**：修改优化器类型或参数（如 Adam 的学习率、动量等）。\n2. **初始化器**：改变张量分解的初始值生成方式。\n3. **损失函数**：调整重构损失的形式或权重。\n4. **超参数**：修改评估流程中的其他超参数（如迭代次数、批大小等）。\n\n此外，人类先验知识可以作为种子注入，提升性能。但具体每次变异修改了哪个组件的哪个参数，以及变异的顺序，在之前的讨论中未提供更详细的细节。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 4,
+            "ok": true
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "14 matrix multiplication SOTA improvements",
+        "must_contain": [
+          "14"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "4x4 complex matrix rank 48",
+        "must_contain": [
+          "48"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Strassen rank 49 for 4x4",
+        "must_contain": [
+          "49"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "56 years since Strassen 1969",
+        "must_contain": [
+          "56"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "AlphaTensor rank 47 on F2",
+        "must_contain": [
+          "47",
+          "F2"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "3D tensor low-rank decomposition",
+        "must_contain": [
+          "张量",
+          "分解"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Evaluation cascade concept",
+        "must_contain_any": [
+          "级联",
+          "cascade",
+          "小规模"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Rounding to integer or half-integer",
+        "must_contain_any": [
+          "半整数",
+          "half-integer",
+          "取整",
+          "rounding"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "15 mutations in evolutionary process",
+        "must_contain": [
+          "15"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Mutation targets: optimizer, initialization, loss, hyperparameters",
+        "must_contain_any": [
+          "优化器",
+          "损失函数",
+          "初始化"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 3,
+          "ok": true
+        }
+      }
+    }
+  ]
+}

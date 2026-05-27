@@ -1,0 +1,400 @@
+{
+  "case_id": "qoulipo_002_quantum_qpu",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 1.0,
+    "final_tokens": 5365,
+    "real_input_tokens": 14323
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 0.75,
+    "final_tokens": 5444,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 3,
+      "total_input_tokens": 4616,
+      "total_output_tokens": 600,
+      "total_cache_hits": 2
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 4908,
+      "last_compressed": 1842
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"Summarize QOuLiPo paper's quantum hardware results, register engineering, and scaling conclusions.\",\n  \"state\": [\n    \"1. Pasqal's FRESNEL_CAN1 100-qubit neutral-atom QPU in analog mode; Rydberg blockade enforces independence constraint. Key metric: best-shot ratio r = max valid IS size / MIS.\",\n    \"2. Natural k-NN texts: best-shot ratios 0.917-1.000, valid IS 10-62%. Engineered exact-UDG texts: ratios 0.840-1.000; Le venticinque stanze (N=25) achieves ratio 1.000 at 53.1% valid IS.\",\n    \"3. SA edge recall caps below 0.5 at N>=30 in 2D, geometric ceiling from 2D-UDG kissing number 6. Better embedders (gradient-MDS, SDP, 3D) needed for fuller recovery.\",\n    \"4. Two hardware-boundary cases: Il castello (requires Omega<0.11 rad/s below FRESNEL floor) and Pomegranate (N=81, energy gap marginal at U/Omega~1.4). Local detuning or ancilla-augmented embedding remedy.\",\n    \"5. 3D register (unique to neutral atoms) lifts SA recall: bilayer closes 30-50% of 2D-to-3D gap. EMU validation: Boethius (N=72) canonical ratio 0.929; Pascal-Menil bilayer exact MIS ratio 1.00.\",\n    \"6. Paper is not a quantum speedup claim; natural target is bounded-degree non-UDG graphs at N~100-200. 3D path favored over 2D ancilla-gadget constructions.\"\n  ],\n  \"decisions\": [\n    \"Register engineering uses SA to maximize edge recall on FRESNEL's triangular lattice.\",\n    \"Tighter blockade margin lifts zero-valid-IS rows to 0.84-1.00 band.\",\n    \"29 engineered texts organized by design tier, geometric class, and rigidity.\",\n    \"Prose generation: pages share threads, edges via cosine similarity; validation via ILP MIS.\",\n    \"Single-investigator agentic loop: Claude Opus calls Pulser and Pasqal Cloud.\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"FRESNEL_CAN1; Omega=3.3 rad/s; T=4-6 microseconds; R_b=8 micrometers; minimum spacing 5 micrometers; field of view <=46 micrometers; SA 30k iterations x 15 restarts; dodecahedron 20 vertices 30 edges; Leclerc et al. 256-qubit processor\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 13,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 13,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 4331
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 0.75,
+    "token_reduction": 0.6246943765281174,
+    "net_token_reduction": 0.3334496962926761,
+    "compression_cost_tokens": 5216,
+    "summary_score": 0.7272727272727273
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "Based on the emulator results reported in the paper, the texts that would benefit most from a 3D-capable neutral-atom processor are:\n\n**1. Boethius (N=72)** — Already demonstrated in 3D emulation: canonical ratio **0.929** (vs. 0.840 in 2D). The bilayer embedding closes ~30-50% of the 2D-to-3D gap.\n\n**2. Pascal-Menil (N=81)** — Bilayer exact MIS ratio **1.00** in emulation, up from lower 2D performance. This is the strongest 3D gain in the corpus.\n\n**3. Pomegranate (N=81)** — A hardware-boundary case in 2D (marginal energy gap at U/Ω~1.4). 3D register engineering would lift SA recall and likely push canonical ratio toward **0.95–1.00**, as the geometric ceiling from 2D kissing number 6 is removed.\n\n**4. Il castello (requires Ω<0.11 rad/s below FRESNEL floor)** — Currently infeasible in 2D. 3D embedding with local detuning or ancilla augmentation would bring it into reach; expected canonical ratio **0.90–1.00** depending on embedding quality.\n\n**5. Le venticinque stanze (N=25)** — Already achieves 1.000 in 2D, so no 3D benefit.\n\n**6. All engineered exact-UDG texts with N≥30** — These are capped by SA edge recall <0.5 in 2D. 3D (bilayer or full 3D register) would lift recall substantially; expected canonical ratios **0.85–1.00** depending on graph density and rigidity tier.\n\n**Summary:** The largest gains are for Pascal-Menil (already 1.00 in emulation), Boethius (0.929), and the hardware-boundary cases Pomegranate and Il castello. The 3D path is favored over 2D ancilla-gadget constructions for N~100-200 bounded-degree non-UDG graphs.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 6,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "The paper's comparison shows a clear performance gap between the two text classes:\n\n**Exact-UDG engineered texts:** Best-shot ratios range **0.840–1.000**, with several achieving 1.000 (e.g., Le venticinque stanze at 53.1% valid IS). These texts are designed to be realizable as unit-disk graphs on the FRESNEL triangular lattice, so the QPU directly solves the intended MIS problem.\n\n**SA-embedded natural texts:** Best-shot ratios range **0.917–1.000**, but valid IS percentages are only **10–62%**. The natural k-NN graphs are not UDG-embeddable on the triangular lattice, so the SA embedding step must force them onto the lattice, introducing distortions.\n\n**Why the embedding step is the bottleneck:**\n\n1. **SA edge recall caps below 0.5 for N≥30 in 2D** — The 2D-UDG kissing number of 6 imposes a geometric ceiling on how many edges of a natural text graph can be simultaneously realized on the triangular lattice. No QPU improvement can overcome this; it is a fundamental geometric constraint.\n\n2. **The QPU itself performs at or near theoretical limits** — When the embedding is exact (engineered UDG texts), the QPU achieves ratios of 0.84–1.00. The hardware is not the weak link.\n\n3. **Better embedders (gradient-MDS, SDP, 3D) are needed** — The paper explicitly argues that the path to literary application runs through improved register engineering, not faster or larger QPUs. The 3D emulation results (Boethius 0.929, Pascal-Menil 1.00) confirm that lifting the geometric ceiling via 3D embedding is what recovers canonical structure.\n\n**Conclusion:** The QPU is already adequate for the task; the literary bottleneck is embedding natural text graphs onto the hardware's geometry. The paper is not a quantum speedup claim — it is a demonstration that register engineering, not hardware performance, determines success for this application class.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 5,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "**Why local detuning helps:** In the Eighty-One Faces (Pomegranate, N=81) case, the energy gap is marginal at U/Ω~1.4, meaning the Rydberg blockade is barely sufficient to enforce the independence constraint for certain graph edges. Per-atom local detuning allows shifting individual atoms slightly off resonance, effectively adjusting the blockade radius locally. This tightens the effective constraint on problematic edges without requiring a global increase in Ω or reduction in atom spacing, which would violate hardware limits (FRESNEL's minimum spacing 5 μm, field of view ≤46 μm).\n\n**Why ancilla-augmented embedding helps:** For Il castello (requires Ω<0.11 rad/s, below FRESNEL's floor of ~3.3 rad/s), the required blockade radius for certain edges exceeds what the hardware can provide. Ancilla atoms — extra atoms placed between register atoms — act as \"spacers\" that enforce effective longer-range blockade via chains of Rydberg interactions. This effectively synthesizes a larger effective blockade radius without requiring lower Ω or larger physical spacing.\n\n**Hardware changes required:**\n\n1. **Per-atom local detuning:** Requires individual addressing capability — each atom must have an independently controllable laser detuning. Current FRESNEL_CAN1 operates in global analog mode (same Ω and detuning for all atoms). This would require either:\n   - Spatially modulated light fields (e.g., spatial light modulator or AOD-based addressing)\n   - Or a move to digital/hybrid mode where individual qubits can be targeted\n\n2. **Ancilla-augmented embedding:** Requires the ability to place additional atoms that are not part of the problem graph but participate in the Rydberg blockade dynamics. This is already possible on neutral-atom platforms (atoms are placed arbitrarily in the trap array), but it increases the total atom count and may require larger fields of view or higher atom numbers (beyond 100 for N=81 problem graphs).\n\n**Practical implication:** These are not exotic hardware modifications — local detuning is already demonstrated in digital neutral-atom processors, and ancilla placement is a matter of register design. The paper argues these are feasible near-term upgrades that would bring the hardware-boundary cases into the feasible regime without requiring fundamentally new QPU architectures.",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 6,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "Why is the SA embedding step the bottleneck for canonical text-MIS recovery, not the QPU hardware? What limits 2D SA recall at N>=30?",
+        "answer": "The SA embedding step is the bottleneck because the QPU itself performs at or near theoretical limits when given an exactly realizable graph (ratios 0.84–1.00 on engineered UDG texts). The hardware is not the weak link.\n\n**What limits 2D SA recall at N>=30:**\n\nThe fundamental geometric constraint is the **2D-UDG kissing number of 6**. In a 2D unit-disk graph, any vertex can have at most 6 mutually non-adjacent neighbors at distance exactly R_b. Natural text graphs (k-NN graphs in 1024-dimensional embedding space) have degrees that routinely exceed 6 — for N=100, typical degrees are 10–14. When SA tries to embed these onto the triangular lattice, it must:\n\n1. **Drop edges** — The SA algorithm maximizes edge recall, but the geometric ceiling means many edges simply cannot be simultaneously realized. The recall caps below 0.5 at N>=30.\n\n2. **Genre independence** — The ceiling holds across frame-tale, narrative poem, encyclopedic miscellany, aphorism, and scientific dialogue. At N=100, recall sits in the band 0.21–0.27 at density d~0.10–0.14. Even a random 12-regular graph at N=75 gives recall 0.21.\n\n3. **No hardware fix** — No pulse engineering, variational refinement, or noise tuning can recover edges lost at the register-embedding stage. The information is simply not present in the register graph.\n\n**The consequence:** Canonical text-MIS recovery is bounded above by SA recall. Even if the QPU solves the register MIS perfectly (ratio 1.0), the canonical recovery is capped at the fraction of canonical edges that survived embedding. This is why the paper argues that better embedders (gradient-MDS, SDP relaxations, learned register placement, or 3D escape) are the path to fuller recovery — not faster or larger QPUs.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "Why does 3D embedding dramatically improve recall over 2D for Boethius? What geometric constraint does 2D-UDG impose?",
+        "answer": "**The geometric constraint 2D-UDG imposes:**\n\nThe 2D-UDG kissing number is **6** — in a 2D unit-disk graph, any vertex can have at most 6 neighbors that are all mutually within unit distance of each other. This is a strict geometric bound: on a triangular lattice, each atom's Rydberg blockade radius can only reach 6 nearest neighbors in the densest packing.\n\nFor Boethius (N=72), the natural k-NN graph has degree exceeding 6 for many vertices. The SA embedding in 2D must either:\n- Drop edges (reducing recall)\n- Or distort the geometry (creating false non-edges)\n\nThe result is SA edge recall capped at **0.339** in 2D.\n\n**Why 3D removes this constraint:**\n\nIn 3D, the kissing number is **12** (face-centered cubic packing). The 3D unit-ball graph can accommodate up to 12 neighbors per vertex within the blockade radius. This doubles the maximum degree the register can faithfully represent.\n\nFor Boethius specifically:\n- 2D recall: 0.339\n- Bilayer recall: 0.392 (30-50% of the 2D-to-3D gap closed)\n- 3D recall: **0.543** (60% improvement over 2D)\n\nThe 3D embedding allows more of Boethius's natural edges to be realized as Rydberg-blockaded pairs, which directly translates to recovering **13 of 14 canonical text-MIS pages** (canonical ratio 0.929) — the cleanest recovery in the corpus.\n\n**The key insight:** The constraint is purely geometric, not algorithmic. 3D is not a better algorithm — it is a larger embedding space that better matches the connectivity of natural text graphs. Since neutral-atom processors are unique in supporting 3D registers, this is a hardware-native advantage that superconducting, trapped-ion, or photonic platforms cannot replicate.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "Why does the 2D-UDG kissing number limit SA recall? How does bilayer embedding bypass this constraint?",
+        "answer": "**Why the 2D-UDG kissing number limits SA recall:**\n\nThe kissing number in 2D is 6 — a circle can have at most 6 non-overlapping unit circles touching it simultaneously. For a UDG on a triangular lattice, each atom can be adjacent (within R_b) to at most 6 neighbors. Natural text graphs (k-NN with k ≥ 7) have degrees exceeding 6, meaning some edges must be lost during embedding. The SA algorithm tries to maximize edge recall, but it cannot exceed the geometric constraint: at most 6 edges per vertex can be realized as UDG edges on the lattice. For N ≥ 30, this caps SA recall below 0.5 because the average degree of natural text graphs exceeds 6.\n\n**How bilayer embedding bypasses this:**\n\nA bilayer consists of two parallel 2D layers separated by distance h ≤ R_b. In this geometry, an atom can have:\n- Up to 6 neighbors within its own layer (2D kissing number)\n- Plus additional neighbors in the opposite layer (up to ~6 more, depending on h and lattice alignment)\n\nThis effectively doubles the maximum degree per atom to ~12, allowing the SA algorithm to realize more edges of the original text graph. The bilayer is a subset of full 3D (unit-ball-in-slab) but already lifts the 2D kissing-number ceiling.\n\n**Evidence from the paper:** Bilayer embedding closes roughly 30-50% of the 2D-to-3D gap on every natural text row (Table 4). For example, Ausonius (N=27): 2D recall 0.344 → bilayer 0.442 → 3D 0.571. The monotonic improvement across the containment chain (2D ⊂ bilayer ⊂ 3D) confirms that the geometric constraint is the limiting factor, not the SA algorithm itself.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What is the 3D recall value for Boethius (N=72)?",
+        "answer": "The 3D recall for Boethius (N=72) is **0.543**, up from 0.339 in 2D and 0.392 in bilayer. This is the largest absolute gain in the corpus: a **0.204 increase** from 2D to 3D.\n\nThis 3D recall of 0.543 enabled the emulator to recover **13 of 14 canonical text-MIS pages**, yielding a canonical ratio of **0.929** — the cleanest recovery of any natural text in the paper.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "Why is the SA embedding step the bottleneck for canonical text-MIS recovery, not the QPU hardware? What limits 2D SA recall at N>=30?",
+        "answer": "The SA embedding step is the bottleneck because the QPU itself performs at or near theoretical limits when given an exact UDG embedding (ratios 0.84–1.00 on engineered texts). The literary application fails not from hardware inadequacy but from the inability to faithfully map natural text graphs onto the FRESNEL triangular lattice.\n\n**What limits 2D SA recall at N≥30:** The **kissing number of 6** in 2D unit-disk graphs. On a triangular lattice, any atom can have at most 6 equidistant nearest neighbors. Natural text graphs (k-NN with k typically 5–10) often require a vertex to have more than 6 neighbors within the blockade radius, or require edge lengths that cannot all be simultaneously realized on the lattice. The SA optimizer must drop or distort edges to fit the lattice, and this geometric ceiling caps edge recall below 0.5 for graphs with N≥30. No improvement in QPU coherence, gate fidelity, or analog pulse shaping can overcome this — it is a fundamental constraint of 2D geometry.\n\nThe paper's conclusion is that the path forward is better register engineering (gradient-MDS, SDP, 3D embedding), not faster or larger QPUs.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "Why does 3D embedding dramatically improve recall over 2D for Boethius? What geometric constraint does 2D-UDG impose?",
+        "answer": "**The geometric constraint 2D-UDG imposes:** The 2D unit-disk graph (UDG) model on a triangular lattice has a **kissing number of 6** — any atom can have at most 6 equidistant nearest neighbors at the blockade radius. This caps the maximum degree of any embeddable graph at 6. For natural text graphs like Boethius (N=72), the k-NN similarity graph has vertices with degree exceeding 6, meaning the SA embedding must drop edges to fit the lattice. The paper reports SA edge recall caps below 0.5 for N≥30 in 2D — more than half the edges are lost.\n\n**Why 3D dramatically improves recall:** A 3D register (unique to neutral-atom platforms) lifts the kissing number from 6 to **12** (face-centered cubic lattice) or higher. This allows each atom to have more nearest neighbors at the same blockade radius, so the SA embedding can preserve a much larger fraction of the original text graph's edges. For Boethius specifically, the bilayer emulation closes **30–50% of the 2D-to-3D gap**, achieving a canonical ratio of **0.929** (vs. 0.840 in 2D). The bilayer is a minimal 3D configuration — two stacked triangular lattices — that already provides enough additional connectivity to recover substantially more of the canonical MIS structure.\n\n**In essence:** 2D imposes a degree-6 ceiling that forces edge dropping; 3D raises that ceiling to degree 12+, allowing the embedding to preserve the literary graph's connectivity and thus recover the intended MIS solution.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 1,
+            "total": 2,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "Why does the 2D-UDG kissing number limit SA recall? How does bilayer embedding bypass this constraint?",
+        "answer": "**Why the 2D-UDG kissing number limits SA recall:**\n\nThe kissing number in 2D is 6 — a circle can be tangent to at most 6 non-overlapping equal circles around it. For a triangular lattice (FRESNEL's geometry), each atom has exactly 6 nearest neighbors at the minimum spacing. When SA embeds a natural text graph onto this lattice, it tries to realize edges as close atom pairs. But if the original graph has a vertex with degree > 6, at least some of its incident edges cannot be mapped to nearest-neighbor pairs — they must be realized as longer-range (weaker) edges or omitted entirely. This creates a **geometric ceiling** on edge recall: for N≥30, SA recall caps below 0.5 because dense literary graphs inevitably have high-degree vertices that exceed the 6-neighbor limit.\n\n**How bilayer embedding bypasses this constraint:**\n\nA bilayer register places atoms in two parallel planes (e.g., z=0 and z=Δz). Now each atom can have up to 6 nearest neighbors **in its own plane** plus additional nearest neighbors **in the opposite plane** directly above/below and at intermediate lateral offsets. The effective 3D kissing number for a bilayer (two stacked triangular lattices) is higher than 6 — typically 8–10 nearest-neighbor positions become available depending on the interlayer spacing Δz.\n\nThis means:\n- A vertex with degree 8–10 can now have all its incident edges mapped to nearest-neighbor pairs across the two layers\n- The geometric ceiling on edge recall is lifted from ~0.5 to ~0.7–0.8\n- The emulator results confirm: bilayer closes **30–50% of the 2D-to-3D gap** (Boethius: 0.929 vs 0.840 in 2D)\n\n**Key insight:** The bilayer does not require full 3D arbitrary placement — just two coupled 2D layers, which is already achievable on neutral-atom platforms by loading atoms into two vertical planes using optical tweezers or SLM-based addressing. This is a minimal hardware upgrade that yields substantial recall improvement.",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "What is the 3D recall value for Boethius (N=72)?",
+        "answer": "The 3D emulation result for Boethius (N=72) gives a canonical ratio of **0.929**. This is achieved using a bilayer register, which closes approximately 30–50% of the 2D-to-3D gap compared to the 2D result of 0.840.",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 0,
+            "total": 1,
+            "ok": false
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "FRESNEL qubit count",
+        "must_contain": [
+          "100"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Best exact-UDG ratio",
+        "must_contain": [
+          "1.000"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "SA recall ceiling",
+        "must_contain_any": [
+          "0.5",
+          "0.50"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Galileo canonical recovery",
+        "must_contain_any": [
+          "14",
+          "0.61"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 2,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "3D Boethius ratio",
+        "must_contain": [
+          "0.929"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Bilayer Pascal-Menil ratio",
+        "must_contain_any": [
+          "1.00",
+          "78.6"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Bilayer closes 2D-3D gap",
+        "must_contain_any": [
+          "30-50",
+          "30",
+          "50"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Friar's Notebook vertices",
+        "must_contain": [
+          "20"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "2D-UDG kissing number",
+        "must_contain": [
+          "6"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Variational pulse improvement",
+        "must_contain_any": [
+          "3-6",
+          "+3",
+          "+6"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 3,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Zenodo DOI",
+        "must_contain_any": [
+          "zenodo",
+          "20074378"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 0,
+          "total": 2,
+          "ok": false
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,450 @@
+{
+  "case_id": "brain_002_recovery_profile",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 1.0,
+    "final_tokens": 5950,
+    "real_input_tokens": 12710
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 1.0,
+    "final_tokens": 6672,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 3,
+      "total_input_tokens": 4243,
+      "total_output_tokens": 417,
+      "total_cache_hits": 2
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 5962,
+      "last_compressed": 1933
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"理解Nakamura等人论文中恢复轮廓框架的核心思想、指标定义及与精度的关系。\",\n  \"state\": [\n    \"1. 框架从预测精度转向恢复轮廓，在目标大脑响应空间中用重复测量定义可复现参考，检查预测子空间覆盖哪些参考方向，不涉及源空间坐标或学习公共空间。\",\n    \"2. DirCov测量单个参考方向是否被预测子空间覆盖，取值范围0-1，是覆盖度指标而非方向级预测质量指标。\",\n    \"3. TopKCov是DirCov的参考加权前缀平均，K=10用于主要展示；ProfileMean是TopKCov曲线的简单平均，概括整体高度。\",\n    \"4. BrainRefScore将模型ProfileMean除以大脑源中位数，是参考化比值而非相似性指标；FullRefCov使用完整参考谱；ShapeDist归一化后比较曲线形状。\",\n    \"5. 大脑到大脑top-k覆盖率从k=1的0.959降至k=10的0.868，全谱覆盖0.85；目标PCA 1成分覆盖0.18，2成分0.37，匹配秩0.43。\",\n    \"6. 框架需重复测量数据；DirCov高不保证标量预测好；精度与恢复轮廓互补；大脑到大脑比较作为轮廓比标量天花板更有信息量。\"\n  ],\n  \"decisions\": [\n    \"DirCov是覆盖度指标，不是方向级预测质量指标。\",\n    \"TopKCov是前缀平均，不是累加和，可下降。\",\n    \"BrainRefScore>1不意味着模型更像大脑。\",\n    \"ProfileMean和ShapeDist互补，分别概括高度和形状。\",\n    \"框架固定在目标空间，不涉及源空间坐标。\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"None\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 27,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 27,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 3589
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 1.0,
+    "token_reduction": 0.675779939617578,
+    "net_token_reduction": 0.3509834775767113,
+    "compression_cost_tokens": 4660,
+    "summary_score": 0.9166666666666666
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "以下是Nakamura等人论文中恢复轮廓框架的完整指标体系总结：\n\n## 一、基础指标：DirCov（方向覆盖率）\n\n- **定义**：DirCov(u_j) = u_j^T P_s u_j，其中u_j是目标大脑响应空间中的第j个参考方向（由重复测量定义），P_s是模型预测子空间的正交投影矩阵。\n- **取值范围**：0到1，衡量单个参考方向是否被预测子空间覆盖。\n- **作用**：方向级别的覆盖度指标，不是预测质量指标。高DirCov不保证该方向的标量预测好，只说明该方向落在预测子空间内。\n\n## 二、聚合指标：TopKCov\n\n- **定义**：按参考方差从大到小排序参考方向后，前K个DirCov的参考加权前缀平均。\n- **作用**：展示模型在不同数量主要参考方向上的平均覆盖表现。K=10是论文主要展示值。\n- **特性**：是前缀平均，不是累加和，因此可以随K增加而下降。\n\n## 三、全局概括指标\n\n1. **ProfileMean**：TopKCov曲线在所有K上的简单平均，概括曲线整体高度。\n2. **BrainRefScore**：模型ProfileMean除以大脑源中位数（大脑到大脑比较的ProfileMean中位数），是参考化比值，不是相似性指标。>1不意味着模型更像大脑。\n3. **FullRefCov**：使用完整参考谱（所有方向）的加权平均覆盖，是DirCov的全局加权和。\n4. **ShapeDist**：对模型和大脑的TopKCov曲线分别归一化后比较形状差异，与ProfileMean互补——一个概括高度，一个概括形状。\n\n## 四、层级关系\n\n```\nDirCov（方向级基础）\n    ↓ 按参考方差排序 + 前缀平均\nTopKCov（方向级聚合，K维曲线）\n    ↓ 简单平均          ↓ 归一化后比较\nProfileMean          ShapeDist\n    ↓ 除以大脑中位数\nBrainRefScore\n```\n\n同时，FullRefCov是DirCov的完整加权和，独立于TopKCov曲线。\n\n## 五、关键决策点\n\n- 框架固定在目标大脑响应空间，不涉及源空间坐标或学习公共空间。\n- 需要重复测量数据来定义参考方向。\n- 精度与恢复轮廓是互补关系，不是替代关系。\n- 大脑到大脑比较作为轮廓比标量天花板更有信息量。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 7,
+          "total": 7,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "从理解大脑表征的角度，我会选择**模型B**。\n\n理由如下：\n\n1. **恢复轮廓框架的核心主张**：精度（标量预测）与恢复轮廓是互补关系，而非替代关系。DirCov高不保证标量预测好，反之亦然。模型A精度略高但形状差异大，说明它虽然在某些方向上预测准确，但整体覆盖的方向结构与大脑源不一致。\n\n2. **ShapeDist衡量的是表征结构**：TopKCov曲线的形状反映了模型在不同主要参考方向上的覆盖模式——即模型优先覆盖哪些方向、覆盖程度如何随方向重要性变化。形状接近大脑源，意味着模型在方向级覆盖的**相对结构**与大脑一致，这是理解大脑如何组织表征的关键。\n\n3. **精度高可能来自非神经相关因素**：模型A的精度优势可能来自对噪声的过拟合、或对某些非核心方向的精确预测，而非真正捕捉了大脑的表征结构。\n\n4. **恢复轮廓框架的最终目标**：该框架从预测精度转向恢复轮廓，目的是评估模型是否复现了大脑响应空间中的可复现参考结构。模型B在这一点上更符合框架的设计意图。\n\n因此，如果目标是**理解大脑的表征组织方式**，而非单纯追求预测精度，模型B是更优选择。当然，理想情况下应同时报告精度和轮廓指标，以获得完整评估。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 7,
+          "total": 7,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "## 为什么不是模型坐标系分解或公共空间学习\n\n恢复轮廓框架**固定在目标大脑响应空间**，具体表现为：\n\n- **不是模型坐标系分解**：不将模型预测分解到模型自身的特征空间或隐空间中去分析每个成分的贡献。\n- **不是学习公共空间**：不通过CCA、深度典型相关分析等方法学习一个模型和大脑共享的低维空间。\n\n框架的做法是：在目标大脑空间中，用重复测量定义可复现参考方向，然后检查模型预测子空间覆盖了哪些参考方向。\n\n## 设计选择的优势\n\n1. **直接回答核心问题**：框架要回答的是\"模型预测是否覆盖了大脑中可复现的表征方向\"，而不是\"模型和大脑在某个公共空间中是否对齐\"。前者更直接地评估模型对大脑表征的恢复程度。\n\n2. **避免公共空间学习的偏差**：学习公共空间会引入额外的自由度（如维度选择、正则化），可能人为提高对齐分数。固定在大脑空间避免了这种\"作弊\"风险。\n\n3. **方向级可解释性**：每个参考方向由大脑重复测量定义，具有神经生理学意义。可以明确知道模型覆盖了哪些方向、遗漏了哪些方向，这是公共空间方法无法提供的细粒度信息。\n\n4. **无需模型架构假设**：不依赖模型内部表示，适用于任何类型的模型（CNN、Transformer、甚至非神经网络模型），只要它能产生预测。\n\n## 代价\n\n1. **需要重复测量数据**：框架依赖重复测量来定义可复现参考方向，这在许多fMRI数据集中不可用，限制了适用范围。\n\n2. **无法解释模型内部机制**：不分解模型坐标系，就无法知道模型中的哪些特征或层次贡献了覆盖。对于理解模型本身的结构，信息有限。\n\n3. **目标空间维度限制**：大脑响应空间的维度由体素/顶点数量决定，可能非常高，而重复测量数量有限，导致参考方向估计的统计效力受限。\n\n4. **不对称性**：框架只评估模型对大脑的覆盖，不评估大脑对模型的覆盖，是一种单向评估。如果模型和大脑有双向交互，这种不对称可能丢失信息。\n\n## 总结\n\n这种设计选择是**以牺牲模型可解释性和数据需求为代价，换取了评估的直接性、公正性和方向级细粒度**。它更适合回答\"模型是否捕捉了大脑的表征结构\"这一核心问题，而非\"模型内部如何工作\"。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 5,
+          "total": 6,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "DirCov高是否意味着该方向上的标量预测好？为什么覆盖率和预测精度测的是不同的东西？",
+        "answer": "## DirCov高不意味着标量预测好\n\n**直接回答**：DirCov高**不保证**该方向上的标量预测好。这是论文明确强调的关键区分。\n\n## 为什么覆盖率和预测精度测的是不同的东西\n\n### 1. 定义本质不同\n\n- **DirCov（覆盖率）**：测量的是**方向是否落在预测子空间内**。它只关心方向的存在性，不关心沿该方向的标量值预测得有多准。\n- **预测精度**：测量的是**沿该方向的标量坐标预测值与真实值的接近程度**。它关心的是数值准确性。\n\n### 2. 数学上的分离性\n\nDirCov = u_j^T P_s u_j，其中P_s是预测子空间的投影矩阵。这个值只取决于u_j与预测子空间的几何关系，与预测子空间内部的标量值完全无关。\n\n即使u_j完全在预测子空间内（DirCov=1），预测子空间中的预测值可能与真实值相差甚远——因为预测子空间可能整体偏移或缩放。\n\n### 3. 具体反例\n\n假设大脑的真实响应在方向u_j上的投影值为5，模型预测子空间包含u_j方向，但模型在该方向上的预测值恒为0。此时：\n- DirCov = 1（方向被覆盖）\n- 预测精度 = 极差（标量值完全错误）\n\n### 4. 框架的设计意图\n\n恢复轮廓框架正是要揭示这种分离性。传统评估只看精度，可能误以为模型表现良好。恢复轮廓告诉你：即使精度不错，模型可能只覆盖了少数方向；或者即使精度一般，模型可能覆盖了正确的方向集合但标量值有偏差。\n\n## 总结\n\n覆盖率和预测精度是**正交的评估维度**：\n- 覆盖率回答\"模型是否在正确的方向上思考\"\n- 精度回答\"模型思考得有多准确\"\n\n两者都需要，但任何一个都不能替代另一个。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 6,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "恢复轮廓框架是在什么空间中定义参考的？为什么不在模型坐标系中分解分数？",
+        "answer": "## 参考定义空间\n\n恢复轮廓框架在**目标大脑响应空间**中定义参考。具体来说，利用重复测量数据，在大脑响应空间中提取可复现的方向作为参考。这些方向具有神经生理学意义，因为它们来自大脑本身的可复现响应模式。\n\n## 为什么不在模型坐标系中分解分数\n\n1. **避免模型依赖的偏差**：模型坐标系因模型架构、训练方式、初始化等而异。在模型坐标系中分解分数，结果会高度依赖模型的具体实现，无法进行跨模型公平比较。\n\n2. **保持评估的公正性**：框架的核心目标是评估模型是否恢复了大脑的表征结构，而不是评估模型内部特征与大脑的对应关系。固定在大脑空间，所有模型在同一参考系下被评估，避免了模型坐标系带来的\"主场优势\"。\n\n3. **方向级可解释性**：大脑参考方向由重复测量定义，具有明确的神经生理学意义。在模型坐标系中分解，得到的成分可能没有生物学解释。\n\n4. **避免公共空间学习的额外自由度**：学习公共空间（如CCA）会引入维度选择、正则化等超参数，可能人为提高对齐分数。固定在大脑空间避免了这些额外自由度。\n\n5. **直接回答核心问题**：框架要回答的是\"模型预测是否覆盖了大脑中可复现的表征方向\"，而不是\"模型和大脑在某个公共空间中是否对齐\"。前者更直接地评估模型对大脑表征的恢复程度。\n\n## 总结\n\n这种设计选择是**以牺牲模型可解释性为代价，换取了评估的直接性、公正性和方向级细粒度**。它更适合回答\"模型是否捕捉了大脑的表征结构\"这一核心问题，而非\"模型内部如何工作\"。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "TopKCov是DirCov的什么类型的聚合？",
+        "answer": "TopKCov是DirCov的**参考加权前缀平均**。具体来说，它按参考方差从大到小排序参考方向后，对前k个方向的DirCov值取加权平均，权重由参考方差决定。注意这是前缀平均（prefix average），不是累加和（cumulative sum），因此当加入覆盖较弱的方向时，TopKCov值可能下降。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "大脑到大脑的top-k覆盖率在k=1时是多少？",
+        "answer": "大脑到大脑的top-k覆盖率在k=1时是0.959。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "大脑到大脑的top-k覆盖率在k=10时是多少？",
+        "answer": "大脑到大脑的top-k覆盖率在k=10时是0.868。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "DirCov高是否意味着该方向上的标量预测好？为什么覆盖率和预测精度测的是不同的东西？",
+        "answer": "## DirCov高不意味着标量预测好\n\n**答案是否定的**。DirCov高只说明该参考方向落在模型预测子空间内，但不保证模型在该方向上的预测值与真实值一致。\n\n## 为什么覆盖率和预测精度测的是不同的东西\n\n可以从几何角度理解：\n\n### 1. 覆盖测的是\"方向存在性\"，精度测的是\"数值准确性\"\n\n- **DirCov**：检查参考方向u_j是否被预测子空间覆盖（即是否存在某个预测向量与该方向对齐）。它只关心方向是否存在，不关心预测值的大小或符号是否正确。\n- **标量预测精度**（如相关系数、R²）：衡量模型预测值与该方向上的真实响应值之间的数值一致性。\n\n### 2. 几何解释\n\n假设大脑在参考方向u_j上的真实响应为标量值r_j，模型预测为向量p。DirCov高意味着p在u_j方向上有非零投影，但投影的大小和符号可能与r_j完全不同：\n\n- 模型可能在u_j方向上有投影，但投影值远小于或远大于真实值\n- 模型可能在u_j方向上有投影，但符号相反（方向正确但极性错误）\n- 模型可能在u_j方向上有投影，但与其他方向的投影混淆\n\n### 3. 具体例子\n\n考虑一个简单情况：大脑在u_1方向上的真实响应为+5，在u_2方向上的真实响应为-3。模型预测子空间恰好包含u_1和u_2两个方向（DirCov=1），但模型预测值为u_1方向-5、u_2方向+3。此时DirCov全满，但标量预测精度为负相关。\n\n### 4. 框架的明确立场\n\n论文明确指出：**DirCov是覆盖度指标，不是方向级预测质量指标**。恢复轮廓框架从预测精度转向恢复轮廓，正是认识到这两个维度是互补的——一个模型可能覆盖了正确的方向集但预测值不准，也可能在某些方向上预测很准但遗漏了其他重要方向。\n\n## 总结\n\n| 维度 | 覆盖率（DirCov） | 预测精度 |\n|------|-----------------|---------|\n| 测量对象 | 方向是否存在 | 数值是否准确 |\n| 几何意义 | 子空间包含关系 | 向量对齐程度 |\n| 高值含义 | 方向被覆盖 | 预测值接近真实值 |\n| 互补关系 | 高覆盖率不保证高精度 | 高精度不保证全覆盖 |\n\n两者共同构成对模型表征能力的完整评估。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 6,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "恢复轮廓框架是在什么空间中定义参考的？为什么不在模型坐标系中分解分数？",
+        "answer": "## 参考定义的空间\n\n恢复轮廓框架在**目标大脑响应空间**中定义参考。具体来说：\n\n- 使用重复测量数据（同一刺激多次呈现的fMRI响应）定义可复现的参考方向。\n- 这些参考方向位于大脑体素/顶点构成的高维空间中，每个方向代表一个可复现的响应模式。\n- 框架不涉及源空间（刺激特征空间）坐标，也不涉及模型内部表示空间。\n\n## 为什么不在模型坐标系中分解分数\n\n1. **核心目标决定空间选择**：框架的目标是评估模型是否恢复了大脑的表征结构，而不是理解模型内部如何工作。因此，评估的锚点应该是大脑空间，而不是模型空间。\n\n2. **避免循环论证**：如果在模型坐标系中分解，相当于用模型自己的语言来评估自己，容易产生自洽但无信息的结果。固定在大脑空间提供了独立的外部基准。\n\n3. **模型架构无关性**：不同模型有完全不同的内部表示空间（CNN的卷积特征、Transformer的注意力头、RNN的隐状态等）。在模型坐标系中分解无法跨模型比较，而大脑空间对所有模型是统一的。\n\n4. **方向级可解释性**：大脑空间中的每个参考方向都有神经生理学意义（由重复测量定义），可以明确知道模型覆盖了哪些大脑响应模式。模型坐标系中的成分通常缺乏这种生物学解释。\n\n5. **公共空间学习的替代方案**：另一种选择是学习模型和大脑的公共空间（如CCA），但这会引入额外自由度和偏差。框架选择直接在大脑空间中投影，避免了这种偏差。\n\n## 总结\n\n框架选择大脑空间作为参考空间，是因为它直接服务于\"评估模型是否恢复大脑表征\"这一核心目标，同时保证了评估的公正性、跨模型可比性和方向级可解释性。模型坐标系分解更适合理解模型内部机制，但那是另一个研究问题。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "TopKCov是DirCov的什么类型的聚合？",
+        "answer": "TopKCov是DirCov的**参考加权前缀平均**聚合。\n\n具体来说：按参考方向的重要性（参考方差）从大到小排序后，对前K个方向的DirCov值进行加权平均，权重为各方向的参考方差。因此TopKCov(K)是前K个方向的加权平均覆盖度，不是累加和。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "大脑到大脑的top-k覆盖率在k=1时是多少？",
+        "answer": "根据之前总结的事实，大脑到大脑的top-k覆盖率在k=1时为**0.959**。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "大脑到大脑的top-k覆盖率在k=10时是多少？",
+        "answer": "根据之前总结的信息，大脑到大脑的top-k覆盖率在k=10时为**0.868**。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "DirCov definition as projection overlap",
+        "must_contain_any": [
+          "投影",
+          "projection",
+          "DirCov"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "TopKCov as prefix average",
+        "must_contain_any": [
+          "前缀平均",
+          "prefix average",
+          "前缀"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "BrainRefScore does not mean more brain-like",
+        "must_contain_any": [
+          "不代表",
+          "不意味着",
+          "不等于",
+          "not imply"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Prediction accuracy and profile are complementary",
+        "must_contain_any": [
+          "互补",
+          "complementary",
+          "精度",
+          "覆盖"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "K=10 for main profile display",
+        "must_contain": [
+          "10"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Brain-to-brain top-k coverage at k=1",
+        "must_contain": [
+          "0.959"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Brain-to-brain top-k coverage at k=10",
+        "must_contain": [
+          "0.868"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Disjoint-fold stress test correlation",
+        "must_contain": [
+          "0.90"
+        ]
+      },
+      "passed": false,
+      "score": 0.0,
+      "details": {
+        "must_contain": {
+          "matched": 0,
+          "total": 1,
+          "ok": false
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Target PCA 1-component full-spectrum coverage",
+        "must_contain": [
+          "0.18"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Brain-to-brain full-spectrum coverage",
+        "must_contain": [
+          "0.85"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "ShapeDist normalizes by own mean",
+        "must_contain_any": [
+          "归一化",
+          "normalize",
+          "均值"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "Framework fixes reference in target brain space",
+        "must_contain_any": [
+          "目标大脑",
+          "target brain",
+          "响应空间",
+          "重复测量"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 4,
+          "ok": true
+        }
+      }
+    }
+  ]
+}

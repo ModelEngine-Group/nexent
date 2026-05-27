@@ -1,0 +1,472 @@
+{
+  "case_id": "alphaevolve_003_data_center",
+  "baseline_failed": false,
+  "baseline": {
+    "task_score": 1.0,
+    "probe_score": 1.0,
+    "final_tokens": 11302,
+    "real_input_tokens": 36667
+  },
+  "compressed": {
+    "task_score": 1.0,
+    "probe_score": 0.6666666666666666,
+    "final_tokens": 11435,
+    "cm_stats": {
+      "total_calls": 1,
+      "total_attempts": 5,
+      "total_input_tokens": 7008,
+      "total_output_tokens": 341,
+      "total_cache_hits": 4
+    },
+    "cm_token_counts": {
+      "last_uncompressed": 11028,
+      "last_compressed": 3022
+    },
+    "cm_summary": {
+      "previous_summary": "{\n  \"active_task\": \"None\",\n  \"goal\": \"总结AlphaEvolve在数据中心调度案例的核心要点与启发\",\n  \"state\": [\n    \"1. AlphaEvolve优化Google Borg调度器的启发式评分函数，解决二维向量装箱问题（CPU+内存），从现有生产启发式进化出简洁函数。\",\n    \"2. 发现的函数包含交叉项（mem_residual/cpu_residual + cpu_residual/mem_residual），隐式优化资源均衡，减少搁浅资源。\",\n    \"3. 调度设计为构造性正确：先过滤合规机器，启发式只排序不改变可行性，确保安全。\",\n    \"4. 评估使用基于历史快照的模拟器，训练/测试分离，渐进式部署到全舰队，持续回收平均0.7%计算资源。\",\n    \"5. 选型AlphaEvolve而非深度RL，因其可解释性、可调试性、可预测性和部署简便性更适合任务关键系统。\",\n    \"6. 案例启示：重视资源碎片化，简单启发式优化潜力大，进化搜索可发现人类直觉难触及的有效解。\"\n  ],\n  \"decisions\": [\n    \"交叉项通过AM-GM不等式惩罚不均衡，引导调度器选择资源使用均衡的机器。\",\n    \"进化搜索从现有生产启发式出发，而非从零开始，提高安全性和工程可接受性。\",\n    \"0.7%资源回收是持续效果，非一次性收益。\"\n  ],\n  \"open_items\": \"None\",\n  \"verbatim_facts\": \"None\"\n}",
+      "current_summary": null,
+      "previous_cache_info": {
+        "covered_pairs": 21,
+        "is_fallback": false
+      },
+      "current_cache_info": null,
+      "compression_boundary": {
+        "config_keep_recent_pairs": 1,
+        "config_keep_recent_steps": 4,
+        "previous_compressed_pairs": 21,
+        "previous_retained_pairs": 1,
+        "current_compressed_steps": 0,
+        "current_retained_steps": 4
+      }
+    },
+    "real_input_tokens": 7769
+  },
+  "metrics": {
+    "task_success_retention": 1.0,
+    "probe_retention": 0.6666666666666666,
+    "token_reduction": 0.7259702575262967,
+    "net_token_reduction": 0.5876946573212971,
+    "compression_cost_tokens": 7349,
+    "summary_score": 1.0
+  },
+  "task_eval": [
+    {
+      "turn": 1,
+      "answer": "## AlphaEvolve 数据中心调度方法核心思路总结\n\n### 1. 问题建模\n\n- **场景**：Google Borg 调度器中的任务放置问题，属于**二维向量装箱问题**（CPU + 内存两个维度）。\n- **目标**：优化 Borg 现有的启发式评分函数，减少资源碎片化，提高集群利用率。\n- **约束**：每个任务必须被放置到一台有足够剩余 CPU 和内存的机器上。\n\n### 2. 启发式函数设计\n\n- **起点**：从 Borg 现有的生产启发式函数出发，而非从零开始，确保工程可接受性和安全性。\n- **进化搜索**：使用 AlphaEvolve 对启发式函数进行符号进化搜索，自动发现更优的评分函数。\n- **关键发现**：进化出的函数包含**交叉项**，形式为 `mem_residual / cpu_residual + cpu_residual / mem_residual`。\n- **数学原理**：通过 AM-GM 不等式，该交叉项在资源均衡时取最小值，从而**惩罚不均衡**，引导调度器选择资源使用更均衡的机器，减少搁浅资源。\n\n### 3. 安全保证\n\n- **构造性正确**：调度流程分为两步——先**过滤**出所有满足资源需求的合规机器，再用启发式函数**排序**这些机器。启发式只影响选择顺序，不改变可行性。\n- **关键意义**：无论进化搜索产生多么激进的启发式函数，都不会导致任务被放置到不合规的机器上，从根本上保证了安全性。\n- **部署策略**：基于历史快照的模拟器评估，训练/测试分离，渐进式部署到全舰队，持续回收平均 **0.7%** 的计算资源。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 6,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 2,
+      "answer": "Google 选择 AlphaEvolve 而非深度强化学习来优化数据中心调度，主要基于以下四个关键原因：\n\n### 1. 可解释性与可调试性\n- **AlphaEvolve** 进化出的启发式函数是简洁的数学表达式（如交叉项 `mem_residual/cpu_residual + cpu_residual/mem_residual`），工程师可以理解其行为逻辑，并在出现异常时快速定位和修复。\n- **深度强化学习** 的策略是黑箱模型，难以解释为何做出某个调度决策，在任务关键系统中调试和排查问题极为困难。\n\n### 2. 可预测性\n- **AlphaEvolve** 的启发式函数是确定性的——给定相同的输入，始终输出相同的评分和排序结果。这种确定性行为对于生产环境的稳定性和可复现性至关重要。\n- **深度强化学习** 的策略可能包含随机性，或对输入微小变化敏感，导致调度行为不可预测，增加运维风险。\n\n### 3. 部署简便性\n- **AlphaEvolve** 进化出的函数只有几行代码，可以直接嵌入现有调度器，无需引入额外的推理框架、GPU 资源或模型服务基础设施。\n- **深度强化学习** 需要维护模型训练和推理管线，增加系统复杂度和运维成本。\n\n### 4. 安全性与工程可接受性\n- 调度系统采用**构造性正确**设计（先过滤合规机器，再排序），启发式只影响选择顺序。简洁、可理解的函数更容易获得工程团队的信任和接受。\n- 进化搜索从**现有生产启发式**出发，而非从零开始，进一步降低了引入新策略的工程阻力。\n\n**总结**：在任务关键的基础设施中，简洁、可解释、确定性的解决方案比理论上更优但复杂、不透明的黑箱方法更受青睐。AlphaEvolve 在保持安全性的前提下，通过系统化搜索发现了人类直觉难以触及的有效解，同时避免了深度强化学习带来的可解释性、可预测性和部署复杂性代价。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 7,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 3,
+      "answer": "## 交叉项的具体逻辑与减少资源碎片化的原理\n\n### 交叉项的具体形式\n\nAlphaEvolve 发现的启发式函数中包含的交叉项为：\n\n$$\\frac{\\text{mem\\_residual}}{\\text{cpu\\_residual}} + \\frac{\\text{cpu\\_residual}}{\\text{mem\\_residual}}$$\n\n其中：\n- `cpu_residual` = 机器剩余 CPU 资源\n- `mem_residual` = 机器剩余内存资源\n\n### 为什么能减少资源碎片化\n\n**1. AM-GM 不等式的数学原理**\n\n根据算术-几何平均不等式（AM-GM），对于任意正数 $a$ 和 $b$：\n\n$$\\frac{a}{b} + \\frac{b}{a} \\geq 2$$\n\n当且仅当 $a = b$（即 `cpu_residual = mem_residual`）时取等号，此时交叉项取最小值 2。\n\n**2. 惩罚不均衡的调度逻辑**\n\n- 当一台机器的 CPU 和内存剩余量**不均衡**时（例如 CPU 剩余很多但内存几乎用完），交叉项的值会**显著大于 2**，产生较高的惩罚分数。\n- 当一台机器的 CPU 和内存剩余量**均衡**时，交叉项接近最小值 2，惩罚最小。\n\n**3. 引导调度器选择均衡机器**\n\n由于启发式函数用于对合规机器进行排序（分数越低越优先），交叉项的存在使得调度器**倾向于选择资源使用均衡的机器**，避免在某一维度上过度消耗而留下另一维度的搁浅资源。\n\n### 资源碎片化的本质\n\n资源碎片化的核心问题是：在多维资源调度中，如果任务放置导致某些机器的 CPU 几乎用完但内存大量闲置（或反之），这些闲置资源因为维度不匹配而无法被后续任务使用，形成**搁浅资源**。\n\n交叉项通过主动优化维度间的均衡性，从根源上减少了这种搁浅资源的产生，从而持续回收平均 **0.7%** 的计算资源。",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 6,
+          "total": 6,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 4,
+      "answer": "## 搁浅资源的概念\n\n**搁浅资源**是指数据中心中虽然物理上存在、但由于资源维度不匹配而无法被任何任务使用的闲置资源。\n\n### 具体场景\n\n假设一台机器有 10 核 CPU 和 10 GB 内存。经过一系列任务放置后，剩余资源变为：\n- CPU 剩余：8 核\n- 内存剩余：0.5 GB\n\n此时，这台机器上虽然有 8 核 CPU 闲置，但内存几乎耗尽。后续任何新任务都需要同时满足 CPU 和内存需求，因此即使有任务只需要 1 核 CPU 和 1 GB 内存，也无法放置到这台机器上（内存不足）。这 8 核 CPU 就成了**搁浅资源**——物理存在但无法被利用。\n\n### 搁浅资源的形成原因\n\n搁浅资源是**多维资源不均衡**的直接后果。当调度器持续将任务放置到机器上，导致某些维度（如 CPU）剩余很多而另一维度（如内存）几乎耗尽时，剩余资源就变成了碎片化的搁浅资源。\n\n## AlphaEvolve 如何回收搁浅资源\n\n### 核心机制：交叉项引导均衡放置\n\nAlphaEvolve 发现的启发式函数中的交叉项：\n\n$$\\frac{\\text{mem\\_residual}}{\\text{cpu\\_residual}} + \\frac{\\text{cpu\\_residual}}{\\text{mem\\_residual}}$$\n\n通过以下方式回收搁浅资源：\n\n1. **惩罚不均衡**：当机器资源不均衡时（如 CPU 多、内存少），交叉项值远大于 2，产生高惩罚分数。\n2. **优先选择均衡机器**：调度器倾向于选择交叉项值低的机器（即资源均衡的机器），避免在单一维度上过度消耗。\n3. **减少搁浅资源产生**：通过均衡放置，机器的 CPU 和内存消耗速度更匹配，减少了某一维度过早耗尽而另一维度大量闲置的情况。\n\n### 实际效果\n\n- 持续回收平均 **0.7%** 的全舰队计算资源\n- 这是**持续效果**而非一次性收益——每次调度决策都通过均衡放置减少新的搁浅资源产生，从而持续释放被碎片化锁定的计算能力",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "turn": 5,
+      "answer": "## AlphaEvolve 调度优化的关键步骤\n\n### 1. 问题定义与建模\n- 将数据中心调度优化定义为**二维向量装箱问题**（CPU + 内存）\n- 目标：优化 Google Borg 调度器的现有启发式评分函数，减少资源碎片化\n\n### 2. 进化搜索发现新启发式\n- 使用 AlphaEvolve 对启发式函数进行**符号进化搜索**\n- 从现有生产启发式出发，而非从零开始\n- 发现包含**交叉项**的简洁函数：`mem_residual/cpu_residual + cpu_residual/mem_residual`\n\n### 3. 模拟器评估\n- 使用基于**历史快照的模拟器**进行离线评估\n- 实现**训练/测试分离**，确保评估结果的泛化性\n- 验证新启发式在模拟环境中能有效减少搁浅资源\n\n### 4. 渐进式部署到生产环境\n- 采用**渐进式部署**策略，逐步将新启发式推广到全舰队\n- 先在部分集群或机器上试运行，监控效果和安全性\n- 逐步扩大部署范围，直至覆盖全舰队\n\n### 5. 持续监控与资源回收\n- 部署后持续监控调度效果\n- 实现**持续回收**平均 **0.7%** 的计算资源（非一次性收益）\n- 每次调度决策都通过均衡放置减少新的搁浅资源产生\n\n### 关键设计保障\n\n整个过程中，**构造性正确**的安全设计贯穿始终：\n- 调度流程先**过滤**合规机器，再用启发式**排序**\n- 启发式只影响选择顺序，不改变可行性\n- 无论进化搜索产生何种函数，都不会导致任务被放置到不合规的机器上",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 5,
+          "total": 5,
+          "ok": true
+        }
+      }
+    }
+  ],
+  "probe_eval": {
+    "baseline": [
+      {
+        "question": "AlphaEvolve 发现的启发式函数包含哪两个交叉项？请写出具体的表达式。",
+        "answer": "根据我们之前的讨论，以下是 AlphaEvolve 在数据中心调度场景的完整总结：\n\n---\n\n## AlphaEvolve 数据中心调度方法核心总结\n\n### 1. 问题建模\n\n- **场景**：Google Borg 调度器中的在线任务放置，本质是**二维向量装箱问题**，每个任务有 CPU 和内存两个需求维度，每台机器有对应的容量约束。\n- **优化目标**：改进 Borg 现有的启发式评分函数（优先级分数），减少因资源不均衡导致的**搁浅资源**（stranded resources），即某一维度耗尽而另一维度闲置的情况。\n- **约束**：每个任务只能放置到同时满足 CPU 和内存剩余量的机器上（可行性约束）。\n\n### 2. 启发式函数设计\n\n- **起点**：从 Google 生产环境已有的启发式函数出发，而非从零开始。\n- **进化搜索**：AlphaEvolve 对启发式函数进行符号进化，自动搜索函数形式与参数。\n- **发现的关键结构**：\n  ```python\n  def alpha_evolve_score(required, free):\n      cpu_residual = required.cpu / free.cpu\n      mem_residual = required.mem / free.mem\n      return -1.0 * (cpu_residual + mem_residual +\n                     mem_residual / cpu_residual +\n                     cpu_residual / mem_residual)\n  ```\n  其中 `mem_residual / cpu_residual + cpu_residual / mem_residual` 是两个**交叉项**。\n- **交叉项的作用**：基于 AM-GM 不等式（对正数 \\(a,b\\) 有 \\(a/b + b/a \\geq 2\\)，等号当且仅当 \\(a=b\\)），该交叉项在 CPU 和内存剩余量**均衡时最小**，在**不均衡时显著增大**。因此分数（取负后）会**惩罚不均衡的机器**，引导调度器优先选择资源使用均衡的机器，从源头上减少搁浅资源的产生。\n\n### 3. 安全保证：构造性正确\n\n- **设计哲学**：调度流程分为两步——**先过滤**出所有满足资源需求的合规机器，**再排序**这些机器。\n- **关键影响**：启发式函数只影响机器之间的优先级顺序，而不影响任务是否能被放置到某台机器上。即使进化搜索产生极端解，也不会导致任务被分配到不合规的机器。\n- **工程意义**：这种“优化与可行性解耦”的设计，允许大胆的自动化搜索而无需担心违反约束，是生产环境部署的核心安全基础。\n\n### 4. 评估与部署\n\n- **模拟器**：基于 Google 舰队历史快照构建，使用真实的工作负载与容量数据。\n- **训练/测试分离**：进化搜索在训练集上运行，最终在未见过的测试集上验证泛化能力。\n- **渐进式部署**：先在小规模集群试运行，验证无异常后逐步扩展到全舰队。\n- **最终效果**：部署后持续回收全舰队平均 **0.7%** 的计算资源（搁浅资源）。\n\n### 5. 选择 AlphaEvolve 而非深度 RL 的原因\n\n| 维度 | AlphaEvolve | 深度 RL |\n|------|-------------|---------|\n| **输出形式** | 可读的数学表达式（5行代码） | 神经网络权重（黑箱） |\n| **可解释性/可调试性** | 高，工程师可逐行理解 | 低，难以解释决策原因 |\n| **可预测性** | 确定性，相同输入始终相同输出 | 可能含随机性，行为不可预测 |\n| **部署复杂度** | 极低，直接嵌入现有系统 | 高，需要推理服务、GPU等 |\n| **安全性** | 构造性正确天然保证 | 需要额外约束机制 |\n\n### 总体洞察\n\nAlphaEvolve 在这个案例中展示了：**简洁、可解释、构造性安全的启发式，通过系统化进化搜索，可以超越复杂黑箱方法，持续在任务关键基础设施中产生可量化的收益**。核心工程哲学是：在生产环境中，可控性、可调试性和可预测性往往比理论最优性更为重要。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 2,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 部署后持续回收了多少比例的 Google 舰队计算资源？",
+        "answer": "AlphaEvolve 部署后持续回收了平均 **0.7%** 的 Google 舰队范围内的计算资源。\n\n这个比例虽然看起来不大，但考虑到 Google 数据中心的庞大规模，0.7% 对应的计算能力是极其可观的。更重要的是，这是一个**持续效果**而非一次性收益——只要 AlphaEvolve 的启发式在运行，它就会通过均衡放置决策持续减少搁浅资源的产生，从而不断释放被碎片化锁定的计算能力。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "相比深度强化学习，AlphaEvolve 在可解释性和可调试性方面有什么优势？",
+        "answer": "## AlphaEvolve 在可解释性和可调试性方面的优势\n\n### 可解释性\n\n| 维度 | AlphaEvolve | 深度强化学习 |\n|------|------------|------------|\n| **输出形式** | 可读的源代码（如五行数学表达式） | 神经网络权重（数百万个参数） |\n| **决策逻辑** | 工程师可以逐行阅读和理解函数行为 | 黑箱模型，无法直观理解为何做出特定决策 |\n| **数学原理** | 交叉项可追溯到 AM-GM 不等式等经典数学 | 决策分散在多层非线性变换中，难以归因 |\n| **行为预测** | 给定输入，可精确预测输出 | 行为可能随输入微小变化而剧烈波动 |\n\n### 可调试性\n\n| 场景 | AlphaEvolve | 深度强化学习 |\n|------|------------|------------|\n| **异常排查** | 可设断点、追踪变量值、分析逻辑分支 | 难以定位问题根源，需要复杂的归因分析 |\n| **修复方式** | 直接修改代码逻辑 | 需要重新训练或调整模型架构 |\n| **确定性** | 确定性函数，相同输入始终相同输出 | 可能包含随机性，难以复现问题 |\n| **回退机制** | 可快速回退到旧版本代码 | 模型版本管理复杂，回退成本高 |\n\n### 核心优势总结\n\n对于任务关键的基础设施（如数据中心调度），可解释性和可调试性不是锦上添花，而是**硬性要求**：\n\n1. **故障响应**：当调度异常导致服务受影响时，工程师需要快速定位原因。AlphaEvolve 的代码可以直接调试，而深度 RL 的黑箱模型会显著延长故障排查时间。\n\n2. **信任建立**：工程团队需要理解并信任调度策略。简洁、可读的代码比神经网络权重更容易获得信任。\n\n3. **持续改进**：可解释的策略允许工程师在进化搜索的基础上进行人工微调，形成人机协作的优化循环。\n\n**结论**：AlphaEvolve 在保持安全性的前提下，通过系统化搜索发现了人类直觉难以触及的有效解，同时避免了深度强化学习带来的可解释性和可调试性代价。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 5,
+            "total": 5,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 的评估中，模拟器是基于什么数据构建的？如何确保新启发式不会过拟合？",
+        "answer": "## 模拟器的数据基础与过拟合防范\n\n### 模拟器的数据基础\n\n模拟器基于 **Google 舰队的历史快照** 构建，具体包括：\n\n1. **工作负载数据**：历史上真实的作业到达时间序列、资源需求模式\n2. **容量数据**：集群中每台机器的 CPU 和内存配置\n3. **作业特征**：执行时长、资源需求（CPU 和内存的峰值及平均值）\n\n模拟器通过这些历史快照还原真实的调度环境，使用待评估的启发式函数进行调度决策，并记录调度结果的各种指标。\n\n### 防止过拟合的机制\n\nAlphaEvolve 通过以下方式确保新启发式不会过拟合：\n\n**1. 训练/测试分离**\n- 进化搜索过程中使用的评估数据集（训练集）和最终验证使用的数据集（测试集）是**分开的**\n- 新启发式需要在**未见过的测试数据集**上验证效果，确保其能够泛化到未来的调度场景\n\n**2. 模拟器保真度**\n- 模拟器需要足够精确地反映真实调度环境的行为，否则评估结果不可靠\n- 可重复性：相同输入产生相同输出，以便公平比较不同启发式\n\n**3. 渐进式生产部署验证**\n- 模拟器验证通过后，还需要经过实际生产环境的渐进式部署验证\n- 从部分集群开始，逐步扩展到整个舰队\n- 部署后的持续监控确认了 0.7% 的资源回收效果\n\n**4. 简洁性降低过拟合风险**\n- AlphaEvolve 发现的启发式函数只有五行代码，结构简单\n- 简单的函数形式天然具有更强的泛化能力，不易过拟合到训练数据的特定模式",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 5,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "论文中的 Figure 6 展示了什么内容？",
+        "answer": "论文中的 **Figure 6** 展示了 AlphaEvolve 发现的启发式函数及其可视化效果，具体包括以下内容：\n\n### 1. 启发式函数代码\n图中展示了完整的 `alpha_evolve_score` 函数代码，包含：\n- `cpu_residual`（需求 CPU / 可用 CPU）\n- `mem_residual`（需求内存 / 可用内存）\n- 两个交叉项：`mem_residual / cpu_residual` 和 `cpu_residual / mem_residual`\n- 最终输出：`-1.0 * (cpu_residual + mem_residual + mem_residual/cpu_residual + cpu_residual/mem_residual)`\n\n### 2. 分数热力图（Heatmap）\n- 以二维热力图的形式可视化启发式函数的输出\n- **横轴**：CPU 可用量\n- **纵轴**：内存可用量\n- **颜色**：表示优先级分数（暖色 = 高分，冷色 = 低分）\n\n### 3. 关键可视化洞察\n- **均衡区域**（CPU 和内存可用量相近）：呈现暖色，分数较高，表示调度器优先选择\n- **不均衡区域**（CPU 多内存少，或反之）：呈现冷色，分数显著降低，表示调度器会避免选择\n- 这种颜色分布直观展示了**交叉项的惩罚效果**——不均衡区域的分数衰减非常明显\n\n### 4. 对比展示\n- 图中可能还包含了**不含交叉项的简单版本**（仅 `cpu_residual + mem_residual`）的热力图作为对比\n- 对比凸显了交叉项带来的差异：简单版本在不均衡区域的分数衰减不够显著，而 AlphaEvolve 版本能更有效地引导调度器选择均衡机器\n\n### 总结\nFigure 6 将抽象的数学公式转化为直观的二维颜色映射，使得工程师可以快速判断启发式在不同场景下的行为是否符合预期，是理解 AlphaEvolve 启发式效果的有力工具。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 4,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "为什么选择 AlphaEvolve 而不是深度 RL 的四个关键工程考量是什么？",
+        "answer": "## 选择 AlphaEvolve 而非深度 RL 的四个关键工程考量\n\n### 1. 可解释性\n- **AlphaEvolve** 进化出的启发式函数是简洁的数学表达式（如交叉项），工程师可以逐行阅读和理解其逻辑。\n- **深度 RL** 的策略是神经网络权重，本质上是黑箱模型，难以解释为何做出特定调度决策。\n\n### 2. 可调试性\n- **AlphaEvolve** 的启发式函数可以设置断点、追踪变量值、分析逻辑分支，快速定位异常原因。\n- **深度 RL** 的决策过程分散在数百万个神经元权重中，调试和排查问题极为困难。\n\n### 3. 可预测性\n- **AlphaEvolve** 的启发式函数是确定性的——相同输入始终产生相同输出，行为可预测。\n- **深度 RL** 的策略可能包含随机性，或对输入微小变化敏感，导致调度行为不可预测。\n\n### 4. 部署简便性\n- **AlphaEvolve** 进化出的函数只有几行代码，可以直接嵌入现有调度器，几乎不增加运行时开销。\n- **深度 RL** 需要维护模型训练和推理管线，引入推理服务、GPU 资源、模型版本管理等额外基础设施。\n\n### 核心结论\n\n在任务关键的基础设施中，简洁、可解释、确定性的解决方案比理论上更优但复杂、不透明的黑箱方法更受青睐。AlphaEvolve 在保持安全性的前提下，通过系统化搜索发现了人类直觉难以触及的有效解，同时避免了深度强化学习带来的可解释性、可预测性和部署复杂性代价。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 7,
+            "ok": true
+          }
+        }
+      }
+    ],
+    "compressed": [
+      {
+        "question": "AlphaEvolve 发现的启发式函数包含哪两个交叉项？请写出具体的表达式。",
+        "answer": "AlphaEvolve 发现的启发式函数中包含的交叉项具体表达式为：\n\n$$\\frac{\\text{mem\\_residual}}{\\text{cpu\\_residual}} + \\frac{\\text{cpu\\_residual}}{\\text{mem\\_residual}}$$\n\n其中：\n- `cpu_residual` = 机器剩余 CPU 资源\n- `mem_residual` = 机器剩余内存资源\n\n这两个分式互为倒数，共同构成一个对称的交叉项。根据 AM-GM 不等式，当 `cpu_residual = mem_residual` 时，该交叉项取最小值 2；当两个维度不均衡时，交叉项值大于 2，从而产生惩罚，引导调度器选择资源使用均衡的机器。",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 0,
+            "total": 4,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 部署后持续回收了多少比例的 Google 舰队计算资源？",
+        "answer": "根据之前的讨论，AlphaEvolve 部署后**持续回收平均 0.7%** 的 Google 全舰队计算资源。这是一个**持续效果**而非一次性收益——每次调度决策都通过均衡放置减少新的搁浅资源产生，从而持续释放被碎片化锁定的计算能力。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain": {
+            "matched": 1,
+            "total": 1,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "相比深度强化学习，AlphaEvolve 在可解释性和可调试性方面有什么优势？",
+        "answer": "## AlphaEvolve 在可解释性和可调试性方面的优势\n\n### 可解释性优势\n\n**AlphaEvolve** 进化出的启发式函数是**简洁的数学表达式**，例如：\n\n$$\\frac{\\text{mem\\_residual}}{\\text{cpu\\_residual}} + \\frac{\\text{cpu\\_residual}}{\\text{mem\\_residual}}$$\n\n- **工程师可以直接理解**其行为逻辑：该函数通过 AM-GM 不等式惩罚资源不均衡，引导调度器选择均衡的机器。\n- **行为可预测**：给定相同的输入，始终输出相同的评分结果，确定性行为便于推理和验证。\n- **无需黑箱解释**：不需要额外的解释工具或近似模型来理解决策依据。\n\n**深度强化学习**的策略是**黑箱模型**（如深度神经网络）：\n- 无法直观理解为何做出某个调度决策\n- 决策逻辑隐藏在数百万个参数中，难以用简洁的规则概括\n- 即使通过注意力机制或特征重要性分析，也只能获得近似解释\n\n### 可调试性优势\n\n**AlphaEvolve** 的启发式函数：\n- **代码量极少**（仅几行），可以像普通代码一样进行单元测试、断点调试和日志记录\n- **异常定位简单**：如果某个调度决策导致问题，可以直接检查函数输入和输出，快速定位原因\n- **修改成本低**：调整函数逻辑只需修改几行代码，无需重新训练模型\n\n**深度强化学习**的调试：\n- **难以复现**：策略可能包含随机性，或对输入微小变化敏感，导致相同输入产生不同输出\n- **问题溯源困难**：出现异常时，无法直接检查模型内部状态，需要复杂的归因分析\n- **修改代价高**：调整策略需要重新训练模型，涉及数据收集、训练管线、超参数调优等复杂流程\n\n### 总结\n\n在任务关键的数据中心调度场景中，AlphaEvolve 的可解释性和可调试性优势使其成为更务实的选择——工程师能够理解、信任并快速迭代优化策略，而深度强化学习的黑箱特性在需要高可靠性和快速故障响应的生产环境中构成了显著风险。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 5,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "AlphaEvolve 的评估中，模拟器是基于什么数据构建的？如何确保新启发式不会过拟合？",
+        "answer": "## 模拟器的数据基础\n\nAlphaEvolve 的模拟器是基于**历史快照数据**构建的。这些快照记录了数据中心在特定时间点的集群状态，包括：\n- 每台机器的资源容量（CPU、内存）\n- 当前已分配的任务及其资源需求\n- 机器的剩余资源状态\n\n模拟器通过回放这些历史快照，重现真实的调度场景，从而评估新启发式函数在类似生产环境中的表现。\n\n## 防止过拟合的机制\n\n### 1. 训练/测试分离\n- 将历史快照数据划分为**训练集**和**测试集**，两者在时间上不重叠\n- 进化搜索在训练集上发现启发式函数\n- 最终评估在测试集上进行，确保函数对未见过的调度场景有良好的泛化能力\n\n### 2. 基于真实生产数据的评估\n- 模拟器使用真实的历史调度请求和集群状态，而非人工合成的数据\n- 这保证了评估场景的多样性和真实性，降低了过拟合到特定模式的风险\n\n### 3. 渐进式全舰队部署验证\n- 模拟器评估通过后，新启发式采用**渐进式部署**策略\n- 先在部分集群试运行，观察实际效果\n- 逐步扩大部署范围，最终覆盖全舰队\n- 实际生产环境中的持续表现是对过拟合的最终检验——如果函数过拟合了模拟器中的特定模式，在真实环境中会表现不佳，从而被及时发现和调整\n\n### 4. 简洁的函数形式\n- 进化出的函数只有几行代码，参数极少\n- 简洁的函数天然具有更强的泛化能力，不易过拟合到训练数据的噪声上",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 3,
+            "total": 5,
+            "ok": true
+          }
+        }
+      },
+      {
+        "question": "论文中的 Figure 6 展示了什么内容？",
+        "answer": "根据之前的讨论内容，我没有关于论文中 Figure 6 的具体信息。之前的对话中并未提及 Figure 6 的内容或相关细节。\n\n如果您能提供 Figure 6 的描述或上下文，我可以基于已有的知识帮助您分析其含义。或者，您也可以直接描述该图展示的内容，我将结合 AlphaEvolve 的整体框架为您解读。",
+        "passed": false,
+        "score": 0.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 0,
+            "total": 4,
+            "ok": false
+          }
+        }
+      },
+      {
+        "question": "为什么选择 AlphaEvolve 而不是深度 RL 的四个关键工程考量是什么？",
+        "answer": "根据之前的讨论，选择 AlphaEvolve 而非深度强化学习的四个关键工程考量如下：\n\n### 1. 可解释性与可调试性\n- **AlphaEvolve** 进化出的启发式函数是简洁的数学表达式（如交叉项），工程师可以理解其行为逻辑，在出现异常时能快速定位和修复。\n- **深度强化学习** 的策略是黑箱模型，难以解释为何做出某个调度决策，在任务关键系统中调试极为困难。\n\n### 2. 可预测性\n- **AlphaEvolve** 的启发式函数是确定性的——给定相同输入，始终输出相同的评分和排序结果，保证调度行为的稳定性和可复现性。\n- **深度强化学习** 的策略可能包含随机性，或对输入微小变化敏感，导致调度行为不可预测，增加运维风险。\n\n### 3. 部署简便性\n- **AlphaEvolve** 进化出的函数只有几行代码，可直接嵌入现有调度器，无需引入额外的推理框架、GPU 资源或模型服务基础设施。\n- **深度强化学习** 需要维护模型训练和推理管线，增加系统复杂度和运维成本。\n\n### 4. 安全性与工程可接受性\n- 调度系统采用**构造性正确**设计（先过滤合规机器，再排序），启发式只影响选择顺序。简洁、可理解的函数更容易获得工程团队的信任和接受。\n- 进化搜索从**现有生产启发式**出发，而非从零开始，进一步降低了引入新策略的工程阻力。",
+        "passed": true,
+        "score": 1.0,
+        "details": {
+          "must_contain_any": {
+            "matched": 4,
+            "total": 7,
+            "ok": true
+          }
+        }
+      }
+    ]
+  },
+  "summary_inspection": [
+    {
+      "check": {
+        "description": "Borg orchestration system",
+        "must_contain": [
+          "Borg"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "vector bin-packing formulation with CPU and memory",
+        "must_contain_any": [
+          "向量装箱",
+          "vector bin-packing",
+          "bin-packing"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 3,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "two resource dimensions CPU and memory",
+        "must_contain": [
+          "CPU",
+          "内存"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 2,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "cross-terms in heuristic function",
+        "must_contain_any": [
+          "mem_residual/cpu_residual",
+          "cpu_residual/mem_residual",
+          "交叉项",
+          "cross-term"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 3,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "correct by construction safety property",
+        "must_contain_any": [
+          "构造性正确",
+          "correct by construction"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "0.7% fleet-wide resource recovery",
+        "must_contain": [
+          "0.7%"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain": {
+          "matched": 1,
+          "total": 1,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "stranded resources concept",
+        "must_contain_any": [
+          "搁浅资源",
+          "stranded resource"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 1,
+          "total": 2,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "AlphaEvolve preferred over deep RL reasons",
+        "must_contain_any": [
+          "可解释性",
+          "可调试性",
+          "可预测性",
+          "部署",
+          "interpretability",
+          "debuggability",
+          "predictability"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 4,
+          "total": 7,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "heuristic evolved from existing production heuristic",
+        "must_contain_any": [
+          "已有",
+          "现有",
+          "生产",
+          "演化"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 4,
+          "ok": true
+        }
+      }
+    },
+    {
+      "check": {
+        "description": "simulator based on historical snapshots",
+        "must_contain_any": [
+          "历史快照",
+          "模拟器",
+          "simulator"
+        ]
+      },
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "must_contain_any": {
+          "matched": 2,
+          "total": 3,
+          "ok": true
+        }
+      }
+    }
+  ]
+}
