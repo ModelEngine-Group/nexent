@@ -80,6 +80,8 @@ interface DocumentListProps {
   availableEmbeddingModels?: ModelOption[];
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
+  isMultimodal?: boolean;
+  onMultimodalChange?: (value: boolean) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
   
   // Auto-summary frequency
@@ -127,6 +129,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       availableEmbeddingModels,
       selectedEmbeddingModel,
       onEmbeddingModelChange,
+      isMultimodal = false,
+      onMultimodalChange,
       permission,
       
       // Auto-summary frequency
@@ -248,6 +252,8 @@ const [isSummarizing, setIsSummarizing] = useState(false);
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
+    const canToggleMultimodal =
+      isCreatingMode && typeof onMultimodalChange === "function";
 
     // Permission options with icons shown inside dropdown
     const permissionOptions = [
@@ -313,6 +319,26 @@ const [isSummarizing, setIsSummarizing] = useState(false);
 
     // Check if group select should be disabled (when permission is PRIVATE)
     const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
+    const embeddingModelsForOptions = availableEmbeddingModels || [];
+    const availableEmbeddingModelKeys = new Set(
+      embeddingModelsForOptions
+        .filter((model) => model.connect_status === "available")
+        .map((model) => `${model.displayName}::${model.type}`)
+    );
+    const isEmbeddingModelSelectable = (model: ModelOption): boolean => {
+      if (model.connect_status === "available") return true;
+      if (model.type === "embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::multi_embedding`
+        );
+      }
+      if (model.type === "multi_embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::embedding`
+        );
+      }
+      return false;
+    };
 
     // Load frequency options from backend API
   useEffect(() => {
@@ -533,11 +559,29 @@ const [isSummarizing, setIsSummarizing] = useState(false);
                         onChange={onEmbeddingModelChange}
                         style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
-                        options={(availableEmbeddingModels || []).map((model) => ({
-                          value: model.displayName,
-                          label: model.displayName,
-                          disabled: model.connect_status === "unavailable",
-                        }))}
+                        allowClear={false}
+                        options={[
+                          {
+                            label: t("modelConfig.option.embeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter((model) => model.type === "embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                          {
+                            label: t("modelConfig.option.multiEmbeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter((model) => model.type === "multi_embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                        ].filter((group) => group.options.length > 0)}
                       />
                     )}
                     {/* User groups multi-select */}
@@ -645,7 +689,7 @@ const [isSummarizing, setIsSummarizing] = useState(false);
             <div className="flex h-full flex-col px-8">
               <DocumentChunk
                 knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId}
+                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
                 documents={documents}
                 getFileIcon={getFileIcon}
                 currentEmbeddingModel={currentModel}

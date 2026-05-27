@@ -401,6 +401,7 @@ export interface McpServer {
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
+  custom_headers?: Record<string, string> | null;
   mcp_id: number;
   /**
    * Per-item permission returned by /mcp/list.

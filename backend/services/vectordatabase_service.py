@@ -28,7 +28,7 @@ from nexent.vector_database.datamate_core import DataMateCore
 
 from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ, ASSET_OWNER_TENANT_ID
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
-from database.attachment_db import delete_file
+from database.attachment_db import delete_file, get_file_stream
 from database.knowledge_db import (
     create_knowledge_record,
     delete_knowledge_record,
@@ -100,6 +100,28 @@ def _get_embedding_model_display_name(model_id: Optional[int], tenant_id: str) -
     except Exception as e:
         logger.warning(f"Failed to get display_name for model_id {model_id}: {e}")
     return ""
+
+
+def _is_multimodal_by_model_id(model_id: Optional[int], tenant_id: str) -> bool:
+    """
+    Determine whether an embedding model is multimodal based on model_id.
+
+    Args:
+        model_id: The embedding model ID.
+        tenant_id: Tenant ID for model lookup.
+
+    Returns:
+        True when the model type is `multi_embedding`, otherwise False.
+    """
+    if model_id is None:
+        return False
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model:
+            return model.get("model_type") == "multi_embedding"
+    except Exception as e:
+        logger.warning(f"Failed to determine multimodal flag for model_id {model_id}: {e}")
+    return False
 
 
 class KnowledgeBaseNeedsModelConfigError(Exception):
@@ -285,8 +307,42 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
     # Case B: Name is available in this tenant
     return {"status": "available"}
 
+def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
+    if raw_model_type in ["multiEmbedding", "multi_embedding"]:
+        return "multi_embedding"
+    if raw_model_type == "embedding":
+        return "embedding"
+    return None
 
-def get_embedding_model(tenant_id: str, model_name: Optional[str] = None) -> tuple[Optional[Any], Optional[int]]:
+def _build_model_config(model: dict) -> dict:
+    return {
+        "model_repo": model.get("model_repo", ""),
+        "model_name": model["model_name"],
+        "api_key": model.get("api_key", ""),
+        "base_url": model.get("base_url", ""),
+        "model_type": model.get("model_type", "embedding"),
+        "max_tokens": model.get("max_tokens", 1024),
+        "ssl_verify": model.get("ssl_verify", True),
+    }
+
+def _create_embedding_model(model: dict) -> Any:
+    model_config = _build_model_config(model)
+    common_kwargs = {
+        "api_key": model_config.get("api_key", ""),
+        "base_url": model_config.get("base_url", ""),
+        "model_name": get_model_name_from_config(model_config) or "",
+        "embedding_dim": model_config.get("max_tokens", 1024),
+        "ssl_verify": model_config.get("ssl_verify", True),
+    }
+    if model.get("model_type", "embedding") == "multi_embedding":
+        return JinaEmbedding(**common_kwargs)
+    return OpenAICompatibleEmbedding(**common_kwargs)
+
+def get_embedding_model(
+        tenant_id: str,
+        model_name: Optional[str] = None,
+        model_type: Optional[str] = None
+) -> tuple[Optional[Any], Optional[int]]:
     """
     Get the embedding model for the tenant, optionally using a specific model name.
 
@@ -298,40 +354,19 @@ def get_embedding_model(tenant_id: str, model_name: Optional[str] = None) -> tup
     Returns:
         Tuple of (embedding model instance or None, model_id or None)
     """
-    # If model_name is provided, find the model by display_name
     if model_name:
         try:
-            model = get_model_by_display_name(model_name, tenant_id)
-            if model and model.get("model_type") in ["embedding", "multi_embedding"]:
-                model_config = {
-                    "model_repo": model.get("model_repo", ""),
-                    "model_name": model["model_name"],
-                    "api_key": model.get("api_key", ""),
-                    "base_url": model.get("base_url", ""),
-                    "model_type": model.get("model_type", "embedding"),
-                    "max_tokens": model.get("max_tokens", 1024),
-                    "ssl_verify": model.get("ssl_verify", True),
-                }
-                model_type = model.get("model_type", "embedding")
-                if model_type == "multi_embedding":
-                    embedding_model = JinaEmbedding(
-                        api_key=model_config.get("api_key", ""),
-                        base_url=model_config.get("base_url", ""),
-                        model_name=get_model_name_from_config(model_config) or "",
-                        embedding_dim=model_config.get("max_tokens", 1024),
-                        ssl_verify=model_config.get("ssl_verify", True),
-                    )
-                else:
-                    embedding_model = OpenAICompatibleEmbedding(
-                        api_key=model_config.get("api_key", ""),
-                        base_url=model_config.get("base_url", ""),
-                        model_name=get_model_name_from_config(model_config) or "",
-                        embedding_dim=model_config.get("max_tokens", 1024),
-                        ssl_verify=model_config.get("ssl_verify", True),
-                    )
-                return embedding_model, model.get("model_id")
+            normalized_model_type = _normalize_model_type(model_type)
+            if normalized_model_type:
+                model = get_model_by_display_name(model_name, tenant_id, normalized_model_type)
             else:
+                model = get_model_by_display_name(model_name, tenant_id)
+
+            if not model or model.get("model_type") not in ["embedding", "multi_embedding"]:
                 logger.warning(f"Model '{model_name}' not found or is not an embedding model")
+                return None, None
+
+            return _create_embedding_model(model), model.get("model_id")
         except Exception as e:
             logger.warning(f"Failed to get embedding model by name {model_name}: {e}")
 
@@ -597,6 +632,7 @@ class ElasticSearchService:
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
             embedding_model_name: Optional[str] = None,
+            is_multimodal: Optional[bool] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -622,7 +658,17 @@ class ElasticSearchService:
         """
         try:
             # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            embedding_model, model_id = get_embedding_model(tenant_id, embedding_model_name)
+            selected_model_type = None
+            if is_multimodal is True:
+                selected_model_type = "multi_embedding"
+            elif is_multimodal is False and embedding_model_name:
+                selected_model_type = "embedding"
+
+            embedding_model, model_id = get_embedding_model(
+                tenant_id,
+                embedding_model_name,
+                selected_model_type
+            )
 
             # Determine the embedding model name to save: use user-provided name if available,
             # otherwise use the model's display name
@@ -1020,6 +1066,7 @@ class ElasticSearchService:
                     model_id = record.get("embedding_model_id")
                     tenant_id = record.get("tenant_id") or target_tenant_id
                     embedding_model_display_name = _get_embedding_model_display_name(model_id, tenant_id)
+                    is_multimodal = _is_multimodal_by_model_id(model_id, tenant_id)
 
                     stats_info.append({
                         # Internal index name (used as ID)
@@ -1031,6 +1078,7 @@ class ElasticSearchService:
                         # knowledge source and ingroup permission from DB record
                         "knowledge_sources": record["knowledge_sources"],
                         "ingroup_permission": record["ingroup_permission"],
+                        "is_multimodal": is_multimodal,
                         "tenant_id": record.get("tenant_id"),
                         # Embedding model info: display_name from model_id
                         "embedding_model_name": embedding_model_display_name or record.get("embedding_model_name", ""),
@@ -1140,12 +1188,27 @@ class ElasticSearchService:
                     "author": author,
                     "date": date,
                     "content": text,
-                    "process_source": "Unstructured",
+                    "process_source": metadata.get("process_source", "Unstructured"),
                     "file_size": file_size,
                     "create_time": create_time,
                     "languages": metadata.get("languages", []),
                     "embedding_model_name": embedding_model_name
                 }
+                
+                image_url = metadata.get("image_url", "")
+                if len(image_url) > 0:
+                    # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)
+                    try:
+                        file_stream = get_file_stream(
+                            object_name=image_url)
+                        if file_stream is None:
+                            raise FileNotFoundError(
+                                f"Unable to fetch file from URL: {image_url}")
+                        document["image_bytes"] = file_stream.read()
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to fetch file from {image_url}: {e}")
+                        raise
 
                 documents.append(document)
 
@@ -1166,8 +1229,9 @@ class ElasticSearchService:
                 'tenant_id') if knowledge_record else None
 
             if tenant_id:
+                model_type = "EMBEDDING_ID" if embedding_model.model_type == "text" else "MULTI_EMBEDDING_ID"
                 model_config = tenant_config_manager.get_model_config(
-                    key="EMBEDDING_ID", tenant_id=tenant_id)
+                    key=model_type, tenant_id=tenant_id)
                 embedding_batch_size = model_config.get("chunk_batch", 10)
                 if embedding_batch_size is None:
                     embedding_batch_size = 10
@@ -1838,6 +1902,7 @@ class ElasticSearchService:
         chunk_request: ChunkUpdateRequest,
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ):
         """
         Update a chunk document.

@@ -1,4 +1,4 @@
-import threading
+﻿import threading
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -498,6 +498,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             rerank = param_dict.get("rerank", False)
             rerank_model_name = param_dict.get("rerank_model_name", "")
             rerank_model = None
+            is_multimodal = bool(tool_config.params.pop("multimodal", False))
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(
                     tenant_id=tenant_id, model_name=rerank_model_name
@@ -877,7 +878,7 @@ async def create_agent_run_info(
     # Filter MCP servers and tools, and build mcp_host with authorization
     used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
 
-    # Build mcp_host list with authorization tokens
+    # Build mcp_host list with authorization tokens and custom headers
     mcp_host = []
     for url in used_mcp_urls:
         # Find the MCP record for this URL
@@ -892,10 +893,15 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }
-            # Add authorization if present
+            headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:
-                mcp_config["authorization"] = auth_token
+                headers["Authorization"] = auth_token
+            custom_headers = mcp_record.get("custom_headers")
+            if custom_headers and isinstance(custom_headers, dict):
+                headers.update(custom_headers)
+            if headers:
+                mcp_config["headers"] = headers
             mcp_host.append(mcp_config)
         else:
             # Fallback to string format if record not found

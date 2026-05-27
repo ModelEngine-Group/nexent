@@ -14,6 +14,7 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   transportType: McpTransportType.URL,
   serverUrl: "",
   authorizationToken: "",
+  customHeaders: "",
   containerConfigJson: "",
   containerPort: undefined,
   tags: [],
@@ -184,6 +185,22 @@ export default function AddMcpServiceLocalSection({
                   {...bindField("authorizationToken")}
                   className="w-full rounded-md"
                   placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                />
+              </Form.Item>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-normal text-slate-500">
+                {t("mcpTools.addModal.customHeaders")}
+              </label>
+              <Form.Item
+                name="customHeaders"
+                className="mb-0"
+              >
+                <Input.TextArea
+                  {...bindField("customHeaders")}
+                  rows={2}
+                  className="w-full rounded-md"
+                  placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
                 />
               </Form.Item>
             </div>

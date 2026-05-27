@@ -2,11 +2,64 @@ import io
 import os
 import uuid
 from datetime import datetime
-from typing import Any, BinaryIO, Dict, List, Optional
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from .client import minio_client
+from consts.const import S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
+
+
+def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """
+    Normalize object_name + bucket from supported URL styles.
+
+    Supports:
+    - s3://bucket/key
+    - /bucket/key
+    - key (uses provided bucket or default bucket)
+    """
+    if not object_name:
+        return object_name, bucket
+
+    if object_name.startswith(S3_URL_PREFIX):
+        s3_path = object_name[len(S3_URL_PREFIX) :]
+        parts = s3_path.split("/", 1)
+        parsed_bucket = parts[0] if parts[0] else None
+        parsed_key = parts[1] if len(parts) > 1 else ""
+        return parsed_key, parsed_bucket or bucket
+
+    if object_name.startswith("/"):
+        path = object_name.lstrip("/")
+        parts = path.split("/", 1)
+        parsed_bucket = parts[0] if parts[0] else None
+        parsed_key = parts[1] if len(parts) > 1 else ""
+        return parsed_key, parsed_bucket or bucket
+
+    return object_name, bucket
+
+
+def build_s3_url(object_name: str, bucket: Optional[str] = None) -> str:
+    """
+    Build an s3://bucket/key style URL from an object name (or passthrough if already s3://).
+    """
+    if not object_name:
+        return ""
+
+    if object_name.startswith(S3_URL_PREFIX):
+        return object_name
+
+    if object_name.startswith("/"):
+        path = object_name.lstrip("/")
+        parts = path.split("/", 1)
+        if len(parts) == 2:
+            return f"{S3_URL_PREFIX}{parts[0]}/{parts[1]}"
+        return f"{S3_URL_PREFIX}{parts[0]}/"
+
+    resolved_bucket = bucket or minio_client.default_bucket
+    if resolved_bucket:
+        return f"{S3_URL_PREFIX}{resolved_bucket}/{object_name}"
+    return f"{S3_URL_PREFIX}{object_name}"
 
 
 def _build_mcp_presigned_url(presigned_url: str) -> str:
@@ -217,6 +270,7 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     """
     Get file size by object name
     """
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
     # Ensure minio_client is initialized before accessing storage_config
     minio_client._ensure_initialized()
     bucket = bucket or minio_client.storage_config.default_bucket
@@ -235,6 +289,7 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
         bool: True if file exists, False otherwise
     """
     try:
+        object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
         return minio_client.file_exists(object_name, bucket)
     except Exception:
         return False
@@ -252,6 +307,8 @@ def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None
     Returns:
         Dict[str, Any]: Result containing success flag and error message (if any)
     """
+    source_object, bucket = _normalize_object_and_bucket(source_object, bucket)
+    dest_object, bucket = _normalize_object_and_bucket(dest_object, bucket)
     success, result = minio_client.copy_file(source_object, dest_object, bucket)
     if success:
         return {"success": True, "object_name": result}
@@ -296,6 +353,7 @@ def delete_file(object_name: str, bucket: Optional[str] = None) -> Dict[str, Any
     Returns:
         Dict[str, Any]: Delete result, containing success flag and error message (if any)
     """
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
     if not bucket:
         minio_client._ensure_initialized()
         bucket = minio_client.storage_config.default_bucket
@@ -320,6 +378,7 @@ def get_file_stream(object_name: str, bucket: Optional[str] = None) -> Optional[
     Returns:
         Optional[BinaryIO]: Standard BinaryIO stream object, or None if failed
     """
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
     success, result = minio_client.get_file_stream(object_name, bucket)
     if not success:
         return None

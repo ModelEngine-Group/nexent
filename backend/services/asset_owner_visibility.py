@@ -1,15 +1,9 @@
 """ASSET_OWNER tenant visibility filters, feature flags, and response post-processing."""
 
-import hashlib
-import re
 from typing import Any, Dict, List, Optional
-
-from sqlalchemy import or_
-from sqlalchemy.orm import Query
 
 from consts.const import (
     AGENT_PROMPTS_HIDDEN_FLAG,
-    ASSET_OWNER_ATTACHMENTS_PREFIX,
     ASSET_OWNER_ROLE,
     ASSET_OWNER_TENANT_ID,
     ENABLE_ASSET_OWNER_ROLE,
@@ -21,10 +15,6 @@ from consts.exceptions import ValidationError
 
 _PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
 
-
-_PREVIEW_CACHE_PREFIXES = ("preview/converted/", "preview/converting/")
-_PREVIEW_HASH_PATTERN = re.compile(r"^(.+)_[0-9a-f]{8}(\.pdf|\.pdf\.tmp)?$")
-_OFFICE_EXTENSIONS = (".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls")
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
 
@@ -47,84 +37,6 @@ def filter_accessible_routes_for_asset_owner_feature(
     if ENABLE_ASSET_OWNER_ROLE:
         return accessible_routes
     return [r for r in accessible_routes if r != ASSET_OWNER_RESOURCES_ROUTE]
-
-
-def _parse_preview_cache_object_name(preview_object_name: str) -> Optional[str]:
-    """
-    Recover the source object_name from a preview cache key, if possible.
-
-    Cache layout matches resolve_preview_file:
-    preview/converted/{source_without_ext}_{md5(source)[:8]}.pdf
-    """
-    for prefix in _PREVIEW_CACHE_PREFIXES:
-        if not preview_object_name.startswith(prefix):
-            continue
-        remainder = preview_object_name[len(prefix):]
-        match = _PREVIEW_HASH_PATTERN.match(remainder)
-        if not match:
-            return None
-        source_without_ext = match.group(1)
-        hash_suffix = remainder.rsplit("_", 1)[-1][:8]
-        for ext in _OFFICE_EXTENSIONS:
-            candidate = f"{source_without_ext}{ext}"
-            expected_hash = hashlib.md5(candidate.encode()).hexdigest()[:8]
-            if expected_hash == hash_suffix:
-                return candidate
-        return None
-    return None
-
-
-def _is_legacy_root_attachment(object_name: str) -> bool:
-    """True for attachments/filename (no user_id subdirectory)."""
-    if not object_name.startswith("attachments/"):
-        return False
-    return "/" not in object_name.replace("attachments/", "", 1)
-
-
-def can_access_file(
-    object_name: str,
-    caller_user_id: Optional[str],
-    caller_tenant_id: Optional[str] = None,
-) -> bool:
-    """
-    Return True when the caller may read a MinIO object.
-
-    Rules (in order):
-    - No caller_user_id -> False
-    - preview cache paths -> delegate to source object access
-    - attachments/asset_owner/{user_id}/* -> ASSET_OWNER tenant and matching user_id
-    - knowledge_base/* -> all authenticated users
-    - attachments/{caller_user_id}/* -> owner only
-    - legacy attachments/filename -> all authenticated users (backward compatible)
-    - otherwise -> False
-    """
-    if not caller_user_id:
-        return False
-
-    if any(object_name.startswith(prefix) for prefix in _PREVIEW_CACHE_PREFIXES):
-        source = _parse_preview_cache_object_name(object_name)
-        if source is None:
-            return False
-        return can_access_file(source, caller_user_id, caller_tenant_id)
-
-    asset_owner_prefix = f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/"
-    if object_name.startswith(asset_owner_prefix):
-        if caller_tenant_id != ASSET_OWNER_TENANT_ID:
-            return False
-        remainder = object_name[len(asset_owner_prefix):]
-        path_user_id = remainder.split("/", 1)[0] if remainder else ""
-        return path_user_id == str(caller_user_id)
-
-    if object_name.startswith("knowledge_base/"):
-        return True
-
-    if object_name.startswith(f"attachments/{caller_user_id}/"):
-        return True
-
-    if _is_legacy_root_attachment(object_name):
-        return True
-
-    return False
 
 
 def can_view_skill(caller_tenant_id: Optional[str], skill_tenant_id: Optional[str]) -> bool:

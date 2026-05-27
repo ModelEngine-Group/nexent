@@ -144,6 +144,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
         const_mod.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
         const_mod.ROOT_DIR = "/mock/root"
+        const_mod.TABLE_TRANSFORMER_MODEL_PATH = "/mock/table_transformer_model"
+        const_mod.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/mock/unstructured_params.json"
         sys.modules["consts.const"] = const_mod
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
@@ -161,6 +163,8 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
+            build_s3_url=lambda bucket_name, object_name: f"http://mock-s3/{bucket_name}/{object_name}",  # NOSONAR
+            upload_fileobj=lambda file_obj, bucket_name, object_name: "mock-etag",
         )
     # Stub model_management_db module required by ray_actors
     if "database.model_management_db" not in sys.modules:
@@ -2001,6 +2005,28 @@ def test_run_async_loop_not_running_branch(monkeypatch):
     assert tasks.run_async(asyncio.sleep(0)) == "ok"
 
 
+def test_run_async_running_loop_without_nest_asyncio_fallback_thread(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class FakeLoop:
+        def is_running(self):
+            return True
+
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+    sys.modules.pop("nest_asyncio", None)
+
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "nest_asyncio":
+            raise ImportError("no nest_asyncio")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert tasks.run_async(asyncio.sleep(0, result="thread-ok")) == "thread-ok"
+
+
 def test_global_pool_manager_paths(monkeypatch):
     tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
 
@@ -2198,3 +2224,90 @@ def test_aggregate_forward_parts_paths(monkeypatch):
     )
     assert out["success"] is True
     assert out["total_indexed"] == 5
+
+
+def test_run_processing_for_parts_single_and_multi(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        def __init__(self):
+            self.process_file = types.SimpleNamespace(remote=lambda *a, **k: "ref-file")
+            self.process_bytes = types.SimpleNamespace(remote=lambda *a, **k: "ref-bytes")
+
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    fake_ray.get_returns = {"ref-bytes": [{"content": "c1"}], "ref-file": [{"content": "cf"}]}
+
+    split_async, chunks, split_chunk_count = tasks._run_processing_for_parts(
+        request_id="r1",
+        source="/a.txt",
+        source_type="local",
+        task_id="t1",
+        chunking_strategy="basic",
+        filename_for_processing="a.txt",
+        parts=[b"one"],
+        index_name="idx",
+        original_filename="a.txt",
+        embedding_model_id=1,
+        tenant_id="tenant",
+        params={},
+    )
+    assert split_async is False
+    assert chunks == [{"content": "c1"}]
+    assert split_chunk_count is None
+
+    captured = {}
+    monkeypatch.setattr(tasks, "process_part", types.SimpleNamespace(s=lambda **kwargs: types.SimpleNamespace(kwargs=kwargs)))
+    monkeypatch.setattr(tasks, "aggregate_store_chunks", types.SimpleNamespace(s=lambda **kwargs: types.SimpleNamespace(set=lambda **kw: {"kwargs": kwargs, "set": kw})))
+    monkeypatch.setattr(tasks, "group", lambda gen: list(gen))
+    monkeypatch.setattr(tasks, "chord", lambda group_tasks: (lambda callback: captured.update({"group": group_tasks, "callback": callback})))
+    monkeypatch.setattr(tasks, "_compute_split_wait_timeout", lambda n: 9)
+    monkeypatch.setattr(tasks, "_estimate_parallel_parts", lambda: 2)
+    monkeypatch.setattr(tasks, "_wait_for_split_ready", lambda **kwargs: 6)
+
+    split_async2, chunks2, split_chunk_count2 = tasks._run_processing_for_parts(
+        request_id="r2",
+        source="/b.txt",
+        source_type="local",
+        task_id="t2",
+        chunking_strategy="basic",
+        filename_for_processing="b.txt",
+        parts=[b"a", b"b", b"c"],
+        index_name="idx",
+        original_filename="b.txt",
+        embedding_model_id=1,
+        tenant_id="tenant",
+        params={"x": 1},
+    )
+    assert split_async2 is True
+    assert chunks2 is None
+    assert split_chunk_count2 == 6
+    assert len(captured["group"]) == 3
+
+
+def test_process_split_async_redis_image_metadata_count(monkeypatch, tmp_path):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://test")
+    monkeypatch.setattr(tasks, "_process_source_with_split", lambda **kwargs: (True, None, 2))
+    monkeypatch.setattr(tasks, "_count_image_metadata_chunks", lambda chunks: 1)
+
+    class FakeRedisClient:
+        def get(self, key):
+            return json.dumps([{"metadata": {"content_type": "image"}}, {"metadata": {}}])
+
+    monkeypatch.setitem(sys.modules, "redis", types.SimpleNamespace(Redis=types.SimpleNamespace(from_url=lambda *a, **k: FakeRedisClient())))
+
+    f = tmp_path / "x.txt"
+    f.write_text("hello")
+    self = FakeSelf("proc-async-1")
+    out = tasks.process(
+        self,
+        source=str(f),
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="idx",
+        original_filename="x.txt",
+    )
+    assert out["split_async"] is True
+    assert out["image_metadata_chunk_count"] == 1
+    success_state = [s for s in self.states if s.get("state") == tasks.states.SUCCESS][0]
+    assert success_state["meta"]["chunks_count"] == 2

@@ -38,7 +38,10 @@ jobs:
       - name: Check if model is cached locally
         id: check-model
         run: |
-          if [ -f ~/model-assets/clip-vit-base-patch32/config.json ] && [ -d ~/model-assets/nltk_data ]; then
+          if [ -f ~/model-assets/clip-vit-base-patch32/config.json ] && \
+             [ -d ~/model-assets/nltk_data ] && \
+             [ -d ~/model-assets/table-transformer-structure-recognition ] && \
+             [ -d ~/model-assets/yolox ]; then
             echo "cache-hit=true" >> "$GITHUB_OUTPUT"
             cp -r ~/model-assets ./
           else

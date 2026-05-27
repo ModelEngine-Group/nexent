@@ -56,6 +56,8 @@ config:
   modelPath:
     clipModelPath: "/opt/models/clip-vit-base-patch32"
     nltkData: "/opt/models/nltk_data"
+    tableTransformerModelPath: "/opt/models/table-transformer-structure-recognition"
+    unstructuredDefaultModelInitializeParamsJsonPath: "/opt/models/yolox"
   terminal:
     sshPrivateKeyPath: "/path/to/openssh-server/ssh-keys/openssh_server_key"
   supabase:

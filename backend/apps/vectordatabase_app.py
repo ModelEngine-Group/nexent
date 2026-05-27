@@ -84,11 +84,13 @@ def create_new_index(
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
-        embedding_model_name = None
+        embedding_model_name: Optional[str] = None
+        is_multimodal: Optional[bool] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
-            embedding_model_name = request.get("embedding_model_name")
+            embedding_model_name = request.get("embeddingModel")
+            is_multimodal = request.get("is_multimodal")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -100,6 +102,7 @@ def create_new_index(
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
             embedding_model_name=embedding_model_name,
+            is_multimodal=is_multimodal,
         )
     except Exception as e:
         raise HTTPException(
@@ -714,6 +717,7 @@ def update_chunk(
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
+            tenant_id=tenant_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
@@ -778,8 +782,17 @@ async def hybrid_search(
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
         _, tenant_id = get_current_user_id(authorization)
+        resolved_index_names: List[str] = []
+        for requested_name in payload.index_names:
+            try:
+                resolved_name = get_index_name_by_knowledge_name(
+                    requested_name, tenant_id
+                )
+            except Exception:
+                resolved_name = requested_name
+            resolved_index_names.append(resolved_name)
         result = ElasticSearchService.search_hybrid(
-            index_names=payload.index_names,
+            index_names=resolved_index_names,
             query=payload.query,
             tenant_id=tenant_id,
             top_k=payload.top_k,

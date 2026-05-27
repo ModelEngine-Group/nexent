@@ -27,6 +27,8 @@ fi
 MODE_CHOICE_SAVED=""
 VERSION_CHOICE_SAVED=""
 IS_MAINLAND_SAVED=""
+ENABLE_EXTRACTED_IMAGE_MODELS_SAVED="N"
+ENABLE_SKILLS_SAVED="Y"
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
 APP_VERSION=""
@@ -116,6 +118,58 @@ is_windows_env() {
     return 0
   fi
   return 1
+}
+
+detect_os_type() {
+  # Return: windows | mac | linux | unknown
+  local os_name
+  os_name=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  case "$os_name" in
+    mingw*|msys*|cygwin*)
+      echo "windows"
+      ;;
+    darwin*)
+      echo "mac"
+      ;;
+    linux*)
+      echo "linux"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+  return 0
+}
+
+format_path_for_env() {
+  # Convert path to OS-specific format for .env values
+  local input_path="$1"
+  local os_type
+  os_type=$(detect_os_type)
+
+  if [[ "$os_type" = "windows" ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -w "$input_path"
+      return 0
+    fi
+
+    if [[ "$input_path" =~ ^/([a-zA-Z])/(.*)$ ]]; then
+      local drive="${BASH_REMATCH[1]}"
+      local rest="${BASH_REMATCH[2]}"
+      rest="${rest//\//\\}"
+      printf "%s:\\%s" "$(echo "$drive" | tr '[:lower:]' '[:upper:]')" "$rest"
+      return 0
+    fi
+  fi
+
+  printf "%s" "$input_path"
+}
+
+escape_backslashes() {
+  # Escape backslashes for safe writing into .env or JSON
+  local input_path="$1"
+  printf "%s" "$input_path" | sed 's/\\/\\\\/g'
+  return 0
 }
 
 is_port_in_use() {
@@ -428,6 +482,8 @@ persist_deploy_options() {
     echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
     echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=\"${ENABLE_EXTRACTED_IMAGE_MODELS_SAVED}\""
+    echo "ENABLE_SKILLS=\"${ENABLE_SKILLS_SAVED}\""
     echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
     echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
   } > "$DEPLOY_OPTIONS_FILE"
@@ -696,6 +752,43 @@ select_deployment_mode() {
   echo ""
 }
 
+
+# Extracted image models selection
+select_extracted_image_models_mode() {
+  echo ""
+
+  local input_choice=""
+  read -r -p "Do you want to enable pre-extracted image models mode? [Y/N] (default: N): " input_choice
+  echo ""
+
+  if [[ $input_choice =~ ^[Yy]$ ]]; then
+    ENABLE_EXTRACTED_IMAGE_MODELS_SAVED="Y"
+    echo "INFO: ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=Y, deployment will not change model path variables."
+  else
+    ENABLE_EXTRACTED_IMAGE_MODELS_SAVED="N"
+    echo "INFO: ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=N, deployment will clear model path variables."
+  fi
+  echo "----------------------------------------"
+  echo ""
+  return 0
+}
+
+configure_extracted_image_models_env() {
+  # New behavior:
+  # - ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=N: clear the two model-path values in .env
+  # - ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=Y: do nothing (no .env update)
+  if [[ "$ENABLE_EXTRACTED_IMAGE_MODELS_SAVED" =~ ^[Yy]$ ]]; then
+    echo "INFO: ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=Y, skip model handling (no .env update)."
+    return 0
+  fi
+
+  echo "INFO: ENABLE_EXTRACTED_IMAGE_MODELS_SAVED=N, clearing model path variables in .env..."
+  update_env_var "TABLE_TRANSFORMER_MODEL_PATH" ""
+  update_env_var "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH" ""
+  echo "INFO: Cleared TABLE_TRANSFORMER_MODEL_PATH and UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH."
+  return 0
+}
+
 clean() {
   export MINIO_ACCESS_KEY=
   export MINIO_SECRET_KEY=
@@ -764,6 +857,13 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
   create_dir_with_permission "$ROOT_DIR/minio" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
+
+  echo "📦 Check the status of model configuration..."
+  configure_extracted_image_models_env || { 
+    echo "⚠️  A warning occurred during the model configuration step, but subsequent deployment will proceed..." 
+    # Do not exit here; the user may choose N or prefer to continue after a model-path handling failure.
+  }
+  echo ""
 
   cp -rn volumes $ROOT_DIR
   chmod -R 775 $ROOT_DIR/volumes
@@ -1344,6 +1444,8 @@ main_deploy() {
 
   configure_root_dir_from_env || { echo "❌ ROOT_DIR configuration failed"; exit 1; }
 
+  select_extracted_image_models_mode || { echo "❌ Extracted image models configuration failed"; exit 1;}
+
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
     update_env_var "NEXENT_MCP_DOCKER_IMAGE" "${NEXENT_MCP_DOCKER_IMAGE}"
@@ -1433,7 +1535,7 @@ docker_compose_command=""
 case $version_type in
     "v1")
         echo "Detected Docker Compose V1, version: $version_number"
-        # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
+        # The version 1.28.0 is the minimum requirement in Docker Compose v1 for default interpolation syntax.
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
             exit 1
