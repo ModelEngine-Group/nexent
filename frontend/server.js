@@ -154,6 +154,12 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/oauth/link",
   "/api/user/oauth/pending",
   "/api/user/oauth/complete",
+  "/api/user/cas/config",
+  "/api/user/cas/login",
+  "/api/user/cas/callback",
+  "/api/user/cas/renew",
+  "/api/user/cas/renew_callback",
+  "/api/user/cas/logout_callback",
 ]);
 
 function collectRequestBody(req) {
@@ -251,9 +257,30 @@ function forwardAuthRequest(req, res, targetUrl) {
               setAuthCookies(res, session);
 
               const isOAuthCallback = req.parsedPathname === "/api/user/oauth/callback";
+              const isCasCallback = req.parsedPathname === "/api/user/cas/callback";
+              const isCasRenewCallback = req.parsedPathname === "/api/user/cas/renew_callback";
               if (isOAuthCallback) {
                 res.writeHead(302, { Location: "/" });
                 res.end();
+                return;
+              }
+              if (isCasCallback) {
+                res.writeHead(302, { Location: data.data.redirect_url || "/" });
+                res.end();
+                return;
+              }
+              if (isCasRenewCallback) {
+                const html = Buffer.from(`<!doctype html><html><body><script>
+window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window.location.origin);
+</script></body></html>`);
+                const responseHeaders = { "content-type": "text/html; charset=utf-8", "content-length": String(html.length) };
+                const existingSetCookie = res.getHeader("Set-Cookie") || [];
+                const cookiesToSend = Array.isArray(existingSetCookie) ? existingSetCookie : [existingSetCookie];
+                if (cookiesToSend.filter(Boolean).length > 0) {
+                  responseHeaders["set-cookie"] = cookiesToSend.filter(Boolean);
+                }
+                res.writeHead(200, responseHeaders);
+                res.end(html);
                 return;
               }
 

@@ -18,6 +18,7 @@ from utils.auth_utils import (
     get_supabase_admin_client,
     calculate_expires_at,
     get_jwt_expiry_seconds,
+    ensure_cas_session_active_from_authorization,
 )
 from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
@@ -87,6 +88,7 @@ def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
     try:
         user = get_current_user_from_client(client, token)
         if user:
+            ensure_cas_session_active_from_authorization(token)
             return True, user
         return False, None
     except Exception as e:

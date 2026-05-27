@@ -255,12 +255,17 @@ export const authService = {
 
   signOut: async (): Promise<{ error: null }> => {
     try {
-      await fetchWithAuth(API_ENDPOINTS.user.logout, {
+      const response = await fetchWithAuth(API_ENDPOINTS.user.logout, {
         method: "POST",
       });
+      const data = await response.json().catch(() => null);
+      const casLogoutUrl = data?.data?.cas_logout_url;
 
       // server.js clears HttpOnly cookies; clear local user info
       removeSessionFromStorage();
+      if (casLogoutUrl && typeof window !== "undefined") {
+        window.location.href = casLogoutUrl;
+      }
 
       return { error: null };
     } catch (error) {

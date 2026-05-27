@@ -86,6 +86,27 @@ OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
 
+# CAS SSO Configuration
+CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
+CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
+CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
+CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
+CAS_LOGIN_MODE = os.getenv("CAS_LOGIN_MODE", "disabled").lower()
+CAS_USER_ATTRIBUTE = os.getenv("CAS_USER_ATTRIBUTE", "")
+CAS_EMAIL_ATTRIBUTE = os.getenv("CAS_EMAIL_ATTRIBUTE", "email")
+CAS_ROLE_ATTRIBUTE = os.getenv("CAS_ROLE_ATTRIBUTE", "role")
+CAS_TENANT_ATTRIBUTE = os.getenv("CAS_TENANT_ATTRIBUTE", "tenant_id")
+CAS_ROLE_MAP_JSON = os.getenv("CAS_ROLE_MAP_JSON", "")
+CAS_SESSION_MAX_AGE_SECONDS = int(os.getenv("CAS_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
+LOCAL_SESSION_MAX_AGE_SECONDS = int(os.getenv("LOCAL_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
+CAS_RENEW_BEFORE_SECONDS = int(os.getenv("CAS_RENEW_BEFORE_SECONDS", "300") or 300)
+CAS_RENEW_TIMEOUT_SECONDS = int(os.getenv("CAS_RENEW_TIMEOUT_SECONDS", "10") or 10)
+CAS_SYNTHETIC_EMAIL_DOMAIN = os.getenv("CAS_SYNTHETIC_EMAIL_DOMAIN", "cas.local")
+CAS_LOGOUT_URL = os.getenv("CAS_LOGOUT_URL", "")
+CAS_SSL_VERIFY = os.getenv("CAS_SSL_VERIFY", "true").lower() == "true"
+CAS_CA_BUNDLE = os.getenv("CAS_CA_BUNDLE", "")
+
+
 # ===== To be migrated to frontend configuration =====
 # Email Configuration
 IMAP_SERVER = os.getenv('IMAP_SERVER')

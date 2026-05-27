@@ -7,7 +7,8 @@ import { App } from "antd";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { authService } from "@/services/authService";
-import { getSessionFromStorage, removeSessionFromStorage, checkSessionValid, hasAuthCookies } from "@/lib/session";
+import { casService } from "@/services/casService";
+import { getSessionFromStorage, removeSessionFromStorage, checkSessionValid, getTokenExpiresAt } from "@/lib/session";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 import { authEventUtils } from "@/lib/authEvents";
@@ -50,6 +51,37 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     }
     setIsAuthChecking(false);
   }, [isSpeedMode]);
+
+  useEffect(() => {
+    if (isSpeedMode || !isAuthenticated) return;
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    casService.getConfig().then((config) => {
+      if (cancelled || !config.enabled || config.login_mode === "disabled") return;
+      const expiresAt = getTokenExpiresAt();
+      if (!expiresAt) return;
+
+      const renewAtMs = expiresAt * 1000 - config.renew_before_seconds * 1000;
+      const delayMs = Math.max(0, renewAtMs - Date.now());
+      timeoutId = setTimeout(async () => {
+        const ok = await casService.renewInIframe(config.renew_timeout_seconds);
+        if (!ok || cancelled) return;
+        const renewedSession = getSessionFromStorage();
+        if (renewedSession) {
+          setSession(renewedSession);
+          setIsAuthenticated(true);
+          authEventUtils.emitTokenRefreshed();
+        }
+      }, delayMs);
+    });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isAuthenticated, session?.expires_at, isSpeedMode]);
 
   const clearLocalSession = useCallback(() => {
     removeSessionFromStorage();

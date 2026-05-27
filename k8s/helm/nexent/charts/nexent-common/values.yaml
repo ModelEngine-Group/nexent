@@ -137,6 +137,25 @@ config:
     sslVerify: "true"
     caBundle: ""
     callbackBaseUrl: "http://localhost:30000"
+  cas:
+    enabled: "false"
+    serverUrl: ""
+    validatePath: "/p3/serviceValidate"
+    callbackBaseUrl: "http://localhost:30000"
+    loginMode: "disabled"
+    userAttribute: ""
+    emailAttribute: "email"
+    roleAttribute: "role"
+    tenantAttribute: "tenant_id"
+    roleMapJson: ""
+    sessionMaxAgeSeconds: "3600"
+    localSessionMaxAgeSeconds: "3600"
+    renewBeforeSeconds: "300"
+    renewTimeoutSeconds: "10"
+    syntheticEmailDomain: "cas.local"
+    logoutUrl: ""
+    sslVerify: "true"
+    caBundle: ""
 
 # Secrets used by common templates
 secrets:

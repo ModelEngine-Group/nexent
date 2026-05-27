@@ -8,6 +8,7 @@ from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
+from consts.const import CAS_LOGOUT_URL
 from consts.model import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError
 from consts.error_code import ErrorCode
@@ -16,7 +17,7 @@ from services.user_management_service import get_authorized_client, validate_tok
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
     update_password
 from services.user_service import delete_user_and_cleanup
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
 
 
 load_dotenv()
@@ -127,7 +128,13 @@ async def logout(request: Request):
     authorization = request.headers.get("Authorization")
     try:
         # Make logout idempotent: if no token or token expired, still return success
+        session_id = None
         if authorization:
+            session_id = extract_session_id_from_authorization(authorization)
+            if session_id:
+                from database.cas_session_db import revoke_cas_session_by_session_id
+
+                revoke_cas_session_by_session_id(session_id, actor="user")
             client = get_authorized_client(authorization)
             try:
                 client.auth.sign_out()
@@ -136,7 +143,12 @@ async def logout(request: Request):
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
         return JSONResponse(status_code=HTTPStatus.OK,
-                            content={"message":"Logout successful"})
+                            content={
+                                "message": "Logout successful",
+                                "data": {
+                                    "cas_logout_url": CAS_LOGOUT_URL if session_id and CAS_LOGOUT_URL else ""
+                                }
+                            })
 
     except Exception as e:
         logging.error(f"User logout failed: {str(e)}")
