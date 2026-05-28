@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 
 from .agent_context import ContextManager
 from ..utils.token_estimation import msg_token_count
+from ..utils.code_analysis import extract_invoked_tools
+
+if not hasattr(ActionStep, "invoked_tools"):
+    ActionStep.invoked_tools = None
 
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
@@ -360,6 +364,7 @@ Additional Args:
             id=f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
+        memory_step.invoked_tools = extract_invoked_tools(code_action, self.tools) if self.tools else []
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
