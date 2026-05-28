@@ -292,18 +292,18 @@ async def list_all_agent_info_api(
     list all agent info
     """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(
+        user_id, tenant_id, _ = get_current_user_info(
             authorization, request)
-        if tenant_id is None:
-            agent_list = await list_all_agent_info_impl(
-                tenant_id=auth_tenant_id, user_id=user_id
+
+        agent_list = await list_all_agent_info_impl(
+            tenant_id=tenant_id, user_id=user_id
+        )
+        if tenant_id != ASSET_OWNER_TENANT_ID:
+            asset_agent_list = await list_all_agent_info_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
             )
-            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
-                asset_agent_list = await list_all_agent_info_impl(
-                    tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
-                )
-                return agent_list + asset_agent_list
-            return agent_list
+            return agent_list + asset_agent_list
+        return agent_list
         return await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
@@ -395,12 +395,10 @@ async def get_version_list_api(
     Get version list for an agent
     """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(
+        _, auth_tenant_id, _ = get_current_user_info(
             authorization, request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
-        logger.info(
-            f"Get version list for agent_id: {agent_id}, tenant_id: {effective_tenant_id}")
         result = get_version_list_impl(
             agent_id=agent_id,
             tenant_id=effective_tenant_id,
