@@ -124,8 +124,7 @@ class TestCasServiceParsing(unittest.TestCase):
         url = build_login_url("/space")
 
         self.assertIn("https://cas.example.com/cas/login?", url)
-        self.assertIn("service=", url)
-        self.assertIn("redirect%3D%252Fspace", url)
+        self.assertIn("service=http://localhost:3000/api/user/cas/callback?redirect=/space", url)
 
     def test_build_logout_url_returns_empty_when_logout_url_is_not_configured(self):
         url = build_logout_url()
@@ -142,7 +141,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "https://sso.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin",
+            "https://sso.example.com/cas/logout?service=https://cas.example.com/cas/login",
         )
 
     def test_build_logout_url_resolves_absolute_path_against_cas_server_url(self):
@@ -155,7 +154,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin",
+            "https://cas.example.com/cas/logout?service=https://cas.example.com/cas/login",
         )
 
     def test_build_logout_url_resolves_relative_path_against_cas_server_url(self):
@@ -168,7 +167,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin",
+            "https://cas.example.com/cas/logout?service=https://cas.example.com/cas/login",
         )
 
     def test_build_logout_url_preserves_configured_logout_url_with_query(self):

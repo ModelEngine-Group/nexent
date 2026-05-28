@@ -84,15 +84,13 @@ def get_cas_config() -> Dict[str, Any]:
 def build_login_url(redirect: str = "/") -> str:
     _ensure_enabled()
     service_url = _build_callback_url("/api/user/cas/callback", {"redirect": _normalize_redirect(redirect)})
-    params = urllib.parse.urlencode({"service": service_url})
-    return f"{CAS_SERVER_URL}/login?{params}"
+    return f"{CAS_SERVER_URL}/login?service={service_url}"
 
 
 def build_renew_url() -> str:
     _ensure_enabled()
     service_url = _build_callback_url("/api/user/cas/renew_callback", {})
-    params = urllib.parse.urlencode({"service": service_url, "gateway": "true"})
-    return f"{CAS_SERVER_URL}/login?{params}"
+    return f"{CAS_SERVER_URL}/login?service={service_url}&gateway=true"
 
 
 def build_logout_url() -> str:
@@ -111,7 +109,7 @@ def build_logout_url() -> str:
     if parsed.query:
         return logout_url
 
-    query = urllib.parse.urlencode({"service": f"{CAS_SERVER_URL}/login"})
+    query = f"service={CAS_SERVER_URL}/login"
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
 
@@ -135,8 +133,8 @@ def validate_service_ticket(ticket: str, service_url: str) -> CasPrincipal:
 
     validate_path = CAS_VALIDATE_PATH if CAS_VALIDATE_PATH.startswith("/") else f"/{CAS_VALIDATE_PATH}"
     validate_url = f"{CAS_SERVER_URL}{validate_path}"
-    params = urllib.parse.urlencode({"service": service_url, "ticket": ticket})
-    xml_text = _http_get_text(f"{validate_url}?{params}")
+    xml_text = _http_get_text(f"{validate_url}?service={service_url}&ticket={ticket}")
+    logger.info("CAS serviceValidate response: %s", xml_text)
     return parse_service_validate_response(xml_text, fallback_session_index=ticket)
 
 
@@ -311,9 +309,13 @@ def _ensure_enabled() -> None:
 def _build_callback_url(path: str, params: Dict[str, str]) -> str:
     if not CAS_CALLBACK_BASE_URL:
         raise CasAuthenticationError("CAS callback base URL is not configured")
-    query = urllib.parse.urlencode(params)
+    query = _build_callback_query(params)
     suffix = f"?{query}" if query else ""
     return f"{CAS_CALLBACK_BASE_URL}{path}{suffix}"
+
+
+def _build_callback_query(params: Dict[str, str]) -> str:
+    return "&".join(f"{key}={value}" for key, value in params.items())
 
 
 def _normalize_redirect(redirect: str) -> str:
