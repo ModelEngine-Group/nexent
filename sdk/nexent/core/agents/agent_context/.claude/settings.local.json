@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(find D:/Project/External/nexent -path */smolagents/memory* -name *.py)"
+    ]
+  }
+}
