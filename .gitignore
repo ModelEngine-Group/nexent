@@ -50,12 +50,12 @@ model-assets/
 openspec/
 logs/
 
+.agents/
 .devspace/
 devspace.yaml
 k8s/helm/**/*.tgz
 k8s/helm/nexent/Chart.lock
 
 MAC_DEVELOPMENT_GUIDE.md
-# Mac本地开发数据持久化（无需提交）
 data/
 /docker/.env.bak

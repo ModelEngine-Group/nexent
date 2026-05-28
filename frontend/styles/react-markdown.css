@@ -516,6 +516,12 @@
   opacity: 0.7;
 }
 
+/* Ensure Prism tokens display inline within code blocks */
+.code-block-content .token,
+.code-block-content span[class*="token"] {
+  display: inline;
+}
+
 .token.comment {
   font-style: italic;
   color: #6a9955;
