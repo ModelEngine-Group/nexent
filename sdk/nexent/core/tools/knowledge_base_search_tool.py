@@ -126,22 +126,6 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
 
-    @staticmethod
-    def _resolve_field_value(value, default):
-        if isinstance(value, FieldInfo):
-            return value.default if value.default is not None else default
-        return default if value is None else value
-
-    def _resolve_index_names(self) -> List[str]:
-        raw_index_names = self._resolve_field_value(self.index_names, None)
-        if raw_index_names is None:
-            return []
-        if isinstance(raw_index_names, str):
-            return [name.strip() for name in raw_index_names.split(",") if name.strip()]
-        if isinstance(raw_index_names, list):
-            return [str(name).strip() for name in raw_index_names if str(name).strip()]
-        return []
-
     def _convert_to_index_names(self, names: List[str]) -> List[str]:
         """Convert display names (knowledge_name) to index names if necessary.
 
@@ -172,7 +156,8 @@ class KnowledgeBaseSearchTool(Tool):
         return converted_names
 
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
-        search_index_names = index_names
+        # Parse index_names from string (always required)
+        search_index_names = index_names if index_names is not None else self.index_names
 
         # Convert display names to index names if necessary
         search_index_names = self._convert_to_index_names(search_index_names)

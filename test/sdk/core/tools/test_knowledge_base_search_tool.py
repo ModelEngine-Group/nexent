@@ -680,24 +680,6 @@ class TestKnowledgeBaseSearchToolRerank:
             top_k=5
         )
 
-    def test_forward_with_whitespace_in_index_names(self, knowledge_base_search_tool):
-        """Test forward method handles whitespace in index_names correctly"""
-        # Mock search results
-        mock_results = create_mock_search_result(1)
-        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
-        knowledge_base_search_tool.index_names = ["  index1  ", "  index2  "]
-
-        knowledge_base_search_tool.forward("test query")
-
-        # _resolve_index_names strips whitespace.
-        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
-            index_names=["index1", "index2"],
-            query_text="test query",
-            embedding_model=knowledge_base_search_tool.embedding_model,
-            top_k=5
-        )
-
-
 class TestConvertToIndexNames:
     """Tests for _convert_to_index_names method."""
 
@@ -877,33 +859,6 @@ class TestSourceTypeConversion:
 
 
 class TestKnowledgeBaseSearchToolMissingBranches:
-    def test_resolve_index_names_and_fieldinfo_paths(self, mock_observer, mock_vdb_core, mock_embedding_model):
-        try:
-            from pydantic import FieldInfo
-        except ImportError:
-            from pydantic.fields import FieldInfo
-
-        tool = KnowledgeBaseSearchTool(
-            index_names=["kb1"],
-            search_mode="hybrid",
-            vdb_core=mock_vdb_core,
-            embedding_model=mock_embedding_model,
-            observer=mock_observer,
-            display_name_to_index_map={},
-        )
-
-        tool.index_names = FieldInfo(default="alpha, beta , gamma")
-        assert tool._resolve_index_names() == ["alpha", "beta", "gamma"]
-
-        tool.index_names = FieldInfo(default=["alpha", " ", "gamma"])
-        assert tool._resolve_index_names() == ["alpha", "gamma"]
-
-        tool.index_names = None
-        assert tool._resolve_index_names() == []
-
-        tool.index_names = 123
-        assert tool._resolve_index_names() == []
-
     def test_convert_to_index_names_with_fieldinfo_default_factory(self, mock_observer, mock_vdb_core, mock_embedding_model):
         try:
             from pydantic import FieldInfo
