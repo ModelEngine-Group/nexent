@@ -48,6 +48,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 import { Tooltip } from "@/components/ui/tooltip";
+import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -108,6 +109,13 @@ function TenantList({
   // Tracks which skills have completed installation in the current session
   const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
 
+  // Password validation state for admin account
+  const [adminPasswordValue, setAdminPasswordValue] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState<{
+    target: "adminPassword" | "confirmAdminPassword" | "";
+    message: string;
+  }>({ target: "", message: "" });
+
   // Fetch official skills when install switch is toggled on
   useEffect(() => {
     if (!installOfficialSkills) return;
@@ -148,6 +156,8 @@ function TenantList({
     setSelectedSkillIds(new Set<string>());
     setInstallingSkills(new Set<string>());
     setInstalledSkills(new Set<string>());
+    setAdminPasswordValue("");
+    setAdminPasswordError({ target: "", message: "" });
     setModalVisible(true);
   };
 
@@ -213,6 +223,54 @@ function TenantList({
     setDeleteModalVisible(false);
     setDeletingTenant(null);
     setTenantUsers([]);
+  };
+
+  // Handle admin password input change
+  const handleAdminPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setAdminPasswordValue(value);
+
+    if (value && !validatePasswordUtil(value)) {
+      setAdminPasswordError({
+        target: "adminPassword",
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    setAdminPasswordError({ target: "", message: "" });
+    const confirmPassword = form.getFieldValue("confirmAdminPassword");
+    if (confirmPassword && confirmPassword !== value) {
+      setAdminPasswordError({
+        target: "confirmAdminPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    }
+  };
+
+  // Handle confirm admin password input change
+  const handleConfirmAdminPasswordChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    const password = form.getFieldValue("adminPassword");
+
+    if (password && !validatePasswordUtil(password)) {
+      setAdminPasswordError({
+        target: "adminPassword",
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    if (value && value !== password) {
+      setAdminPasswordError({
+        target: "confirmAdminPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    } else {
+      setAdminPasswordError({ target: "", message: "" });
+    }
   };
 
   const handleSubmit = async () => {
@@ -495,26 +553,86 @@ function TenantList({
                   <Form.Item
                     name="adminPassword"
                     label={t("tenantResources.tenants.adminPassword")}
+                    validateStatus={
+                      adminPasswordError.target === "adminPassword"
+                        ? "error"
+                        : ""
+                    }
+                    help={
+                      form.getFieldError("adminPassword").length
+                        ? undefined
+                        : adminPasswordError.target === "adminPassword"
+                          ? adminPasswordError.message
+                          : undefined
+                    }
                     rules={[
                       {
                         required: true,
                         message: t("tenantResources.tenants.adminPasswordRequired"),
                       },
                       {
-                        min: 6,
-                        message: t("tenantResources.tenants.weakPassword"),
+                        validator: (_, value) => {
+                          if (!value) return Promise.resolve();
+                          if (!validatePasswordUtil(value)) {
+                            return Promise.reject(
+                              new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit")
+                            );
+                          }
+                          return Promise.resolve();
+                        },
                       },
                     ]}
+                    hasFeedback
                   >
                     <Input.Password
                       placeholder={t("tenantResources.tenants.adminPassword")}
                       autoComplete="new-password"
+                      onChange={handleAdminPasswordChange}
                     />
                   </Form.Item>
+
+                  {/* Password Strength Indicator */}
+                  {adminPasswordValue && generateAdminAccount && (() => {
+                    const checks = getPasswordChecks(adminPasswordValue);
+                    const levelInfo = getStrengthLevel(adminPasswordValue, t);
+                    return (
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
+                          <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
+                            {levelInfo.label}
+                          </span>
+                        </div>
+                        <div className="flex gap-1">
+                          {[0, 1, 2, 3].map((level) => (
+                            <div
+                              key={level}
+                              className="h-1 flex-1 rounded-full transition-colors"
+                              style={{
+                                backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb",
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <Form.Item
                     name="confirmAdminPassword"
                     label={t("tenantResources.tenants.confirmAdminPassword")}
+                    validateStatus={
+                      adminPasswordError.target === "confirmAdminPassword"
+                        ? "error"
+                        : ""
+                    }
+                    help={
+                      form.getFieldError("confirmAdminPassword").length
+                        ? undefined
+                        : adminPasswordError.target === "confirmAdminPassword"
+                          ? adminPasswordError.message
+                          : undefined
+                    }
                     dependencies={["adminPassword"]}
                     rules={[
                       {
@@ -523,6 +641,14 @@ function TenantList({
                       },
                       ({ getFieldValue }) => ({
                         validator(_, value) {
+                          const password = getFieldValue("adminPassword");
+                          if (password && !validatePasswordUtil(password)) {
+                            setAdminPasswordError({
+                              target: "adminPassword",
+                              message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+                            });
+                            return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                          }
                           if (!value || getFieldValue("adminPassword") === value) {
                             return Promise.resolve();
                           }
@@ -530,10 +656,12 @@ function TenantList({
                         },
                       }),
                     ]}
+                    hasFeedback
                   >
                     <Input.Password
                       placeholder={t("tenantResources.tenants.confirmAdminPassword")}
                       autoComplete="new-password"
+                      onChange={handleConfirmAdminPasswordChange}
                     />
                   </Form.Item>
                 </>
