@@ -113,11 +113,10 @@ export default function ToolManagement({
   // Use tool list hook for data management
   const { availableTools } = useToolList();
 
-  const { isVlmAvailable, isEmbeddingAvailable, isMultiEmbeddingAvailable } = useConfig();
-  const isEmbeddingOrMultiAvailable = isEmbeddingAvailable || isMultiEmbeddingAvailable;
   const {
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
+    isEmbeddingAvailable,
   } = useConfig();
 
   // Prefetch knowledge bases for KB tools
@@ -383,10 +382,7 @@ export default function ToolManagement({
                             isImageUnderstandingAvailable,
                             isVideoUnderstandingAvailable
                           );
-                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(
-                            tool.name,
-                            isEmbeddingOrMultiAvailable
-                          );
+                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
                           const tooltipTitle = isReadOnly
@@ -495,10 +491,7 @@ export default function ToolManagement({
                   isImageUnderstandingAvailable,
                   isVideoUnderstandingAvailable
                 );
-                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(
-                  tool.name,
-                  isEmbeddingOrMultiAvailable
-                );
+                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
                 const tooltipTitle = isReadOnly

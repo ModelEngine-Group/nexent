@@ -5,6 +5,7 @@ These tests cover the STT specific fields in save_config_impl.
 import importlib
 import sys
 import types
+import importlib
 from unittest.mock import patch, MagicMock
 
 import pytest

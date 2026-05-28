@@ -44,15 +44,39 @@ def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_mode
         storage_client=mock_storage_client,
     )
 
-    result = tool._forward_impl([b"ID3audio-bytes"], "what happened?")
+    result = tool._forward_impl(audio_url=b"ID3audio-bytes", query="what happened?")
 
-    assert result == ["audio result"]
+    assert result == "audio result"
     assert calls == [("analyze_audio", "en")]
     mock_vlm_model.analyze_audio.assert_called_once()
     call_kwargs = mock_vlm_model.analyze_audio.call_args.kwargs
     assert hasattr(call_kwargs["audio_input"], "read")
     assert call_kwargs["content_type"].startswith("audio/")
     observer_en.add_message.assert_called_once_with("", ProcessType.TOOL, "Analyzing audio...")
+
+
+def test_analyze_audio_schema_uses_single_url():
+    assert "audio_url" in AnalyzeAudioTool.inputs
+    assert "audio_urls_list" not in AnalyzeAudioTool.inputs
+    assert AnalyzeAudioTool.output_type == "string"
+
+
+def test_analyze_audio_accepts_legacy_url_list(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
+    monkeypatch.setattr(
+        analyze_audio_tool,
+        "get_prompt_template",
+        lambda template_type, language=None, **_: {"system_prompt": "Analyze audio for {{ query }}"},
+    )
+    mock_vlm_model.analyze_audio.return_value = SimpleNamespace(content="audio result")
+    tool = AnalyzeAudioTool(
+        observer=observer_en,
+        vlm_model=mock_vlm_model,
+        storage_client=mock_storage_client,
+    )
+
+    result = tool._forward_impl(audio_urls_list=[b"ID3audio-bytes"], query="what happened?")
+
+    assert result == "audio result"
 
 
 def test_analyze_audio_rejects_siliconflow_non_omni_model(observer_en, mock_storage_client):
@@ -67,7 +91,7 @@ def test_analyze_audio_rejects_siliconflow_non_omni_model(observer_en, mock_stor
     )
 
     with pytest.raises(ValueError) as exc_info:
-        tool._forward_impl([b"ID3audio-bytes"], "what happened?")
+        tool._forward_impl(audio_url=b"ID3audio-bytes", query="what happened?")
 
     assert "Please choose a Qwen3-Omni model" in str(exc_info.value)
 
@@ -87,15 +111,39 @@ def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_mode
         storage_client=mock_storage_client,
     )
 
-    result = tool._forward_impl([b"\x00\x00\x00\x18ftypmp42video-bytes"], "what happened?")
+    result = tool._forward_impl(video_url=b"\x00\x00\x00\x18ftypmp42video-bytes", query="what happened?")
 
-    assert result == ["video result"]
+    assert result == "video result"
     assert calls == [("analyze_video", "en")]
     mock_vlm_model.analyze_video.assert_called_once()
     call_kwargs = mock_vlm_model.analyze_video.call_args.kwargs
     assert hasattr(call_kwargs["video_input"], "read")
     assert call_kwargs["content_type"].startswith("video/")
     observer_en.add_message.assert_called_once_with("", ProcessType.TOOL, "Analyzing video...")
+
+
+def test_analyze_video_schema_uses_single_url():
+    assert "video_url" in AnalyzeVideoTool.inputs
+    assert "video_urls_list" not in AnalyzeVideoTool.inputs
+    assert AnalyzeVideoTool.output_type == "string"
+
+
+def test_analyze_video_accepts_legacy_url_list(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
+    monkeypatch.setattr(
+        analyze_video_tool,
+        "get_prompt_template",
+        lambda template_type, language=None, **_: {"system_prompt": "Analyze video for {{ query }}"},
+    )
+    mock_vlm_model.analyze_video.return_value = SimpleNamespace(content="video result")
+    tool = AnalyzeVideoTool(
+        observer=observer_en,
+        vlm_model=mock_vlm_model,
+        storage_client=mock_storage_client,
+    )
+
+    result = tool._forward_impl(video_urls_list=[b"\x00\x00\x00\x18ftypmp42video-bytes"], query="what happened?")
+
+    assert result == "video result"
 
 
 @pytest.mark.parametrize(

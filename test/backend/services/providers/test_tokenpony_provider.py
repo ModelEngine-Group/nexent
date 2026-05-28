@@ -126,6 +126,16 @@ class TestTokenPonyModelProvider:
                     "id": "qwen-vl-plus",
                     "object": "model",
                     "owned_by": "qwen"
+                },
+                {
+                    "id": "qwen3.6-27b",
+                    "object": "model",
+                    "owned_by": "qwen"
+                },
+                {
+                    "id": "qwen-vl-max",
+                    "object": "model",
+                    "owned_by": "qwen"
                 }
             ]
         }
@@ -155,10 +165,120 @@ class TestTokenPonyModelProvider:
 
         result = await provider.get_models(provider_config)
 
+        assert [model["id"] for model in result] == ["qwen-vl-plus", "qwen3.6-27b", "qwen-vl-max"]
+        assert all(model["model_type"] == "vlm" for model in result)
+        assert all(model["model_tag"] == "chat" for model in result)
+
+    @pytest.mark.asyncio
+    async def test_get_models_vlm2_only_returns_image_generation_models(self, mocker: MockFixture):
+        """Image generation slot only returns image-generation multimodal models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "qwen-vl-plus",
+                    "object": "model",
+                    "owned_by": "qwen"
+                },
+                {
+                    "id": "flux-image-pro",
+                    "object": "model",
+                    "owned_by": "flux"
+                },
+                {
+                    "id": "qwen-vl-max",
+                    "object": "model",
+                    "owned_by": "qwen"
+                },
+                {
+                    "id": "qwen-plus",
+                    "object": "model",
+                    "owned_by": "qwen"
+                }
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = TokenPonyModelProvider()
+        provider_config = {
+            "model_type": "vlm2",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
         assert len(result) == 1
-        assert result[0]["id"] == "qwen-vl-plus"
-        assert result[0]["model_type"] == "vlm"
+        assert result[0]["id"] == "flux-image-pro"
+        assert result[0]["model_type"] == "vlm2"
         assert result[0]["model_tag"] == "chat"
+
+    @pytest.mark.asyncio
+    async def test_get_models_vlm3_only_returns_video_understanding_models(self, mocker: MockFixture):
+        """Video understanding slot excludes image generation and text-only models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "flux-image-pro",
+                    "object": "model",
+                    "owned_by": "flux"
+                },
+                {
+                    "id": "qwen-omni-video",
+                    "object": "model",
+                    "owned_by": "qwen"
+                },
+                {
+                    "id": "qwen3-omni-30b-a3b-instruct",
+                    "object": "model",
+                    "owned_by": "qwen"
+                },
+                {
+                    "id": "qwen-plus",
+                    "object": "model",
+                    "owned_by": "qwen"
+                }
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = TokenPonyModelProvider()
+        provider_config = {
+            "model_type": "vlm3",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
+        assert [model["id"] for model in result] == ["qwen-omni-video", "qwen3-omni-30b-a3b-instruct"]
+        assert all(model["model_type"] == "vlm3" for model in result)
+        assert all(model["model_tag"] == "chat" for model in result)
 
     @pytest.mark.asyncio
     async def test_get_models_rerank_success(self, mocker: MockFixture):

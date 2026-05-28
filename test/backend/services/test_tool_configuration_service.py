@@ -427,6 +427,38 @@ for service_name, attrs in services_modules.items():
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
 
+# Mock services modules before importing tool_configuration_service so absolute
+# imports inside that module do not walk into real service dependency chains.
+sys.modules['services'] = _create_package_mock('services')
+services_modules = {
+    'file_management_service': {
+        'get_llm_model': MagicMock(),
+        'validate_urls_access': MagicMock(return_value=True),
+    },
+    'vectordatabase_service': {
+        'get_embedding_model': MagicMock(),
+        'get_embedding_model_by_index_name': MagicMock(),
+        'get_rerank_model': MagicMock(),
+        'get_vector_db_core': MagicMock(),
+        'ElasticSearchService': MagicMock(),
+    },
+    'tenant_config_service': {
+        'get_selected_knowledge_list': MagicMock(),
+        'build_knowledge_name_mapping': MagicMock(),
+    },
+    'image_service': {
+        'get_vlm_model': MagicMock(),
+        'get_video_understanding_model': MagicMock(),
+    },
+}
+for service_name, attrs in services_modules.items():
+    service_module = types.ModuleType(f'services.{service_name}')
+    for attr_name, attr_value in attrs.items():
+        setattr(service_module, attr_name, attr_value)
+    sys.modules[f'services.{service_name}'] = service_module
+    # Expose on parent package for patch resolution
+    setattr(sys.modules['services'], service_name, service_module)
+
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
@@ -440,70 +472,6 @@ backend_services_module = importlib.import_module(
     'backend.services.tool_configuration_service')
 # Ensure services package can resolve tool_configuration_service for patching
 sys.modules['services.tool_configuration_service'] = backend_services_module
-
-# Mock services modules
-sys.modules['services'] = _create_package_mock('services')
-services_modules = {
-    'file_management_service': {'get_llm_model': MagicMock(), 'validate_urls_access': MagicMock()},
-    'vectordatabase_service': {'get_embedding_model': MagicMock(), 'get_embedding_model_by_index_name': MagicMock(),
-                               'get_rerank_model': MagicMock(), 'get_vector_db_core': MagicMock(),
-                               'ElasticSearchService': MagicMock()},
-    'tenant_config_service': {'get_selected_knowledge_list': MagicMock(), 'build_knowledge_name_mapping': MagicMock()},
-    'image_service': {
-        'get_vlm_model': MagicMock(),
-        'get_video_understanding_model': MagicMock(),
-    },
-    'redis_service': {'get_redis_service': MagicMock()},
-}
-for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
-    for attr_name, attr_value in attrs.items():
-        setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
-    # Expose on parent package for patch resolution
-    setattr(sys.modules['services'], service_name, service_module)
-
-# Also expose selected service stubs under backend.services.* so patch decorators
-# don't import heavy real modules during collection.
-try:
-    import backend.services as backend_services_pkg
-except Exception:
-    backend_services_pkg = types.ModuleType("backend.services")
-    sys.modules["backend.services"] = backend_services_pkg
-for service_name, service_module in [
-    ("file_management_service", sys.modules["services.file_management_service"]),
-]:
-    setattr(backend_services_pkg, service_name, service_module)
-    sys.modules[f"backend.services.{service_name}"] = service_module
-
-# Build a deterministic backend.services.file_management_service stub used by
-# TestGetLlmModel so cross-file module monkeypatching does not affect imports.
-backend_file_mgmt_module = types.ModuleType("backend.services.file_management_service")
-backend_file_mgmt_module.MODEL_CONFIG_MAPPING = {"llm": "llm"}
-backend_file_mgmt_module.tenant_config_manager = MagicMock()
-backend_file_mgmt_module.get_model_name_from_config = MagicMock(return_value="gpt-4")
-backend_file_mgmt_module.MessageObserver = MagicMock()
-backend_file_mgmt_module.OpenAILongContextModel = MagicMock()
-backend_file_mgmt_module.validate_urls_access = MagicMock()
-
-def _stub_get_llm_model(tenant_id):
-    cfg_key = backend_file_mgmt_module.MODEL_CONFIG_MAPPING["llm"]
-    model_config = backend_file_mgmt_module.tenant_config_manager.get_model_config(
-        key=cfg_key, tenant_id=tenant_id
-    )
-    observer = backend_file_mgmt_module.MessageObserver()
-    return backend_file_mgmt_module.OpenAILongContextModel(
-        observer=observer,
-        model_id=backend_file_mgmt_module.get_model_name_from_config(model_config),
-        api_base=model_config.get("base_url"),
-        api_key=model_config.get("api_key"),
-        max_context_tokens=model_config.get("max_tokens"),
-        ssl_verify=model_config.get("ssl_verify", True),
-    )
-
-backend_file_mgmt_module.get_llm_model = _stub_get_llm_model
-sys.modules["backend.services.file_management_service"] = backend_file_mgmt_module
-setattr(backend_services_pkg, "file_management_service", backend_file_mgmt_module)
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -3643,6 +3611,7 @@ class TestGetLlmModel:
             api_key="test_api_key",
             max_context_tokens=4096,
             ssl_verify=True,
+            timeout_seconds=None,
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
@@ -3682,6 +3651,42 @@ class TestGetLlmModel:
         call_kwargs = mock_openai_model.call_args[1]
         assert call_kwargs["api_key"] is None
         assert call_kwargs["max_context_tokens"] is None
+        assert call_kwargs["timeout_seconds"] is None
+
+    @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
+    @patch('backend.services.file_management_service.MessageObserver')
+    @patch('backend.services.file_management_service.OpenAILongContextModel')
+    @patch('backend.services.file_management_service.get_model_name_from_config')
+    @patch('backend.services.file_management_service.tenant_config_manager')
+    def test_get_llm_model_with_timeout_seconds(self, mock_tenant_config, mock_get_model_name, mock_openai_model, mock_message_observer):
+        """Test get_llm_model passes configured timeout_seconds."""
+        from backend.services.file_management_service import get_llm_model
+
+        mock_config = {
+            "base_url": "http://api.example.com",
+            "api_key": "test_api_key",
+            "max_tokens": 4096,
+            "timeout_seconds": 30,
+        }
+        mock_tenant_config.get_model_config.return_value = mock_config
+        mock_get_model_name.return_value = "gpt-4"
+        mock_observer_instance = Mock()
+        mock_message_observer.return_value = mock_observer_instance
+        mock_model_instance = Mock()
+        mock_openai_model.return_value = mock_model_instance
+
+        result = get_llm_model("tenant123")
+
+        assert result == mock_model_instance
+        mock_openai_model.assert_called_once_with(
+            observer=mock_observer_instance,
+            model_id="gpt-4",
+            api_base="http://api.example.com",
+            api_key="test_api_key",
+            max_context_tokens=4096,
+            ssl_verify=True,
+            timeout_seconds=30,
+        )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
     @patch('backend.services.file_management_service.MessageObserver')
