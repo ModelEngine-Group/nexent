@@ -974,6 +974,7 @@ export const ModelAddDialog = ({
             <Switch
               checked={form.isBatchImport}
               onChange={(checked) => handleFormChange("isBatchImport", checked)}
+              disabled={form.type === MODEL_TYPES.TTS || form.type === MODEL_TYPES.STT}
             />
           </div>
           <div className="text-xs text-gray-500 mt-1">
@@ -1066,7 +1067,7 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.STT} disabled={form.isBatchImport}>
               {t("model.type.stt")}
             </Option>
-            <Option value={MODEL_TYPES.TTS}>
+            <Option value={MODEL_TYPES.TTS} disabled={form.isBatchImport}>
               {t("model.type.tts")}
             </Option>
           </Select>
