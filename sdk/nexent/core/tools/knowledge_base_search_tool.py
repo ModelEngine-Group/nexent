@@ -38,7 +38,13 @@ class KnowledgeBaseSearchTool(Tool):
         "query": {
             "type": "string",
             "description": "The search query to perform.",
-            "description_zh": "要执行的搜索查询。",
+            "description_zh": "要执行的搜索查询词"
+        },
+        "index_names": {
+            "type": "array",
+            "description": "The list of index names to search",
+            "description_zh": "要索引的知识库",
+            "nullable": True
         },
     }
 
@@ -165,9 +171,8 @@ class KnowledgeBaseSearchTool(Tool):
                 converted_names.append(name)
         return converted_names
 
-    def forward(self, query: str) -> str:
-        # index_names is configured in tool init params, not runtime inputs
-        search_index_names = self._resolve_index_names()
+    def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
+        search_index_names = index_names
 
         # Convert display names to index names if necessary
         search_index_names = self._convert_to_index_names(search_index_names)

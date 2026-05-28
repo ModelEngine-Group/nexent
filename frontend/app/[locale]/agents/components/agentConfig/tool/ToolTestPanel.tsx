@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Button, Card, Typography, Tooltip, Modal, Form } from "antd";
+import { Input, Button, Card, Typography, Tooltip, Modal, Form, Tag } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
 
 import { Tool, ToolParam } from "@/types/agentConfig";
@@ -59,6 +59,9 @@ export default function ToolTestPanel({
   onClose,
   toolRequiresKbSelection = false,
   selectedKbIds = [],
+  selectedKbDisplayNames = [],
+  onOpenKbSelector,
+  onRemoveKb,
   toolKbType = null,
 }: ToolTestPanelProps) {
   const { t } = useTranslation("common");
@@ -77,6 +80,9 @@ export default function ToolTestPanel({
   const [isManualInputMode, setIsManualInputMode] = useState(false);
   const [manualJsonInput, setManualJsonInput] = useState<string>("");
   const [isParseSuccessful, setIsParseSuccessful] = useState<boolean>(false);
+  const isKnowledgeBaseSearchTool =
+    tool?.origin_name === "knowledge_base_search" ||
+    tool?.name === "knowledge_base_search";
 
   // Reset form initialization flag when modal is closed or tool changes
   useEffect(() => {
@@ -249,7 +255,7 @@ export default function ToolTestPanel({
     if (!tool) return;
 
     // Validate that knowledge base is selected when required
-    if (toolRequiresKbSelection && selectedKbIds.length === 0) {
+    if (toolRequiresKbSelection && !isKnowledgeBaseSearchTool && selectedKbIds.length === 0) {
       setTestResult(`Test failed: Please select at least one knowledge base`);
       return;
     }
@@ -283,7 +289,7 @@ export default function ToolTestPanel({
           const isKbSelectorParam = (paramName === "index_names" || paramName === "dataset_ids") && toolRequiresKbSelection;
 
           // Skip KB selector parameters - they will be handled separately
-          if (isKbSelectorParam) {
+          if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
             return;
           }
 
@@ -324,6 +330,13 @@ export default function ToolTestPanel({
         });
       }
 
+      if (isKnowledgeBaseSearchTool) {
+        if (!Array.isArray(toolParams.index_names) || toolParams.index_names.length === 0) {
+          setTestResult(`Test failed: Please provide non-empty index_names in input params`);
+          return;
+        }
+      }
+
       // Prepare KB selection parameter based on tool type
       // These are init-time configuration parameters, not forward() parameters
       let kbSelectionConfig: Record<string, any> = {};
@@ -335,8 +348,8 @@ export default function ToolTestPanel({
         } else if (tool?.name === "haotian_search" || tool?.name === "idata_search") {
           // Haotian and iData use dataset_ids as an array (not JSON string)
           kbSelectionConfig = { dataset_ids: selectedKbIds };
-        } else {
-          // knowledge_base_search, datamate_search use index_names
+        } else if (!isKnowledgeBaseSearchTool) {
+          // datamate_search uses index_names in config
           kbSelectionConfig = { index_names: selectedKbIds };
         }
       }
@@ -350,7 +363,7 @@ export default function ToolTestPanel({
           // For haotian_search and idata_search: skip only index_names (dataset_ids is handled by kbSelectionConfig)
           // For other KB tools: skip both index_names and dataset_ids
           if (toolRequiresKbSelection) {
-            if (param.name === "index_names") {
+            if (param.name === "index_names" && !isKnowledgeBaseSearchTool) {
               return acc;
             }
             if (param.name === "dataset_ids" && tool?.name !== "haotian_search" && tool?.name !== "idata_search") {
@@ -448,7 +461,7 @@ export default function ToolTestPanel({
                         const isKbSelectorParam = (paramName === "index_names" || paramName === "dataset_ids") && toolRequiresKbSelection;
 
                         // Handle KB selector parameters - use selectedKbIds
-                        if (isKbSelectorParam) {
+                        if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
                           if (selectedKbIds.length > 0) {
                             currentParamsJson[paramName] = selectedKbIds;
                           }
@@ -598,7 +611,7 @@ export default function ToolTestPanel({
 
                       // KB selection is configured in the upper config area.
                       // Do not render duplicated KB params in the test input area.
-                      if (isKbSelectorParam) {
+                      if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
                         return null;
                       }
 
@@ -655,6 +668,16 @@ export default function ToolTestPanel({
                       }
 
                       return (
+                        (() => {
+                          const kbPlaceholder = t(
+                            "toolConfig.input.knowledgeBaseSelector.placeholder",
+                            {
+                              name:
+                                getLocalizedDescription(description, description_zh) ||
+                                paramName,
+                            }
+                          );
+                          return (
                         <Form.Item
                           key={paramName}
                           label={
@@ -673,10 +696,39 @@ export default function ToolTestPanel({
                             styles: { root: { maxWidth: 400 } },
                           }}
                         >
-                          <Input
-                            placeholder={getLocalizedDescription(description, description_zh)}
-                          />
+                          {isKnowledgeBaseSearchTool && paramName === "index_names" ? (
+                            <div>
+                              <div
+                                className="cursor-pointer bg-white border rounded px-3 py-2 transition-colors hover:border-[#8C68CD] min-h-[40px]"
+                                onClick={() => onOpenKbSelector?.(-1)}
+                              >
+                                {selectedKbIds.length > 0 ? (
+                                  selectedKbIds.map((id, i) => (
+                                    <Tag
+                                      key={id}
+                                      closable
+                                      onClose={(e) => {
+                                        e.preventDefault();
+                                        onRemoveKb?.(i, -1);
+                                      }}
+                                      style={{ marginBottom: 4 }}
+                                    >
+                                      {selectedKbDisplayNames[i] || id}
+                                    </Tag>
+                                  ))
+                                ) : (
+                                  <span className="text-gray-400 text-sm">{kbPlaceholder}</span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <Input
+                              placeholder={getLocalizedDescription(description, description_zh)}
+                            />
+                          )}
                         </Form.Item>
+                          );
+                        })()
                       );
                     })}
                   </>
