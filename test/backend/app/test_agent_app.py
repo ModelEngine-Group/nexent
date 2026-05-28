@@ -3,6 +3,7 @@ Unit tests for backend.apps.agent_app module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
+from apps.agent_app import agent_config_router, agent_runtime_router
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
@@ -20,8 +21,10 @@ from fastapi.testclient import TestClient
 from consts.const import ASSET_OWNER_TENANT_ID
 
 # Filter out deprecation warnings from third-party libraries
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="pyiceberg")
-pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning:pyiceberg.*")
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="pyiceberg")
+pytestmark = pytest.mark.filterwarnings(
+    "ignore::DeprecationWarning:pyiceberg.*")
 
 # Dynamically determine the backend path - MUST BE FIRST
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,8 +48,10 @@ storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
+      return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+      lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
@@ -62,7 +67,6 @@ for p in patches:
     p.start()
 
 # Import target endpoints with all external dependencies patched
-from apps.agent_app import agent_config_router, agent_runtime_router
 
 # Mock external dependencies before importing the modules that use them
 # Stub nexent.core.agents.agent_model.ToolConfig to satisfy type imports in consts.model
@@ -116,7 +120,8 @@ sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['utils.monitoring'] = MagicMock()
 sys.modules['utils.monitoring'].monitoring_manager = monitoring_manager_mock
-sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(return_value=True)
+sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(
+    return_value=True)
 sys.modules['agents.agent_run_manager'] = MagicMock()
 sys.modules['services.agent_service'] = MagicMock()
 sys.modules['services.skill_service'] = MagicMock()
@@ -125,7 +130,6 @@ sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.agent_version_service'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
-from apps.agent_app import agent_config_router, agent_runtime_router
 
 
 # Create FastAPI apps for runtime and config routers
@@ -272,7 +276,8 @@ def test_search_agent_info_api_success(mocker, mock_auth_header):
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     # Should use auth tenant_id when query parameter is not provided, and default version_no=0
-    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 0, "user_id")
+    mock_get_agent_info.assert_called_once_with(
+        123, "auth_tenant_id", 0, "user_id")
     assert response.json()["agent_id"] == 123
     assert response.json()["name"] == "Test Agent"
 
@@ -301,7 +306,8 @@ def test_search_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header)
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     # Should use explicit tenant_id when provided, not auth tenant_id, and default version_no=0
-    mock_get_agent_info.assert_called_once_with(456, explicit_tenant_id, 0, "user_id")
+    mock_get_agent_info.assert_called_once_with(
+        456, explicit_tenant_id, 0, "user_id")
     assert response.json()["agent_id"] == 456
 
 
@@ -321,7 +327,8 @@ def test_search_agent_info_api_exception(mocker, mock_auth_header):
 
     assert response.status_code == 500
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
-    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 0, "user_id")
+    mock_get_agent_info.assert_called_once_with(
+        123, "auth_tenant_id", 0, "user_id")
     assert "Agent search info error" in response.json()["detail"]
 
 
@@ -333,7 +340,8 @@ def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_au
         "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
     # Mock return values and exception
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
-    mock_get_agent_info.side_effect = Exception("Test error with explicit tenant")
+    mock_get_agent_info.side_effect = Exception(
+        "Test error with explicit tenant")
 
     # Test the endpoint with explicit tenant_id query parameter
     explicit_tenant_id = "explicit_tenant_999"
@@ -348,7 +356,8 @@ def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_au
     assert response.status_code == 500
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     # Should use explicit tenant_id even when exception occurs, and default version_no=0
-    mock_get_agent_info.assert_called_once_with(789, explicit_tenant_id, 0, "user_id")
+    mock_get_agent_info.assert_called_once_with(
+        789, explicit_tenant_id, 0, "user_id")
     assert "Agent search info error" in response.json()["detail"]
 
 
@@ -358,7 +367,8 @@ def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
     mock_get_agent_info = mocker.patch(
         "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
-    mock_get_agent_info.return_value = {"agent_id": 123, "name": "Test Agent", "version_no": 2}
+    mock_get_agent_info.return_value = {
+        "agent_id": 123, "name": "Test Agent", "version_no": 2}
 
     response = config_client.post(
         "/agent/search_info",
@@ -367,7 +377,8 @@ def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 2, "user_id")
+    mock_get_agent_info.assert_called_once_with(
+        123, "auth_tenant_id", 2, "user_id")
 
 
 # get_agent_by_name_api Tests
@@ -377,7 +388,8 @@ def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
 def test_get_agent_by_name_api_success(mocker, mock_auth_header):
     """Test get_agent_by_name_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_agent_by_name = mocker.patch("apps.agent_app.get_agent_by_name_impl")
+    mock_get_agent_by_name = mocker.patch(
+        "apps.agent_app.get_agent_by_name_impl")
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_by_name.return_value = {"agent_id": 123, "version_no": 1}
 
@@ -388,7 +400,8 @@ def test_get_agent_by_name_api_success(mocker, mock_auth_header):
 
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
-    mock_get_agent_by_name.assert_called_once_with("TestAgent", "auth_tenant_id")
+    mock_get_agent_by_name.assert_called_once_with(
+        "TestAgent", "auth_tenant_id")
     assert response.json()["agent_id"] == 123
     assert response.json()["version_no"] == 1
 
@@ -396,7 +409,8 @@ def test_get_agent_by_name_api_success(mocker, mock_auth_header):
 def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test get_agent_by_name_api with explicit tenant_id."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_agent_by_name = mocker.patch("apps.agent_app.get_agent_by_name_impl")
+    mock_get_agent_by_name = mocker.patch(
+        "apps.agent_app.get_agent_by_name_impl")
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_by_name.return_value = {"agent_id": 123, "version_no": 1}
 
@@ -408,8 +422,8 @@ def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header)
     )
 
     assert response.status_code == 200
-    mock_get_agent_by_name.assert_called_once_with("TestAgent", explicit_tenant_id)
-
+    mock_get_agent_by_name.assert_called_once_with(
+        "TestAgent", explicit_tenant_id)
 
 
 def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
@@ -418,7 +432,6 @@ def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     mock_get_agent_info = mocker.patch(
         "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
-
 
     response = config_client.get(
         "/agent/by-name/NonExistentAgent",
@@ -540,7 +553,8 @@ def test_delete_agent_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    mock_get_user_info.assert_called_once_with(
+        mock_auth_header["Authorization"], ANY)
     mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
     assert response.json() == {}
 
@@ -564,7 +578,8 @@ def test_delete_agent_api_with_explicit_tenant_id(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_delete_agent.assert_called_once_with(456, explicit_tenant_id, "test_user")
+    mock_delete_agent.assert_called_once_with(
+        456, explicit_tenant_id, "test_user")
 
 
 def test_delete_agent_api_exception(mocker, mock_auth_header):
@@ -597,7 +612,8 @@ def test_delete_agent_api_exception_with_explicit_tenant_id(mocker, mock_auth_he
     mock_logger = mocker.patch("apps.agent_app.logger")
     # Mock return values and exception
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
-    mock_delete_agent.side_effect = Exception("Test error with explicit tenant")
+    mock_delete_agent.side_effect = Exception(
+        "Test error with explicit tenant")
 
     # Test the endpoint with explicit tenant_id query parameter
     explicit_tenant_id = "explicit_tenant_456"
@@ -611,12 +627,15 @@ def test_delete_agent_api_exception_with_explicit_tenant_id(mocker, mock_auth_he
 
     # Assertions
     assert response.status_code == 500
-    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    mock_get_user_info.assert_called_once_with(
+        mock_auth_header["Authorization"], ANY)
     # Should use explicit tenant_id even when exception occurs
-    mock_delete_agent.assert_called_once_with(789, explicit_tenant_id, "test_user")
+    mock_delete_agent.assert_called_once_with(
+        789, explicit_tenant_id, "test_user")
     assert "Agent delete error" in response.json()["detail"]
     # Verify error was logged
-    mock_logger.error.assert_called_once_with("Agent delete error: Test error with explicit tenant")
+    mock_logger.error.assert_called_once_with(
+        "Agent delete error: Test error with explicit tenant")
 
 
 def test_export_agent_api_success(mocker, mock_auth_header):
@@ -632,7 +651,8 @@ def test_export_agent_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_export_agent.assert_called_once_with(123, mock_auth_header["Authorization"])
+    mock_export_agent.assert_called_once_with(
+        123, mock_auth_header["Authorization"])
     assert response.json()["code"] == 0
     assert response.json()["message"] == "success"
 
@@ -735,7 +755,8 @@ def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
     from consts.exceptions import SkillDuplicateError
     mock_import_agent = mocker.patch(
         "apps.agent_app.import_agent_impl", new_callable=AsyncMock)
-    mock_import_agent.side_effect = SkillDuplicateError(duplicate_names=["skill1", "skill2"])
+    mock_import_agent.side_effect = SkillDuplicateError(
+        duplicate_names=["skill1", "skill2"])
 
     response = config_client.post(
         "/agent/import",
@@ -823,8 +844,10 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
 
     assert response.status_code == 200
     assert mock_list_all_agent.call_count == 2
-    mock_list_all_agent.assert_any_call(tenant_id="test_tenant", user_id="test_user")
-    mock_list_all_agent.assert_any_call(tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
+    mock_list_all_agent.assert_any_call(
+        tenant_id="test_tenant", user_id="test_user")
+    mock_list_all_agent.assert_any_call(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
     assert len(response.json()) == 4
 
 
@@ -846,8 +869,10 @@ def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_heade
 
     assert response.status_code == 200
     assert mock_list_all_agent.call_count == 2
-    mock_list_all_agent.assert_any_call(tenant_id=explicit_tenant_id, user_id="test_user")
-    mock_list_all_agent.assert_any_call(tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
+    mock_list_all_agent.assert_any_call(
+        tenant_id="auth_tenant", user_id="test_user")
+    mock_list_all_agent.assert_any_call(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
 
 
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
@@ -876,7 +901,8 @@ def test_list_all_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_
         "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
     # Mock return values and exception
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
-    mock_list_all_agent.side_effect = Exception("Test error with explicit tenant")
+    mock_list_all_agent.side_effect = Exception(
+        "Test error with explicit tenant")
 
     # Test the endpoint with explicit tenant_id query parameter
     explicit_tenant_id = "explicit_tenant_456"
@@ -888,9 +914,14 @@ def test_list_all_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_
 
     # Assertions
     assert response.status_code == 500
-    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
-    # Should use explicit tenant_id even when exception occurs
-    mock_list_all_agent.assert_called_once_with(tenant_id=explicit_tenant_id, user_id="test_user")
+    mock_get_user_info.assert_called_once_with(
+        mock_auth_header["Authorization"], ANY)
+    # list_all_agent_info_impl is expected to be called twice:
+    # - once for explicit tenant_id
+    # - once for asset owner tenant_id
+    assert mock_list_all_agent.call_count == 1
+    mock_list_all_agent.assert_any_call(
+        tenant_id="auth_tenant", user_id="test_user")
     assert "Agent list error" in response.json()["detail"]
 
 
@@ -987,7 +1018,8 @@ def test_get_agent_call_relationship_api_success(mocker, mock_auth_header):
         "tree": {"tools": [], "sub_agents": []}
     }
 
-    resp = config_client.get("/agent/call_relationship/1", headers=mock_auth_header)
+    resp = config_client.get(
+        "/agent/call_relationship/1", headers=mock_auth_header)
 
     assert resp.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
@@ -1003,7 +1035,8 @@ def test_get_agent_call_relationship_api_exception(mocker, mock_auth_header):
     mock_get_user_id.return_value = ("user_id_x", "tenant_abc")
     mock_impl.side_effect = Exception("boom")
 
-    resp = config_client.get("/agent/call_relationship/999", headers=mock_auth_header)
+    resp = config_client.get(
+        "/agent/call_relationship/999", headers=mock_auth_header)
 
     assert resp.status_code == 500
     assert "Failed to get agent call relationship" in resp.json()["detail"]
@@ -1082,11 +1115,13 @@ def test_regenerate_agent_name_batch_api_success(mocker, mock_auth_header):
         "apps.agent_app.regenerate_agent_name_batch_impl",
         new_callable=AsyncMock,
     )
-    mock_impl.return_value = [{"name": "NewName", "display_name": "New Display"}]
+    mock_impl.return_value = [
+        {"name": "NewName", "display_name": "New Display"}]
 
     payload = {
         "items": [
-            {"agent_id": 1, "name": "AgentA", "display_name": "Agent A", "task_description": "desc"},
+            {"agent_id": 1, "name": "AgentA",
+                "display_name": "Agent A", "task_description": "desc"},
         ]
     }
 
@@ -1145,7 +1180,8 @@ def test_clear_agent_new_mark_api_success(mocker, mock_auth_header):
     mock_clear_agent_new_mark = mocker.patch(
         "apps.agent_app.clear_agent_new_mark_impl", new_callable=AsyncMock)
 
-    mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "extra_info")
+    mock_get_user_info.return_value = (
+        "test_user_id", "test_tenant_id", "extra_info")
     mock_clear_agent_new_mark.return_value = 1
 
     response = config_client.put(
@@ -1157,7 +1193,8 @@ def test_clear_agent_new_mark_api_success(mocker, mock_auth_header):
     response_data = response.json()
     assert response_data["message"] == "Agent NEW mark cleared successfully"
     assert response_data["affected_rows"] == 1
-    mock_clear_agent_new_mark.assert_called_once_with(123, "test_tenant_id", "test_user_id")
+    mock_clear_agent_new_mark.assert_called_once_with(
+        123, "test_tenant_id", "test_user_id")
 
 
 def test_clear_agent_new_mark_api_exception(mocker, mock_auth_header):
@@ -1167,8 +1204,10 @@ def test_clear_agent_new_mark_api_exception(mocker, mock_auth_header):
         "apps.agent_app.clear_agent_new_mark_impl", new_callable=AsyncMock)
     mock_logger = mocker.patch("apps.agent_app.logger")
 
-    mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "extra_info")
-    mock_clear_agent_new_mark.side_effect = Exception("Database connection failed")
+    mock_get_user_info.return_value = (
+        "test_user_id", "test_tenant_id", "extra_info")
+    mock_clear_agent_new_mark.side_effect = Exception(
+        "Database connection failed")
 
     response = config_client.put(
         "/agent/clear_new/456",
@@ -1279,7 +1318,8 @@ def test_publish_version_api_exception(mocker, mock_auth_header):
 def test_compare_versions_api_success(mocker, mock_auth_header):
     """Test compare_versions_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_compare_versions = mocker.patch("apps.agent_app.compare_versions_impl")
+    mock_compare_versions = mocker.patch(
+        "apps.agent_app.compare_versions_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_compare_versions.return_value = {
@@ -1303,7 +1343,8 @@ def test_compare_versions_api_success(mocker, mock_auth_header):
 def test_compare_versions_api_bad_request(mocker, mock_auth_header):
     """Test compare_versions_api with ValueError."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_compare_versions = mocker.patch("apps.agent_app.compare_versions_impl")
+    mock_compare_versions = mocker.patch(
+        "apps.agent_app.compare_versions_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_compare_versions.side_effect = ValueError("Version not found")
@@ -1321,7 +1362,8 @@ def test_compare_versions_api_bad_request(mocker, mock_auth_header):
 def test_compare_versions_api_exception(mocker, mock_auth_header):
     """Test compare_versions_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_compare_versions = mocker.patch("apps.agent_app.compare_versions_impl")
+    mock_compare_versions = mocker.patch(
+        "apps.agent_app.compare_versions_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_compare_versions.side_effect = Exception("Database error")
@@ -1339,7 +1381,8 @@ def test_compare_versions_api_exception(mocker, mock_auth_header):
 def test_get_version_list_api_success(mocker, mock_auth_header):
     """Test get_version_list_api success case."""
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
-    mock_get_version_list = mocker.patch("apps.agent_app.get_version_list_impl")
+    mock_get_version_list = mocker.patch(
+        "apps.agent_app.get_version_list_impl")
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_get_version_list.return_value = {
@@ -1355,14 +1398,16 @@ def test_get_version_list_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_version_list.assert_called_once_with(agent_id=123, tenant_id="test_tenant_id")
+    mock_get_version_list.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant_id")
     assert len(response.json()["versions"]) == 2
 
 
 def test_get_version_list_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test get_version_list_api with explicit tenant_id."""
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
-    mock_get_version_list = mocker.patch("apps.agent_app.get_version_list_impl")
+    mock_get_version_list = mocker.patch(
+        "apps.agent_app.get_version_list_impl")
 
     mock_get_user_info.return_value = ("test_user_id", "auth_tenant_id", "en")
     mock_get_version_list.return_value = {"versions": []}
@@ -1375,13 +1420,15 @@ def test_get_version_list_api_with_explicit_tenant_id(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_version_list.assert_called_once_with(agent_id=123, tenant_id=explicit_tenant_id)
+    mock_get_version_list.assert_called_once_with(
+        agent_id=123, tenant_id=explicit_tenant_id)
 
 
 def test_get_version_list_api_exception(mocker, mock_auth_header):
     """Test get_version_list_api with exception."""
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
-    mock_get_version_list = mocker.patch("apps.agent_app.get_version_list_impl")
+    mock_get_version_list = mocker.patch(
+        "apps.agent_app.get_version_list_impl")
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_get_version_list.side_effect = Exception("Database error")
@@ -1414,7 +1461,8 @@ def test_get_version_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_version.assert_called_once_with(agent_id=123, tenant_id="test_tenant_id", version_no=1)
+    mock_get_version.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant_id", version_no=1)
     assert response.json()["version_no"] == 1
 
 
@@ -1455,7 +1503,8 @@ def test_get_version_api_exception(mocker, mock_auth_header):
 def test_get_version_detail_api_success(mocker, mock_auth_header):
     """Test get_version_detail_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_version_detail = mocker.patch("apps.agent_app.get_version_detail_impl")
+    mock_get_version_detail = mocker.patch(
+        "apps.agent_app.get_version_detail_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.return_value = {
@@ -1481,7 +1530,8 @@ def test_get_version_detail_api_success(mocker, mock_auth_header):
 def test_get_version_detail_api_not_found(mocker, mock_auth_header):
     """Test get_version_detail_api with ValueError (not found)."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_version_detail = mocker.patch("apps.agent_app.get_version_detail_impl")
+    mock_get_version_detail = mocker.patch(
+        "apps.agent_app.get_version_detail_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = ValueError("Version not found")
@@ -1498,7 +1548,8 @@ def test_get_version_detail_api_not_found(mocker, mock_auth_header):
 def test_get_version_detail_api_exception(mocker, mock_auth_header):
     """Test get_version_detail_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_version_detail = mocker.patch("apps.agent_app.get_version_detail_impl")
+    mock_get_version_detail = mocker.patch(
+        "apps.agent_app.get_version_detail_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = Exception("Database error")
@@ -1515,7 +1566,8 @@ def test_get_version_detail_api_exception(mocker, mock_auth_header):
 def test_rollback_version_api_success(mocker, mock_auth_header):
     """Test rollback_version_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_rollback_version = mocker.patch("apps.agent_app.rollback_version_impl")
+    mock_rollback_version = mocker.patch(
+        "apps.agent_app.rollback_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_rollback_version.return_value = {
@@ -1539,7 +1591,8 @@ def test_rollback_version_api_success(mocker, mock_auth_header):
 def test_rollback_version_api_bad_request(mocker, mock_auth_header):
     """Test rollback_version_api with ValueError."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_rollback_version = mocker.patch("apps.agent_app.rollback_version_impl")
+    mock_rollback_version = mocker.patch(
+        "apps.agent_app.rollback_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_rollback_version.side_effect = ValueError("Version not found")
@@ -1556,7 +1609,8 @@ def test_rollback_version_api_bad_request(mocker, mock_auth_header):
 def test_rollback_version_api_exception(mocker, mock_auth_header):
     """Test rollback_version_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_rollback_version = mocker.patch("apps.agent_app.rollback_version_impl")
+    mock_rollback_version = mocker.patch(
+        "apps.agent_app.rollback_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_rollback_version.side_effect = Exception("Database error")
@@ -1573,7 +1627,8 @@ def test_rollback_version_api_exception(mocker, mock_auth_header):
 def test_update_version_status_api_success(mocker, mock_auth_header):
     """Test update_version_status_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_update_version_status = mocker.patch("apps.agent_app.update_version_status_impl")
+    mock_update_version_status = mocker.patch(
+        "apps.agent_app.update_version_status_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version_status.return_value = {
@@ -1598,7 +1653,8 @@ def test_update_version_status_api_success(mocker, mock_auth_header):
 def test_update_version_status_api_bad_request(mocker, mock_auth_header):
     """Test update_version_status_api with ValueError."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_update_version_status = mocker.patch("apps.agent_app.update_version_status_impl")
+    mock_update_version_status = mocker.patch(
+        "apps.agent_app.update_version_status_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version_status.side_effect = ValueError("Invalid status")
@@ -1616,7 +1672,8 @@ def test_update_version_status_api_bad_request(mocker, mock_auth_header):
 def test_update_version_status_api_exception(mocker, mock_auth_header):
     """Test update_version_status_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_update_version_status = mocker.patch("apps.agent_app.update_version_status_impl")
+    mock_update_version_status = mocker.patch(
+        "apps.agent_app.update_version_status_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version_status.side_effect = Exception("Database error")
@@ -1644,7 +1701,8 @@ def test_update_version_api_success(mocker, mock_auth_header):
 
     response = config_client.put(
         "/agent/123/versions/1",
-        json={"version_name": "Updated Version", "release_note": "Updated note"},
+        json={"version_name": "Updated Version",
+              "release_note": "Updated note"},
         headers=mock_auth_header
     )
 
@@ -1752,7 +1810,8 @@ def test_delete_version_api_exception(mocker, mock_auth_header):
 def test_get_current_version_api_success(mocker, mock_auth_header):
     """Test get_current_version_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_current_version = mocker.patch("apps.agent_app.get_current_version_impl")
+    mock_get_current_version = mocker.patch(
+        "apps.agent_app.get_current_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_current_version.return_value = {
@@ -1767,17 +1826,20 @@ def test_get_current_version_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_get_current_version.assert_called_once_with(agent_id=123, tenant_id="test_tenant_id")
+    mock_get_current_version.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant_id")
     assert response.json()["version_no"] == 1
 
 
 def test_get_current_version_api_not_found(mocker, mock_auth_header):
     """Test get_current_version_api with ValueError (not found)."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_current_version = mocker.patch("apps.agent_app.get_current_version_impl")
+    mock_get_current_version = mocker.patch(
+        "apps.agent_app.get_current_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-    mock_get_current_version.side_effect = ValueError("No published version found")
+    mock_get_current_version.side_effect = ValueError(
+        "No published version found")
 
     response = config_client.get(
         "/agent/123/current_version",
@@ -1791,7 +1853,8 @@ def test_get_current_version_api_not_found(mocker, mock_auth_header):
 def test_get_current_version_api_exception(mocker, mock_auth_header):
     """Test get_current_version_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_current_version = mocker.patch("apps.agent_app.get_current_version_impl")
+    mock_get_current_version = mocker.patch(
+        "apps.agent_app.get_current_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_current_version.side_effect = Exception("Database error")
@@ -1810,7 +1873,7 @@ def test_list_published_agents_api_success(mocker, mock_auth_header):
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
     mock_list_published_agents = mocker.patch(
         "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
-    
+
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_list_published_agents.return_value = [
         {"agent_id": 1, "name": "Agent 1", "published_version_no": 1},
@@ -1834,7 +1897,7 @@ def test_list_published_agents_api_exception(mocker, mock_auth_header):
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
     mock_list_published_agents = mocker.patch(
         "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
-    
+
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_list_published_agents.side_effect = Exception("Database error")
 

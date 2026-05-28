@@ -304,7 +304,6 @@ async def list_all_agent_info_api(
             )
             return agent_list + asset_agent_list
         return agent_list
-        return await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
