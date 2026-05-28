@@ -1144,7 +1144,7 @@ class TestAgentConfig:
             model_name="default-model"
         )
         assert config.prompt_templates is None
-        assert config.max_steps == 5
+        assert config.max_steps == 15
         assert config.provide_run_summary is False
         assert config.instructions is None
         assert config.managed_agents == []
@@ -1222,9 +1222,29 @@ class TestAgentConfig:
             description="Max steps",
             tools=[],
             model_name="test",
-            max_steps=100
+            max_steps=30
         )
-        assert config_max.max_steps == 100
+        assert config_max.max_steps == 30
+
+    def test_agent_config_max_steps_rejects_out_of_bounds(self):
+        """Test AgentConfig rejects max_steps values outside 1-30 range."""
+        with pytest.raises(Exception):
+            agent_model_module.AgentConfig(
+                name="too_high",
+                description="Too high steps",
+                tools=[],
+                model_name="test",
+                max_steps=31
+            )
+
+        with pytest.raises(Exception):
+            agent_model_module.AgentConfig(
+                name="too_low",
+                description="Too low steps",
+                tools=[],
+                model_name="test",
+                max_steps=0
+            )
 
 
 # ----------------------------------------------------------------------------
