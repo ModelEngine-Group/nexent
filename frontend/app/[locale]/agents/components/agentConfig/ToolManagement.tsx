@@ -89,16 +89,13 @@ function isToolDisabledDueToEmbedding(toolName: string, embeddingAvailable: bool
 export default function ToolManagement({
   toolGroups,
   isCreatingMode,
-  currentAgentId,
-  isReadOnly: isReadOnlyProp,
+  currentAgentId
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
 
-  // Use prop if provided, otherwise fall back to store
-  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
