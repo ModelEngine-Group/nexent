@@ -9,6 +9,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
+import { authFlowState } from "@/lib/authFlow";
 import { casService } from "@/services/casService";
 import { AuthenticationUIReturn, RegisterModalOptions } from "@/types/auth";
 
@@ -79,8 +80,10 @@ export function useAuthenticationUI({
   const redirectToCasIfForced = useCallback(
     async (redirect?: string): Promise<boolean> => {
       if (isRedirectingToCasRef.current) return true;
+      if (authFlowState.isExplicitLogoutInProgress()) return true;
 
       const config = await casService.getConfig();
+      if (authFlowState.isExplicitLogoutInProgress()) return true;
       if (!config.enabled || config.login_mode !== "force") return false;
 
       isRedirectingToCasRef.current = true;

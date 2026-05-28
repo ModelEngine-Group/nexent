@@ -54,7 +54,7 @@ async def callback(ticket: str = "", redirect: str = "/"):
 
 @router.post("/callback")
 async def callback_logout(request: Request, logout_request: Optional[str] = None):
-    return await _handle_logout_request(request, logout_request)
+    return await _handle_logout_request(request, logout_request, endpoint="callback")
 
 
 @router.get("/renew")
@@ -85,12 +85,23 @@ async def logout_callback(
     request: Request,
     logout_request: Optional[str] = None,
 ):
-    return await _handle_logout_request(request, logout_request)
+    return await _handle_logout_request(request, logout_request, endpoint="logout_callback")
 
 
-async def _handle_logout_request(request: Request, logout_request: Optional[str] = None):
+async def _handle_logout_request(
+    request: Request,
+    logout_request: Optional[str] = None,
+    endpoint: str = "unknown",
+):
     logout_request = await _extract_logout_request(request, logout_request)
+    logger.info(
+        "CAS SLO %s received logoutRequest: present=%s length=%s",
+        endpoint,
+        bool(logout_request),
+        len(logout_request or ""),
+    )
     result = revoke_from_logout_request(logout_request)
+    logger.info("CAS SLO %s revoke result: %s", endpoint, result)
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"message": "success", "data": result},

@@ -27,6 +27,7 @@ import { SIDER_CONFIG } from "@/const/layoutConstants";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents } from "@/lib/authEvents";
+import { authFlowState } from "@/lib/authFlow";
 import { casService } from "@/services/casService";
 
 interface SideNavigationProps {
@@ -187,7 +188,11 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
         if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
           setPendingNavigationPath(route.path);
           casService.getConfig().then((config) => {
-            if (config.enabled && config.login_mode === "force") {
+            if (
+              !authFlowState.isExplicitLogoutInProgress() &&
+              config.enabled &&
+              config.login_mode === "force"
+            ) {
               casService.startLogin(route.path);
               return;
             }

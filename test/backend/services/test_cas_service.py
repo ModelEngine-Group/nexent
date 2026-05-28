@@ -59,6 +59,7 @@ from services.cas_service import (  # noqa: E402
     build_logout_url,
     parse_logout_request,
     parse_service_validate_response,
+    revoke_from_logout_request,
 )
 
 for _name, _module in _ORIGINAL_MODULES.items():
@@ -120,6 +121,32 @@ class TestCasServiceParsing(unittest.TestCase):
         self.assertEqual(result["cas_user_id"], "cas-user-1")
         self.assertEqual(result["session_index"], "ST-123")
 
+    def test_revoke_logout_request_falls_back_to_session_index_when_name_id_misses(self):
+        xml = """
+        <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+          xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+          <saml:NameID>different-cas-user</saml:NameID>
+          <samlp:SessionIndex>ST-123</samlp:SessionIndex>
+        </samlp:LogoutRequest>
+        """
+        original_revoke_by_user = revoke_from_logout_request.__globals__["revoke_cas_sessions_by_user_id"]
+        original_revoke_by_index = revoke_from_logout_request.__globals__["revoke_cas_session_by_index"]
+        revoke_by_user = MagicMock(return_value=0)
+        revoke_by_index = MagicMock(return_value=1)
+        revoke_from_logout_request.__globals__["revoke_cas_sessions_by_user_id"] = revoke_by_user
+        revoke_from_logout_request.__globals__["revoke_cas_session_by_index"] = revoke_by_index
+        try:
+            result = revoke_from_logout_request(xml)
+        finally:
+            revoke_from_logout_request.__globals__["revoke_cas_sessions_by_user_id"] = original_revoke_by_user
+            revoke_from_logout_request.__globals__["revoke_cas_session_by_index"] = original_revoke_by_index
+
+        self.assertEqual(result["revoked"], 1)
+        self.assertEqual(result["cas_user_id"], "different-cas-user")
+        self.assertEqual(result["session_index"], "ST-123")
+        revoke_by_user.assert_called_once_with("different-cas-user")
+        revoke_by_index.assert_called_once_with("ST-123")
+
     def test_build_login_url_includes_service_redirect(self):
         url = build_login_url("/space")
 
@@ -131,7 +158,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(url, "")
 
-    def test_build_logout_url_adds_login_service_to_configured_bare_logout_url(self):
+    def test_build_logout_url_adds_nexent_service_to_configured_bare_logout_url(self):
         original = build_logout_url.__globals__["CAS_LOGOUT_URL"]
         build_logout_url.__globals__["CAS_LOGOUT_URL"] = "https://sso.example.com/cas/logout"
         try:
@@ -141,7 +168,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "https://sso.example.com/cas/logout?service=https://cas.example.com/cas/login",
+            "https://sso.example.com/cas/logout?service=http://localhost:3000",
         )
 
     def test_build_logout_url_resolves_absolute_path_against_cas_server_url(self):
@@ -154,7 +181,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "https://cas.example.com/cas/logout?service=https://cas.example.com/cas/login",
+            "https://cas.example.com/cas/logout?service=http://localhost:3000",
         )
 
     def test_build_logout_url_resolves_relative_path_against_cas_server_url(self):
@@ -167,7 +194,7 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(
             url,
-            "https://cas.example.com/cas/logout?service=https://cas.example.com/cas/login",
+            "https://cas.example.com/cas/logout?service=http://localhost:3000",
         )
 
     def test_build_logout_url_preserves_configured_logout_url_with_query(self):

@@ -14,6 +14,7 @@ import { STATUS_CODES } from "@/const/auth";
 
 import { generateAvatarUrl } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/auth";
+import { authFlowState } from "@/lib/authFlow";
 import {
   removeSessionFromStorage,
   getSessionFromStorage,
@@ -24,7 +25,6 @@ import {
 import log from "@/lib/logger";
 import { ErrorCode } from "@/const/errorCode";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
-
 
 export const authService = {
   getSession: async (): Promise<Session | null> => {
@@ -149,7 +149,9 @@ export const authService = {
       return {
         error: {
           message:
-            error instanceof Error ? error.message : "Network error, please try again later",
+            error instanceof Error
+              ? error.message
+              : "Network error, please try again later",
           code:
             error instanceof Error && "code" in error
               ? (error as any).code
@@ -254,9 +256,11 @@ export const authService = {
   },
 
   signOut: async (): Promise<{ error: null }> => {
+    authFlowState.beginExplicitLogout();
     try {
       const response = await fetchWithAuth(API_ENDPOINTS.user.logout, {
         method: "POST",
+        keepalive: true,
       });
       const data = await response.json().catch(() => null);
       const casLogoutUrl = data?.data?.cas_logout_url;
@@ -265,6 +269,8 @@ export const authService = {
       removeSessionFromStorage();
       if (casLogoutUrl && typeof window !== "undefined") {
         window.location.href = casLogoutUrl;
+      } else {
+        authFlowState.endExplicitLogout();
       }
 
       return { error: null };
@@ -272,6 +278,7 @@ export const authService = {
       log.error("Logout failed:", error);
 
       removeSessionFromStorage();
+      authFlowState.endExplicitLogout();
 
       return { error: null };
     }
@@ -320,10 +327,14 @@ export const authService = {
           email: data.data.user.user_email,
           role: data.data.user.user_role,
           avatarUrl: data.data.user.avatarUrl,
-          permissions: data.data.user.permissions.map((permission:string) => permission.toLowerCase()),
-          accessibleRoutes: data.data.user.accessibleRoutes.map((router:string) => router.toLowerCase()),
-        }
-      }
+          permissions: data.data.user.permissions.map((permission: string) =>
+            permission.toLowerCase()
+          ),
+          accessibleRoutes: data.data.user.accessibleRoutes.map(
+            (router: string) => router.toLowerCase()
+          ),
+        },
+      };
       return userData as AuthInfoResponse;
     } catch (error) {
       log.error("Failed to get user Info:", error);
@@ -362,7 +373,9 @@ export const authService = {
       if (errorCode === ErrorCode.INVALID_CREDENTIALS) {
         return {
           errorCode: ErrorCode.INVALID_CREDENTIALS,
-          error: error?.message || getI18nErrorMessage(ErrorCode.INVALID_CREDENTIALS),
+          error:
+            error?.message ||
+            getI18nErrorMessage(ErrorCode.INVALID_CREDENTIALS),
         };
       }
       if (errorCode === ErrorCode.PASSWORD_WEAK) {
@@ -374,7 +387,9 @@ export const authService = {
       if (errorCode === ErrorCode.PASSWORD_SAME_AS_OLD) {
         return {
           errorCode: ErrorCode.PASSWORD_SAME_AS_OLD,
-          error: error?.message || getI18nErrorMessage(ErrorCode.PASSWORD_SAME_AS_OLD),
+          error:
+            error?.message ||
+            getI18nErrorMessage(ErrorCode.PASSWORD_SAME_AS_OLD),
         };
       }
 

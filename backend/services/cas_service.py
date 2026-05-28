@@ -109,7 +109,7 @@ def build_logout_url() -> str:
     if parsed.query:
         return logout_url
 
-    query = f"service={CAS_SERVER_URL}/login"
+    query = f"service={CAS_CALLBACK_BASE_URL}"
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
 
@@ -206,8 +206,20 @@ def revoke_from_logout_request(logout_request: str) -> Dict[str, Any]:
     revoked = 0
     if parsed["cas_user_id"]:
         revoked = revoke_cas_sessions_by_user_id(parsed["cas_user_id"])
-    elif parsed["session_index"]:
+        logger.info(
+            "CAS SLO revoke by cas_user_id: cas_user_id=%s revoked=%s",
+            parsed["cas_user_id"],
+            revoked,
+        )
+    if revoked == 0 and parsed["session_index"]:
         revoked = revoke_cas_session_by_index(parsed["session_index"])
+        logger.info(
+            "CAS SLO revoke by session_index: session_index=%s revoked=%s",
+            parsed["session_index"],
+            revoked,
+        )
+    if revoked == 0:
+        logger.warning("CAS SLO did not revoke any session: %s", parsed)
     return {"revoked": revoked, **parsed}
 
 

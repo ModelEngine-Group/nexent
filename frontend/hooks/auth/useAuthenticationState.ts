@@ -14,6 +14,7 @@ import {
   checkSessionValid,
   getTokenExpiresAt,
 } from "@/lib/session";
+import { authFlowState } from "@/lib/authFlow";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 import { authEventUtils } from "@/lib/authEvents";
@@ -61,6 +62,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   useEffect(() => {
     if (isSpeedMode || isAuthChecking || isAuthenticated) return;
     if (isCasLoginInProgressRef.current) return;
+    if (authFlowState.isExplicitLogoutInProgress()) return;
     if (typeof window === "undefined") return;
 
     const pathname = window.location.pathname;
@@ -71,6 +73,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
       if (
         cancelled ||
         isCasLoginInProgressRef.current ||
+        authFlowState.isExplicitLogoutInProgress() ||
         !config.enabled ||
         config.login_mode !== "force"
       ) {
