@@ -208,6 +208,10 @@ async def get_user_information(request: Request):
         if not user_info:
             raise UnauthorizedError("User information not found")
 
+        user_info["user"]["auth_provider"] = (
+            "cas" if extract_session_id_from_authorization(authorization) else "local"
+        )
+
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Success",
                                      "data": user_info})

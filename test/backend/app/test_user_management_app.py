@@ -725,10 +725,46 @@ class TestCurrentUserInfo:
         assert data["data"]["user"]["tenant_id"] == "tenant456"
         assert data["data"]["user"]["user_email"] == "test@example.com"
         assert data["data"]["user"]["user_role"] == "USER"
+        assert data["data"]["user"]["auth_provider"] == "local"
         assert data["data"]["user"]["permissions"] == [
             "agent:create", "agent:read"]
         assert data["data"]["user"]["accessibleRoutes"] == ["chat", "agents"]
         mock_get_user_info.assert_called_once_with("user123")
+
+    @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.validate_token')
+    @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_current_user_info_marks_cas_user(
+        self,
+        mock_get_user_info,
+        mock_validate_token,
+        mock_extract_session_id,
+    ):
+        """Test CAS-authenticated current user info includes auth provider"""
+        mock_user = MockUser("user123", "test@example.com")
+        mock_validate_token.return_value = (True, mock_user)
+        mock_extract_session_id.return_value = "cas-session-123"
+        mock_get_user_info.return_value = {
+            "user": {
+                "user_id": "user123",
+                "group_ids": [1],
+                "tenant_id": "tenant456",
+                "user_email": "test@example.com",
+                "user_role": "USER",
+                "permissions": ["agent:read"],
+                "accessibleRoutes": ["chat"]
+            }
+        }
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer cas-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"]["user"]["auth_provider"] == "cas"
+        mock_extract_session_id.assert_called_once_with("Bearer cas-token")
 
     def test_current_user_info_no_authorization(self):
         """Test current user info retrieval without authorization header"""

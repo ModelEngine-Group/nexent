@@ -91,6 +91,10 @@ CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", 
 CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
 CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
 CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
+# CAS login mode:
+# - disabled: disable CAS login entry and automatic CAS redirects.
+# - button: show CAS as an optional login entry.
+# - force: automatically redirect unauthenticated users to CAS login.
 CAS_LOGIN_MODE = os.getenv("CAS_LOGIN_MODE", "disabled").lower()
 CAS_USER_ATTRIBUTE = os.getenv("CAS_USER_ATTRIBUTE", "")
 CAS_EMAIL_ATTRIBUTE = os.getenv("CAS_EMAIL_ATTRIBUTE", "email")

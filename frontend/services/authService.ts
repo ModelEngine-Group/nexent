@@ -326,6 +326,7 @@ export const authService = {
           tenantId: data.data.user.tenant_id,
           email: data.data.user.user_email,
           role: data.data.user.user_role,
+          authProvider: data.data.user.auth_provider,
           avatarUrl: data.data.user.avatarUrl,
           permissions: data.data.user.permissions.map((permission: string) =>
             permission.toLowerCase()

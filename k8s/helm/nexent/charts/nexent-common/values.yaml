@@ -142,6 +142,10 @@ config:
     serverUrl: ""
     validatePath: "/p3/serviceValidate"
     callbackBaseUrl: "http://localhost:30000"
+    # Supported values:
+    # - disabled: disable CAS login entry and automatic CAS redirects.
+    # - button: show CAS as an optional login entry.
+    # - force: automatically redirect unauthenticated users to CAS login.
     loginMode: "disabled"
     userAttribute: ""
     emailAttribute: "email"
