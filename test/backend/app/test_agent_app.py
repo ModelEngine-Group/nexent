@@ -190,7 +190,7 @@ async def test_agent_run_api(mocker, mock_auth_header):
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
     """Test agent_run_api error case in debug mode - should expose actual error."""
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream", new_callable=mocker.AsyncMock)
+        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
     mock_run_agent_stream.side_effect = Exception("Test error")
 
     response = runtime_client.post(
@@ -214,7 +214,7 @@ async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
 async def test_agent_run_api_error_normal_mode(mocker, mock_auth_header):
     """Test agent_run_api error case in normal mode - should show generic error."""
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream", new_callable=mocker.AsyncMock)
+        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
     mock_run_agent_stream.side_effect = Exception("Test internal error")
 
     response = runtime_client.post(
