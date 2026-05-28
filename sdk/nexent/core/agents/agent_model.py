@@ -80,7 +80,7 @@ class AgentConfig(BaseModel):
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
-    max_steps: int = Field(description="Maximum number of steps for current Agent", default=5)
+    max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)

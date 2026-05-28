@@ -159,7 +159,7 @@ export default function AgentGenerateDetail({}) {
       agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
       mainAgentModel: editedAgent.model,
       mainAgentModelId: editedAgent.model_id,
-      mainAgentMaxStep: editedAgent.max_step || 5,
+      mainAgentMaxStep: editedAgent.max_step || 15,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -861,14 +861,14 @@ export default function AgentGenerateDetail({}) {
                               {
                                 type: "number",
                                 min: 1,
-                                max: 20,
+                                max: 30,
                                 message: t("businessLogic.config.maxSteps"),
                               },
                             ]}
                           >
                             <InputNumber
                               min={1}
-                              max={20}
+                              max={30}
                               style={{ width: "100%" }}
                               onBlur={() => {
                                 const value = form.getFieldValue("mainAgentMaxStep");

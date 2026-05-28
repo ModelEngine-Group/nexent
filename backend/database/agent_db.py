@@ -158,7 +158,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     :return: Created agent object
     """
     info_with_metadata = dict(agent_info)
-    info_with_metadata.setdefault("max_steps", 5)
+    info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
