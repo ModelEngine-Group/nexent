@@ -507,8 +507,7 @@ def _generate_unique_invitation_code(length: int = 6) -> str:
 
     while attempts < max_attempts:
         # Generate random code with letters and digits
-        code = ''.join(random.choices(
-            string.ascii_letters + string.digits, k=length))
+        code = ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
         # Check uniqueness
         if not query_invitation_by_code(code):

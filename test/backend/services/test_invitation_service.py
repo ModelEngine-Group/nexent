@@ -25,7 +25,7 @@ setattr(nexent_module, "__path__", [])
 nexent_storage_module = types.ModuleType("nexent.storage")
 setattr(nexent_storage_module, "__path__", [])
 nexent_storage_factory_module = types.ModuleType("nexent.storage.storage_client_factory")
-nexent_storage_factory_module.create_storage_client_from_config = MagicMock()
+nexent_storage_factory_module.create_storage_client_from_config = MagicMock(return_value=MagicMock())
 nexent_minio_config_module = types.ModuleType("nexent.storage.minio_config")
 
 
@@ -39,6 +39,11 @@ sys.modules["nexent"] = nexent_module
 sys.modules["nexent.storage"] = nexent_storage_module
 sys.modules["nexent.storage.storage_client_factory"] = nexent_storage_factory_module
 sys.modules["nexent.storage.minio_config"] = nexent_minio_config_module
+
+# Make parent/child attributes resolvable for patch() dotted lookups.
+setattr(nexent_module, "storage", nexent_storage_module)
+setattr(nexent_storage_module, "storage_client_factory", nexent_storage_factory_module)
+setattr(nexent_storage_module, "minio_config", nexent_minio_config_module)
 
 # Mock mem0 to prevent optional dependency import failures during test collection
 mem0_module = types.ModuleType("mem0")
@@ -82,9 +87,8 @@ sys.modules["database.role_permission_db"] = MagicMock()
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('database.client.MinioClient', return_value=minio_client_mock).start()
+nexent_storage_factory_module.create_storage_client_from_config.return_value = storage_client_mock
+_db_client_stub.MinioClient.return_value = minio_client_mock
 
 _services_pkg = types.ModuleType("services")
 _services_pkg.__path__ = []
