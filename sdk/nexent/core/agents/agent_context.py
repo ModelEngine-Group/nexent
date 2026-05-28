@@ -2,6 +2,11 @@
 
 Provides ContextManager for token-aware compression of agent memory,
 supporting incremental summarization with cache-based optimization.
+
+Also provides ContextManager as the single source of truth for:
+- Context component registration and lifecycle
+- System prompt assembly from components
+- Strategy-based component selection
 """
 
 import hashlib
@@ -10,13 +15,16 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+
+if TYPE_CHECKING:
+    from .agent_model import ContextComponent, ContextStrategy
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
 from .summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
-from .summary_config import ContextManagerConfig
+from .summary_config import ContextManagerConfig, StrategyType
 
 logger = logging.getLogger("agent_context")
 
@@ -41,15 +49,214 @@ class SummaryTaskStep(TaskStep):
         return [ChatMessage(role=MessageRole.USER, content=content)]
 
 
+# ============================================================
+#  Standalone utilities (no ContextManager state required)
+# ============================================================
+
+def format_summary_output(raw_output: str) -> Optional[str]:
+    """Clean and validate LLM summary output.
+
+    Strips markdown code fences, attempts JSON parse for normalization,
+    falls back to plain text if not valid JSON.
+    """
+    cleaned = raw_output.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    if not cleaned:
+        return None
+    try:
+        parsed = json.loads(cleaned)
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        logger.warning("Summary output is not valid JSON; using as plain text")
+        return cleaned
+
+
+def _is_context_length_error(err: Exception) -> bool:
+    """Check if an exception indicates a context length / token limit error."""
+    msg = str(err).lower()
+    return any(k in msg for k in (
+        "context_length", "context length", "maximum context", "maximum context length",
+        "prompt is too long", "reduce the length", "too many tokens",
+        "token limit", "exceeds the maximum", "input is too long",
+        "input length", "exceeds context", "context window",
+    ))
+
+
+def compress_history_offline(
+    pairs: List[Tuple[str, str]],
+    model,
+    config: Optional[ContextManagerConfig] = None,
+    previous_summary: Optional[str] = None,
+) -> dict:
+    """Compress conversation history offline, without ContextManager or AgentMemory.
+
+    This is a standalone function for **Static Compression Inspection** in
+    benchmarks. It takes plain-text (user, assistant) pairs and produces a
+    summary using the same prompts and schema as the in-agent compression path,
+    but without any stateful cache, offload store, or agent runtime.
+
+    Args:
+        pairs: List of (user_text, assistant_text) tuples representing
+               conversation turns to compress.
+        model: An LLM model object compatible with smolagents' call interface.
+        config: ContextManagerConfig providing prompts, schema, and token budgets.
+                Defaults to a fresh ContextManagerConfig() if not provided.
+        previous_summary: Optional existing summary text for incremental
+                          compression. If provided, uses the incremental prompt
+                          to update rather than create from scratch.
+
+    Returns:
+        dict with:
+          - "summary": the compressed summary text (str or None on failure)
+          - "is_incremental": whether incremental compression was used
+          - "is_fallback": whether the LLM failed and fallback truncation was used
+          - "input_text": the raw text that was fed to the LLM (for debugging)
+          - "input_chars": character count of the input text
+    """
+    config = config or ContextManagerConfig()
+    # Same compensation as ContextManager.__init__: when max_summary_input_tokens
+    # is left at the default 0, derive it from token_threshold so that truncation
+    # logic doesn't accidentally chop all input.
+    if config.max_summary_input_tokens <= 0:
+        config.max_summary_input_tokens = int(config.token_threshold * 1.2)
+    if not pairs and not previous_summary:
+        return {
+            "summary": None,
+            "is_incremental": False,
+            "is_fallback": False,
+            "input_text": "",
+            "input_chars": 0,
+        }
+
+    # Build input text from pairs
+    parts = []
+    for user_text, assistant_text in pairs:
+        parts.append(f"user: {user_text}\nassistant: {assistant_text}")
+    pairs_text = "\n\n".join(parts)
+
+    # Determine compression mode
+    is_incremental = previous_summary is not None
+
+    if is_incremental:
+        input_text = (
+            f"## Previous Summary\n{previous_summary}\n\n"
+            f"## New Conversations\n{pairs_text}"
+        )
+    else:
+        input_text = pairs_text
+
+    # Truncate if exceeds budget
+    from ..utils.token_estimation import estimate_tokens_text
+    input_tokens = estimate_tokens_text(input_text)
+    if input_tokens > config.max_summary_input_tokens:
+        # Simple tail-truncation for offline mode
+        approx_chars = int(config.max_summary_input_tokens * config.chars_per_token * 0.9)
+        input_text = "...[Earlier content truncated]...\n" + input_text[-approx_chars:]
+
+    # Build prompt
+    schema_desc = json.dumps(config.summary_json_schema, ensure_ascii=False, indent=2)
+    if is_incremental:
+        system_prompt = config.incremental_summary_system_prompt
+        user_prompt = (
+            f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+            f"{input_text}"
+        )
+    else:
+        system_prompt = config.summary_system_prompt
+        user_prompt = (
+            f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
+            f"TURNS TO SUMMARIZE:\n{input_text}"
+        )
+
+    messages = [
+        ChatMessage(role=MessageRole.SYSTEM,
+                    content=[{"type": "text", "text": system_prompt}]),
+        ChatMessage(role=MessageRole.USER,
+                    content=[{"type": "text", "text": user_prompt}]),
+    ]
+
+    # Call LLM with error handling
+    is_fallback = False
+    summary = None
+
+    try:
+        response = model(messages, stop_sequences=[])
+        raw_output = response.content
+        if isinstance(raw_output, list):
+            raw_output = " ".join(
+                block.get("text", "")
+                for block in raw_output
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        if not isinstance(raw_output, str):
+            raw_output = str(raw_output)
+        summary = format_summary_output(raw_output)
+    except Exception as e:
+        if _is_context_length_error(e):
+            logger.warning("Offline compression exceeds context limit; retrying with 2/3 budget")
+            approx_chars = int(config.max_summary_input_tokens * config.chars_per_token * 0.6)
+            truncated_input = input_text[-approx_chars:] if len(input_text) > approx_chars else input_text
+            if is_incremental:
+                user_prompt = (
+                    f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+                    f"{truncated_input}"
+                )
+            else:
+                user_prompt = (
+                    f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
+                    f"TURNS TO SUMMARIZE:\n{truncated_input}"
+                )
+            messages[-1] = ChatMessage(
+                role=MessageRole.USER,
+                content=[{"type": "text", "text": user_prompt}],
+            )
+            try:
+                response = model(messages, stop_sequences=[])
+                raw_output = response.content
+                if isinstance(raw_output, list):
+                    raw_output = " ".join(
+                        block.get("text", "")
+                        for block in raw_output
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                if not isinstance(raw_output, str):
+                    raw_output = str(raw_output)
+                summary = format_summary_output(raw_output)
+            except Exception as e2:
+                logger.error(f"Offline compression retry still failed: {e2}")
+
+        if summary is None:
+            # L3 fallback: hard truncation
+            is_fallback = True
+            first_task = pairs[0][0][:200] if pairs else ""
+            reduced_chars = int(config.max_summary_reduce_tokens * config.chars_per_token)
+            reduced_text = pairs_text[-reduced_chars:] if len(pairs_text) > reduced_chars else pairs_text
+            summary = (
+                "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier steps were removed to free context space. "
+                "The removed content cannot be summarized. Continue based on the steps below.\n\n"
+                f"Original task: {first_task}\n\n"
+                f"Steps removed: {len(pairs)} of {len(pairs)}\n\n"
+                "Remaining compressed history:\n"
+                + reduced_text
+            )
+
+    return {
+        "summary": summary,
+        "is_incremental": is_incremental,
+        "is_fallback": is_fallback,
+        "input_text": input_text,
+        "input_chars": len(input_text),
+    }
+
+
 class ContextManager:
     def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: Optional[int] = None):
         self.config = config or ContextManagerConfig()
         self._previous_summary_cache: Optional[PreviousSummaryCache] = None
         self._current_summary_cache: Optional[CurrentSummaryCache] = None
 
-        # Run boundary self-detection. The current cache fingerprint is only reused
-        # within the current run and must be explicitly cleared at the start of a new run.
-        # The previous cache is managed and updated across runs.
         self._last_run_start_idx: Optional[int] = None
 
         if max_steps is not None and self.config.keep_recent_steps >= max_steps:
@@ -59,10 +266,18 @@ class ContextManager:
         self._step_local_log: List[CompressionCallRecord] = []
         self._lock = threading.Lock()
 
+        # Token accounting for benchmark instrumentation.
+        # Recorded by compress_if_needed at each return point so benchmarks
+        # can compute token_reduction = 1 - last_compressed / last_uncompressed.
+        self._last_uncompressed_token_count: Optional[int] = None
+        self._last_compressed_token_count: Optional[int] = None
+
         if self.config.max_summary_input_tokens <= 0:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
             self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
+
+        self._components: List = []
 
     # ============================================================
     #  Cache validation
@@ -241,9 +456,13 @@ class ContextManager:
         # G1
         if not self.config.enabled:
             return original_messages
-        
+
         if self._estimate_tokens(memory) <= self.config.token_threshold:
-            return original_messages 
+            # No compression needed; record that compressed == uncompressed
+            # so benchmark token_reduction reads as zero rather than stale.
+            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
+            self._last_compressed_token_count = self._last_uncompressed_token_count
+            return original_messages
 
         with self._lock:
             # Run detection
@@ -296,11 +515,16 @@ class ContextManager:
                 self.compression_calls_log.append(record)
                 self._step_local_log.append(record)
 
-                return self._build_messages(
+                compressed_msgs = self._build_messages(
                     memory, prev_summary_step, prev_tail_steps, curr_kept_steps
-                ) 
+                )
+                self._last_uncompressed_token_count = self._msg_token_count(original_messages)
+                self._last_compressed_token_count = self._msg_token_count(compressed_msgs)
+                return compressed_msgs
 
             self._step_local_log.clear()
+
+            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
 
             prev_steps = memory.steps[:current_run_start_idx]
             curr_steps = memory.steps[current_run_start_idx:]
@@ -334,7 +558,7 @@ class ContextManager:
                         pairs_to_compress, model
                     )
                     if summary_text:
-                        if "Truncated" in summary_text:
+                        if "[CONTEXT COMPACTION" in summary_text:
                             prev_summary_step = SummaryTaskStep(task=summary_text, prefix="Context fallback, Truncated raw history:")
                         else:
                             prev_summary_step = SummaryTaskStep(task=summary_text)
@@ -376,7 +600,7 @@ class ContextManager:
                             curr_task, actions_to_compress, model
                         )
                         if curr_summary_text:
-                            if "Truncated" in curr_summary_text:
+                            if "[CONTEXT COMPACTION" in curr_summary_text:
                                 curr_summary_step = SummaryTaskStep(task=curr_summary_text, prefix="Truncated recent action steps:")
                             else:
                                 curr_summary_step = SummaryTaskStep(task=curr_summary_text)
@@ -399,6 +623,7 @@ class ContextManager:
                 memory, prev_summary_step, prev_tail_steps, curr_kept_steps
             )
             final_tokens = self._msg_token_count(final_messages)
+            self._last_compressed_token_count = final_tokens
             # This situation is unlikely to occur unless the threshold itself is set unreasonably small
             if final_tokens > int(self.config.token_threshold * 1.1):
                 logger.warning(
@@ -463,7 +688,8 @@ class ContextManager:
                 if input_tokens <= self.config.max_summary_input_tokens:
                     summary_text = self._generate_summary(
                         incremental_input, model,
-                        call_type="previous_incremental"
+                        call_type="previous_incremental",
+                        prompt_type="incremental",
                     )
                     if summary_text:
                         last_t, last_a = pairs_to_compress[-1]
@@ -534,10 +760,19 @@ class ContextManager:
         logger.warning("previous full/truncated history summary generation failed, triggering L3 fallback truncation")
         
         reduced_pairs = self._trim_pairs_to_budget(pairs, self.config.max_summary_reduce_tokens, False)
-        reduced_text = "Truncated: " + self._render_steps_with_truncation(
+        reduced_text = self._render_steps_with_truncation(
             reduced_pairs, fmt="pair", max_tokens=self.config.max_summary_reduce_tokens
         )
-        return reduced_text, False
+        first_task = pairs[0][0].task[:200] if pairs and pairs[0][0].task else ""
+        fallback_text = (
+            "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier steps were removed to free context space. "
+            "The removed content cannot be summarized. Continue based on the steps below.\n\n"
+            f"Original task: {first_task}\n\n"
+            f"Steps removed: {len(pairs) - len(reduced_pairs)} of {len(pairs)}\n\n"
+            "Remaining compressed history:\n"
+            + reduced_text
+        )
+        return fallback_text, False
 
 
     # ============================================================
@@ -577,7 +812,9 @@ class ContextManager:
                 input_tokens = self._estimate_text_tokens(incremental_input)
                 if input_tokens <= self.config.max_summary_input_tokens:
                     summary_text = self._generate_summary(
-                        incremental_input, model, call_type="current_incremental"
+                        incremental_input, model,
+                        call_type="current_incremental",
+                        prompt_type="incremental",
                     )
                     if summary_text:
                         self._current_summary_cache = CurrentSummaryCache(
@@ -622,8 +859,14 @@ class ContextManager:
             actions_text = self._render_steps_with_truncation(
                 reduced_actions, fmt="action", max_tokens=self.config.max_summary_reduce_tokens
             )
-            reduced_text = "Truncated action steps: " + actions_text
-            return reduced_text
+            fallback_text = (
+                "[CONTEXT COMPACTION — REFERENCE ONLY] Some recent action steps were removed to free context space. "
+                "Continue based on the remaining steps below.\n\n"
+                f"Steps removed: {len(actions_to_compress) - len(reduced_actions)} of {len(actions_to_compress)}\n\n"
+                "Remaining steps:\n"
+                + actions_text
+            )
+            return fallback_text
 
     def _actions_to_text(self, actions: List[ActionStep]) -> str:
         parts = []
@@ -755,17 +998,12 @@ class ContextManager:
     # ============================================================
 
     def _is_context_length_error(self, err: Exception) -> bool:
-        msg = str(err).lower()
-        return any(k in msg for k in (
-            "context_length", "context length", "maximum context", "maximum context length",
-            "prompt is too long", "reduce the length", "too many tokens",
-            "token limit", "exceeds the maximum", "input is too long",
-            "input length", "exceeds context", "context window",
-        ))
+        return _is_context_length_error(err)
 
-    def _generate_summary(self, text: str, model, call_type: str = "summary") -> Optional[str]:
+    def _generate_summary(self, text: str, model, call_type: str = "summary",
+                          prompt_type: str = "initial") -> Optional[str]:
         try:
-            return self._do_generate_summary(text, model, call_type)
+            return self._do_generate_summary(text, model, call_type, prompt_type)
         except Exception as e:
             if self._is_context_length_error(e):
                 logger.warning(f"{call_type} exceeds context limit; retrying with 2/3 budget truncation")
@@ -773,24 +1011,62 @@ class ContextManager:
                     text, int(self.config.max_summary_input_tokens * 0.66)
                 )
                 try:
-                    return self._do_generate_summary(shrunk, model, call_type + "_retry")
+                    return self._do_generate_summary(shrunk, model, call_type + "_retry", prompt_type)
                 except Exception as e2:
+                    self._record_failed_compression(call_type + "_retry_failed", str(e2))
                     logger.error(f"Retry still failed: {e2}")
                     return None
+            self._record_failed_compression(call_type + "_failed", str(e))
             logger.error(f"Summary generation exception: {e}")
             return None
 
-    def _do_generate_summary(self, text: str, model, call_type: str = "summary") -> Optional[str]:
+    def _record_failed_compression(self, call_type: str, error_msg: str):
+        """Record a failed compression attempt so stats reflect actual compression triggers."""
+
+        record = CompressionCallRecord(
+            call_type=call_type,
+            input_tokens=0,
+            output_tokens=0,
+            input_chars=0,
+            output_chars=0,
+            cache_hit=False,
+            details={"error": error_msg},
+        )
+        self.compression_calls_log.append(record)
+        self._step_local_log.append(record)
+
+    def _do_generate_summary(self, text: str, model, call_type: str = "summary",
+                             prompt_type: str = "initial") -> Optional[str]:
+        # prompt_type selects which system prompt to render. For "incremental"
+        # we use the dedicated incremental_summary_system_prompt (with fallback
+        # to summary_system_prompt if it is empty) and a user prompt phrased
+        # as an update; "initial" keeps the original fresh-compaction phrasing.
+        if prompt_type == "incremental":
+            system_prompt = (
+                self.config.incremental_summary_system_prompt
+                or self.config.summary_system_prompt
+            )
+        else:
+            system_prompt = self.config.summary_system_prompt
+
         schema_desc = json.dumps(
             self.config.summary_json_schema, ensure_ascii=False, indent=2
         )
-        user_prompt = (
-            f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
-            f"Conversation content to summarize:\n{text}"
-        )
+        if prompt_type == "incremental":
+            # text already contains the "## Previous Summary" + "## New ..."
+            # sections; the prompt only needs to instruct the update.
+            user_prompt = (
+                f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+                f"{text}"
+            )
+        else:
+            user_prompt = (
+                f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
+                f"Conversation content to summarize:\n{text}"
+            )
         messages = [
             ChatMessage(role=MessageRole.SYSTEM,
-                        content=[{"type": "text", "text": self.config.summary_system_prompt}]),
+                        content=[{"type": "text", "text": system_prompt}]),
             ChatMessage(role=MessageRole.USER,
                         content=[{"type": "text", "text": user_prompt}]),
         ]
@@ -930,7 +1206,204 @@ class ContextManager:
             real_calls = [r for r in self.compression_calls_log if not r.cache_hit]
             return {
                 "total_calls": len(real_calls),
+                "total_attempts": len(self.compression_calls_log),
                 "total_input_tokens": sum(r.input_tokens for r in real_calls),
                 "total_output_tokens": sum(r.output_tokens for r in real_calls),
                 "total_cache_hits": sum(1 for r in self.compression_calls_log if r.cache_hit),
             }
+
+    # ============================================================
+    #  Benchmark export APIs
+    # ============================================================
+
+    def build_compressed_snapshot(
+        self, model, memory: AgentMemory, current_run_start_idx: int,
+    ) -> Tuple[List[ChatMessage], dict]:
+        """Build a frozen compressed message snapshot for probe evaluation.
+
+        Returns (compressed_messages, metadata) without modifying internal
+        cache state. This enables the Probe Evaluation pattern where each
+        probe runs independently against a frozen compressed snapshot.
+
+        metadata contains: token counts, which caches were used, and summary export.
+        """
+        saved_prev_cache = self._previous_summary_cache
+        saved_curr_cache = self._current_summary_cache
+        saved_step_log = list(self._step_local_log)
+        saved_calls_log = list(self.compression_calls_log)
+
+        try:
+            original_messages = memory.system_prompt.to_messages() if memory.system_prompt else []
+            for step in memory.steps:
+                original_messages.extend(step.to_messages())
+
+            compressed_messages = self.compress_if_needed(
+                model, memory, original_messages, current_run_start_idx
+            )
+
+            metadata = {
+                "token_counts": self.get_token_counts(),
+                "summary": self.export_summary(),
+                "compression_stats": self.get_step_compression_stats(),
+            }
+            return compressed_messages, metadata
+        finally:
+            self._previous_summary_cache = saved_prev_cache
+            self._current_summary_cache = saved_curr_cache
+            self._step_local_log = saved_step_log
+            self.compression_calls_log = saved_calls_log
+
+    def get_token_counts(self) -> dict:
+        """Return token counts from the most recent compression pass.
+
+        Returns a dict with ``last_uncompressed`` and ``last_compressed`` token
+        counts, enabling accurate ``token_reduction = 1 - compressed/uncompressed``
+        measurement in benchmarks. Values are None before the first compress_if_needed
+        call on this instance.
+        """
+        with self._lock:
+            return {
+                "last_uncompressed": self._last_uncompressed_token_count,
+                "last_compressed": self._last_compressed_token_count,
+            }
+
+    def export_summary(self) -> dict:
+        """Export current compression summary state for benchmark inspection.
+
+        Returns a dict with the cached summary texts, cache metadata, and a
+        compression_boundary block describing which pairs/steps fed the
+        summary versus which were retained verbatim. Benchmarks use the
+        boundary block to validate probe design: probes should only target
+        information that was actually compressed.
+        """
+        with self._lock:
+            prev_cache = self._previous_summary_cache
+            curr_cache = self._current_summary_cache
+            return {
+                "previous_summary": prev_cache.summary_text if prev_cache else None,
+                "current_summary": curr_cache.summary_text if curr_cache else None,
+                "previous_cache_info": (
+                    {
+                        "covered_pairs": prev_cache.covered_pairs,
+                        "is_fallback": "[CONTEXT COMPACTION" in (prev_cache.summary_text or ""),
+                    }
+                    if prev_cache else None
+                ),
+                "current_cache_info": (
+                    {
+                        "end_steps": curr_cache.end_steps,
+                        "is_fallback": "[CONTEXT COMPACTION" in (curr_cache.summary_text or ""),
+                    }
+                    if curr_cache else None
+                ),
+                "compression_boundary": {
+                    "config_keep_recent_pairs": self.config.keep_recent_pairs,
+                    "config_keep_recent_steps": self.config.keep_recent_steps,
+                    "previous_compressed_pairs": (
+                        prev_cache.covered_pairs if prev_cache else 0
+                    ),
+                    "previous_retained_pairs": self.config.keep_recent_pairs,
+                    "current_compressed_steps": (
+                        curr_cache.end_steps if curr_cache else 0
+                    ),
+                    "current_retained_steps": self.config.keep_recent_steps,
+                },
+            }
+
+    # ============================================================
+    #  Context Component Management
+    # ============================================================
+
+    def register_component(self, component) -> None:
+        """Register a context component for system prompt assembly.
+        
+        Components are accumulated and used by build_system_prompt().
+        
+        Args:
+            component: A ContextComponent instance (e.g., ToolsComponent,
+                       MemoryComponent, KnowledgeBaseComponent).
+        """
+        with self._lock:
+            if component.token_estimate == 0:
+                component.token_estimate = component.estimate_tokens(
+                    self.config.chars_per_token
+                )
+            self._components.append(component)
+
+    def clear_components(self) -> None:
+        """Clear all registered context components.
+        
+        Typically called at the start of a new agent run.
+        """
+        with self._lock:
+            self._components.clear()
+
+    def get_registered_components(self) -> List:
+        """Return copy of registered components."""
+        with self._lock:
+            return list(self._components)
+
+    def _get_strategy(self):
+        """Factory method to get strategy instance based on config."""
+        from .agent_model import (
+            FullStrategy, TokenBudgetStrategy, BufferedStrategy, PriorityWeightedStrategy
+        )
+        strategy_map = {
+            "full": FullStrategy,
+            "token_budget": TokenBudgetStrategy,
+            "buffered": BufferedStrategy,
+            "priority": PriorityWeightedStrategy,
+        }
+        strategy_class = strategy_map.get(self.config.strategy, TokenBudgetStrategy)
+        
+        if self.config.strategy == "buffered":
+            return strategy_class(buffer_size=self.config.buffer_size_per_component)
+        elif self.config.strategy == "priority":
+            return strategy_class(relevance_threshold=0.5)
+        return strategy_class()
+
+    def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
+        """Build system prompt messages from registered components.
+        
+        Uses configured strategy to select components within token budget,
+        then converts each to message format.
+        
+        Args:
+            token_budget: Maximum tokens for all components. Defaults to
+                          config.component_budgets total minus conversation_history.
+        
+        Returns:
+            List of message dicts with 'role' and 'content' keys.
+        """
+        if not self._components:
+            return []
+        
+        from .agent_model import SystemPromptComponent
+        
+        budget = token_budget or self._calculate_component_budget()
+        strategy = self._get_strategy()
+        selected = strategy.select_components(
+            self._components, budget, self.config.component_budgets
+        )
+        
+        messages = []
+        for comp in selected:
+            comp_messages = comp.to_messages()
+            for msg in comp_messages:
+                if not self._message_already_present(messages, msg):
+                    messages.append(msg)
+        
+        return messages
+
+    def _calculate_component_budget(self) -> int:
+        """Calculate total token budget for components (excluding conversation_history)."""
+        budgets = self.config.component_budgets
+        excluded = ["conversation_history"]
+        return sum(v for k, v in budgets.items() if k not in excluded)
+
+    def _message_already_present(self, messages: List, new_msg: dict) -> bool:
+        """Check if identical message already exists."""
+        for existing in messages:
+            if existing.get("role") == new_msg.get("role") and existing.get("content") == new_msg.get("content"):
+                return True
+        return False

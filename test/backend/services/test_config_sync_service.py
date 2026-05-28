@@ -1,6 +1,6 @@
 import sys
 import types
-import importlib.machinery
+import importlib
 from unittest.mock import patch, MagicMock, call
 
 import pytest

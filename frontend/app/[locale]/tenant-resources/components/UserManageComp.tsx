@@ -63,6 +63,11 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 import { Tooltip } from "@/components/ui/tooltip";
+import {
+  getPasswordChecks,
+  getStrengthLevel,
+  validatePassword as validatePasswordUtil,
+} from "@/lib/utils";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -115,13 +120,28 @@ function TenantList({
 
   // State for auto-install official skills feature
   const [installOfficialSkills, setInstallOfficialSkills] = useState(false);
-  const [installableSkills, setInstallableSkills] = useState<InstallableSkill[]>([]);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
+  const [installableSkills, setInstallableSkills] = useState<
+    InstallableSkill[]
+  >([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
+    new Set()
+  );
   const [skillsLoading, setSkillsLoading] = useState(false);
   // Tracks which skills are currently being installed (per-skill async flow)
-  const [installingSkills, setInstallingSkills] = useState<Set<string>>(new Set());
+  const [installingSkills, setInstallingSkills] = useState<Set<string>>(
+    new Set()
+  );
   // Tracks which skills have completed installation in the current session
-  const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
+  const [installedSkills, setInstalledSkills] = useState<Set<string>>(
+    new Set()
+  );
+
+  // Password validation state for admin account
+  const [adminPasswordValue, setAdminPasswordValue] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState<{
+    target: "adminPassword" | "confirmAdminPassword" | "";
+    message: string;
+  }>({ target: "", message: "" });
 
   // Fetch official skills when install switch is toggled on
   useEffect(() => {
@@ -151,7 +171,9 @@ function TenantList({
         if (!cancelled) setSkillsLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [installOfficialSkills]);
 
   const openCreate = () => {
@@ -163,6 +185,8 @@ function TenantList({
     setSelectedSkillIds(new Set<string>());
     setInstallingSkills(new Set<string>());
     setInstalledSkills(new Set<string>());
+    setAdminPasswordValue("");
+    setAdminPasswordError({ target: "", message: "" });
     setModalVisible(true);
   };
 
@@ -231,6 +255,60 @@ function TenantList({
     setTenantUsers([]);
   };
 
+  // Handle admin password input change
+  const handleAdminPasswordChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    setAdminPasswordValue(value);
+
+    if (value && !validatePasswordUtil(value)) {
+      setAdminPasswordError({
+        target: "adminPassword",
+        message:
+          t("auth.passwordStrengthError") ||
+          "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    setAdminPasswordError({ target: "", message: "" });
+    const confirmPassword = form.getFieldValue("confirmAdminPassword");
+    if (confirmPassword && confirmPassword !== value) {
+      setAdminPasswordError({
+        target: "confirmAdminPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    }
+  };
+
+  // Handle confirm admin password input change
+  const handleConfirmAdminPasswordChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    const password = form.getFieldValue("adminPassword");
+
+    if (password && !validatePasswordUtil(password)) {
+      setAdminPasswordError({
+        target: "adminPassword",
+        message:
+          t("auth.passwordStrengthError") ||
+          "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    if (value && value !== password) {
+      setAdminPasswordError({
+        target: "confirmAdminPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    } else {
+      setAdminPasswordError({ target: "", message: "" });
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
@@ -244,9 +322,10 @@ function TenantList({
         message.success(t("tenantResources.tenants.updated"));
       } else {
         // Build skill_names list from selected skill names for backend ZIP-based installation
-        const skillNamesToInstall = installOfficialSkills && selectedSkillIds.size > 0
-          ? Array.from(selectedSkillIds)
-          : undefined;
+        const skillNamesToInstall =
+          installOfficialSkills && selectedSkillIds.size > 0
+            ? Array.from(selectedSkillIds)
+            : undefined;
 
         // Create tenant (skills are installed via ZIP upload inside the backend)
         const newTenant = await createTenant({
@@ -548,6 +627,18 @@ function TenantList({
                   <Form.Item
                     name="adminPassword"
                     label={t("tenantResources.tenants.adminPassword")}
+                    validateStatus={
+                      adminPasswordError.target === "adminPassword"
+                        ? "error"
+                        : ""
+                    }
+                    help={
+                      form.getFieldError("adminPassword").length
+                        ? undefined
+                        : adminPasswordError.target === "adminPassword"
+                          ? adminPasswordError.message
+                          : undefined
+                    }
                     rules={[
                       {
                         required: true,
@@ -556,20 +647,82 @@ function TenantList({
                         ),
                       },
                       {
-                        min: 6,
-                        message: t("tenantResources.tenants.weakPassword"),
+                        validator: (_, value) => {
+                          if (!value) return Promise.resolve();
+                          if (!validatePasswordUtil(value)) {
+                            return Promise.reject(
+                              new Error(
+                                t("auth.passwordStrengthError") ||
+                                  "Password must contain uppercase, lowercase, and digit"
+                              )
+                            );
+                          }
+                          return Promise.resolve();
+                        },
                       },
                     ]}
+                    hasFeedback
                   >
                     <Input.Password
                       placeholder={t("tenantResources.tenants.adminPassword")}
                       autoComplete="new-password"
+                      onChange={handleAdminPasswordChange}
                     />
                   </Form.Item>
+
+                  {/* Password Strength Indicator */}
+                  {adminPasswordValue &&
+                    generateAdminAccount &&
+                    (() => {
+                      const checks = getPasswordChecks(adminPasswordValue);
+                      const levelInfo = getStrengthLevel(adminPasswordValue, t);
+                      return (
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-gray-500">
+                              {t("auth.passwordStrength") ||
+                                "Password strength"}
+                            </span>
+                            <span
+                              className="text-xs font-medium"
+                              style={{ color: levelInfo.color }}
+                            >
+                              {levelInfo.label}
+                            </span>
+                          </div>
+                          <div className="flex gap-1">
+                            {[0, 1, 2, 3].map((level) => (
+                              <div
+                                key={level}
+                                className="h-1 flex-1 rounded-full transition-colors"
+                                style={{
+                                  backgroundColor:
+                                    level <= levelInfo.level
+                                      ? levelInfo.color
+                                      : "#e5e7eb",
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                   <Form.Item
                     name="confirmAdminPassword"
                     label={t("tenantResources.tenants.confirmAdminPassword")}
+                    validateStatus={
+                      adminPasswordError.target === "confirmAdminPassword"
+                        ? "error"
+                        : ""
+                    }
+                    help={
+                      form.getFieldError("confirmAdminPassword").length
+                        ? undefined
+                        : adminPasswordError.target === "confirmAdminPassword"
+                          ? adminPasswordError.message
+                          : undefined
+                    }
                     dependencies={["adminPassword"]}
                     rules={[
                       {
@@ -580,6 +733,21 @@ function TenantList({
                       },
                       ({ getFieldValue }) => ({
                         validator(_, value) {
+                          const password = getFieldValue("adminPassword");
+                          if (password && !validatePasswordUtil(password)) {
+                            setAdminPasswordError({
+                              target: "adminPassword",
+                              message:
+                                t("auth.passwordStrengthError") ||
+                                "Password must contain uppercase, lowercase, and digit",
+                            });
+                            return Promise.reject(
+                              new Error(
+                                t("auth.passwordStrengthError") ||
+                                  "Password must contain uppercase, lowercase, and digit"
+                              )
+                            );
+                          }
                           if (
                             !value ||
                             getFieldValue("adminPassword") === value
@@ -594,12 +762,14 @@ function TenantList({
                         },
                       }),
                     ]}
+                    hasFeedback
                   >
                     <Input.Password
                       placeholder={t(
                         "tenantResources.tenants.confirmAdminPassword"
                       )}
                       autoComplete="new-password"
+                      onChange={handleConfirmAdminPasswordChange}
                     />
                   </Form.Item>
                 </>
@@ -610,12 +780,11 @@ function TenantList({
           {/* Auto-Install Official Skills Switch - Only show in create mode */}
           {!editingTenant && (
             <>
-              <Form.Item
-                labelCol={{ span: 24 }}
-                wrapperCol={{ span: 24 }}
-              >
+              <Form.Item labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}>
                 <div className="flex items-center justify-between">
-                  <span>{t("tenantResources.tenants.installOfficialSkills")}</span>
+                  <span>
+                    {t("tenantResources.tenants.installOfficialSkills")}
+                  </span>
                   <Switch
                     checked={installOfficialSkills}
                     onChange={(checked) => {
@@ -657,12 +826,20 @@ function TenantList({
                       <div className="flex items-center px-3 py-2 border-b border-gray-200 bg-gray-50">
                         <input
                           type="checkbox"
-                          checked={installableSkills.every((s) => selectedSkillIds.has(s.name))}
+                          checked={installableSkills.every((s) =>
+                            selectedSkillIds.has(s.name)
+                          )}
                           onChange={() => {
-                            if (installableSkills.every((s) => selectedSkillIds.has(s.name))) {
+                            if (
+                              installableSkills.every((s) =>
+                                selectedSkillIds.has(s.name)
+                              )
+                            ) {
                               setSelectedSkillIds(new Set<string>());
                             } else {
-                              setSelectedSkillIds(new Set(installableSkills.map((s) => s.name)));
+                              setSelectedSkillIds(
+                                new Set(installableSkills.map((s) => s.name))
+                              );
                             }
                           }}
                           className="mr-3 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
@@ -675,9 +852,13 @@ function TenantList({
                       {installableSkills.map((skill) => {
                         // Determine effective status: installing > installed > original status
                         const isInstalling = installingSkills.has(skill.name);
-                        const isInstalledSession = installedSkills.has(skill.name);
-                        const isAlreadyInstalled = skill.status === "installed" || isInstalledSession;
-                        const isResourceMissing = skill.status === "resource_missing";
+                        const isInstalledSession = installedSkills.has(
+                          skill.name
+                        );
+                        const isAlreadyInstalled =
+                          skill.status === "installed" || isInstalledSession;
+                        const isResourceMissing =
+                          skill.status === "resource_missing";
 
                         let iconElement: React.ReactNode;
                         let tooltipText: string;
@@ -686,25 +867,34 @@ function TenantList({
                           iconElement = (
                             <LoaderCircle className="h-4 w-4 text-gray-400 shrink-0 animate-spin" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.installing");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.installing"
+                          );
                         } else if (isAlreadyInstalled) {
                           iconElement = (
                             <CircleCheckBig className="h-4 w-4 text-green-500 shrink-0" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.installed");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.installed"
+                          );
                         } else if (isResourceMissing) {
                           iconElement = (
                             <CircleOff className="h-4 w-4 text-red-400 shrink-0" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.resourceMissing");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.resourceMissing"
+                          );
                         } else {
                           iconElement = (
                             <CircleDot className="h-4 w-4 text-green-500 shrink-0" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.installable");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.installable"
+                          );
                         }
 
-                        const isDisabled = isAlreadyInstalled || isResourceMissing;
+                        const isDisabled =
+                          isAlreadyInstalled || isResourceMissing;
 
                         return (
                           <div
@@ -726,7 +916,11 @@ function TenantList({
                                 }
                                 setSelectedSkillIds(newSet);
                               }}
-                              disabled={isInstalling || isAlreadyInstalled || isResourceMissing}
+                              disabled={
+                                isInstalling ||
+                                isAlreadyInstalled ||
+                                isResourceMissing
+                              }
                               className="mr-3 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
                             />
                             <span className="flex-1 text-sm text-gray-800 truncate">
@@ -1030,8 +1224,12 @@ export default function UserManageComp() {
                     }}
                     loading={tenantsLoading}
                     t={t}
-                    onUserListRefresh={() => setUserListRefreshKey((prev) => prev + 1)}
-                    onInvitationListRefresh={() => setInvitationListRefreshKey((prev) => prev + 1)}
+                    onUserListRefresh={() =>
+                      setUserListRefreshKey((prev) => prev + 1)
+                    }
+                    onInvitationListRefresh={() =>
+                      setInvitationListRefreshKey((prev) => prev + 1)
+                    }
                     locale={locale}
                   />
                 </div>

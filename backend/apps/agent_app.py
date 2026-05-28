@@ -64,8 +64,11 @@ async def agent_run_api(agent_request: AgentRequest, http_request: Request, auth
         )
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
+        # Only expose actual error in debug mode for better diagnosis
+        # Keep generic message in normal mode for user experience
+        error_detail = str(e) if agent_request.is_debug else "Agent run error."
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent run error.")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_detail)
 
 
 @agent_runtime_router.get("/stop/{conversation_id}")

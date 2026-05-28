@@ -133,9 +133,9 @@ export default function ToolTestPanel({
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
           // Check if this is the KB selector parameter and KB selection is enabled
-          // Haotian uses dataset_ids, others use index_names
-          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search"
-            || paramName === "dataset_ids" && toolRequiresKbSelection && toolKbType === "haotian_search";
+          // Haotian and iData use dataset_ids, others use index_names
+          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search" && toolKbType !== "idata_search"
+            || paramName === "dataset_ids" && toolRequiresKbSelection && (toolKbType === "haotian_search" || toolKbType === "idata_search");
 
           if (isKbSelectorParam && selectedKbIds.length > 0) {
             // Use the selected KB IDs from configParams as default
@@ -205,9 +205,9 @@ export default function ToolTestPanel({
     if (!toolRequiresKbSelection) return;
 
     // Determine which field to sync based on tool type
-    const isHaotian = toolKbType === "haotian_search";
-    const fieldName = isHaotian ? `param_dataset_ids` : `param_index_names`;
-    const stateKey = isHaotian ? "dataset_ids" : "index_names";
+    const isHaotianOrIdata = toolKbType === "haotian_search" || toolKbType === "idata_search";
+    const fieldName = isHaotianOrIdata ? `param_dataset_ids` : `param_index_names`;
+    const stateKey = isHaotianOrIdata ? "dataset_ids" : "index_names";
     const currentValue = form.getFieldValue(fieldName);
 
     // Only update if the value is different
@@ -332,11 +332,11 @@ export default function ToolTestPanel({
         // Determine the correct parameter name based on tool type
         if (tool?.name === "dify_search") {
           kbSelectionConfig = { dataset_ids: JSON.stringify(selectedKbIds) };
-        } else if (tool?.name === "haotian_search") {
-          // Haotian uses dataset_ids as an array (not JSON string)
+        } else if (tool?.name === "haotian_search" || tool?.name === "idata_search") {
+          // Haotian and iData use dataset_ids as an array (not JSON string)
           kbSelectionConfig = { dataset_ids: selectedKbIds };
         } else {
-          // knowledge_base_search, datamate_search, idata_search use index_names
+          // knowledge_base_search, datamate_search use index_names
           kbSelectionConfig = { index_names: selectedKbIds };
         }
       }
@@ -347,13 +347,13 @@ export default function ToolTestPanel({
       const configs = (configParams || []).reduce(
         (acc: Record<string, any>, param: ToolParam) => {
           // Skip index_names when KB selection is enabled (provided via kbSelectionConfig)
-          // For haotian_search: skip only index_names (dataset_ids is handled by kbSelectionConfig)
+          // For haotian_search and idata_search: skip only index_names (dataset_ids is handled by kbSelectionConfig)
           // For other KB tools: skip both index_names and dataset_ids
           if (toolRequiresKbSelection) {
             if (param.name === "index_names") {
               return acc;
             }
-            if (param.name === "dataset_ids" && tool?.name !== "haotian_search") {
+            if (param.name === "dataset_ids" && tool?.name !== "haotian_search" && tool?.name !== "idata_search") {
               return acc;
             }
           }
@@ -445,7 +445,7 @@ export default function ToolTestPanel({
                         const formValue = currentFormValues[`param_${paramName}`];
 
                         // Check if this is a KB selector parameter
-                        const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection;
+                        const isKbSelectorParam = (paramName === "index_names" || paramName === "dataset_ids") && toolRequiresKbSelection;
 
                         // Handle KB selector parameters - use selectedKbIds
                         if (isKbSelectorParam) {
@@ -507,7 +507,7 @@ export default function ToolTestPanel({
                           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
                           // Check if this is a KB selector parameter
-                          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection;
+                          const isKbSelectorParam = (paramName === "index_names" || paramName === "dataset_ids") && toolRequiresKbSelection;
 
                           if (manualValue !== undefined) {
                             // KB selector parameters should keep their array form

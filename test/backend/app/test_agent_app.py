@@ -193,6 +193,56 @@ async def test_agent_run_api(mocker, mock_auth_header):
     assert "data: chunk2" in content
 
 
+async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
+    """Test agent_run_api error case in debug mode - should expose actual error."""
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+    mock_run_agent_stream.side_effect = Exception("Test error")
+
+    response = runtime_client.post(
+        "/agent/run",
+        json={
+            "agent_id": 1,
+            "conversation_id": 123,
+            "query": "test query",
+            "history": [],
+            "minio_files": [],
+            "is_debug": True,  # Debug mode
+        },
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 500
+    # In debug mode, actual error should be exposed
+    assert "Test error" in response.json()["detail"]
+
+
+async def test_agent_run_api_error_normal_mode(mocker, mock_auth_header):
+    """Test agent_run_api error case in normal mode - should show generic error."""
+    mock_run_agent_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+    mock_run_agent_stream.side_effect = Exception("Test internal error")
+
+    response = runtime_client.post(
+        "/agent/run",
+        json={
+            "agent_id": 1,
+            "conversation_id": 123,
+            "query": "test query",
+            "history": [],
+            "minio_files": [],
+            "is_debug": False,  # Normal mode
+        },
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 500
+    # In normal mode, generic error message should be shown
+    assert response.json()["detail"] == "Agent run error."
+    # Actual error should NOT be exposed in normal mode
+    assert "Test internal error" not in response.json()["detail"]
+
+
 def test_agent_run_api_exception(mocker, mock_auth_header):
     """Test agent_run_api exception handling."""
     mock_run_agent_stream = mocker.patch(
