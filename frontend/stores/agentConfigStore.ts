@@ -155,7 +155,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     author: "",
     model: llmConfig?.name || "",
     model_id: llmConfig?.id || 0,
-    max_step: 5,
+    max_step: 15,
     provide_run_summary: false,
     tools: [],
     skills: [],
