@@ -477,7 +477,7 @@ async def create_agent_config(
             agent_id=agent_id
         ),
         tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
-        max_steps=agent_info.get("max_steps", 10),
+        max_steps=agent_info.get("max_steps", 15),
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,

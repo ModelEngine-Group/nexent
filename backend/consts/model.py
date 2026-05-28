@@ -437,7 +437,7 @@ class AgentInfoRequest(BaseModel):
     author: Optional[str] = None
     model_name: Optional[str] = None
     model_id: Optional[int] = None
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
