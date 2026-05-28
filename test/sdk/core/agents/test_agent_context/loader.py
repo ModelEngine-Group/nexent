@@ -19,7 +19,7 @@ import sys
 from types import ModuleType
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from stubs import register_smolagents_mocks
+from stubs import register_smolagents_mocks, restore_real_smolagents
 
 # ── 1. Register smolagents mocks (idempotent) ──────────────────
 register_smolagents_mocks()
@@ -156,9 +156,18 @@ def _register_stub_packages():
         "sdk.nexent.core",
         "sdk.nexent.core.agents",
         "sdk.nexent.core.utils",
+        "sdk.nexent.core.utils.observer",
+        "sdk.nexent.core.agents.a2a_agent_proxy",
     ]:
         if name not in sys.modules:
-            sys.modules[name] = ModuleType(name)
+            m = ModuleType(name)
+            if name == "sdk.nexent.core.utils.observer":
+                m.MessageObserver = type("MessageObserver", (), {})
+            if name == "sdk.nexent.core.agents.a2a_agent_proxy":
+                m.A2AAgentInfo = type("A2AAgentInfo", (), {
+                    "__init__": lambda self, **kwargs: None
+                })
+            sys.modules[name] = m
 
     token_est_key = "sdk.nexent.core.utils.token_estimation"
     if token_est_key not in sys.modules:
@@ -238,7 +247,34 @@ def _load_agent_context():
 
 _ctx_mod = _load_agent_context()
 
-# ── 5. Re-export public names (mirrors original monolithic imports) ──
+# ── 5. Load agent_model.py for ContextComponent classes ──────────────────
+
+def _load_agent_model():
+    """Load agent_model.py containing ContextComponent and ContextStrategy classes."""
+    module_name = "sdk.nexent.core.agents.agent_model"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    
+    target = _locate_module("agent_model")
+    spec = importlib.util.spec_from_file_location(module_name, target)
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = "sdk.nexent.core.agents"
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_agent_model_mod = _load_agent_model()
+
+# Restore real smolagents in sys.modules so sibling test trees (e.g.
+# test/backend/utils/test_context_utils.py) that import the real
+# nexent.core.agents path can do "from smolagents.memory import AgentMemory"
+# without picking up our mock. The mock classes captured above as
+# module-level attributes on _ctx_mod / _agent_model_mod stay valid for our
+# own unit tests, which never touch sys.modules['smolagents.*'] at runtime.
+restore_real_smolagents()
+
+# ── 6. Re-export public names (mirrors original monolithic imports) ──
 
 ContextManager        = _ctx_mod.ContextManager
 ContextManagerConfig  = _ctx_mod.ContextManagerConfig
@@ -251,4 +287,22 @@ AgentMemory           = _ctx_mod.AgentMemory
 ChatMessage           = _ctx_mod.ChatMessage
 MessageRole           = _ctx_mod.MessageRole
 CompressionCallRecord = _ctx_mod.CompressionCallRecord
+
+# Export ContextComponent classes
+ContextComponent         = _agent_model_mod.ContextComponent
+SystemPromptComponent    = _agent_model_mod.SystemPromptComponent
+ToolsComponent           = _agent_model_mod.ToolsComponent
+SkillsComponent          = _agent_model_mod.SkillsComponent
+MemoryComponent          = _agent_model_mod.MemoryComponent
+KnowledgeBaseComponent   = _agent_model_mod.KnowledgeBaseComponent
+ManagedAgentsComponent   = _agent_model_mod.ManagedAgentsComponent
+ExternalAgentsComponent  = _agent_model_mod.ExternalAgentsComponent
+
+# Export ContextStrategy classes
+ContextStrategy          = _agent_model_mod.ContextStrategy
+FullStrategy             = _agent_model_mod.FullStrategy
+TokenBudgetStrategy      = _agent_model_mod.TokenBudgetStrategy
+BufferedStrategy         = _agent_model_mod.BufferedStrategy
+PriorityWeightedStrategy = _agent_model_mod.PriorityWeightedStrategy
+
 from stubs import _SystemPromptStep as SystemPromptStep

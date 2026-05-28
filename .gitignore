@@ -58,4 +58,5 @@ k8s/helm/nexent/Chart.lock
 
 MAC_DEVELOPMENT_GUIDE.md
 data/
+sdk/benchmark/.env
 /docker/.env.bak

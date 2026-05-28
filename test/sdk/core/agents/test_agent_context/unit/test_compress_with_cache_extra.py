@@ -90,7 +90,7 @@ class TestCompressPreviousExtra:
         cm._previous_summary_cache = PreviousSummaryCache("old summary", 2, fp)
 
         call_count = [0]
-        def side_effect(text, model_, call_type="summary"):
+        def side_effect(text, model_, call_type="summary", prompt_type="initial"):
             call_count[0] += 1
             if call_count[0] == 1:
                 return None
@@ -181,7 +181,7 @@ class TestCompressCurrentExtra:
         cm._current_summary_cache = CurrentSummaryCache("old summary", 2, fp)
 
         call_count = [0]
-        def side_effect(text, model_, call_type="summary"):
+        def side_effect(text, model_, call_type="summary", prompt_type="initial"):
             call_count[0] += 1
             if call_count[0] == 1:
                 return None
@@ -232,7 +232,7 @@ class TestCompressCurrentExtra:
         with patch.object(cm, '_generate_summary', return_value=None):
             result = cm._compress_current_with_cache(TaskStep(task="t"), actions, MagicMock())
 
-        assert "Truncated" in result
+        assert "[CONTEXT COMPACTION" in result
         assert cm._current_summary_cache is None
 
     def test_C6_vs_previous_asymmetry(self):

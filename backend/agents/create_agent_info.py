@@ -31,6 +31,7 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.context_utils import build_context_components
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.exceptions import ValidationError
 
@@ -412,6 +413,9 @@ async def create_agent_config(
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
+    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
@@ -424,10 +428,29 @@ async def create_agent_config(
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
         "knowledge_base_summary": knowledge_base_summary,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "time": time_str,
         "user_id": user_id,
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
+
+    context_components = build_context_components(
+        duty=duty_prompt,
+        constraint=constraint_prompt,
+        few_shots=few_shots_prompt,
+        app_name=app_name,
+        app_description=app_description,
+        time_str=time_str,
+        user_id=user_id,
+        language=language,
+        is_manager=is_manager,
+        tools=render_kwargs["tools"],
+        skills=skills,
+        managed_agents=render_kwargs["managed_agents"],
+        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        memory_list=memory_list,
+        memory_search_query=last_user_query,
+        knowledge_base_summary=knowledge_base_summary,
+    )
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_max_tokens = 10000
@@ -459,7 +482,8 @@ async def create_agent_config(
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
-        context_manager_config=cm_config
+        context_manager_config=cm_config,
+        context_components=context_components,
     )
     return agent_config
 

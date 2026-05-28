@@ -78,11 +78,20 @@ for _path in (str(PROJECT_ROOT), str(TEST_ROOT)):
 
 # Utilities ---------------------------------------------------------------
 def _create_stub_module(name: str, **attrs):
-    """Return a lightweight module stub with the provided attributes."""
     module = types.ModuleType(name)
-    for attr_name, attr_value in attrs.items():
-        setattr(module, attr_name, attr_value)
+    module.__dict__.update(attrs)
+    sys.modules[name] = module
     return module
+
+
+def _create_stub_component_class(name: str):
+    class StubComponent:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+            self.component_type = name.lower().replace("component", "")
+    StubComponent.__name__ = name
+    return StubComponent
 
 
 # Configure required constants via shared bootstrap env
@@ -106,10 +115,13 @@ consts_const.DATA_PROCESS_SERVICE = "https://example.com/data-process"
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+utils_mock.context_utils = MagicMock()
+utils_mock.context_utils.build_context_components = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.context_utils'] = utils_mock.context_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -148,6 +160,14 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     ExternalA2AAgentConfig=MagicMock(),
     AgentRunInfo=MagicMock(),
     MessageObserver=MagicMock(),
+    ContextComponent=_create_stub_component_class("ContextComponent"),
+    ToolsComponent=_create_stub_component_class("ToolsComponent"),
+    SkillsComponent=_create_stub_component_class("SkillsComponent"),
+    MemoryComponent=_create_stub_component_class("MemoryComponent"),
+    KnowledgeBaseComponent=_create_stub_component_class("KnowledgeBaseComponent"),
+    ManagedAgentsComponent=_create_stub_component_class("ManagedAgentsComponent"),
+    ExternalAgentsComponent=_create_stub_component_class("ExternalAgentsComponent"),
+    SystemPromptComponent=_create_stub_component_class("SystemPromptComponent"),
 )
 sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     "nexent.core.agents.agent_context",
@@ -1511,13 +1531,14 @@ class TestCreateAgentConfig:
                 name="test_agent",
                 description="test description",
                 prompt_templates={"system_prompt": "populated_system_prompt"},
-                tools=[],
+                tools=ANY,
                 max_steps=5,
                 model_name="test_model",
                 provide_run_summary=True,
                 managed_agents=[],
                 external_a2a_agents=[],
-                context_manager_config=ANY
+                context_manager_config=ANY,
+                context_components=ANY
             )
 
     @pytest.mark.asyncio
@@ -1579,13 +1600,14 @@ class TestCreateAgentConfig:
                     description="test description",
                     prompt_templates={
                         "system_prompt": "populated_system_prompt"},
-                    tools=[],
+                    tools=ANY,
                     max_steps=5,
                     model_name="test_model",
                     provide_run_summary=True,
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
-                    context_manager_config=ANY
+                    context_manager_config=ANY,
+                    context_components=ANY
                 )
 
     @pytest.mark.asyncio
@@ -1773,18 +1795,18 @@ class TestCreateAgentConfig:
 
             result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
-            # Verify that AgentConfig was called with "main_model" as fallback
             mock_agent_config.assert_called_with(
                 name="test_agent",
                 description="test description",
                 prompt_templates={"system_prompt": "populated_system_prompt"},
-                tools=[],
+                tools=ANY,
                 max_steps=5,
-                model_name="main_model",  # Should fallback to "main_model"
+                model_name="main_model",
                 provide_run_summary=True,
                 managed_agents=[],
                 external_a2a_agents=[],
-                context_manager_config=ANY
+                context_manager_config=ANY,
+                context_components=ANY
             )
 
     @pytest.mark.asyncio

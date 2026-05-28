@@ -22,7 +22,6 @@ def _ensure_path(path: Path) -> None:
 
 
 def _create_module(name: str, **attrs: Any) -> types.ModuleType:
-    """Create a module with the given attributes."""
     module = types.ModuleType(name)
     for attr_name, attr_value in attrs.items():
         setattr(module, attr_name, attr_value)
