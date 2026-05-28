@@ -1706,7 +1706,7 @@ export const ModelAddDialog = ({
               )}
               {isSTTModel && (
                 <>
-                  <Tooltip title={t("model.provider.volengine")}>
+                  <Tooltip title={t("model.provider.volcengine")}>
                     <a
                       href={PROVIDER_LINKS.volcengine}
                       target="_blank"
@@ -1736,7 +1736,7 @@ export const ModelAddDialog = ({
               )}
               {isTTSModel && (
                 <>
-                  <Tooltip title={t("model.provider.volengine")}>
+                  <Tooltip title={t("model.provider.volcengine")}>
                     <a
                       href={PROVIDER_LINKS.volcengine}
                       target="_blank"
