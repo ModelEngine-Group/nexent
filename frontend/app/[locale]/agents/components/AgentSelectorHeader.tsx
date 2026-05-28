@@ -666,7 +666,6 @@ export default function AgentSelectorHeader({
                 <span>{t("agentConfig.button.new")}</span>
               </Button>
               <Button
-                type="text"
                 size="middle"
                 onClick={handleImportAgent}
                 className="flex items-center gap-1"
