@@ -18,6 +18,8 @@ import {
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import DebugMessageList from "./DebugMessageList";
+import DebugOptimizeModal from "./DebugOptimizeModal";
+import DebugPromptCompareModal from "./DebugPromptCompareModal";
 import { useCompareStream } from "./useCompareStream";
 
 // Agent debugging component Props interface
@@ -30,6 +32,11 @@ interface AgentDebuggingProps {
   isStreaming: boolean;
   isCompareStreaming?: boolean;
   messages: ChatMessageType[];
+  onOptimizeReply?: (params: {
+    userQuestion: string;
+    assistantAnswer: string;
+    history: Array<{ role: string; content: string }>;
+  }) => void;
   comparePanel?: React.ReactNode;
   showCompare?: boolean;
   onOpenCompare?: () => void;
@@ -55,6 +62,7 @@ function AgentDebugging({
   isStreaming,
   isCompareStreaming = false,
   messages,
+  onOptimizeReply,
   comparePanel,
   showCompare,
   onOpenCompare,
@@ -74,7 +82,11 @@ function AgentDebugging({
         ) : (
           <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
             {/* Message display area */}
-            <DebugMessageList messages={messages} isStreaming={isStreaming} />
+            <DebugMessageList
+              messages={messages}
+              isStreaming={isStreaming}
+              onOptimizeReply={onOptimizeReply}
+            />
           </div>
         )}
 
@@ -152,6 +164,17 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const prevAgentIdRef = useRef<number | null | undefined>(undefined);
   // Maintain an independent step ID counter per Agent
   const stepIdCounter = useRef<{ current: number }>({ current: 0 });
+
+  const [debugOptimizeOpen, setDebugOptimizeOpen] = useState(false);
+  const [debugOptimizeSelected, setDebugOptimizeSelected] = useState<null | {
+    userQuestion: string;
+    assistantAnswer: string;
+    history: Array<{ role: string; content: string }>;
+  }>(null);
+  const [debugCompareOpen, setDebugCompareOpen] = useState(false);
+  const [compareOriginalPrompt, setCompareOriginalPrompt] = useState("");
+  const [compareOptimizedPrompt, setCompareOptimizedPrompt] = useState("");
+
   const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
   const [compareLeftModelId, setCompareLeftModelId] = useState<number | null>(null);
   const [compareRightModelId, setCompareRightModelId] = useState<number | null>(null);
@@ -602,8 +625,88 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     }
   };
 
+  const handleOpenOptimize = (params: {
+    userQuestion: string;
+    assistantAnswer: string;
+    history: Array<{ role: string; content: string }>;
+  }) => {
+    if (!parsedAgentId) return;
+    if (!editedAgent?.model_id) return;
+    setDebugOptimizeSelected(params);
+    setDebugOptimizeOpen(true);
+  };
+
+  const handleOptimized = (params: {
+    originalFullPrompt: string;
+    optimizedFullPrompt: string;
+  }) => {
+    setDebugOptimizeOpen(false);
+    setDebugOptimizeSelected(null);
+    setCompareOriginalPrompt(params.originalFullPrompt || "");
+    setCompareOptimizedPrompt(params.optimizedFullPrompt || "");
+    setDebugCompareOpen(true);
+  };
+
+  const handleApplyOptimizedPrompt = () => {
+    const optimized = (compareOptimizedPrompt || "").trim();
+    if (!optimized) {
+      setDebugCompareOpen(false);
+      return;
+    }
+
+    // Parse the optimized full prompt by section headers.
+    // Previous implementation split by blank lines, which can truncate multi-paragraph sections.
+    const pickSection = (header: string): string => {
+      const headerRe = new RegExp(`^#\\s*${header}\\s*$`, "im");
+      const match = headerRe.exec(optimized);
+      if (!match) return "";
+
+      const start = match.index + match[0].length;
+      const rest = optimized.slice(start);
+      const nextHeaderIdx = rest.search(/^#\s+.+$/m);
+      const section = nextHeaderIdx >= 0 ? rest.slice(0, nextHeaderIdx) : rest;
+      return section.replace(/^\s*\n/, "").trim();
+    };
+
+    const duty = pickSection("duty");
+    const constraint = pickSection("constraint");
+    const fewShots = pickSection("fewshots");
+
+    const updateAgentConfig = useAgentConfigStore.getState().updateAgentConfig;
+
+    updateAgentConfig({
+      ...(duty ? { duty_prompt: duty } : {}),
+      ...(constraint ? { constraint_prompt: constraint } : {}),
+      ...(fewShots ? { few_shots_prompt: fewShots } : {}),
+    });
+
+    setDebugCompareOpen(false);
+  };
+
   return (
     <div className="w-full h-full bg-white">
+      <DebugOptimizeModal
+        open={debugOptimizeOpen}
+        agentId={parsedAgentId ?? 0}
+        modelId={editedAgent?.model_id ?? 0}
+        userQuestion={debugOptimizeSelected?.userQuestion || ""}
+        assistantAnswer={debugOptimizeSelected?.assistantAnswer || ""}
+        history={debugOptimizeSelected?.history || []}
+        onCancel={() => {
+          setDebugOptimizeOpen(false);
+          setDebugOptimizeSelected(null);
+        }}
+        onOptimized={handleOptimized}
+      />
+
+      <DebugPromptCompareModal
+        open={debugCompareOpen}
+        originalFullPrompt={compareOriginalPrompt}
+        optimizedFullPrompt={compareOptimizedPrompt}
+        onClose={() => setDebugCompareOpen(false)}
+        onApply={handleApplyOptimizedPrompt}
+      />
+
       <AgentDebugging
         key={agentId} // Re-render when agentId changes to ensure state resets
         onStop={handleStop}
@@ -614,6 +717,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         isStreaming={isStreaming}
         isCompareStreaming={isCompareStreaming}
         messages={messages}
+        onOptimizeReply={handleOpenOptimize}
         comparePanel={comparePanel}
         showCompare={hasMultipleLlmModels}
         onOpenCompare={toggleComparePanel}

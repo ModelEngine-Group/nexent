@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 ARG MIRROR
 ARG APT_MIRROR
 LABEL authors="nexent"
@@ -27,6 +27,16 @@ RUN uv sync --no-cache-dir $(test -n "$MIRROR" && echo "-i $MIRROR") && \
 # Layer 1: install sdk in link mode
 COPY sdk /opt/sdk
 RUN uv pip install --no-cache-dir "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR") && \
+    uv cache clean
+
+# Layer 1.5: install openjiuwen without its heavyweight transitive deps (transformers, etc.)
+# openjiuwen's prompt_builder only needs pydantic, openai, httpx, tiktoken — all already in sdk/base
+# Using --no-deps then installing only what's needed avoids pulling in transformers (~2GB) etc.
+# pymilvus IS needed — openjiuwen's import chain references it and the real module must exist
+# dashscope/pdfplumber remain stubbed since they are never called at runtime
+RUN uv pip install --no-cache-dir --no-deps openjiuwen $(test -n "$MIRROR" && echo "-i $MIRROR") && \
+    uv pip install --no-cache-dir pymilvus $(test -n "$MIRROR" && echo "-i $MIRROR") && \
+    uv pip install --no-cache-dir pydantic openai tiktoken httpx $(test -n "$MIRROR" && echo "-i $MIRROR") && \
     uv cache clean
 
 # Pre-download tiktoken cl100k_base model to avoid network issues during runtime

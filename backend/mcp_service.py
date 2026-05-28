@@ -70,7 +70,7 @@ class CustomFunctionTool:
 
 
 nexent_mcp = FastMCP(name="nexent_mcp")
-nexent_mcp.mount(local_mcp_service.name, local_mcp_service)
+nexent_mcp.mount(local_mcp_service, local_mcp_service.name)
 
 _openapi_mcp_services: Dict[str, FastMCP] = {}
 
@@ -239,7 +239,7 @@ def register_openapi_service(
         _openapi_mcp_services[service_name] = mcp_server
 
         # Mount to the main MCP server
-        nexent_mcp.mount(service_name, mcp_server)
+        nexent_mcp.mount(mcp_server, service_name)
 
         logger.info(f"Registered OpenAPI service: {service_name}")
         return True

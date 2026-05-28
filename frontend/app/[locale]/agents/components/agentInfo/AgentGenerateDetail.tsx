@@ -38,7 +38,6 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
-
 const { TextArea } = Input;
 
 export default function AgentGenerateDetail({}) {
@@ -231,6 +230,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalOpen(true);
   };
 
+
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return (
       <Button
@@ -379,6 +379,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(null);
   };
 
+
   const handleSaveExpandModal = (content: string) => {
     switch (expandModalType) {
       case 'duty':
@@ -446,12 +447,13 @@ export default function AgentGenerateDetail({}) {
   };
 
   const handleReplaceOptimizedContent = (content: string) => {
-    if (!optimizeModalType) {
+    const activeType = optimizeModalType;
+    if (!activeType) {
       return;
     }
 
-    const formFieldKey = getPromptFieldKey(optimizeModalType);
-    const storeFieldKey = getStoreFieldKey(optimizeModalType);
+    const formFieldKey = getPromptFieldKey(activeType);
+    const storeFieldKey = getStoreFieldKey(activeType);
 
     form.setFieldsValue({ [formFieldKey]: content });
     updateAgentConfig({ [storeFieldKey]: content } as AgentConfigUpdate);
@@ -665,7 +667,7 @@ export default function AgentGenerateDetail({}) {
         <Col className="w-full h-full">
           <Tabs
             value={activeTab}
-            onValueChange={(value) => {
+            onValueChange={(value: string) => {
               setActiveTab(value);
             }}
             className="agent-config-tabs flex flex-col h-full w-full"

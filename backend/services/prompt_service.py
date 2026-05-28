@@ -31,6 +31,13 @@ from utils.prompt_template_utils import (
     get_prompt_optimize_prompt_template,
 )
 
+from dataclasses import dataclass, field
+from typing import Optional as Opt
+
+from adapters.exception import JiuwenSDKError, NexentCapabilityError
+from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
+
+
 # Configure logging
 logger = logging.getLogger("prompt_service")
 
@@ -773,3 +780,287 @@ def get_enabled_sub_agent_description_for_generate_prompt(agent_id: int, tenant_
 
         sub_agent_info_list.append(sub_agent_info)
     return sub_agent_info_list
+
+
+# ── Jiuwen SDK 集成 ───────────────────────────────────────────────────────────
+
+
+@dataclass
+class OptimizeRequest:
+    """优化请求的统一数据结构"""
+    agent_id: int
+    model_id: int
+    task_description: str
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
+    mode: str = "general"
+    start_pos: Opt[int] = None
+    end_pos: Opt[int] = None
+    tool_ids: Opt[list[int]] = None
+    sub_agent_ids: Opt[list[int]] = None
+    knowledge_base_display_names: Opt[list[str]] = None
+
+
+@dataclass
+class OptimizeResult:
+    """优化结果的统一数据结构"""
+    optimized_content: str
+    source: str
+    section_type: str = ""
+    section_title: str = ""
+    original_content: str = ""
+
+
+class PromptOptimizationService:
+    """提示词优化服务 — 统一入口，模式二选一"""
+
+    def optimize_from_debug(self, agent_id: int, feedback: str, selected, history=None) -> OptimizeResult:
+        """基于调试对话自动优化整个 system prompt（完整模板）。
+
+        Args:
+            selected: OptimizeFromDebugSelected (pydantic model) or any object with user_question/assistant_answer.
+            history: Optional[List[HistoryItem]]
+        """
+        if not (feedback or "").strip():
+            raise AppException(
+                ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+                "Optimization feedback is required.",
+            )
+
+        if not self.is_jiuwen_mode_available():
+            raise NexentCapabilityError(
+                "Auto optimize from debug requires Jiuwen SDK to be enabled."
+            )
+
+        agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=self.tenant_id, version_no=0)
+
+        duty = (agent_info.get("duty_prompt") or "").strip()
+        constraint = (agent_info.get("constraint_prompt") or "").strip()
+        few_shots = (agent_info.get("few_shots_prompt") or "").strip()
+
+        original_full_prompt = "\n\n".join(
+            [
+                "# Duty\n" + duty,
+                "# Constraint\n" + constraint,
+                "# FewShots\n" + few_shots,
+            ]
+        ).strip()
+
+        if not original_full_prompt:
+            raise AppException(
+                ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+                "Agent system prompt is empty.",
+            )
+
+        user_question = getattr(selected, "user_question", None) or (selected.get("user_question") if isinstance(selected, dict) else "")
+        assistant_answer = getattr(selected, "assistant_answer", None) or (selected.get("assistant_answer") if isinstance(selected, dict) else "")
+
+        bad_case_obj = type("_BadCase", (), {})
+        bc = bad_case_obj()
+        bc.question = user_question or ""
+        bc.answer = assistant_answer or ""
+        bc.label = ""
+        bc.reason = feedback
+
+        adapter = JiuwenSDKAdapter(model_id=self.model_id, tenant_id=self.tenant_id)
+
+        optimized_full_prompt = adapter.optimize_badcase(
+            prompt=original_full_prompt,
+            bad_cases=[bc],
+            language=self.language,
+        )
+
+        return OptimizeResult(
+            optimized_content=optimized_full_prompt,
+            source="jiuwen",
+            section_type="full_prompt",
+            section_title="system_prompt",
+            original_content=original_full_prompt,
+        )
+
+    def __init__(self, model_id: int, tenant_id: str, language: str):
+        self.model_id = model_id
+        self.tenant_id = tenant_id
+        self.language = language
+
+    def is_jiuwen_mode_available(self) -> bool:
+        """判断 Jiuwen SDK 模式是否可用"""
+        from consts.const import ENABLE_JIUWEN_SDK
+
+        if not ENABLE_JIUWEN_SDK:
+            return False
+
+        try:
+            import openjiuwen  # noqa: F401
+        except ImportError:
+            return False
+
+        return True
+
+    def optimize(self, request: OptimizeRequest) -> OptimizeResult:
+        """统一优化入口 — 优先 Jiuwen SDK，失败则降级 nexent 原生"""
+        if self.is_jiuwen_mode_available():
+            logger.info(f"[prompt-optimize] mode={request.mode}, using Jiuwen SDK")
+            try:
+                return self._optimize_with_jiuwen(request)
+            except JiuwenSDKError as e:
+                logger.warning(f"Jiuwen SDK 模式失败，降级到 nexent 原生: {e}")
+                return self._optimize_with_nexent(request)
+        else:
+            return self._optimize_with_nexent(request)
+
+    def _optimize_with_jiuwen(self, request: OptimizeRequest) -> OptimizeResult:
+        """Jiuwen SDK 模式"""
+        logger.info(
+            f"[jiuwen-optimize] mode={request.mode}, start_pos={request.start_pos}, "
+            f"end_pos={request.end_pos}, prompt_len={len(request.current_content)}, "
+            f"feedback_len={len(request.feedback)}"
+        )
+        adapter = JiuwenSDKAdapter(
+            model_id=self.model_id,
+            tenant_id=self.tenant_id,
+        )
+        result = adapter.optimize(
+            prompt=request.current_content,
+            feedback=request.feedback,
+            mode=request.mode,
+            start_pos=request.start_pos,
+            end_pos=request.end_pos,
+            language=self.language,
+        )
+
+        # Jiuwen insert/select mode returns a fragment by design.
+        # We reassemble the full prompt here so frontend always receives full optimized content.
+        if request.mode == "insert":
+            if request.start_pos is None or not isinstance(request.start_pos, int):
+                raise JiuwenSDKError("insert mode requires start_pos")
+            if request.start_pos < 0 or request.start_pos > len(request.current_content):
+                raise JiuwenSDKError("insert mode start_pos out of bounds")
+            optimized_full = (
+                request.current_content[: request.start_pos]
+                + result
+                + request.current_content[request.start_pos :]
+            )
+        elif request.mode == "select":
+            if request.start_pos is None or request.end_pos is None:
+                raise JiuwenSDKError("select mode requires start_pos and end_pos")
+            if not isinstance(request.start_pos, int) or not isinstance(request.end_pos, int):
+                raise JiuwenSDKError("select mode start_pos/end_pos must be int")
+            if request.start_pos < 0 or request.end_pos < 0 or request.start_pos >= request.end_pos:
+                raise JiuwenSDKError("select mode start_pos/end_pos invalid")
+            if request.end_pos > len(request.current_content):
+                raise JiuwenSDKError("select mode end_pos out of bounds")
+            optimized_full = (
+                request.current_content[: request.start_pos]
+                + result
+                + request.current_content[request.end_pos :]
+            )
+        else:
+            optimized_full = result
+
+        return OptimizeResult(
+            optimized_content=optimized_full,
+            source="jiuwen",
+            section_type=request.section_type,
+            section_title=request.section_title,
+            original_content=request.current_content,
+        )
+
+    def _optimize_with_nexent(self, request: OptimizeRequest) -> OptimizeResult:
+        """nexent 原生模式 — 只支持 general 模式"""
+        if request.mode != "general":
+            raise NexentCapabilityError(
+                f"nexent 原生模式只支持 general 模式，"
+                f"当前请求 mode={request.mode} 不支持，请启用 Jiuwen SDK"
+            )
+
+        result = optimize_prompt_section_impl(
+            agent_id=request.agent_id,
+            model_id=self.model_id,
+            task_description=request.task_description,
+            tenant_id=self.tenant_id,
+            language=self.language,
+            section_type=request.section_type,
+            section_title=request.section_title,
+            current_content=request.current_content,
+            feedback=request.feedback,
+            tool_ids=request.tool_ids,
+            sub_agent_ids=request.sub_agent_ids,
+            knowledge_base_display_names=request.knowledge_base_display_names,
+        )
+        return OptimizeResult(
+            optimized_content=result["optimized_content"],
+            source="nexent",
+            section_type=result["section_type"],
+            section_title=result["section_title"],
+            original_content=result["original_content"],
+        )
+
+    def optimize_badcase(
+        self,
+        current_content: str,
+        bad_cases: list,
+        agent_id: int,
+        section_type: str,
+        section_title: str,
+        tool_ids: Opt[list[int]] = None,
+        sub_agent_ids: Opt[list[int]] = None,
+        knowledge_base_display_names: Opt[list[str]] = None,
+    ) -> OptimizeResult:
+        """坏案例优化入口 — 优先 Jiuwen SDK，失败则降级"""
+        if self.is_jiuwen_mode_available():
+            logger.info("[prompt-badcase] using Jiuwen SDK")
+            try:
+                return self._optimize_badcase_with_jiuwen(
+                    current_content, bad_cases, section_type, section_title
+                )
+            except JiuwenSDKError as e:
+                logger.warning(f"Jiuwen SDK badcase 模式失败，降级到 nexent 原生: {e}")
+                return self._optimize_badcase_with_nexent(
+                    current_content, bad_cases, agent_id, section_type, section_title,
+                    tool_ids, sub_agent_ids, knowledge_base_display_names,
+                )
+        else:
+            return self._optimize_badcase_with_nexent(
+                current_content, bad_cases, agent_id, section_type, section_title,
+                tool_ids, sub_agent_ids, knowledge_base_display_names,
+            )
+
+    def _optimize_badcase_with_jiuwen(
+        self, current_content: str, bad_cases: list, section_type: str, section_title: str
+    ) -> OptimizeResult:
+        """Jiuwen SDK 坏案例优化"""
+        adapter = JiuwenSDKAdapter(
+            model_id=self.model_id,
+            tenant_id=self.tenant_id,
+        )
+        result = adapter.optimize_badcase(
+            prompt=current_content,
+            bad_cases=bad_cases,
+            language=self.language,
+        )
+        return OptimizeResult(
+            optimized_content=result,
+            source="jiuwen",
+            section_type=section_type,
+            section_title=section_title,
+            original_content=current_content,
+        )
+
+    def _optimize_badcase_with_nexent(
+        self,
+        current_content: str,
+        bad_cases: list,
+        agent_id: int,
+        section_type: str,
+        section_title: str,
+        tool_ids: Opt[list[int]] = None,
+        sub_agent_ids: Opt[list[int]] = None,
+        knowledge_base_display_names: Opt[list[str]] = None,
+    ) -> OptimizeResult:
+        """nexent 原生模式不支持坏案例优化"""
+        raise NexentCapabilityError(
+            "nexent 原生模式不支持 badcase 优化，请启用 Jiuwen SDK"
+        )
