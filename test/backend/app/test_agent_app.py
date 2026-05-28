@@ -845,7 +845,9 @@ def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_heade
     )
 
     assert response.status_code == 200
-    mock_list_all_agent.assert_called_once_with(tenant_id=explicit_tenant_id, user_id="test_user")
+    assert mock_list_all_agent.call_count == 2
+    mock_list_all_agent.assert_any_call(tenant_id=explicit_tenant_id, user_id="test_user")
+    mock_list_all_agent.assert_any_call(tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
 
 
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
