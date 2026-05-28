@@ -564,21 +564,17 @@ export default function InvitationList({
                 {
                   validator: async (_, value) => {
                     if (!value) {
-                      return Promise.resolve();
+                      return;
                     }
+                    let exists: boolean;
                     try {
-                      const exists = await checkInvitationCodeExists(value);
-                      if (exists) {
-                        return Promise.reject(
-                          new Error(
-                            t("tenantResources.invitation.alreadyExists")
-                          )
-                        );
-                      }
-                      return Promise.resolve();
+                      exists = await checkInvitationCodeExists(value);
                     } catch {
-                      return Promise.reject(
-                        new Error("Failed to check invitation code")
+                      throw new Error("Failed to check invitation code");
+                    }
+                    if (exists) {
+                      throw new Error(
+                        t("tenantResources.invitation.alreadyExists")
                       );
                     }
                   },
@@ -608,15 +604,12 @@ export default function InvitationList({
                 message: t("tenantResources.invitation.capacityRequired"),
               },
               {
-                validator: (_, value) => {
-                  if (!value) return Promise.resolve();
+                validator: async (_, value) => {
+                  if (!value) return;
                   const numValue = Number(value);
                   if (isNaN(numValue) || numValue < 1) {
-                    return Promise.reject(
-                      new Error(t("tenantResources.invitation.capacityMin"))
-                    );
+                    throw new Error(t("tenantResources.invitation.capacityMin"));
                   }
-                  return Promise.resolve();
                 },
               },
             ]}

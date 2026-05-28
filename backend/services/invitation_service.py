@@ -240,10 +240,10 @@ def delete_invitation_code(invitation_id: int, user_id: str) -> bool:
     code_type = invitation_info.get("code_type")
     if code_type == ASSET_OWNER_INVITE_CODE_TYPE and user_role not in ["SU"]:
         raise UnauthorizedError(
-            f"User role {user_role} not authorized to update invitation codes")
+            f"User role {user_role} not authorized to delete invitation codes")
     elif user_role not in ["SU", "ADMIN"]:
         raise UnauthorizedError(
-            f"User role {user_role} not authorized to update invitation codes")
+            f"User role {user_role} not authorized to delete invitation codes")
 
     # Delete invitation code
     success = remove_invitation(

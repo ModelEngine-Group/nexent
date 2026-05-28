@@ -62,6 +62,38 @@ a2a_server_service_mock.get_agent_card = MagicMock()
 a2a_server_service_mock.get_task = MagicMock()
 a2a_service_module.a2a_server_service = a2a_server_service_mock
 
+# services.file_management_service - stub used by northbound_knowledge_app
+file_mgmt_module = types.ModuleType("services.file_management_service")
+file_mgmt_module.upload_to_minio = AsyncMock()
+file_mgmt_module.upload_files_impl = AsyncMock()
+file_mgmt_module.get_file_url_impl = AsyncMock()
+file_mgmt_module.get_file_stream_impl = AsyncMock()
+file_mgmt_module.delete_file_impl = AsyncMock()
+file_mgmt_module.list_files_impl = AsyncMock()
+file_mgmt_module.check_file_access = MagicMock(return_value=True)
+file_mgmt_module.check_file_access_batch = MagicMock(return_value={})
+file_mgmt_module.resolve_preview_file = AsyncMock()
+file_mgmt_module.get_preview_stream = MagicMock()
+file_mgmt_module.resolve_minio_upload_folder = MagicMock(return_value="attachments")
+sys.modules["services.file_management_service"] = file_mgmt_module
+
+# services.redis_service - stub to avoid importing redis dependency
+redis_service_module = types.ModuleType("services.redis_service")
+redis_service_module.get_redis_service = MagicMock()
+sys.modules["services.redis_service"] = redis_service_module
+
+# services.vectordatabase_service - stub to avoid heavy SDK imports
+vectordb_service_module = types.ModuleType("services.vectordatabase_service")
+
+class _ElasticSearchServiceStub:
+    @staticmethod
+    def list_indices(*args, **kwargs):
+        return {"indices": []}
+
+vectordb_service_module.ElasticSearchService = _ElasticSearchServiceStub
+vectordb_service_module.get_vector_db_core = MagicMock()
+sys.modules["services.vectordatabase_service"] = vectordb_service_module
+
 # ---------------------------------------------------------------------------
 # BLOCK 2: Mock minimal consts modules needed by apps layer
 # ---------------------------------------------------------------------------
@@ -75,6 +107,7 @@ consts_model_module.LimitExceededError = type("LimitExceededError", (Exception,)
 consts_model_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 consts_model_module.SignatureValidationError = type("SignatureValidationError", (Exception,), {})
 consts_model_module.AgentRequest = type("AgentRequest", (), {})
+consts_model_module.ProcessParams = type("ProcessParams", (), {})
 consts_module.model = consts_model_module
 sys.modules['consts.model'] = consts_model_module
 
@@ -86,6 +119,9 @@ consts_exceptions_module.UnauthorizedError = consts_model_module.UnauthorizedErr
 consts_exceptions_module.SignatureValidationError = consts_model_module.SignatureValidationError
 consts_exceptions_module.MemoryPreparationException = type("MemoryPreparationException", (Exception,), {})
 consts_exceptions_module.AgentRunException = type("AgentRunException", (Exception,), {})
+consts_exceptions_module.NotFoundException = type("NotFoundException", (Exception,), {})
+consts_exceptions_module.UnsupportedFileTypeException = type("UnsupportedFileTypeException", (Exception,), {})
+consts_exceptions_module.FileTooLargeException = type("FileTooLargeException", (Exception,), {})
 consts_module.exceptions = consts_exceptions_module
 sys.modules['consts.exceptions'] = consts_exceptions_module
 
@@ -184,7 +220,14 @@ sys.modules['database.a2a_agent_db'] = database_a2a_module
 # Mock utils.auth_utils (referenced by northbound_app._get_northbound_context)
 auth_utils_module = types.ModuleType("utils.auth_utils")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
+auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
+auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
 sys.modules['utils.auth_utils'] = auth_utils_module
+
+# Mock utils.file_management_utils to avoid database/storage imports
+file_management_utils_module = types.ModuleType("utils.file_management_utils")
+file_management_utils_module.trigger_data_process = AsyncMock(return_value=[])
+sys.modules["utils.file_management_utils"] = file_management_utils_module
 
 # ---------------------------------------------------------------------------
 # Helper to build async iterators without passing keyword args through mock

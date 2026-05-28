@@ -1,9 +1,10 @@
 import logging
 from typing import List, Optional, Tuple
-from sqlalchemy import select, insert, update, delete, func
+from sqlalchemy import or_, select, insert, update, delete, func
 
 from database.client import get_db_session, as_dict
 from database.db_models import AgentInfo, ToolInstance, AgentRelation, AgentVersion, SkillInstance
+from consts.const import ASSET_OWNER_TENANT_ID
 
 logger = logging.getLogger("agent_version_db")
 
@@ -76,7 +77,10 @@ def query_current_version_no(
     with get_db_session() as session:
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
             AgentInfo.version_no == 0,
             AgentInfo.delete_flag == 'N',
         ).first()
@@ -95,14 +99,21 @@ def query_agent_snapshot(
         # Query agent info snapshot
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag == 'N',
         ).first()
 
+        if agent is not None:
+            tenant_id = agent.tenant_id
+
         # Query tool instances snapshot
         tools = session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,
-            ToolInstance.tenant_id == agent.tenant_id,
+            ToolInstance.tenant_id == tenant_id,
             ToolInstance.version_no == version_no,
             ToolInstance.delete_flag == 'N',
         ).all()
@@ -110,7 +121,7 @@ def query_agent_snapshot(
         # Query relations snapshot
         relations = session.query(AgentRelation).filter(
             AgentRelation.parent_agent_id == agent_id,
-            AgentRelation.tenant_id == agent.tenant_id,
+            AgentRelation.tenant_id == tenant_id,
             AgentRelation.version_no == version_no,
             AgentRelation.delete_flag == 'N',
         ).all()

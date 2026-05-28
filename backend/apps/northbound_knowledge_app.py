@@ -1,7 +1,7 @@
 import base64
 import logging
 from http import HTTPStatus
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Annotated
 
 from fastapi import APIRouter, Body, File, Form, Path, Path as PathParam, Query, Request, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
@@ -34,6 +34,8 @@ router = APIRouter(prefix="/nb/v1/knowledge", tags=["northbound"])
 
 __all__ = ["router"]
 
+RATE_LIMIT_EXCEEDED_DETAIL = "Too Many Requests: rate limit exceeded"
+
 
 async def _require_asset_owner_context(request: Request) -> NorthboundContext:
     """Resolve northbound context and ensure the caller belongs to the asset-owner tenant."""
@@ -49,7 +51,7 @@ async def _require_asset_owner_context(request: Request) -> NorthboundContext:
 @router.get("/indices")
 async def get_list_indices(
     request: Request,
-    pattern: str = Query("*", description="Pattern to match index names"),
+    pattern: Annotated[str, Query(description="Pattern to match index names")] = "*",
 ):
     """List knowledge bases visible to the asset-owner tenant.
 
@@ -62,32 +64,38 @@ async def get_list_indices(
             pattern, True, ctx.tenant_id, ctx.user_id, vdb_core
         )
     except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        logger.exception("Rate limit exceeded while listing knowledge bases")
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error listing knowledge bases: {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception("Error listing knowledge bases")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error listing knowledge bases: {str(e)}")
+            detail="Error listing knowledge bases")
 
 
 @router.post("/indices/{index_name}")
 async def create_new_index(
     request: Request,
-    index_name: str = Path(..., description="Name of the index to create"),
-    embedding_dim: Optional[int] = Query(
-        None, description="Dimension of the embedding vectors"),
-    body: Optional[Dict[str, Any]] = Body(
-        None,
-        description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name)"),
+    index_name: Annotated[str, Path(..., description="Name of the index to create")],
+    embedding_dim: Annotated[
+        Optional[int],
+        Query(description="Dimension of the embedding vectors"),
+    ] = None,
+    body: Annotated[
+        Optional[Dict[str, Any]],
+        Body(
+            description=(
+                "Request body with optional fields (ingroup_permission, group_ids, embedding_model_name)"
+            ),
+        ),
+    ] = None,
 ):
     """Create a new vector index and store it in the knowledge table.
 
@@ -118,34 +126,32 @@ async def create_new_index(
             embedding_model_name=embedding_model_name,
         )
     except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        logger.exception("Rate limit exceeded while creating index")
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(
-            f"Error creating index '{index_name}': {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception("Error creating index")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error creating index: {str(e)}")
+            detail="Error creating index")
 
 
 @router.delete("/indices/{index_name}")
 async def delete_index(
     request: Request,
-    index_name: str = Path(..., description="Name of the index to delete"),
+    index_name: Annotated[str, Path(..., description="Name of the index to delete")],
 ):
     """Delete a knowledge base and all related data.
 
     Restricted to asset administrators (same auth as create_new_index).
     """
-    logger.debug(f"Received northbound request to delete knowledge base: {index_name}")
+    logger.debug("Received northbound request to delete knowledge base")
     try:
         ctx = await _require_asset_owner_context(request)
         vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
@@ -153,28 +159,26 @@ async def delete_index(
             index_name, vdb_core, ctx.user_id
         )
     except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        logger.exception("Rate limit exceeded while deleting index")
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(
-            f"Error deleting index '{index_name}': {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception("Error deleting index")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting index: {str(e)}")
+            detail="Error deleting index")
 
 
 @router.get("/indices/{index_name}/files")
 async def get_index_files(
     request: Request,
-    index_name: str = Path(..., description="Name of the index"),
+    index_name: Annotated[str, Path(..., description="Name of the index")],
 ):
     """Get all files from an index, including those that are not yet stored in ES.
 
@@ -197,32 +201,27 @@ async def get_index_files(
             "files": result.get("files", []),
         }
     except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        logger.exception("Rate limit exceeded while listing files")
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(
-            f"Error getting files for index '{index_name}': {str(e)}",
-            exc_info=True,
-        )
+    except Exception:
+        logger.exception("Error getting files for index")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error getting index files: {str(e)}")
+            detail="Error getting index files")
 
 
 @router.delete("/indices/{index_name}/documents")
 async def delete_documents(
     request: Request,
-    index_name: str = Path(..., description="Name of the index"),
-    path_or_url: str = Query(
-        ..., description="Path or URL of documents to delete"),
+    index_name: Annotated[str, Path(..., description="Name of the index")],
+    path_or_url: Annotated[str, Query(..., description="Path or URL of documents to delete")],
 ):
     """Delete documents by path or URL and clean up related Redis records.
 
@@ -231,13 +230,7 @@ async def delete_documents(
     try:
         ctx = await _require_asset_owner_context(request)
         vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
-        logger.debug(
-            "Deleting documents for index %s, path_or_url=%s, tenant_id=%s, user_id=%s",
-            index_name,
-            path_or_url,
-            ctx.tenant_id,
-            ctx.user_id,
-        )
+        logger.debug("Deleting documents for index %s", index_name)
         result = ElasticSearchService.delete_documents(
             index_name, path_or_url, vdb_core)
 
@@ -262,10 +255,9 @@ async def delete_documents(
 
         except Exception as redis_error:
             logger.warning(
-                "Redis cleanup failed for document %s in index %s: %s",
-                path_or_url,
+                "Redis cleanup failed for index %s: %s",
                 index_name,
-                str(redis_error),
+                redis_error,
             )
             result["redis_cleanup_error"] = str(redis_error)
             original_message = result.get(
@@ -277,30 +269,26 @@ async def delete_documents(
 
         return result
     except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        logger.exception("Rate limit exceeded while deleting documents")
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(
-            f"Error deleting documents for index '{index_name}': {str(e)}",
-            exc_info=True,
-        )
+    except Exception:
+        logger.exception("Error deleting documents for index")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting documents: {str(e)}")
+            detail="Error deleting documents")
 
 
 @router.post("/file/upload")
 async def upload_files(
     request: Request,
-    file: List[UploadFile] = File(..., alias="file"),
+    file: Annotated[List[UploadFile], File(..., alias="file")],
     index_name: str = Form(..., description="Knowledge base index"),
 ):
     """Upload files to MinIO and trigger knowledge base data processing.
@@ -365,18 +353,17 @@ async def upload_files(
             detail="No valid files uploaded",
         )
     except LimitExceededError as e:
-        logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        logger.exception("Rate limit exceeded while uploading files")
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"File upload error: {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception("File upload error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="File upload error.")
@@ -409,8 +396,7 @@ async def get_storage_file(
 
         if not check_file_access(object_name, ctx.user_id, ctx.tenant_id):
             logger.warning(
-                "[get_storage_file] Access denied: object_name=%s, user_id=%s",
-                object_name,
+                "[get_storage_file] Access denied: user_id=%s",
                 ctx.user_id,
             )
             raise HTTPException(
@@ -419,10 +405,8 @@ async def get_storage_file(
             )
 
         logger.info(
-            "[get_storage_file] object_name=%s, download=%s, filename=%s",
-            object_name,
+            "[get_storage_file] download=%s",
             download,
-            filename,
         )
         if download == "redirect":
             result = await get_file_url_impl(
@@ -484,21 +468,21 @@ async def get_storage_file(
             object_name=object_name, expires=expires)
     except LimitExceededError as e:
         logger.error(
-            f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+            "%s: %s",
+            RATE_LIMIT_EXCEEDED_DETAIL,
+            str(e),
+            exc_info=e,
+        )
         raise HTTPException(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded")
+            detail=RATE_LIMIT_EXCEEDED_DETAIL)
     except UnauthorizedError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(
-            f"Failed to get file: object_name={object_name}, error={str(e)}",
-            exc_info=True,
-        )
+    except Exception:
+        logger.exception("Failed to get file")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to get file.")
-

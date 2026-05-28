@@ -3,15 +3,15 @@ import time
 import hmac
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import jwt
 from fastapi import Request
 from supabase import create_client
 
 from consts.const import (
-    ASSET_OWNER_TENANT_ID,
     ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
     DEFAULT_USER_ID,
     IS_SPEED_MODE,
@@ -28,36 +28,6 @@ from database.token_db import get_token_by_access_key
 
 # Module logger
 logger = logging.getLogger(__name__)
-
-
-def resolve_tenant_id_from_user_tenant_record(
-    user_tenant_record: Optional[dict],
-) -> str:
-    """
-    Resolve tenant_id from a user_tenant row.
-
-    ASSET_OWNER virtual tenant_id is valid for asset administrator users.
-
-    ENABLE_ASSET_OWNER_ROLE gates invites, registrations, and sign-in; existing
-    ASSET_OWNER rows still resolve to the virtual tenant for API paths that read
-    user_tenant_t (e.g. JWT-authenticated requests until tokens expire).
-    """
-    if user_tenant_record is None:
-        return DEFAULT_TENANT_ID
-
-    user_role = str(user_tenant_record.get("user_role") or "").upper()
-    if "tenant_id" in user_tenant_record:
-        tenant_value = user_tenant_record["tenant_id"]
-        if tenant_value is not None:
-            # Legacy asset-owner rows may still use empty string before DB migration
-            if tenant_value == "":
-                return ASSET_OWNER_TENANT_ID
-            return tenant_value
-
-    if user_role == ASSET_OWNER_ROLE:
-        return ASSET_OWNER_TENANT_ID
-
-    return DEFAULT_TENANT_ID
 
 # ---------------------------------------------------------------------------
 # Shared test constants
@@ -131,7 +101,8 @@ def verify_aksk_signature(
     if access_key != expected_access_key:
         return False
 
-    expected_sig = calculate_hmac_signature(secret_key, access_key, timestamp, body)
+    expected_sig = calculate_hmac_signature(
+        secret_key, access_key, timestamp, body)
     return hmac.compare_digest(expected_sig, signature)
 
 
@@ -243,9 +214,12 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     if not user_id:
         raise UnauthorizedError("No user associated with this access key")
 
+    # Query tenant from user_tenant_t
     user_tenant_record = get_user_tenant_by_user_id(user_id)
-    tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant_record)
-    if user_tenant_record is None:
+    if user_tenant_record and user_tenant_record.get("tenant_id"):
+        tenant_id = user_tenant_record["tenant_id"]
+    else:
+        tenant_id = DEFAULT_TENANT_ID
         logger.warning(
             f"No tenant relationship found for user {user_id}, using default tenant"
         )
@@ -255,6 +229,24 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
         "tenant_id": tenant_id,
         "token_id": token_info.get("token_id"),
     }
+
+
+def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
+    """
+    Resolve the effective tenant_id from a user_tenant_t record.
+
+    ASSET_OWNER users may have an empty legacy tenant_id; map them to the
+    virtual ASSET_OWNER tenant. Fall back to DEFAULT_TENANT_ID when unset.
+    """
+    tenant_id = user_tenant.get("tenant_id")
+    if tenant_id:
+        return tenant_id
+
+    user_role = (user_tenant.get("user_role") or "").upper()
+    if user_role == ASSET_OWNER_ROLE:
+        return ASSET_OWNER_TENANT_ID
+
+    return DEFAULT_TENANT_ID
 
 
 def get_supabase_client():
@@ -292,7 +284,8 @@ def get_jwt_expiry_seconds(token: str) -> int:
             return 10 * 365 * 24 * 60 * 60
         # Ensure token is pure JWT, remove possible Bearer prefix
         jwt_token = (
-            token.replace("Bearer ", "") if token.startswith("Bearer ") else token
+            token.replace("Bearer ", "") if token.startswith(
+                "Bearer ") else token
         )
 
         # If debug expiration time is set, return directly for quick debugging
@@ -401,7 +394,8 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     """
     # In speed mode, allow unauthenticated access with default user for demo/dev
     if IS_SPEED_MODE:
-        logging.debug("Speed mode detected - returning default user ID and tenant ID")
+        logging.debug(
+            "Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
     # In normal mode, missing auth header means unauthorized - return 401, not default user
@@ -416,10 +410,11 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
             raise UnauthorizedError("Invalid or expired authentication token")
 
         user_tenant_record = get_user_tenant_by_user_id(user_id)
-        tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant_record)
-        if user_tenant_record is not None:
-            logging.debug(f"Found tenant ID for user {user_id}: {tenant_id!r}")
+        if user_tenant_record and user_tenant_record.get("tenant_id"):
+            tenant_id = user_tenant_record["tenant_id"]
+            logging.debug(f"Found tenant ID for user {user_id}: {tenant_id}")
         else:
+            tenant_id = DEFAULT_TENANT_ID
             logging.warning(
                 f"No tenant relationship found for user {user_id}, using default tenant"
             )

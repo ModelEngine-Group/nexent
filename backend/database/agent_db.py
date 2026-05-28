@@ -1,9 +1,10 @@
 import logging
 from typing import List
-from sqlalchemy import update
+from sqlalchemy import or_, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from consts.const import ASSET_OWNER_TENANT_ID
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
@@ -23,7 +24,11 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
             AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y'
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
+            AgentInfo.delete_flag != 'Y',
         ).first()
 
         if not agent:

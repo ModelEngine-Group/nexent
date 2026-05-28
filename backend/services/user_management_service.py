@@ -196,8 +196,6 @@ async def signup_user_with_invitation(email: EmailStr,
 
         except IncorrectInviteCodeException:
             raise
-        except ValidationError:
-            raise
         except Exception as e:
             logging.error(
                 f"Invitation code {invite_code} validation failed: {str(e)}")

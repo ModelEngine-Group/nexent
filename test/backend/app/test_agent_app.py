@@ -17,6 +17,8 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
+from consts.const import ASSET_OWNER_TENANT_ID
+
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="pyiceberg")
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning:pyiceberg.*")
@@ -820,8 +822,10 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
-    assert len(response.json()) == 2
+    assert mock_list_all_agent.call_count == 2
+    mock_list_all_agent.assert_any_call(tenant_id="test_tenant", user_id="test_user")
+    mock_list_all_agent.assert_any_call(tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
+    assert len(response.json()) == 4
 
 
 def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header):

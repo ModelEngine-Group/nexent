@@ -764,7 +764,10 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     try:
         agent_info = search_agent_info_by_agent_id(
             agent_id, tenant_id, version_no)
-        tenant_id = agent_info.get("tenant_id")
+        # Keep the request-scoped tenant_id unless the record explicitly provides one.
+        record_tenant_id = agent_info.get("tenant_id")
+        if record_tenant_id:
+            tenant_id = record_tenant_id
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")

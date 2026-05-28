@@ -94,16 +94,6 @@ def apply_agent_detail_prompt_visibility(
     return result
 
 
-def postprocess_agent_visibility(
-    items: List[Dict[str, Any]],
-    caller_role: Optional[str],
-    caller_tenant_id: Optional[str],
-) -> List[Dict[str, Any]]:
-    """Return agent records after visibility post-processing (no-op for now)."""
-    _ = (caller_role, caller_tenant_id)
-    return items
-
-
 def postprocess_knowledge_visibility(
     items: List[Dict[str, Any]],
     caller_role: Optional[str],
