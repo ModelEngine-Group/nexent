@@ -179,15 +179,22 @@ function collectRequestBody(req) {
 /**
  * For the refresh_token endpoint, inject the refresh_token from cookie
  * into the request body so the backend can process it normally.
+ * If no refresh_token cookie exists, return 401 immediately.
  */
-function prepareAuthRequestBody(pathname, body, cookies) {
+function prepareAuthRequestBody(pathname, body, cookies, res) {
   if (
-    pathname === "/api/user/refresh_token" &&
+    pathname === "/api/user/refresh_token" ) {
+    const refreshToken =
     cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ) {
+  ;
+    if (!refreshToken) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
+      return null;
+    }
     try {
       const parsed = body.length > 0 ? JSON.parse(body.toString()) : {};
-      parsed.refresh_token = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+      parsed.refresh_token = refreshToken;
       return Buffer.from(JSON.stringify(parsed));
     } catch {
       return body;
@@ -212,7 +219,12 @@ function forwardAuthRequest(req, res, targetUrl) {
 
   collectRequestBody(req)
     .then((rawBody) => {
-      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies);
+      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+
+    // If body is null, prepareAuthRequestBody already sent the error response
+    if (body === null) {
+      return;
+    }
 
       const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 

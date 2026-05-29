@@ -183,7 +183,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 toolGroups={groupedTools}
                 isCreatingMode={isCreatingMode}
                 currentAgentId={currentAgentId ?? undefined}
-                isReadOnly={isReadOnly}
               />
             </Col>
           </Row>
