@@ -39,6 +39,7 @@ import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
 import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   getUserTokens,
   deleteUserToken,
@@ -61,6 +62,7 @@ export default function UserProfileComp() {
   const { message: antdMessage } = App.useApp();
   const { logout, revoke, isLoading } = useAuthenticationContext();
   const { user, groupIds } = useAuthorizationContext();
+  const { confirm } = useConfirmModal();
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(user?.tenantId || null);
@@ -107,6 +109,7 @@ export default function UserProfileComp() {
   // Check if user is admin or super admin (cannot delete account)
   const isAdminOrSuperAdmin =
     user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
+  const isCasUser = user?.authProvider === "cas";
   const getRoleDisplayName = (role: string) => {
     switch (role) {
       case USER_ROLES.SPEED:
@@ -125,17 +128,20 @@ export default function UserProfileComp() {
   };
 
   // Handle logout
-  const handleLogout = async () => {
-    try {
-      await logout();
-      window.location.href = "/";
-    } catch (error) {
-      antdMessage.error(t("auth.logoutFailed"));
-    }
+  const handleLogout = () => {
+    confirm({
+      title: t("auth.confirmLogout"),
+      content: t("auth.confirmLogoutPrompt"),
+      onOk: () => {
+        logout();
+      },
+    });
   };
 
   // Handle delete account
   const handleDeleteAccount = async () => {
+    if (isAdminOrSuperAdmin || isCasUser) return;
+
     try {
       await revoke();
       antdMessage.success(t("auth.revokeSuccess"));
@@ -469,8 +475,16 @@ export default function UserProfileComp() {
                 </div>
 
                 <button
-                  onClick={() => setIsDeleteModalOpen(true)}
-                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-left"
+                  disabled={isCasUser}
+                  onClick={() => {
+                    if (isCasUser) return;
+                    setIsDeleteModalOpen(true);
+                  }}
+                  className={`w-full px-6 py-3 flex items-center justify-between transition-colors text-left ${
+                    isCasUser
+                      ? "cursor-not-allowed opacity-50"
+                      : "hover:bg-red-50 dark:hover:bg-red-900/20"
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
@@ -695,7 +709,7 @@ export default function UserProfileComp() {
         onOk={handleDeleteAccount}
         onCancel={() => setIsDeleteModalOpen(false)}
         loading={isLoading}
-        disabled={isAdminOrSuperAdmin}
+        disabled={isAdminOrSuperAdmin || isCasUser}
       />
 
       {/* OAuth Linked Accounts */}

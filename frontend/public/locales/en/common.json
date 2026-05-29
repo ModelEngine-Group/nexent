@@ -1058,6 +1058,7 @@
   "auth.accessDenied": "You do not have permission to access this page",
   "auth.oauthDivider": "or continue with",
   "auth.oauthLogin": "{{provider}} Login",
+  "auth.casLogin": "{{provider}} Login",
   "auth.oauthLoginFailed": "Third-party login failed: {{error}}",
   "auth.oauthLoginFailedGeneric": "Third-party login failed. Please try again.",
   "auth.oauthCompleteTitle": "Complete Account Setup",

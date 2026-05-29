@@ -9,6 +9,7 @@ export interface User {
   role: UserRole;
   avatarUrl?: string;
   tenantId?: string;
+  authProvider?: "local" | "cas";
 }
 
 // Session type definition

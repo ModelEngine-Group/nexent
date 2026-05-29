@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
@@ -9,6 +9,8 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
+import { authFlowState } from "@/lib/authFlow";
+import { casService } from "@/services/casService";
 import { AuthenticationUIReturn, RegisterModalOptions } from "@/types/auth";
 
 /**
@@ -33,6 +35,7 @@ export function useAuthenticationUI({
   const { message } = App.useApp();
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
+  const isRedirectingToCasRef = useRef(false);
 
   // UI state for modals - managed locally within the hook
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -40,12 +43,12 @@ export function useAuthenticationUI({
   const [registerModalOptions, setRegisterModalOptions] =
     useState<RegisterModalOptions | null>(null);
   const [isAuthPromptModalOpen, setIsAuthPromptModalOpen] = useState(false);
-  const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] = useState(false);
+  const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] =
+    useState(false);
 
-  const handleUnauthenticatedModalClose = (() => {
+  const handleUnauthenticatedModalClose = () => {
     // Only emit back to home event and redirect if user is not authenticated
     if (!isAuthenticated && !isSpeedMode) {
-        
       // Emit event to notify SideNavigation to reset selected key
       authEventUtils.emitBackToHome();
       // Redirect to home page if not already there
@@ -53,7 +56,7 @@ export function useAuthenticationUI({
         router.push("/");
       }
     }
-  });
+  };
 
   // Modal control functions
   const openLoginModal = useCallback(() => setIsLoginModalOpen(true), []);
@@ -74,14 +77,37 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  const openAuthPromptModal = useCallback(() => setIsAuthPromptModalOpen(true), []);
+  const redirectToCasIfForced = useCallback(
+    async (redirect?: string): Promise<boolean> => {
+      if (isRedirectingToCasRef.current) return true;
+      if (authFlowState.isExplicitLogoutInProgress()) return true;
+
+      const config = await casService.getConfig();
+      if (authFlowState.isExplicitLogoutInProgress()) return true;
+      if (!config.enabled || config.login_mode !== "force") return false;
+
+      isRedirectingToCasRef.current = true;
+      casService.startLogin(redirect);
+      return true;
+    },
+    []
+  );
+
+  const openAuthPromptModal = useCallback(() => {
+    redirectToCasIfForced(effectivePath).then((redirected) => {
+      if (!redirected) setIsAuthPromptModalOpen(true);
+    });
+  }, [effectivePath, redirectToCasIfForced]);
 
   const closeAuthPromptModal = useCallback(() => {
     setIsAuthPromptModalOpen(false);
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  const openSessionExpiredModal = useCallback(() => setIsSessionExpiredModalOpen(true), []);
+  const openSessionExpiredModal = useCallback(
+    () => setIsSessionExpiredModalOpen(true),
+    []
+  );
 
   const closeSessionExpiredModal = useCallback(() => {
     clearLocalSession();
@@ -105,7 +131,9 @@ export function useAuthenticationUI({
     if (isSpeedMode) return;
 
     const handleSessionExpired = () => {
-      setIsSessionExpiredModalOpen(true);
+      redirectToCasIfForced(effectivePath).then((redirected) => {
+        if (!redirected) setIsSessionExpiredModalOpen(true);
+      });
     };
 
     const handleRegisterSuccess = () => {
@@ -128,7 +156,7 @@ export function useAuthenticationUI({
       cleanup();
       cleanupRegister();
     };
-  }, [isSpeedMode, setIsSessionExpiredModalOpen]);
+  }, [effectivePath, isSpeedMode, redirectToCasIfForced]);
 
   // Auto-open login modal when returning from a failed OAuth redirect
   useEffect(() => {
@@ -148,7 +176,17 @@ export function useAuthenticationUI({
     if (oauthError && !isLoginModalOpen) {
       setIsLoginModalOpen(true);
     }
-  }, [searchParams, isAuthChecking, isAuthenticated, isSpeedMode, isLoginModalOpen, router, isOAuthCompletePage, message, getOAuthErrorMessage]);
+  }, [
+    searchParams,
+    isAuthChecking,
+    isAuthenticated,
+    isSpeedMode,
+    isLoginModalOpen,
+    router,
+    isOAuthCompletePage,
+    message,
+    getOAuthErrorMessage,
+  ]);
 
   useEffect(() => {
     if (!isOAuthCompletePage) return;
@@ -169,9 +207,28 @@ export function useAuthenticationUI({
     if (isSessionExpiredModalOpen) return;
     if (isLoginModalOpen) return;
     if (isRegisterModalOpen) return;
-    openAuthPromptModal();
-  }, [pathname, isAuthenticated, isSpeedMode, isAuthChecking, isSessionExpiredModalOpen, openAuthPromptModal, isOAuthCompletePage]);
+    let cancelled = false;
 
+    redirectToCasIfForced(effectivePath).then((redirected) => {
+      if (!cancelled && !redirected) {
+        setIsAuthPromptModalOpen(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    effectivePath,
+    isAuthenticated,
+    isSpeedMode,
+    isAuthChecking,
+    isSessionExpiredModalOpen,
+    isLoginModalOpen,
+    isRegisterModalOpen,
+    isOAuthCompletePage,
+    redirectToCasIfForced,
+  ]);
 
   return {
     // Login/Register Modal
