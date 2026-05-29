@@ -1093,6 +1093,7 @@
   "auth.registerAdmin": "注册管理员账号",
   "auth.inviteCodeNotConfigured": "管理员注册功能暂未开放，请联系系统管理员配置邀请码",
   "auth.inviteCodeInvalid": "管理员邀请码错误，请检查后重新输入",
+  "auth.assetOwnerUseOAuth": "资产管理员账号不支持邮箱密码注册。请使用 GitHub、微信等 OAuth 方式登录，并填写资产管理员邀请码完成注册。",
   "auth.emailAlreadyExists": "该邮箱已被注册，请使用其他邮箱地址或尝试登录现有账号",
   "auth.weakPassword": "密码强度不够，请设置更安全的密码",
   "auth.invalidEmailFormat": "邮箱格式不正确，请检查后重新输入",

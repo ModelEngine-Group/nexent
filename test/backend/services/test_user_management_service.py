@@ -41,8 +41,23 @@ asset_owner_visibility_mock.require_asset_owner_enabled = lambda: None
 sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
 setattr(services_pkg, 'asset_owner_visibility', asset_owner_visibility_mock)
 
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    UnauthorizedError,
+    AppException,
+    ValidationError,
+)
 from consts.error_code import ErrorCode
+from consts.const import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_TENANT_ID,
+)
+
+ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -696,6 +711,25 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
             await signup_user_with_invitation("test@example.com", "Password123", "INVALID")
 
         self.assertIn("is not available", str(context.exception))
+
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    async def test_signup_user_with_asset_owner_invite_rejected(self, mock_check_available, mock_get_invite_code):
+        """Asset owner invite codes must use OAuth registration, not email signup."""
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "invitation_id": 1,
+            "code_type": ASSET_OWNER_INVITE_CODE_TYPE,
+            "group_ids": [],
+            "tenant_id": "asset_owner_tenant_id",
+        }
+
+        with self.assertRaises(ValidationError) as context:
+            await signup_user_with_invitation(
+                "owner@example.com", "Password123", invite_code="ASSET123"
+            )
+
+        self.assertEqual(str(context.exception), ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL)
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -1847,6 +1881,104 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
 class TestIntegrationScenarios(unittest.IsolatedAsyncioTestCase):
     """Integration test scenarios"""
 
+
+class TestAssetOwnerUserManagement(unittest.IsolatedAsyncioTestCase):
+    """ASSET_OWNER-specific user management behavior."""
+
+    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", False)
+    @patch("backend.services.user_management_service.filter_accessible_routes_for_asset_owner_feature")
+    def test_format_role_permissions_excludes_asset_owner_route_when_disabled(
+        self, mock_filter_routes,
+    ):
+        import backend.services.asset_owner_visibility as aov
+
+        mock_filter_routes.side_effect = aov.filter_accessible_routes_for_asset_owner_feature
+        from backend.services.user_management_service import format_role_permissions
+
+        permissions = [
+            {
+                "permission_category": "MENU",
+                "permission_type": "LEFT_NAV_MENU",
+                "permission_subtype": ASSET_OWNER_RESOURCES_ROUTE,
+            },
+            {
+                "permission_category": "MENU",
+                "permission_type": "LEFT_NAV_MENU",
+                "permission_subtype": "/home",
+            },
+        ]
+        result = format_role_permissions(permissions)
+        assert ASSET_OWNER_RESOURCES_ROUTE not in result["accessibleRoutes"]
+        assert "/home" in result["accessibleRoutes"]
+
+    @patch("backend.services.user_management_service.require_asset_owner_enabled")
+    @patch("backend.services.user_management_service.get_jwt_expiry_seconds")
+    @patch("backend.services.user_management_service.calculate_expires_at")
+    @patch("backend.services.user_management_service.get_supabase_client")
+    @patch("backend.services.user_management_service.get_user_tenant_by_user_id")
+    async def test_signin_asset_owner_feature_disabled_signs_out(
+        self,
+        mock_get_user_tenant,
+        mock_get_client,
+        mock_calc_expires,
+        mock_get_expiry,
+        mock_require_enabled,
+    ):
+        from backend.services.user_management_service import signin_user
+
+        mock_require_enabled.side_effect = ValidationError(
+            "ASSET_OWNER feature is not enabled"
+        )
+        mock_get_user_tenant.return_value = {
+            "user_role": ASSET_OWNER_ROLE,
+            "tenant_id": "",
+        }
+        mock_client = MagicMock()
+        mock_user = MagicMock()
+        mock_user.id = "ao-user"
+        mock_user.user_metadata = {}
+        mock_session = MagicMock()
+        mock_session.access_token = "token"
+        mock_response = MagicMock()
+        mock_response.user = mock_user
+        mock_response.session = mock_session
+        mock_client.auth.sign_in_with_password.return_value = mock_response
+        mock_get_client.return_value = mock_client
+        mock_get_expiry.return_value = 3600
+        mock_calc_expires.return_value = 1234567890
+
+        with self.assertRaises(ValidationError):
+            await signin_user("owner@example.com", "Password123")
+
+        mock_client.auth.sign_out.assert_called_once()
+
+    @patch("backend.services.user_management_service.query_group_ids_by_user")
+    @patch("backend.services.user_management_service.get_user_tenant_by_user_id")
+    @patch("backend.services.user_management_service.get_db_session")
+    async def test_get_user_info_resolves_asset_owner_virtual_tenant(
+        self,
+        mock_get_db_session,
+        mock_get_user_tenant,
+        mock_query_groups,
+    ):
+        from backend.services.user_management_service import get_user_info
+
+        mock_get_user_tenant.return_value = {
+            "user_id": "ao-user",
+            "user_role": ASSET_OWNER_ROLE,
+            "user_email": "owner@example.com",
+            "tenant_id": "",
+        }
+        mock_query_groups.return_value = []
+
+        mock_session = MagicMock()
+        mock_session.query.return_value.filter.return_value.all.return_value = []
+        mock_get_db_session.return_value.__enter__.return_value = mock_session
+
+        result = await get_user_info("ao-user")
+
+        assert result is not None
+        assert result["user"]["tenant_id"] == ASSET_OWNER_TENANT_ID
 
 
 if __name__ == '__main__':

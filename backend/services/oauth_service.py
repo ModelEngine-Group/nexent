@@ -12,6 +12,9 @@ import jwt
 from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
 
 from consts.const import (
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
     OAUTH_CALLBACK_BASE_URL,
     OAUTH_SSL_VERIFY,
@@ -19,6 +22,7 @@ from consts.const import (
     SUPABASE_JWT_SECRET,
 )
 from consts.exceptions import OAuthLinkError, OAuthProviderError
+from services.asset_owner_visibility import require_asset_owner_enabled
 from consts.oauth_providers import (
     get_all_provider_definitions,
     get_provider_definition,
@@ -359,6 +363,9 @@ def _role_from_invitation_type(code_type: str) -> str:
         return "ADMIN"
     if code_type == "DEV_INVITE":
         return "DEV"
+    if code_type == ASSET_OWNER_INVITE_CODE_TYPE:
+        require_asset_owner_enabled()
+        return ASSET_OWNER_ROLE
     return "USER"
 
 
@@ -431,7 +438,10 @@ async def complete_pending_oauth_account(
     supabase_user_id = create_resp.user.id
 
     tenant_id = invitation_info["tenant_id"]
+    if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
+        tenant_id = ASSET_OWNER_TENANT_ID
     user_role = _role_from_invitation_type(invitation_info.get("code_type", "USER_INVITE"))
+    is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
     insert_user_tenant(
         user_id=supabase_user_id,
@@ -446,12 +456,13 @@ async def complete_pending_oauth_account(
         from utils.str_utils import convert_string_to_list
 
         group_ids = convert_string_to_list(group_ids)
-    if group_ids:
+    if group_ids and not is_asset_owner_registration:
         add_user_to_groups(supabase_user_id, group_ids, supabase_user_id)
 
     if user_role == "ADMIN":
         await generate_tts_stt_4_admin(tenant_id, supabase_user_id)
-    await init_tool_list_for_tenant(tenant_id, supabase_user_id)
+    if not is_asset_owner_registration:
+        await init_tool_list_for_tenant(tenant_id, supabase_user_id)
 
     create_or_update_oauth_account(
         user_id=supabase_user_id,
