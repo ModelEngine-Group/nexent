@@ -364,6 +364,7 @@ Additional Args:
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
+        exec_start = time.time()
         try:
             monitoring_manager = get_monitoring_manager()
             with monitoring_manager.trace_tool_call(
@@ -396,6 +397,7 @@ Additional Args:
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
+            exec_duration_ms = (time.time() - exec_start) * 1000
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
                     self.python_executor.state["_print_outputs"])
@@ -410,7 +412,17 @@ Additional Args:
                     self.logger.log(
                         Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
+            self.logger.log(
+                f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
+                level=LogLevel.WARNING,
+            )
             raise AgentExecutionError(error_msg, self.logger)
+
+        exec_duration_ms = (time.time() - exec_start) * 1000
+        self.logger.log(
+            f"[Code Execution] step={memory_step.step_number} completed in {exec_duration_ms:.1f}ms",
+            level=LogLevel.INFO,
+        )
 
         truncated_output = None
         if code_output is not None and code_output.output is not None:
