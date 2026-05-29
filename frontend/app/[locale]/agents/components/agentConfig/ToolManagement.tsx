@@ -17,8 +17,7 @@ import { Settings, AlertTriangle } from "lucide-react";
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
-  currentAgentId?: number | undefined;
-  isReadOnly?: boolean;
+  currentAgentId?: number;
 }
 
 // Tool types that require knowledge base selection

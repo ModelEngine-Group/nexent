@@ -408,7 +408,7 @@
   "systemPrompt.expandEdit.backgroundInfo": "Background Info",
   "systemPrompt.expandEdit.close": "Save & Close",
   "systemPrompt.nonEditing.title": "Please Select an Agent First",
-  "systemPrompt.nonEditing.subtitle": "Please select an Agent from the left panel to edit, or create a new Agent",
+  "systemPrompt.nonEditing.subtitle": "Please select an Agent from the top panel to edit, or create a new Agent",
 
   "collaborativeAgent.title": "Select Collaborative Agent",
   "collaborativeAgent.button.add": "Add Collaborative Agent",
