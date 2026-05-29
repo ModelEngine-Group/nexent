@@ -8685,6 +8685,60 @@ async def test_list_all_agent_info_impl_admin_gets_edit_permission(
 @patch("backend.services.agent_service.get_user_tenant_by_user_id")
 @patch("backend.services.agent_service.query_group_ids_by_user")
 @patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """ASSET_OWNER-scoped agents are READ_ONLY for non-ASSET_OWNER roles even when admin."""
+    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+
+    mock_agents = [
+        {
+            "agent_id": 99,
+            "name": "Asset Agent",
+            "display_name": "Asset Agent",
+            "description": "Asset owner scoped",
+            "enabled": True,
+            "group_ids": "1",
+            "ingroup_permission": PERMISSION_EDIT,
+            "created_by": "admin_user",
+            "tenant_id": ASSET_OWNER_TENANT_ID,
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = [1]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        return [int(p.strip()) for p in str(x).split(",") if p.strip().isdigit()]
+
+    mock_convert_list.side_effect = convert_side_effect
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="admin_user"
+    )
+
+    assert len(result) == 1
+    assert result[0]["permission"] == PERMISSION_READ
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_non_creator_no_group_overlap_hidden(
     mock_query_agents,
     mock_query_groups,

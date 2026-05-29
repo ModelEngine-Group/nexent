@@ -33,7 +33,14 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    UnauthorizedError,
+    AppException,
+    ValidationError,
+)
 from consts.error_code import ErrorCode
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
@@ -239,6 +246,23 @@ class TestUserSignup:
             data = response.json()
             assert data["detail"] == "INVITE_CODE_INVALID"
 
+    def test_signup_validation_error_returns_400(self):
+        """Test registration rejected by ASSET_OWNER feature flag returns 400."""
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            mock_signup.side_effect = ValidationError("ASSET_OWNER feature is not enabled")
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "owner@example.com",
+                    "password": "password123",
+                    "invite_code": "AO123",
+                },
+            )
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
+
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
         with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
@@ -314,6 +338,22 @@ class TestUserSignup:
 
 class TestUserSignin:
     """Test user signin endpoint"""
+
+    def test_signin_validation_error_returns_400(self):
+        """Test login rejected by ASSET_OWNER feature flag returns 400."""
+        with patch("apps.user_management_app.signin_user") as mock_signin:
+            mock_signin.side_effect = ValidationError("ASSET_OWNER feature is not enabled")
+
+            response = client.post(
+                "/user/signin",
+                json={
+                    "email": "owner@example.com",
+                    "password": "password123",
+                },
+            )
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
 
     def test_signin_success(self):
         """Test successful user login"""
