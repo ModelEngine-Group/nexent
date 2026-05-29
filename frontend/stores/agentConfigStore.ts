@@ -362,7 +362,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   forceRefreshKey: 0,
 
   isReadOnly: () => {
-    const { isCreatingMode, currentAgentPermission } = get();
+    const { isCreatingMode, currentAgentId, currentAgentPermission } = get();
+    if (isCreatingMode === false && currentAgentId === null) return true;
     if (isCreatingMode) return false;
     return currentAgentPermission === 'READ_ONLY';
   },
