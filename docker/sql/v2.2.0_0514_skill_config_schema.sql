@@ -3,7 +3,17 @@
 ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
 
 -- Add config_values and config_schemas to ag_skill_info_t
-ALTER TABLE nexent.ag_skill_info_t RENAME COLUMN params TO config_values;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name   = 'ag_skill_info_t'
+          AND column_name  = 'params'
+    ) THEN
+        ALTER TABLE nexent.ag_skill_info_t RENAME COLUMN params TO config_values;
+    END IF;
+END $$;
 ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS config_schemas JSON;
 
 -- Comments for ag_skill_info_t columns
