@@ -10,7 +10,7 @@ import { API_ENDPOINTS } from "@/services/api";
 import { sessionService } from "@/services/sessionService";
 
 import { Session, SessionResponse, AuthInfoResponse } from "@/types/auth";
-import { STATUS_CODES } from "@/const/auth";
+import { ASSET_OWNER_TENANT_ID, STATUS_CODES, USER_ROLES } from "@/const/auth";
 
 import { generateAvatarUrl } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/auth";
@@ -25,6 +25,19 @@ import log from "@/lib/logger";
 import { ErrorCode } from "@/const/errorCode";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 
+/** Map legacy empty tenant_id to the asset-owner virtual tenant for API consumers. */
+function resolveTenantIdForClient(
+  tenantId?: string | null,
+  userRole?: string
+): string | undefined {
+  if (tenantId && tenantId.trim() !== "") {
+    return tenantId.trim();
+  }
+  if (userRole === USER_ROLES.ASSET_OWNER) {
+    return ASSET_OWNER_TENANT_ID;
+  }
+  return undefined;
+}
 
 export const authService = {
   getSession: async (): Promise<Session | null> => {
@@ -311,7 +324,10 @@ export const authService = {
         user: {
           id: data.data.user.user_id,
           groupIds: data.data.user.group_ids,
-          tenantId: data.data.user.tenant_id,
+          tenantId: resolveTenantIdForClient(
+            data.data.user.tenant_id,
+            data.data.user.user_role
+          ),
           email: data.data.user.user_email,
           role: data.data.user.user_role,
           avatarUrl: data.data.user.avatarUrl,

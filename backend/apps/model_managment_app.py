@@ -264,6 +264,7 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
     Returns each model enriched with repo-qualified `model_name` and a normalized
     `connect_status` value.
     """
+
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         logger.debug(

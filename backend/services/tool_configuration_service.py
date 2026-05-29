@@ -514,7 +514,8 @@ async def list_all_tools(tenant_id: str):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
 
-            # Merge inputs description_zh from SDK
+            # Use SDK full input schema for local tools to keep runtime inputs
+            # aligned with current tool code (instead of stale DB snapshots).
             inputs_str = tool.get("inputs", "{}")
             try:
                 inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
@@ -547,7 +548,6 @@ async def list_all_tools(tenant_id: str):
             "category": tool.get("category")
         }
         formatted_tools.append(formatted_tool)
-
     return formatted_tools
 
 
@@ -860,18 +860,18 @@ def _validate_local_tool(
         else:
             tool_instance = tool_class(**instantiation_params)
 
-        # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
-        declared_inputs = getattr(tool_class, "inputs", {}) or {}
-        allowed_input_names = (
-            set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
-        )
-        filtered_runtime_inputs = (
-            {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
-            if allowed_input_names
-            else runtime_inputs
-        )
+        # # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
+        # declared_inputs = getattr(tool_class, "inputs", {}) or {}
+        # allowed_input_names = (
+        #     set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
+        # )
+        # filtered_runtime_inputs = (
+        #     {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
+        #     if allowed_input_names
+        #     else runtime_inputs
+        # )
 
-        result = tool_instance.forward(**filtered_runtime_inputs)
+        result = tool_instance.forward(**(inputs or {}))
         return result
     except Exception as e:
         logger.error(f"Local tool validation failed for {tool_name}: {e}")

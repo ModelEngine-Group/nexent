@@ -168,10 +168,14 @@ consts_model_mock.SkillCreateInteractiveRequest = MockSkillCreateInteractiveRequ
 
 # Mock services
 services_mock = types.ModuleType('services')
+services_mock.__path__ = []  # Make it a package so submodules can be imported
 services_skill_service_mock = types.ModuleType('services.skill_service')
+services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
+sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
+setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
 
 class MockSkillService:
     def __init__(self):
@@ -184,6 +188,7 @@ services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("tas
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
