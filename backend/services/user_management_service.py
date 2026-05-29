@@ -19,6 +19,21 @@ from utils.auth_utils import (
     calculate_expires_at,
     get_jwt_expiry_seconds,
     ensure_cas_session_active_from_authorization,
+    resolve_tenant_id_from_user_tenant_record,
+)
+from consts.const import (
+    INVITE_CODE,
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    DEFAULT_TENANT_ID,
+    ASSET_OWNER_TENANT_ID,
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_ROLE,
+)
+
+from services.asset_owner_visibility import (
+    filter_accessible_routes_for_asset_owner_feature,
+    require_asset_owner_enabled,
 )
 from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
@@ -34,7 +49,6 @@ from services.invitation_service import use_invitation_code, check_invitation_av
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
 from services.skill_service import init_skill_list_for_tenant
-
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -175,6 +189,9 @@ async def signup_user_with_invitation(email: EmailStr,
                 user_role = "ADMIN"
             elif code_type == "DEV_INVITE":
                 user_role = "DEV"
+            elif code_type == ASSET_OWNER_INVITE_CODE_TYPE:
+                require_asset_owner_enabled()
+                user_role = ASSET_OWNER_ROLE
 
             logging.info(
                 f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
@@ -199,14 +216,20 @@ async def signup_user_with_invitation(email: EmailStr,
         # Determine tenant_id based on invitation code
         if invitation_info:
             tenant_id = invitation_info["tenant_id"]
+            if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
+                tenant_id = ASSET_OWNER_TENANT_ID
         else:
             tenant_id = DEFAULT_TENANT_ID
 
+        is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
+
         # Create user tenant relationship
-        logging.debug(f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
+        logging.debug(
+            f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
         insert_user_tenant(
             user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
-        logging.debug(f"User tenant relationship created successfully for user {user_id}")
+        logging.debug(
+            f"User tenant relationship created successfully for user {user_id}")
 
         # Use invitation code now that we have the real user_id
         if invitation_info:
@@ -217,7 +240,7 @@ async def signup_user_with_invitation(email: EmailStr,
 
                 # Add user to groups specified in invitation code
                 group_ids = invitation_result.get("group_ids", [])
-                if group_ids:
+                if group_ids and not is_asset_owner_registration:
                     try:
                         # Convert group_ids from string to list if needed
                         if isinstance(group_ids, str):
@@ -225,7 +248,8 @@ async def signup_user_with_invitation(email: EmailStr,
                             group_ids = convert_string_to_list(group_ids)
 
                         if group_ids:
-                            group_results = add_user_to_groups(user_id, group_ids, user_id)
+                            group_results = add_user_to_groups(
+                                user_id, group_ids, user_id)
                             successful_adds = [
                                 r for r in group_results if not r.get("error")]
                             logging.info(
@@ -247,8 +271,9 @@ async def signup_user_with_invitation(email: EmailStr,
             await generate_tts_stt_4_admin(tenant_id, user_id)
 
         # Initialize tool list for the new tenant (only once per tenant)
-        await init_tool_list_for_tenant(tenant_id, user_id)
-        await init_skill_list_for_tenant(tenant_id, user_id)
+        if not is_asset_owner_registration:
+            await init_tool_list_for_tenant(tenant_id, user_id)
+            await init_skill_list_for_tenant(tenant_id, user_id)
 
         return await parse_supabase_response(False, response, user_role, auto_login)
     else:
@@ -343,14 +368,24 @@ async def signin_user(email: EmailStr,
         "password": password
     })
 
+    user_tenant = get_user_tenant_by_user_id(response.user.id)
+    if user_tenant and user_tenant.get("user_role") == ASSET_OWNER_ROLE:
+        try:
+            require_asset_owner_enabled()
+        except ValidationError:
+            client.auth.sign_out()
+            raise
+
     # Get actual expiration time from access_token
     expiry_seconds = get_jwt_expiry_seconds(response.session.access_token)
     expires_at = calculate_expires_at(response.session.access_token)
 
-    # Get role information from user metadata
-    user_role = "user"  # Default role
-    if 'role' in response.user.user_metadata:  # Adapt to historical user data
-        user_role = response.user.user_metadata['role']
+    # Prefer user_tenant_t role; fall back to Supabase metadata for legacy users
+    user_role = "user"
+    if user_tenant and user_tenant.get("user_role"):
+        user_role = user_tenant["user_role"]
+    elif "role" in response.user.user_metadata:
+        user_role = response.user.user_metadata["role"]
 
     logging.info(
         f"User {email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
@@ -387,7 +422,8 @@ async def refresh_user_token(authorization, refresh_token: str):
 
 async def get_session_by_authorization(authorization):
     # Extract clean token from authorization header
-    clean_token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+    clean_token = authorization.replace(
+        "Bearer ", "") if authorization.startswith("Bearer ") else authorization
 
     # Use the unified token validation function
     is_valid, user = validate_token(clean_token)
@@ -444,7 +480,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 )
             return None
 
-        tenant_id = user_tenant["tenant_id"]
+        tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant)
         user_role = user_tenant["user_role"]
         user_email = user_tenant["user_email"]
 
@@ -468,7 +504,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "user_email": user_email,
                 "user_role": user_role,
                 "permissions": permissions_data["permissions"],
-                "accessibleRoutes": permissions_data["accessibleRoutes"]
+                "accessibleRoutes": permissions_data["accessibleRoutes"],
             }
         }
 
@@ -507,9 +543,13 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
             # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
             accessible_routes.append(permission_subtype)
 
+    accessible_routes = filter_accessible_routes_for_asset_owner_feature(
+        accessible_routes
+    )
+
     return {
         "permissions": formatted_permissions,
-        "accessibleRoutes": accessible_routes
+        "accessibleRoutes": accessible_routes,
     }
 
 
@@ -617,7 +657,8 @@ async def update_password(user_id: str, old_password: str, new_password: str) ->
                 "password": old_password
             })
         except Exception as auth_err:
-            logging.warning(f"Password verification failed for user {user_id}: {str(auth_err)}")
+            logging.warning(
+                f"Password verification failed for user {user_id}: {str(auth_err)}")
             raise UnauthorizedError("Invalid old password")
 
         # Update to new password using admin client
@@ -631,5 +672,6 @@ async def update_password(user_id: str, old_password: str, new_password: str) ->
     except AppException:
         raise
     except Exception as exc:
-        logging.error(f"Failed to update password for user {user_id}: {str(exc)}")
+        logging.error(
+            f"Failed to update password for user {user_id}: {str(exc)}")
         raise

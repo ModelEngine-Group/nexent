@@ -1,3 +1,5 @@
+import importlib.machinery
+import types
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 import sys
@@ -9,7 +11,11 @@ import aiohttp
 
 # Align with the standard pattern used in test_conversation_management_service.py
 # Mock external SDKs and patch MinioClient before importing the SUT
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['supabase'] = MagicMock()
 sys.modules['psycopg2'] = MagicMock()
 
@@ -21,11 +27,19 @@ sys.modules['nexent.memory.memory_service'] = nexent_memory_service
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 
 # Mock services
-sys.modules['services'] = MagicMock()
+services_pkg = types.ModuleType('services')
+services_pkg.__path__ = []
+sys.modules['services'] = services_pkg
 sys.modules['services.invitation_service'] = MagicMock()
 sys.modules['services.group_service'] = MagicMock()
 sys.modules['services.tool_configuration_service'] = MagicMock()
 sys.modules['services.skill_service'] = MagicMock()
+
+asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
+asset_owner_visibility_mock.filter_accessible_routes_for_asset_owner_feature = lambda routes: routes
+asset_owner_visibility_mock.require_asset_owner_enabled = lambda: None
+sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
+setattr(services_pkg, 'asset_owner_visibility', asset_owner_visibility_mock)
 
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException
 from consts.error_code import ErrorCode
@@ -37,6 +51,18 @@ minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+
+# Stub database modules used by user_management_service to avoid loading real SQLAlchemy client
+_db_client_stub = types.ModuleType("database.client")
+_db_client_stub.get_db_session = MagicMock()
+_db_client_stub.as_dict = MagicMock()
+_db_client_stub.MinioClient = MagicMock(return_value=minio_client_mock)
+sys.modules["database.client"] = _db_client_stub
+sys.modules["database.token_db"] = MagicMock()
+sys.modules["database.model_management_db"] = MagicMock()
+sys.modules["database.user_tenant_db"] = MagicMock()
+sys.modules["database.group_db"] = MagicMock()
+sys.modules["database.db_models"] = MagicMock()
 
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
     from backend.services.user_management_service import (
@@ -1233,11 +1259,15 @@ class TestVerifyInviteCode(unittest.IsolatedAsyncioTestCase):
 class TestSigninUser(unittest.IsolatedAsyncioTestCase):
     """Test signin_user"""
 
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.get_jwt_expiry_seconds')
     @patch('backend.services.user_management_service.calculate_expires_at')
     @patch('backend.services.user_management_service.get_supabase_client')
-    async def test_signin_user_success(self, mock_get_client, mock_calc_expires, mock_get_expiry):
+    async def test_signin_user_success(
+        self, mock_get_client, mock_calc_expires, mock_get_expiry, mock_get_user_tenant
+    ):
         """Test successful user signin"""
+        mock_get_user_tenant.return_value = None
         mock_client = MagicMock()
         mock_user = MagicMock()
         mock_user.id = "user-123"
@@ -1277,11 +1307,15 @@ class TestSigninUser(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(result, expected)
 
+    @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.get_jwt_expiry_seconds')
     @patch('backend.services.user_management_service.calculate_expires_at')
     @patch('backend.services.user_management_service.get_supabase_client')
-    async def test_signin_user_default_role(self, mock_get_client, mock_calc_expires, mock_get_expiry):
+    async def test_signin_user_default_role(
+        self, mock_get_client, mock_calc_expires, mock_get_expiry, mock_get_user_tenant
+    ):
         """Test signin with default user role"""
+        mock_get_user_tenant.return_value = None
         mock_client = MagicMock()
         mock_user = MagicMock()
         mock_user.id = "user-123"

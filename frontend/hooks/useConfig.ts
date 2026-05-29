@@ -81,6 +81,22 @@ const defaultConfig: GlobalConfig = {
         modelUrl: "",
       },
     },
+    vlm2: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
+    vlm3: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
     stt: {
       id: 0,
       modelName: "",
@@ -173,6 +189,8 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         ),
         rerank: transformModelEntry(backendConfig.models.rerank),
         vlm: transformModelEntry(backendConfig.models.vlm),
+        vlm2: transformModelEntry(backendConfig.models.vlm2),
+        vlm3: transformModelEntry(backendConfig.models.vlm3),
         stt: transformVoiceModelEntry(backendConfig.models.stt),
         tts: transformVoiceModelEntry(backendConfig.models.tts),
       }
@@ -207,7 +225,10 @@ function loadConfigFromStorage(): GlobalConfig | null {
 
     if (storedModelConfig) {
       try {
-        mergedConfig.models = JSON.parse(storedModelConfig);
+        mergedConfig.models = deepMerge(
+          mergedConfig.models,
+          JSON.parse(storedModelConfig)
+        );
       } catch (error) {
         log.error("Failed to parse model config:", error);
       }
@@ -297,10 +318,30 @@ export function useConfig() {
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
   // Whether config has selected a VLM model
-  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+  const isVlmAvailable = !!(
+    config?.models?.vlm?.modelName ||
+    config?.models?.vlm?.displayName ||
+    config?.models?.vlm2?.modelName ||
+    config?.models?.vlm2?.displayName ||
+    config?.models?.vlm3?.modelName ||
+    config?.models?.vlm3?.displayName
+  );
+
+  const isImageUnderstandingAvailable = !!(
+    config?.models?.vlm?.modelName ||
+    config?.models?.vlm?.displayName
+  );
+
+  const isVideoUnderstandingAvailable = !!(
+    config?.models?.vlm3?.modelName ||
+    config?.models?.vlm3?.displayName
+  );
 
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
+
+  // Whether config has selected a Multi-Embedding model
+  const isMultiEmbeddingAvailable = !!(config?.models?.multiEmbedding?.modelName || config?.models?.multiEmbedding?.displayName);
 
   // Default LLM model name from config (modelName or displayName)
   const defaultLlmModelName = config?.models?.llm?.modelName || config?.models?.llm?.displayName || "";
@@ -383,7 +424,10 @@ export function useConfig() {
     appConfig: config?.app,
     modelConfig: config?.models,
     isVlmAvailable,
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
     isEmbeddingAvailable,
+    isMultiEmbeddingAvailable,
     defaultLlmModelName,
     defaultLlmModelConfig,
     updateAppConfig,

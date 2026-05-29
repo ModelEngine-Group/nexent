@@ -605,6 +605,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
     authorization_token VARCHAR(500) DEFAULT NULL,
+    custom_headers JSON DEFAULT NULL,
     source VARCHAR(30),
     registry_json JSONB,
     config_json JSON,
@@ -631,6 +632,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
 COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
+COMMENT ON COLUMN nexent.mcp_record_t.custom_headers IS 'Custom HTTP headers as JSON object for MCP server requests';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
@@ -820,7 +822,7 @@ COMMENT ON COLUMN nexent.tenant_invitation_code_t.group_ids IS 'Associated group
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.capacity IS 'Invitation code capacity';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.expiry_date IS 'Invitation code expiry date';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.status IS 'Invitation code status: IN_USE, EXPIRE, DISABLE, RUN_OUT';
-COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS 'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE';
+COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS 'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE, ASSET_OWNER_INVITE';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.create_time IS 'Create time';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.created_by IS 'Created by';
@@ -1101,7 +1103,42 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (184, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE');
+(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
+(188, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'CREATE'),
+(189, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'READ'),
+(190, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'UPDATE'),
+(191, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'DELETE'),
+(192, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(193, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
+(194, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
+(195, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(196, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
+(197, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
+(198, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
+(199, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'CREATE'),
+(200, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'READ'),
+(201, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'UPDATE'),
+(202, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'DELETE'),
+(203, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'CREATE'),
+(204, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'READ'),
+(205, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'UPDATE'),
+(206, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'DELETE'),
+(207, 'ASSET_OWNER', 'RESOURCE', 'KB', 'CREATE'),
+(208, 'ASSET_OWNER', 'RESOURCE', 'KB', 'READ'),
+(209, 'ASSET_OWNER', 'RESOURCE', 'KB', 'UPDATE'),
+(210, 'ASSET_OWNER', 'RESOURCE', 'KB', 'DELETE'),
+(211, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'CREATE'),
+(212, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'READ'),
+(213, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'UPDATE'),
+(214, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'DELETE'),
+(215, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'CREATE'),
+(216, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'READ'),
+(217, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'UPDATE'),
+(218, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'DELETE'),
+(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ'),
+(220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(221, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/asset-owner-resources')
+;
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
@@ -1223,6 +1260,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     config_schemas JSON,
     config_values JSON,
     source VARCHAR(30) DEFAULT 'official',
+    tenant_id VARCHAR(100),
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1773,7 +1811,7 @@ EXECUTE FUNCTION update_user_oauth_account_t_update_time();
 COMMENT ON TABLE nexent.user_oauth_account_t IS 'User OAuth account table - third-party login bindings';
 COMMENT ON COLUMN nexent.user_oauth_account_t.oauth_account_id IS 'OAuth account ID, primary key';
 COMMENT ON COLUMN nexent.user_oauth_account_t.user_id IS 'Nexent user ID (Supabase UUID)';
-COMMENT ON COLUMN nexent.user_oauth_account_t.provider IS 'OAuth provider name: github, wechat';
+COMMENT ON COLUMN nexent.user_oauth_account_t.provider IS 'OAuth provider name: github, wechat, gde, link_app';
 COMMENT ON COLUMN nexent.user_oauth_account_t.provider_user_id IS 'User ID from the OAuth provider';
 COMMENT ON COLUMN nexent.user_oauth_account_t.provider_email IS 'Email from the OAuth provider';
 COMMENT ON COLUMN nexent.user_oauth_account_t.provider_username IS 'Display name from the OAuth provider';

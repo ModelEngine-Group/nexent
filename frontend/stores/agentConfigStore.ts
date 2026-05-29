@@ -44,6 +44,7 @@ export type EditableAgent = Pick<
 > & {
   skills: Skill[];
   external_sub_agent_id_list?: number[];
+  prompts_hidden?: boolean;
 };
 
 interface AgentConfigStoreState {
@@ -155,7 +156,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     author: "",
     model: llmConfig?.name || "",
     model_id: llmConfig?.id || 0,
-    max_step: 5,
+    max_step: 15,
     provide_run_summary: false,
     tools: [],
     skills: [],
@@ -200,6 +201,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
+        prompts_hidden: agent.prompts_hidden,
       }
     : { ...emptyEditableAgent };
 

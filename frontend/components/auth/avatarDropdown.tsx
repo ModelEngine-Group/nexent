@@ -30,6 +30,25 @@ export function AvatarDropdown() {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
+  const getRoleDisplayName = (role: string) => {
+    switch (role) {
+      case USER_ROLES.SPEED:
+        return t("auth.speed");
+      case USER_ROLES.SU:
+        return t("auth.su");
+      case USER_ROLES.ADMIN:
+        return t("auth.admin");
+      case USER_ROLES.DEV:
+        return t("auth.dev");
+      case USER_ROLES.USER:
+        return t("auth.user");
+      case USER_ROLES.ASSET_OWNER:
+        return t("auth.assetOwner");
+      default:
+        return t("auth.user");
+    }
+  };
+
   // Show loading while authentication is in progress
   if (isLoading) {
     return <Spin size="small" />;
@@ -105,7 +124,7 @@ export function AvatarDropdown() {
           <div className="font-medium">{user.email}</div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
-              {t(`auth.${user.role.toLowerCase()}`)}
+              {getRoleDisplayName(user.role)}
             </Tag>
           </div>
         </div>

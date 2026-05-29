@@ -177,6 +177,14 @@ class STTModelConfig(BaseModel):
     accessToken: Optional[str] = None
 
 
+def _empty_model_config() -> SingleModelConfig:
+    return SingleModelConfig(
+        modelName="",
+        displayName="",
+        apiConfig=ModelApiConfig(apiKey="", modelUrl="")
+    )
+
+
 class TTSModelConfig(BaseModel):
     """TTS model specific configuration with factory, appid, and access token fields"""
     modelName: str
@@ -193,6 +201,8 @@ class ModelConfig(BaseModel):
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
     vlm: SingleModelConfig
+    vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
     tts: TTSModelConfig
 
@@ -328,6 +338,7 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
+    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):
@@ -426,7 +437,7 @@ class AgentInfoRequest(BaseModel):
     author: Optional[str] = None
     model_name: Optional[str] = None
     model_id: Optional[int] = None
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
@@ -669,6 +680,8 @@ class MCPUpdateRequest(BaseModel):
     new_mcp_url: str = Field(..., description="New MCP server URL")
     new_authorization_token: Optional[str] = Field(
         None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
+    custom_headers: Optional[Dict[str, Any]] = Field(
+        None, description="Custom HTTP headers as JSON object")
 
 
 # Tenant Management Data Models
@@ -1108,6 +1121,7 @@ class AddMcpServiceRequest(BaseModel):
     source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
@@ -1147,6 +1161,7 @@ class UpdateMcpServiceRequest(BaseModel):
     server_url: str = Field(..., min_length=1, description="New MCP server URL")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod

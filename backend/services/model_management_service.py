@@ -8,7 +8,6 @@ from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, 
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
-    get_model_by_display_name,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
@@ -31,6 +30,23 @@ from services.vectordatabase_service import get_vector_db_core
 from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
+
+INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
+
+
+def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
+    """Allow the three multimodal slots to share display names across slots."""
+    if not existing_models:
+        return False
+
+    if model_type in INDEPENDENT_MULTIMODAL_MODEL_TYPES:
+        return any(
+            existing.get("model_type") == model_type
+            or existing.get("model_type") not in INDEPENDENT_MULTIMODAL_MODEL_TYPES
+            for existing in existing_models
+        )
+
+    return True
 
 
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
@@ -77,9 +93,9 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
 
         # Check display name conflict scoped by tenant
         if model_data.get("display_name"):
-            existing_model_by_display = get_model_by_display_name(
+            existing_models_by_display = get_models_by_display_name(
                 model_data["display_name"], tenant_id)
-            if existing_model_by_display:
+            if _has_display_name_conflict(existing_models_by_display, model_data.get("model_type")):
                 logging.error(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
                 raise ValueError(
@@ -164,6 +180,13 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             tenant_id, provider, model_type)
         model_list_ids = {model.get("id")
                           for model in model_list} if model_list else set()
+        existing_model_map = {
+            add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            ): model
+            for model in existing_model_list
+        }
 
         # Delete existing models not present
         for model in existing_model_list:
@@ -173,21 +196,20 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
 
         # Create or update new models
         for model in model_list:
+            model["model_type"] = model_type
             _, model_name = split_repo_name(
                 model["id"]) if model.get("id") else ("", "")
             model_repo, model_name_only = split_repo_name(
                 model.get("id", "")) if model.get("id") else ("", "")
             model_display_name = add_repo_to_name(model_repo, model_name_only)
             if model_name:
-                existing_model_by_display = get_model_by_display_name(
-                    model_display_name, tenant_id)
-                if existing_model_by_display:
+                existing_model = existing_model_map.get(model_display_name)
+                if existing_model:
                     # Check if max_tokens has changed
-                    existing_max_tokens = existing_model_by_display.get(
-                        "max_tokens")
+                    existing_max_tokens = existing_model.get("max_tokens")
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
-                        update_model_record(existing_model_by_display["model_id"], {
+                        update_model_record(existing_model["model_id"], {
                                             "max_tokens": new_max_tokens}, user_id)
                     continue
 

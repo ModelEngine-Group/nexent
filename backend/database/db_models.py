@@ -476,6 +476,11 @@ class McpRecord(TableBase):
         doc="Authorization token for MCP server authentication (e.g., Bearer token)",
         default=None,
     )
+    custom_headers = Column(
+        JSON,
+        doc="Custom HTTP headers as JSON object for MCP server requests",
+        default=None,
+    )
     source = Column(String(30), doc="Source type: local/mcp_registry/community")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
     config_json = Column(JSON, doc="MCP config data")
@@ -704,7 +709,7 @@ class UserOAuthAccount(TableBase):
     )
     user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
     provider = Column(
-        String(30), nullable=False, doc="OAuth provider name: github, wechat"
+        String(30), nullable=False, doc="OAuth provider name: github, wechat, gde, link_app"
     )
     provider_user_id = Column(
         String(200), nullable=False, doc="User ID from the OAuth provider"

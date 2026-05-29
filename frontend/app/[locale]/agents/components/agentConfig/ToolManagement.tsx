@@ -35,9 +35,15 @@ const TOOLS_REQUIRING_EMBEDDING = [
   "knowledge_base_search",
 ];
 
-// Tool types that require VLM model
-const TOOLS_REQUIRING_VLM = [
+// Tool types that require the image understanding model
+const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = [
   "analyze_image",
+];
+
+// Tool types that require the video understanding model
+const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = [
+  "analyze_audio",
+  "analyze_video",
 ];
 
 function getToolKbType(
@@ -54,9 +60,18 @@ function getToolKbType(
 /**
  * Check if a tool requires VLM model but VLM is not available
  */
-function isToolDisabledDueToVlm(toolName: string, vlmAvailable: boolean): boolean {
-  if (!TOOLS_REQUIRING_VLM.includes(toolName)) return false;
-  return !vlmAvailable;
+function isToolDisabledDueToVlm(
+  toolName: string,
+  imageUnderstandingAvailable: boolean,
+  videoUnderstandingAvailable: boolean
+): boolean {
+  if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(toolName)) {
+    return !imageUnderstandingAvailable;
+  }
+  if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(toolName)) {
+    return !videoUnderstandingAvailable;
+  }
+  return false;
 }
 
 /**
@@ -98,7 +113,11 @@ export default function ToolManagement({
   // Use tool list hook for data management
   const { availableTools } = useToolList();
 
-  const { isVlmAvailable, isEmbeddingAvailable } = useConfig();
+  const {
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
+    isEmbeddingAvailable,
+  } = useConfig();
 
   // Prefetch knowledge bases for KB tools
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
@@ -358,7 +377,11 @@ export default function ToolManagement({
                           const isSelected = originalSelectedToolIdsSet.has(
                             tool.id
                           );
-                          const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
+                          const isDisabledDueToVlm = isToolDisabledDueToVlm(
+                            tool.name,
+                            isImageUnderstandingAvailable,
+                            isVideoUnderstandingAvailable
+                          );
                           const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
@@ -463,7 +486,11 @@ export default function ToolManagement({
             >
               {group.tools.map((tool) => {
                 const isSelected = originalSelectedToolIdsSet.has(tool.id);
-                const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
+                const isDisabledDueToVlm = isToolDisabledDueToVlm(
+                  tool.name,
+                  isImageUnderstandingAvailable,
+                  isVideoUnderstandingAvailable
+                );
                 const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding

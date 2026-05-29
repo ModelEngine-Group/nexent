@@ -89,6 +89,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
       transportType: draft.transportType,
       serverUrl: draft.serverUrl,
       authorizationToken: draft.authorizationToken,
+      customHeaders: draft.customHeaders,
       containerConfigJson: draft.containerConfigJson,
       containerPort: draft.containerPort,
     });
@@ -135,6 +136,7 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
       okText={t("mcpTools.community.quickAddConfirm")}
       cancelText={t("common.cancel")}
       confirmLoading={submitting}
+      centered
       width={560}
     >
       <Form
@@ -235,6 +237,24 @@ function CommunityQuickAddModal({ controller }: CommunityQuickAddModalProps) {
                 }}
                 className="mt-2 w-full rounded-md"
                 placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+              />
+            </Form.Item>
+            <Form.Item
+              label={t("mcpTools.addModal.customHeaders")}
+              name="customHeaders"
+              className="mb-0 text-sm text-slate-500"
+            >
+              <Input.TextArea
+                value={draft.customHeaders}
+                onChange={(event) => {
+                  controller.updateDraft({
+                    customHeaders: event.target.value,
+                  });
+                  form.setFieldValue("customHeaders", event.target.value);
+                }}
+                rows={2}
+                className="mt-2 w-full rounded-md"
+                placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
               />
             </Form.Item>
           </div>

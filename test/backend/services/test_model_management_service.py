@@ -83,7 +83,22 @@ class _ModelConnectStatusEnum:
         return status or _ModelConnectStatusEnum.NOT_DETECTED.value
 
 
+class _ToolValidateRequest:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _ProcessParams:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def model_dump(self, *args, **kwargs):
+        return dict(self.__dict__)
+
+
 consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
+consts_model_mod.ToolValidateRequest = _ToolValidateRequest
+consts_model_mod.ProcessParams = _ProcessParams
 sys.modules["consts.model"] = consts_model_mod
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")
@@ -93,6 +108,23 @@ consts_const_mod = types.ModuleType("consts.const")
 consts_const_mod.LOCALHOST_IP = "127.0.0.1"
 consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
+consts_const_mod.DATA_PROCESS_SERVICE = "http://data-process"
+consts_const_mod.FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024
+consts_const_mod.MAX_CONCURRENT_UPLOADS = 5
+consts_const_mod.OFFICE_MIME_TYPES = []
+consts_const_mod.UPLOAD_FOLDER = "uploads"
+consts_const_mod.LOCAL_MCP_SERVER = "http://local-mcp"
+consts_const_mod.MCP_MANAGEMENT_API = "http://mcp-management"
+consts_const_mod.LIBREOFFICE_PROFILE_DIR = "libreoffice-profile"
+consts_const_mod.DEFAULT_TENANT_ID = "tenant_id"
+consts_const_mod.DEFAULT_USER_ID = "user_id"
+consts_const_mod.IS_SPEED_MODE = False
+consts_const_mod.SUPABASE_JWT_SECRET = "test-secret"
+consts_const_mod.SUPABASE_URL = "http://supabase"
+consts_const_mod.SUPABASE_KEY = "supabase-key"
+consts_const_mod.SERVICE_ROLE_KEY = "service-role-key"
+consts_const_mod.DEBUG_JWT_EXPIRE_SECONDS = 3600
+consts_const_mod.LANGUAGE = "zh"
 # Fields required by utils.memory_utils and services.vectordatabase_service
 consts_const_mod.MODEL_CONFIG_MAPPING = {
     "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
@@ -193,9 +225,23 @@ utils_name_mod.split_repo_name = _split_repo_name
 utils_name_mod.sort_models_by_id = _sort_models_by_id
 sys.modules["utils.model_name_utils"] = utils_name_mod
 
+# Stub utils.file_management_utils so file_management_service can be imported
+# by other tests in the same pytest process without pulling auth/database deps.
+utils_file_mgmt_mod = types.ModuleType("utils.file_management_utils")
+
+
+async def _save_upload_file(*args, **kwargs):
+    return None
+
+
+utils_file_mgmt_mod.save_upload_file = _save_upload_file
+sys.modules["utils.file_management_utils"] = utils_file_mgmt_mod
+
 # Stub database.model_management_db to avoid importing heavy DB client
 database_mod = types.ModuleType("database")
+database_mod.__path__ = []
 db_mm_mod = types.ModuleType("database.model_management_db")
+db_attachment_mod = types.ModuleType("database.attachment_db")
 
 
 def _noop(*args, **kwargs):
@@ -245,6 +291,22 @@ db_mm_mod.get_model_by_model_id = _get_model_by_model_id
 db_mm_mod.update_model_record = _noop
 sys.modules["database"] = database_mod
 sys.modules["database.model_management_db"] = db_mm_mod
+for _attachment_func in [
+    "copy_file",
+    "delete_file",
+    "file_exists",
+    "get_content_type",
+    "get_file_range",
+    "get_file_size_from_minio",
+    "get_file_stream",
+    "get_file_stream_raw",
+    "get_file_url",
+    "list_files",
+    "upload_fileobj",
+]:
+    setattr(db_attachment_mod, _attachment_func, _noop)
+sys.modules["database.attachment_db"] = db_attachment_mod
+setattr(database_mod, "attachment_db", db_attachment_mod)
 
 # Stub database.tenant_config_db required by utils.config_utils
 db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
@@ -286,10 +348,15 @@ sys.modules["database.tenant_config_db"] = db_tenant_cfg_mod
 services_vdb_mod = types.ModuleType("services.vectordatabase_service")
 
 
+class _ElasticSearchService:
+    pass
+
+
 def _get_vector_db_core():
     return object()
 
 
+services_vdb_mod.ElasticSearchService = _ElasticSearchService
 services_vdb_mod.get_vector_db_core = _get_vector_db_core
 sys.modules["services.vectordatabase_service"] = services_vdb_mod
 
@@ -326,6 +393,11 @@ def _add_repo_to_name(model_repo, model_name):
 def import_svc():
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
+    sys.modules["database"] = database_mod
+    sys.modules["database.model_management_db"] = db_mm_mod
+    setattr(database_mod, "model_management_db", db_mm_mod)
+    sys.modules.pop("backend.services.model_management_service", None)
+    sys.modules.pop("services.model_management_service", None)
     with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
         from backend.services import model_management_service as svc  # type: ignore
     return svc
@@ -335,7 +407,7 @@ def import_svc():
 async def test_create_model_for_tenant_success_llm():
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None) as mock_get_by_display, \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]) as mock_get_by_display, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("huggingface", "llama")):
 
@@ -362,7 +434,7 @@ async def test_create_model_for_tenant_open_router_disables_ssl():
     """When base_url contains 'open/router' ssl_verify should be set to False and model_factory to 'modelengine'."""
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("modelengine", "m")):
 
@@ -389,7 +461,7 @@ async def test_create_model_for_tenant_open_router_disables_ssl():
 async def test_create_model_for_tenant_conflict_raises():
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value={"model_id": "exists"}):
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[{"model_id": "exists", "model_type": "llm"}]):
         user_id = "u1"
         tenant_id = "t1"
         model_data = {
@@ -410,7 +482,7 @@ async def test_create_model_for_tenant_display_name_conflict_valueerror():
     svc = import_svc()
 
     existing_model = {"model_id": 1, "display_name": "existing_name"}
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=existing_model):
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[existing_model]):
         user_id = "u1"
         tenant_id = "t1"
         model_data = {
@@ -428,10 +500,57 @@ async def test_create_model_for_tenant_display_name_conflict_valueerror():
 
 
 @pytest.mark.asyncio
+async def test_create_model_for_tenant_allows_same_display_name_across_multimodal_slots():
+    """Image understanding, image generation, and video understanding are separate slots."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "display_name": "Qwen3.6-27B", "model_type": "vlm"},
+        {"model_id": 2, "display_name": "Qwen3.6-27B", "model_type": "vlm3"},
+    ]
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("Qwen", "Qwen3.6-27B")):
+
+        model_data = {
+            "model_name": "Qwen/Qwen3.6-27B",
+            "display_name": "Qwen3.6-27B",
+            "base_url": "https://api.example.com/v1",
+            "model_type": "vlm2",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_blocks_duplicate_within_same_multimodal_slot():
+    svc = import_svc()
+
+    with mock.patch.object(
+        svc,
+        "get_models_by_display_name",
+        return_value=[{"model_id": 1, "display_name": "Qwen3.6-27B", "model_type": "vlm"}],
+    ):
+        model_data = {
+            "model_name": "Qwen/Qwen3.6-27B",
+            "display_name": "Qwen3.6-27B",
+            "base_url": "https://api.example.com/v1",
+            "model_type": "vlm",
+        }
+
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant("u1", "t1", model_data)
+        assert "already in use" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_create_model_for_tenant_multi_embedding_creates_two_records():
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
 
@@ -453,7 +572,7 @@ async def test_create_model_for_tenant_multi_embedding_creates_two_records():
 async def test_create_model_for_tenant_embedding_sets_dimension():
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
@@ -479,7 +598,7 @@ async def test_create_model_for_tenant_embedding_sets_default_chunk_batch():
     """chunk_batch defaults to 10 when not provided for embedding models."""
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-3-small")):
@@ -508,7 +627,7 @@ async def test_create_model_for_tenant_multi_embedding_sets_default_chunk_batch(
     """chunk_batch defaults to 10 when not provided for multi_embedding models (covers line 79)."""
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
@@ -586,7 +705,7 @@ async def test_batch_create_models_for_tenant_dashscope_provider():
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", return_value=("qwen", "qwen-turbo")), \
             mock.patch.object(svc, "add_repo_to_name", return_value="qwen/qwen-turbo"), \
-            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
             mock.patch.object(svc, "create_model_record", return_value=True):
 
@@ -612,7 +731,7 @@ async def test_batch_create_models_for_tenant_tokenpony_provider():
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", return_value=("gpt", "gpt-4o")), \
             mock.patch.object(svc, "add_repo_to_name", return_value="gpt/gpt-4o"), \
-            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 2})), \
             mock.patch.object(svc, "create_model_record", return_value=True):
 
@@ -645,7 +764,7 @@ async def test_batch_create_models_for_tenant_other_provider():
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "gpt-4")), \
             mock.patch.object(svc, "add_repo_to_name", return_value="openai/gpt-4"), \
-            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
             mock.patch.object(svc, "create_model_record", return_value=True):
 
@@ -673,17 +792,11 @@ async def test_batch_create_models_for_tenant_flow():
 
     existing = [
         {"model_id": "del-id", "model_repo": "silicon", "model_name": "delete"},
-        {"model_id": "keep-id", "model_repo": "silicon", "model_name": "keep"},
+        {"model_id": "keep-id", "model_repo": "silicon", "model_name": "keep", "max_tokens": 1024},
     ]
-
-    def get_by_display(display_name, tenant_id):
-        if display_name == "silicon/keep":
-            return {"model_id": "keep-id", "max_tokens": 1024}
-        return None
 
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing) as mock_get_existing, \
             mock.patch.object(svc, "delete_model_record") as mock_delete, \
-            mock.patch.object(svc, "get_model_by_display_name", side_effect=get_by_display) as mock_get_by_display, \
             mock.patch.object(svc, "update_model_record") as mock_update, \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
             mock.patch.object(svc, "create_model_record") as mock_create:
@@ -692,11 +805,33 @@ async def test_batch_create_models_for_tenant_flow():
 
         mock_get_existing.assert_called_once_with("t1", "silicon", "llm")
         mock_delete.assert_called_once_with("del-id", "u1", "t1")
-        mock_get_by_display.assert_any_call("silicon/keep", "t1")
         mock_update.assert_called_once_with(
             "keep-id", {"max_tokens": 4096}, "u1")
         mock_prep.assert_awaited()
         mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_uses_requested_type_for_each_model():
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "vlm",
+        "models": [
+            {"id": "Qwen/Qwen2.5-VL-72B-Instruct", "model_type": "llm", "max_tokens": 4096},
+        ],
+        "api_key": "k",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"prepared": True})) as mock_prep, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        prepared_model = mock_prep.call_args.kwargs["model"]
+        assert prepared_model["model_type"] == "vlm"
 
 
 @pytest.mark.asyncio
@@ -715,22 +850,16 @@ async def test_batch_create_models_max_tokens_update():
         "api_key": "k",
     }
 
-    def get_by_display(display_name, tenant_id):
-        if display_name == "silicon/model1":
-            # Different from new value
-            return {"model_id": "id1", "max_tokens": 4096}
-        elif display_name == "silicon/model2":
-            return {"model_id": "id2", "max_tokens": 4096}  # Same as new value
-        elif display_name == "silicon/model3":
-            # Existing has value, new is None
-            return {"model_id": "id3", "max_tokens": 2048}
-        return None
+    existing = [
+        {"model_id": "id1", "model_repo": "silicon", "model_name": "model1", "max_tokens": 4096},
+        {"model_id": "id2", "model_repo": "silicon", "model_name": "model2", "max_tokens": 4096},
+        {"model_id": "id3", "model_repo": "silicon", "model_name": "model3", "max_tokens": 2048},
+    ]
 
-    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing), \
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", side_effect=lambda x: ("silicon", x.split("/")[1] if "/" in x else x)), \
-            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda r, n: f"{r}/{n}"), \
-            mock.patch.object(svc, "get_model_by_display_name", side_effect=get_by_display) as mock_get_by_display, \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda *args, **kwargs: f"{kwargs.get('model_repo', args[0] if args else '')}/{kwargs.get('model_name', args[1] if len(args) > 1 else '')}"), \
             mock.patch.object(svc, "update_model_record") as mock_update, \
             mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
             mock.patch.object(svc, "create_model_record", return_value=True):

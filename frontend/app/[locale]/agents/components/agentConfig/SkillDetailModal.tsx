@@ -2,10 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Descriptions, Tag, Tree } from "antd";
+import { Alert, Modal, Descriptions, Tag, Tree } from "antd";
 import type { TreeProps } from "antd/es/tree";
 import { Skill } from "@/types/agentConfig";
-import { fetchSkillFiles, fetchSkillFileContent } from "@/services/agentConfigService";
+import {
+  fetchSkillFiles,
+  fetchSkillFileContent,
+  SkillFilesAccessDeniedError,
+} from "@/services/agentConfigService";
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import {
   buildTreeData,
@@ -19,6 +23,7 @@ import {
 } from "@/lib/skillFileUtils";
 import type { ExtendedSkillFileNode } from "@/types/skill";
 import { SKILL_DETAIL_CONTENT_HEIGHT } from "@/types/skill";
+import log from "@/lib/logger";
 
 interface SkillDetailModalProps {
   skill: Skill | null;
@@ -35,6 +40,7 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
   const [loadingContent, setLoadingContent] = useState(false);
   const [loadingTree, setLoadingTree] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [fileTreeMessage, setFileTreeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (skill && open) {
@@ -51,6 +57,7 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
   const loadSkillFiles = async () => {
     if (!skill) return;
     setLoadingTree(true);
+    setFileTreeMessage(null);
     try {
       const files = await fetchSkillFiles(skill.name);
       const normalizedFiles = normalizeSkillFiles(files);
@@ -59,7 +66,11 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
       setTreeData(built);
       setExpandedKeys(collectDirKeys(built));
     } catch (error) {
-      console.error("Failed to load skill files:", error);
+      if (error instanceof SkillFilesAccessDeniedError) {
+        setFileTreeMessage(error.message);
+      } else {
+        log.error("Failed to load skill files:", error);
+      }
       setTreeData([]);
     } finally {
       setLoadingTree(false);
@@ -76,7 +87,7 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
       const content = await fetchSkillFileContent(skill.name, relativePath);
       setFileContent(content || "");
     } catch (error) {
-      console.error("Failed to load file content:", error);
+      log.error("Failed to load file content:", error);
       setFileContent("");
     } finally {
       setLoadingContent(false);
@@ -88,6 +99,7 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
     setFileContent("");
     setTreeData([]);
     setExpandedKeys([]);
+    setFileTreeMessage(null);
     onClose();
   };
 
@@ -249,6 +261,13 @@ export default function SkillDetailModal({ skill, open, onClose }: SkillDetailMo
                       <div className="text-center text-gray-400 py-4">
                         {t("common.loading")}
                       </div>
+                    ) : fileTreeMessage ? (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message={fileTreeMessage}
+                        className="m-2"
+                      />
                     ) : treeData.length > 0 ? (
                       <Tree
                         showIcon

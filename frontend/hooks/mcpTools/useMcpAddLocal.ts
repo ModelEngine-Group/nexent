@@ -48,6 +48,17 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       }
     }
 
+    // Parse custom headers JSON if provided
+    let customHeaders: Record<string, string> | undefined;
+    if (draft.customHeaders?.trim()) {
+      try {
+        customHeaders = JSON.parse(draft.customHeaders.trim());
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return false;
+      }
+    }
+
     setSubmitting(true);
     try {
       if (isContainer) {
@@ -73,6 +84,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           source: McpSource.LOCAL,
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken?.trim() || undefined,
+          custom_headers: customHeaders,
           tags: draft.tags,
         });
       }

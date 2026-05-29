@@ -7,6 +7,8 @@ export const MODEL_TYPES = {
   STT: "stt",
   TTS: "tts",
   VLM: "vlm",
+  VLM2: "vlm2",
+  VLM3: "vlm3",
 } as const;
 
 // Model source constants
@@ -101,6 +103,7 @@ export const USER_ROLES = {
   ADMIN: "ADMIN",
   DEV: "DEV",
   USER: "USER",
+  ASSET_OWNER: "ASSET_OWNER",
 } as const;
 
 // Memory tab key constants

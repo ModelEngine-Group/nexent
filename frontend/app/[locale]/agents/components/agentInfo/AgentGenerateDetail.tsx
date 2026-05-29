@@ -13,6 +13,7 @@ import {
   Flex,
   Card,
   App,
+  Alert,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
@@ -38,6 +39,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
+import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
 
@@ -88,8 +90,8 @@ export default function AgentGenerateDetail({}) {
     );
   }, [defaultLlmModelConfig, availableLlmModels, models]);
 
-  // Agent list for name uniqueness validation
-  const { agents: agentList } = useAgentList(user?.tenantId ?? null);
+  // Agent list for name uniqueness validation (auth-scoped, same as agent dev sidebar)
+  const { agents: agentList } = useAgentList("");
 
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
@@ -159,7 +161,7 @@ export default function AgentGenerateDetail({}) {
       agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
       mainAgentModel: editedAgent.model,
       mainAgentModelId: editedAgent.model_id,
-      mainAgentMaxStep: editedAgent.max_step || 5,
+      mainAgentMaxStep: editedAgent.max_step || 15,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -331,6 +333,8 @@ export default function AgentGenerateDetail({}) {
     );
   };
 
+  const promptsHidden = isAgentPromptsHidden(editedAgent);
+
   const renderPromptSection = (
     type: "duty" | "constraint" | "few-shots",
     fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
@@ -339,6 +343,14 @@ export default function AgentGenerateDetail({}) {
   ) => {
     return (
       <div className="flex flex-col h-full">
+        {promptsHidden && (
+          <Alert
+            type="warning"
+            showIcon
+            className="mb-3 shrink-0"
+            message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+          />
+        )}
         {renderPromptToolbar(type, title)}
         <Form
           form={form}
@@ -362,7 +374,7 @@ export default function AgentGenerateDetail({}) {
         <TextArea
           placeholder={placeholder}
           style={promptEditorStyle}
-          disabled={!editable || isGenerating}
+          disabled={!editable || isGenerating || promptsHidden}
           onBlur={(e) => onBlurUpdate(e.target.value)}
         />
       </Form.Item>
@@ -665,7 +677,7 @@ export default function AgentGenerateDetail({}) {
         <Col className="w-full h-full">
           <Tabs
             value={activeTab}
-            onValueChange={(value) => {
+            onValueChange={(value: string) => {
               setActiveTab(value);
             }}
             className="agent-config-tabs flex flex-col h-full w-full"
@@ -861,14 +873,14 @@ export default function AgentGenerateDetail({}) {
                               {
                                 type: "number",
                                 min: 1,
-                                max: 20,
+                                max: 30,
                                 message: t("businessLogic.config.maxSteps"),
                               },
                             ]}
                           >
                             <InputNumber
                               min={1}
-                              max={20}
+                              max={30}
                               style={{ width: "100%" }}
                               onBlur={() => {
                                 const value = form.getFieldValue("mainAgentMaxStep");

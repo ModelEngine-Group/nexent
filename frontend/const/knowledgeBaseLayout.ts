@@ -56,4 +56,6 @@ export const KB_TAG_VARIANTS = {
   model: "bg-green-50 text-green-700 border border-green-200",
   // Yellow tag for model mismatch
   warning: "bg-yellow-100 text-yellow-800 border border-yellow-200",
+  // Red tag for multimodal models
+  red: "bg-red-50 text-red-700 border border-red-200",
 } as const;

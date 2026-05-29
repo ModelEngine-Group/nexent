@@ -24,6 +24,7 @@ from database.remote_mcp_db import (
     get_mcp_authorization_token_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
+    get_mcp_custom_headers_by_name_and_url,
 )
 from database.tool_db import (
     check_tool_list_initialized,
@@ -38,7 +39,7 @@ from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
 from database.client import minio_client
-from services.image_service import get_vlm_model
+from services.image_service import get_video_understanding_model, get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.vectordatabase_service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
@@ -47,19 +48,24 @@ from utils.tool_utils import get_local_tools_classes, get_local_tools_descriptio
 logger = logging.getLogger("tool_configuration_service")
 
 
-def _create_mcp_transport(url: str, authorization_token: Optional[str] = None):
+def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, custom_headers: Optional[Dict[str, Any]] = None):
     """
     Create appropriate MCP transport based on URL ending.
 
     Args:
         url: MCP server URL
         authorization_token: Optional authorization token
+        custom_headers: Optional custom HTTP headers
 
     Returns:
         Transport instance (SSETransport or StreamableHttpTransport)
     """
     url_stripped = url.strip()
-    headers = {"Authorization": authorization_token} if authorization_token else {}
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
 
     if url_stripped.endswith("/sse"):
         return SSETransport(url=url_stripped, headers=headers)
@@ -282,7 +288,9 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
                 tools_info.extend(await get_tool_from_remote_mcp_server(
                     mcp_server_name=record["mcp_name"],
                     remote_mcp_server=record["mcp_server"],
-                    tenant_id=tenant_id
+                    tenant_id=tenant_id,
+                    authorization_token=record.get("authorization_token"),
+                    custom_headers=record.get("custom_headers"),
                 ))
             except Exception as e:
                 logger.error(f"mcp connection error: {str(e)}")
@@ -354,7 +362,8 @@ async def get_tool_from_remote_mcp_server(
     mcp_server_name: str,
     remote_mcp_server: str,
     tenant_id: Optional[str] = None,
-    authorization_token: Optional[str] = None
+    authorization_token: Optional[str] = None,
+    custom_headers: Optional[Dict[str, Any]] = None
 ):
     """
     Get the tool information from the remote MCP server, avoid blocking the event loop
@@ -364,6 +373,7 @@ async def get_tool_from_remote_mcp_server(
         remote_mcp_server: URL of the MCP server
         tenant_id: Optional tenant ID for database lookup of authorization_token
         authorization_token: Optional authorization token for authentication (if not provided and tenant_id is given, will be fetched from database)
+        custom_headers: Optional custom HTTP headers
     """
     # Get authorization token from database if not provided
     if authorization_token is None and tenant_id:
@@ -373,10 +383,18 @@ async def get_tool_from_remote_mcp_server(
             tenant_id=tenant_id
         )
 
+    # Get custom headers from database if not provided
+    if custom_headers is None and tenant_id:
+        custom_headers = get_mcp_custom_headers_by_name_and_url(
+            mcp_name=mcp_server_name,
+            mcp_server=remote_mcp_server,
+            tenant_id=tenant_id
+        )
+
     tools_info = []
 
     try:
-        transport = _create_mcp_transport(remote_mcp_server, authorization_token)
+        transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
         client = Client(transport=transport, timeout=10)
         async with client:
             # List available operations
@@ -496,7 +514,8 @@ async def list_all_tools(tenant_id: str):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
 
-            # Merge inputs description_zh from SDK
+            # Use SDK full input schema for local tools to keep runtime inputs
+            # aligned with current tool code (instead of stale DB snapshots).
             inputs_str = tool.get("inputs", "{}")
             try:
                 inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
@@ -529,7 +548,6 @@ async def list_all_tools(tenant_id: str):
             "category": tool.get("category")
         }
         formatted_tools.append(formatted_tool)
-
     return formatted_tools
 
 
@@ -549,7 +567,8 @@ async def _call_mcp_tool(
     mcp_url: str,
     tool_name: str,
     inputs: Optional[Dict[str, Any]],
-    authorization_token: Optional[str] = None
+    authorization_token: Optional[str] = None,
+    custom_headers: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Common method to call MCP tool with connection handling.
@@ -559,6 +578,7 @@ async def _call_mcp_tool(
         tool_name: Name of the tool to call
         inputs: Parameters to pass to the tool
         authorization_token: Optional authorization token for authentication
+        custom_headers: Optional custom HTTP headers
 
     Returns:
         Dict containing tool execution result
@@ -566,7 +586,7 @@ async def _call_mcp_tool(
     Raises:
         MCPConnectionError: If MCP connection fails
     """
-    transport = _create_mcp_transport(mcp_url, authorization_token)
+    transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
     client = Client(transport=transport)
     async with client:
         # Check if connected
@@ -630,16 +650,22 @@ async def _validate_mcp_tool_remote(
     if not actual_mcp_url:
         raise NotFoundException(f"MCP server not found for name: {usage}")
 
-    # Get authorization token from database
+    # Get authorization token and custom headers from database
     authorization_token = None
+    custom_headers = None
     if tenant_id:
         authorization_token = get_mcp_authorization_token_by_name_and_url(
             mcp_name=usage,
             mcp_server=actual_mcp_url,
             tenant_id=tenant_id
         )
+        custom_headers = get_mcp_custom_headers_by_name_and_url(
+            mcp_name=usage,
+            mcp_server=actual_mcp_url,
+            tenant_id=tenant_id
+        )
 
-    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs, authorization_token)
+    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs, authorization_token, custom_headers)
 
 
 def _get_tool_class_by_name(tool_name: str) -> Optional[type]:
@@ -695,6 +721,8 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
+        runtime_inputs = dict(inputs or {})
+
         # Parse instantiation parameters first
         instantiation_params = params or {}
         # Get signature and extract default values for all parameters
@@ -718,6 +746,7 @@ def _validate_local_tool(
 
         if tool_name == "knowledge_base_search":
             index_names = instantiation_params.get("index_names", [])
+            is_multimodal = instantiation_params.pop("multimodal", False)
 
             # Must have embedding model for knowledge base search
             if not index_names or not tenant_id:
@@ -779,6 +808,7 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
+            # get_vlm_model reads the first multimodal slot, now shown as image understanding.
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
@@ -788,6 +818,23 @@ def _validate_local_tool(
             params = {
                 **instantiation_params,
                 'vlm_model': image_to_text_model,
+                'storage_client': minio_client,
+                'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name in ["analyze_audio", "analyze_video"]:
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
+            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id)
+            model_display_name = getattr(
+                video_understanding_model, 'display_name', None)
+            set_monitoring_context(tenant_id=tenant_id)
+            set_monitoring_operation(
+                "tool_validation", display_name=model_display_name)
+            params = {
+                **instantiation_params,
+                'vlm_model': video_understanding_model,
                 'storage_client': minio_client,
                 'validate_url_access': lambda urls: validate_urls_access(urls, user_id)
             }
@@ -812,6 +859,17 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         else:
             tool_instance = tool_class(**instantiation_params)
+
+        # # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
+        # declared_inputs = getattr(tool_class, "inputs", {}) or {}
+        # allowed_input_names = (
+        #     set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
+        # )
+        # filtered_runtime_inputs = (
+        #     {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
+        #     if allowed_input_names
+        #     else runtime_inputs
+        # )
 
         result = tool_instance.forward(**(inputs or {}))
         return result

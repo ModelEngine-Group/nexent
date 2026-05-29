@@ -110,7 +110,6 @@ export default function UserProfileComp() {
   const isAdminOrSuperAdmin =
     user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
   const isCasUser = user?.authProvider === "cas";
-
   const getRoleDisplayName = (role: string) => {
     switch (role) {
       case USER_ROLES.SPEED:

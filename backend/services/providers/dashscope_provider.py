@@ -6,6 +6,75 @@ from consts.provider import DASHSCOPE_GET_URL
 from services.providers.base import AbstractModelProvider, _classify_provider_error
 
 
+DASHSCOPE_IMAGE_GENERATION_KEYWORDS = (
+    "image",
+    "wanx",
+    "aitryon",
+    "tryon",
+    "flux",
+    "stable-diffusion",
+    "sdxl",
+)
+DASHSCOPE_IMAGE_UNDERSTANDING_KEYWORDS = (
+    "qwen-vl",
+    "qwen2-vl",
+    "qwen2.5-vl",
+    "qwen3-vl",
+    "qwen3.5-vl",
+    "qwen3.6-vl",
+    "-vl",
+    "vl-",
+    "vision",
+    "visual",
+    "ocr",
+    "qwen3.6",
+    "qwen-3.6",
+)
+DASHSCOPE_VIDEO_UNDERSTANDING_KEYWORDS = ("omni", "video-understanding", "video-ocr")
+
+
+def _modality_set(value) -> set:
+    if not value:
+        return set()
+    if isinstance(value, str):
+        return {value.lower()}
+    return {str(item).lower() for item in value}
+
+
+def _has_keyword(text: str, keywords: tuple) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _is_dashscope_explicit_image_understanding_model(model_id: str) -> bool:
+    return _has_keyword(model_id, DASHSCOPE_IMAGE_UNDERSTANDING_KEYWORDS)
+
+
+def _is_dashscope_image_generation_model(model_id: str, desc: str, req_mods: set, res_mods: set) -> bool:
+    if _is_dashscope_explicit_image_understanding_model(model_id):
+        return False
+    return "image" in res_mods or _has_keyword(model_id, DASHSCOPE_IMAGE_GENERATION_KEYWORDS)
+
+
+def _is_dashscope_video_understanding_model(model_id: str, desc: str, req_mods: set, res_mods: set) -> bool:
+    searchable_text = f"{model_id} {desc.lower()}"
+    if "video" in req_mods and "text" in res_mods:
+        return True
+    return _has_keyword(searchable_text, DASHSCOPE_VIDEO_UNDERSTANDING_KEYWORDS)
+
+
+def _is_dashscope_image_understanding_model(model_id: str, desc: str, req_mods: set, res_mods: set) -> bool:
+    searchable_text = f"{model_id} {desc.lower()}"
+    if _is_dashscope_image_generation_model(model_id, desc, req_mods, res_mods):
+        return False
+    if _is_dashscope_video_understanding_model(model_id, desc, req_mods, res_mods):
+        return False
+    if ("image" in req_mods or "video" in req_mods) and "text" in res_mods:
+        return True
+    return _is_dashscope_explicit_image_understanding_model(model_id) or _has_keyword(
+        searchable_text, DASHSCOPE_IMAGE_UNDERSTANDING_KEYWORDS
+    )
+
+
 class DashScopeModelProvider(AbstractModelProvider):
     """Concrete implementation for DashScope (Aliyun) provider."""
 
@@ -57,6 +126,8 @@ class DashScopeModelProvider(AbstractModelProvider):
             categorized_models = {
                 "chat": [],  # Maps to "llm"
                 "vlm": [],  # Maps to "vlm"
+                "vlm2": [],  # Maps to image generation models
+                "vlm3": [],  # Maps to video understanding models
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
                 "rerank": [],  # Maps to "rerank"
                 "tts": [],  # Maps to "tts"
@@ -71,6 +142,8 @@ class DashScopeModelProvider(AbstractModelProvider):
                 metadata = model_obj.get('inference_metadata') or {}
                 req_mod = metadata.get('request_modality', [])
                 res_mod = metadata.get('response_modality', [])
+                req_mods = _modality_set(req_mod)
+                res_mods = _modality_set(res_mod)
                 model_obj.setdefault("object", model_obj.get("object", "model"))
                 model_obj.setdefault("owned_by", model_obj.get("owned_by", "dashscope"))
                 cleaned_model = {
@@ -107,8 +180,17 @@ class DashScopeModelProvider(AbstractModelProvider):
                     continue
 
                 # 5. VLM
-                vision_mods = {'Image', 'Video'}
-                if (set(req_mod) & vision_mods) or (set(res_mod) & vision_mods) or '视觉' in desc:
+                if _is_dashscope_video_understanding_model(m_id, desc, req_mods, res_mods):
+                    cleaned_model.update({"model_tag": "chat", "model_type": "vlm3"})
+                    categorized_models['vlm3'].append(cleaned_model)
+                    continue
+
+                if _is_dashscope_image_generation_model(m_id, desc, req_mods, res_mods):
+                    cleaned_model.update({"model_tag": "chat", "model_type": "vlm2"})
+                    categorized_models['vlm2'].append(cleaned_model)
+                    continue
+
+                if _is_dashscope_image_understanding_model(m_id, desc, req_mods, res_mods):
                     cleaned_model.update({"model_tag": "chat", "model_type": "vlm"})
                     categorized_models['vlm'].append(cleaned_model)
                     continue
@@ -124,7 +206,10 @@ class DashScopeModelProvider(AbstractModelProvider):
             elif target_model_type in ("embedding", "multi_embedding"):
                 return categorized_models["embedding"]
             elif target_model_type in categorized_models:
-                return categorized_models[target_model_type]
+                return [
+                    {**model, "model_type": target_model_type}
+                    for model in categorized_models[target_model_type]
+                ]
             else:
                 return []
         except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:

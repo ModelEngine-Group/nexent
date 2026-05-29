@@ -12,6 +12,9 @@ import {
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 
+// Re-export for consumers that import this type from the hook module.
+export type { ImportAgentData };
+
 export interface UseAgentImportOptions {
   onSuccess?: () => void;
   onError?: (error: Error) => void;

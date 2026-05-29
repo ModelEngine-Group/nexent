@@ -8,19 +8,50 @@ import asyncio
 import sys
 import os
 import types
-from unittest.mock import MagicMock, patch, AsyncMock
+import importlib.machinery
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
 # Apply patches that need to be active before imports
 from unittest.mock import patch as mock_patch
 
-mock_patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-mock_patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()
-mock_patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-mock_patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-mock_patch('redis.Redis', return_value=MagicMock()).start()
+# Mock external dependencies
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
+sys.modules['botocore'] = MagicMock()
+sys.modules['botocore.client'] = MagicMock()
+sys.modules['botocore.exceptions'] = MagicMock()
+sys.modules['nexent'] = MagicMock()
+nexent_core = types.ModuleType('nexent.core')
+sys.modules['nexent.core'] = nexent_core
+nexent_core_agents = types.ModuleType('nexent.core.agents')
+sys.modules['nexent.core.agents'] = nexent_core_agents
 
+
+nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.agent_model')
+
+
+class MockToolConfig:
+    pass
+
+
+nexent_core_agents_agent_model.ToolConfig = MockToolConfig
+sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
+nexent_nexent_vector_database = types.ModuleType('nexent.vector_database')
+sys.modules['nexent.vector_database'] = nexent_nexent_vector_database
+nexent_nexent_vector_database = types.ModuleType('nexent.vector_database.base')
+
+
+class MockVectorDatabaseCore:
+    pass
+
+
+nexent_nexent_vector_database.VectorDatabaseCore = MockVectorDatabaseCore
+sys.modules['nexent.vector_database.base'] = nexent_nexent_vector_database
 # Create mock for vectordatabase_service BEFORE importing the app
 vectordatabase_service_mock = types.ModuleType('services.vectordatabase_service')
 
@@ -41,6 +72,20 @@ sys.modules['services.vectordatabase_service'] = vectordatabase_service_mock
 # Mock other services that might be imported
 sys.modules['services.redis_service'] = types.ModuleType('services.redis_service')
 sys.modules['services.group_service'] = types.ModuleType('services.group_service')
+
+# Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
+utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
+utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("test_user_id", "test_tenant_id", "en"))
+sys.modules['utils.auth_utils'] = utils_auth_utils_mock
+
+utils_config_utils_mock = types.ModuleType('utils.config_utils')
+mock_tenant_config_manager = MagicMock()
+mock_tenant_config = MagicMock()
+mock_tenant_config.get.return_value = None
+mock_tenant_config_manager.load_config.return_value = mock_tenant_config
+utils_config_utils_mock.tenant_config_manager = mock_tenant_config_manager
+sys.modules['utils.config_utils'] = utils_config_utils_mock
 
 # Import the modules we need
 from fastapi.testclient import TestClient

@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+﻿import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
@@ -66,6 +66,23 @@ const DEFAULT_FORM_STATE = {
   accessToken: "",
   // TTS specific fields
   ttsProvider: "dashscope", // ali or volcengine
+};
+
+const resolveConnectivityModelType = (type: ModelType): ModelType =>
+  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3
+    ? (MODEL_TYPES.VLM as ModelType)
+    : type;
+
+const resolveConfigKey = (type: ModelType): string =>
+  type;
+
+const isVlmConfigType = (type: ModelType): boolean =>
+  type === MODEL_TYPES.VLM || type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3;
+
+const emptyModelConfig = {
+  modelName: "",
+  displayName: "",
+  apiConfig: { apiKey: "", modelUrl: "" },
 };
 
 // Connectivity status type comes from utils
@@ -198,7 +215,7 @@ export const ModelAddDialog = ({
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig, saveConfig } = useConfig();
+  const { modelConfig: currentModelConfig, updateModelConfig, saveConfig } = useConfig();
 
   // Parse backend error message and return i18n key with params
   const parseModelError = (
@@ -490,7 +507,7 @@ export const ModelAddDialog = ({
       const modelType =
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : form.type;
+          : resolveConnectivityModelType(form.type);
 
       let connectivity = false;
 
@@ -498,7 +515,8 @@ export const ModelAddDialog = ({
       if (tenantId) {
         connectivity = await modelService.checkManageTenantModelConnectivity(
           tenantId,
-          form.displayName || form.name
+          form.displayName || form.name,
+          modelType
         );
       } else {
         // For STT models, build the appropriate config based on provider
@@ -651,6 +669,32 @@ export const ModelAddDialog = ({
           type: modelType,
           models: modelsData,
         });
+      }
+
+      if (isVlmConfigType(form.type) && enabledModels.length > 0) {
+        const selectedModel = enabledModels[0];
+        const selectedDisplayName = selectedModel.displayName || selectedModel.id || "";
+        const configKey = resolveConfigKey(form.type);
+        const vlmConfigUpdate: any = {
+          [configKey]: {
+            modelName: selectedModel.id || selectedModel.model_name || "",
+            displayName: selectedDisplayName,
+            apiConfig: {
+              apiKey: form.apiKey,
+              modelUrl: "",
+            },
+          },
+        };
+        for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+          if (
+            key !== configKey &&
+            currentModelConfig?.[key]?.displayName === selectedDisplayName
+          ) {
+            vlmConfigUpdate[key] = emptyModelConfig;
+          }
+        }
+        updateModelConfig(vlmConfigUpdate);
+        await persistModelConfig();
       }
 
       // Reset form state and close dialog on success
@@ -841,6 +885,7 @@ export const ModelAddDialog = ({
 
       // Update the local storage according to the model type
       let configUpdate: any = {};
+      const configKey = resolveConfigKey(form.type);
 
       switch (modelType) {
         case MODEL_TYPES.LLM:
@@ -853,7 +898,17 @@ export const ModelAddDialog = ({
           configUpdate = { multiEmbedding: modelConfig };
           break;
         case MODEL_TYPES.VLM:
-          configUpdate = { vlm: modelConfig };
+        case MODEL_TYPES.VLM2:
+        case MODEL_TYPES.VLM3:
+          configUpdate = { [configKey]: modelConfig };
+          for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+            if (
+              key !== configKey &&
+              currentModelConfig?.[key]?.displayName === modelConfig.displayName
+            ) {
+              configUpdate[key] = emptyModelConfig;
+            }
+          }
           break;
         case MODEL_TYPES.RERANK:
           configUpdate = { rerank: modelConfig };
@@ -996,7 +1051,15 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.EMBEDDING}>
               {t("model.type.embedding")}
             </Option>
-            <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
+            <Option value={MODEL_TYPES.VLM}>
+              {t("model.type.imageUnderstanding")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM2}>
+              {t("model.type.imageGeneration")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM3}>
+              {t("model.type.videoUnderstanding")}
+            </Option>
             <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
@@ -1643,7 +1706,7 @@ export const ModelAddDialog = ({
               )}
               {isSTTModel && (
                 <>
-                  <Tooltip title={t("model.provider.volengine")}>
+                  <Tooltip title={t("model.provider.volcengine")}>
                     <a
                       href={PROVIDER_LINKS.volcengine}
                       target="_blank"
@@ -1673,7 +1736,7 @@ export const ModelAddDialog = ({
               )}
               {isTTSModel && (
                 <>
-                  <Tooltip title={t("model.provider.volengine")}>
+                  <Tooltip title={t("model.provider.volcengine")}>
                     <a
                       href={PROVIDER_LINKS.volcengine}
                       target="_blank"

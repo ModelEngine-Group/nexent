@@ -3,15 +3,21 @@ Unit tests for backend.services.user_service module
 """
 import sys
 import os
+import importlib.machinery
+import types
 
 # Add backend path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 # Mock external dependencies before any imports
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['supabase'] = MagicMock()
 sys.modules['nexent'] = MagicMock()
@@ -534,7 +540,7 @@ class TestDeleteUserAndCleanup:
         )
         mock_clear_memory = mocker.patch(
             "backend.services.user_service.clear_memory",
-            new_callable=mocker.AsyncMock
+            new_callable=AsyncMock
         )
         mock_get_admin = mocker.patch(
             "backend.services.user_service.get_supabase_admin_client"
@@ -587,7 +593,7 @@ class TestDeleteUserAndCleanup:
         )
         mocker.patch(
             "backend.services.user_service.clear_memory",
-            new_callable=mocker.AsyncMock,
+            new_callable=AsyncMock,
             side_effect=Exception("memory failed")
         )
         mocker.patch(

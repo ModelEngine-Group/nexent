@@ -63,6 +63,8 @@ export interface Agent {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
+  prompts_hidden?: boolean;
   current_version_no?: number;
   is_a2a_server?: boolean;
 }
@@ -399,6 +401,7 @@ export interface McpServer {
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
+  custom_headers?: Record<string, string> | null;
   mcp_id: number;
   /**
    * Per-item permission returned by /mcp/list.

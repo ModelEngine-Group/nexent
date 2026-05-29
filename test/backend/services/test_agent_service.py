@@ -49,8 +49,7 @@ sys.modules['elasticsearch'] = MagicMock()
 sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.create_engine'] = MagicMock()
 
-# Mock database submodules
-sys.modules['database'] = MagicMock()
+# Mock database submodules (do not replace the parent `database` package to avoid breaking other tests)
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.remote_mcp_db'] = MagicMock()
@@ -61,6 +60,16 @@ sys.modules['database.model_management_db'] = MagicMock()
 
 # Mock a2a_agent_db (referenced by agent_service.py)
 sys.modules['database.a2a_agent_db'] = MagicMock()
+sys.modules['database.skill_db'] = MagicMock()
+
+# Stub database.client early so real DB modules are not loaded during import
+_mock_db_client = MagicMock()
+_mock_db_client.get_db_session = MagicMock()
+_mock_db_client.as_dict = MagicMock()
+_mock_db_client.MinioClient = MagicMock()
+_mock_db_client.db_client = MagicMock()
+sys.modules['database.client'] = _mock_db_client
+sys.modules['backend.database.client'] = _mock_db_client
 
 # Mock services submodules
 services_module = types.ModuleType("services")
@@ -85,6 +94,19 @@ sys.modules['services.skill_service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 sys.modules['services.skill_service'] = MagicMock()
 setattr(services_module, 'skill_service', sys.modules['services.skill_service'])
+
+# Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
+import importlib.util
+from pathlib import Path
+
+_asset_owner_path = Path(__file__).resolve().parents[3] / "backend" / "services" / "asset_owner_visibility.py"
+_asset_owner_spec = importlib.util.spec_from_file_location(
+    "services.asset_owner_visibility", _asset_owner_path
+)
+_asset_owner_mod = importlib.util.module_from_spec(_asset_owner_spec)
+_asset_owner_spec.loader.exec_module(_asset_owner_mod)
+sys.modules["services.asset_owner_visibility"] = _asset_owner_mod
+setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 
 # Mock agents submodules
 sys.modules['agents'] = MagicMock()
@@ -9673,7 +9695,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
     mock_agent_info.description = "desc"
     mock_agent_info.business_description = "biz"
     mock_agent_info.author = "author"
-    mock_agent_info.max_steps = 25  # Too high (> 20)
+    mock_agent_info.max_steps = 35  # Too high (> 30)
     mock_agent_info.provide_run_summary = True
     mock_agent_info.duty_prompt = "duty"
     mock_agent_info.constraint_prompt = "constraint"

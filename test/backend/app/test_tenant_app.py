@@ -1,18 +1,44 @@
-"""
-Unit tests for backend.apps.tenant_app module.
-
-These tests verify the tenant endpoint logic by directly testing the exception handling
-and response patterns used in the tenant_app router.
-"""
+import types
+import importlib.machinery
 import pytest
 import sys
-import types
-from http import HTTPStatus
-from unittest.mock import MagicMock, AsyncMock
+import os
+
+# Import exception classes and models
+from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+
+# Import the modules we need
+from unittest.mock import MagicMock, AsyncMock, patch
 
 
 # Import exceptions
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+
+# Add path for correct imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
+
+# Mock external dependencies
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
+sys.modules['psycopg2'] = MagicMock()
+sys.modules['supabase'] = MagicMock()
+
+# Apply critical patches before importing any modules
+storage_client_mock = MagicMock()
+minio_mock = MagicMock()
+minio_mock._ensure_bucket_exists = MagicMock()
+minio_mock.client = MagicMock()
+
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_mock).start()
+patch('database.client.MinioClient', return_value=minio_mock).start()
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
+
+
 
 
 services_module = types.ModuleType("services")

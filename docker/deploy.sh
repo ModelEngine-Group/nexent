@@ -27,6 +27,7 @@ fi
 MODE_CHOICE_SAVED=""
 VERSION_CHOICE_SAVED=""
 IS_MAINLAND_SAVED=""
+ENABLE_SKILLS_SAVED="Y"
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
 APP_VERSION=""
@@ -428,6 +429,7 @@ persist_deploy_options() {
     echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
     echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "ENABLE_SKILLS=\"${ENABLE_SKILLS_SAVED}\""
     echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
     echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
   } > "$DEPLOY_OPTIONS_FILE"
@@ -1433,7 +1435,7 @@ docker_compose_command=""
 case $version_type in
     "v1")
         echo "Detected Docker Compose V1, version: $version_number"
-        # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
+        # The version 1.28.0 is the minimum requirement in Docker Compose v1 for default interpolation syntax.
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
             exit 1

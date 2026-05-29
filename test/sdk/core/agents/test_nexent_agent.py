@@ -470,6 +470,8 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         top_p=mock_model_config.top_p,
         ssl_verify=True,
         display_name=mock_model_config.cite_name,
+        extra_body=mock_model_config.extra_body,
+        max_tokens=mock_model_config.max_tokens,
         timeout_seconds=mock_model_config.timeout_seconds,
     )
 
@@ -500,6 +502,8 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         top_p=mock_deep_thinking_model_config.top_p,
         ssl_verify=True,
         display_name=mock_deep_thinking_model_config.cite_name,
+        extra_body=mock_deep_thinking_model_config.extra_body,
+        max_tokens=mock_deep_thinking_model_config.max_tokens,
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
     )
 
@@ -2471,6 +2475,52 @@ class TestCreateLocalToolAnalyze:
         call_kwargs = mock_tool_class.call_args[1]
         assert call_kwargs["observer"] == nexent_agent_instance.observer
         assert call_kwargs["vlm_model"] == ["gpt-4-vision"]
+        assert call_kwargs["storage_client"] == "storage"
+        assert call_kwargs["param1"] == "value1"
+        assert result == mock_tool_instance
+
+    @pytest.mark.parametrize(
+        "class_name,tool_name",
+        [
+            ("AnalyzeAudioTool", "analyze_audio"),
+            ("AnalyzeVideoTool", "analyze_video"),
+        ],
+    )
+    def test_create_local_tool_analyze_audio_video(self, nexent_agent_instance, class_name, tool_name):
+        """Test successful audio/video analysis tool creation."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name=class_name,
+            name=tool_name,
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"param1": "value1"},
+            source="local",
+            metadata={
+                "vlm_model": ["video-understanding-model"],
+                "storage_client": "storage"
+            }
+        )
+
+        original_value = nexent_agent.__dict__.get(class_name)
+        nexent_agent.__dict__[class_name] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__[class_name] = original_value
+            elif class_name in nexent_agent.__dict__:
+                del nexent_agent.__dict__[class_name]
+
+        mock_tool_class.assert_called_once()
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["observer"] == nexent_agent_instance.observer
+        assert call_kwargs["vlm_model"] == ["video-understanding-model"]
         assert call_kwargs["storage_client"] == "storage"
         assert call_kwargs["param1"] == "value1"
         assert result == mock_tool_instance

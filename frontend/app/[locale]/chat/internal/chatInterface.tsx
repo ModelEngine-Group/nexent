@@ -38,7 +38,7 @@ import {
   extractAssistantMsgFromResponse,
 } from "@/lib/chatMessageExtractor";
 
-import { Layout } from "antd";
+import { Layout, message } from "antd";
 import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
@@ -268,9 +268,23 @@ export function ChatInterface() {
 
       // Use preprocessing function to upload attachments
       const uploadResult = await uploadAttachments(attachments, t);
+      if (uploadResult.error) {
+        message.error(`${t("chatPreprocess.fileUploadFailed")} ${uploadResult.error}`);
+        setIsLoading(false);
+        return;
+      }
       uploadedFileUrls = uploadResult.uploadedFileUrls;
       objectNames = uploadResult.objectNames; // Get object name mapping
       presignedUrls = uploadResult.presignedUrls; // Get presigned URLs for external access
+
+      const missingUploads = attachments.filter(
+        (attachment) => !uploadedFileUrls[attachment.file.name] || !objectNames[attachment.file.name]
+      );
+      if (missingUploads.length > 0) {
+        message.error(`${t("chatPreprocess.fileUploadFailed")} ${missingUploads.map((item) => item.file.name).join(", ")}`);
+        setIsLoading(false);
+        return;
+      }
     }
 
     // Use preprocessing function to create message attachments

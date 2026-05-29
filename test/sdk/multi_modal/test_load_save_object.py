@@ -26,6 +26,23 @@ def test_get_client_requires_initialized_storage():
         manager._get_client()
 
 
+def test_s3_single_slash_url_supported():
+    assert lso.is_url("s3:/bucket/path/to/image.png") == "s3"
+    assert lso.parse_s3_url("s3:/bucket/path/to/image.png") == (
+        "bucket",
+        "path/to/image.png",
+    )
+
+
+def test_s3_blob_preview_url_rejected():
+    assert lso.is_url("s3:/blob:http://localhost:3000/preview") is None
+
+
+def test_parse_s3_blob_preview_url_rejected():
+    with pytest.raises(ValueError, match="Invalid s3:// URL format"):
+        lso.parse_s3_url("s3:/blob:http://localhost:3000/preview")
+
+
 def test_download_file_from_http(monkeypatch):
     manager = make_manager()
 

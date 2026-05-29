@@ -97,6 +97,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     labelKey: "sidebar.tenantResources",
     order: 12,
   },
+  { path: "/asset-owner-resources", Icon: Building2, labelKey: "sidebar.assetOwnerResources", order: 13 },
 ];
 
 /**

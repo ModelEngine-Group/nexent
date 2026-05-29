@@ -25,8 +25,11 @@ logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, timeout_seconds: Optional[float] = None, model_factory: Optional[str] = None,
-                 display_name: Optional[str] = None, *args, **kwargs):
+ssl_verify=True, model_factory: Optional[str] = None,
+                 display_name: Optional[str] = None,
+                 extra_body: Optional[Dict[str, Any]] = None,
+                 max_tokens: Optional[int] = None,
+                 timeout_seconds: Optional[float] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -39,6 +42,13 @@ class OpenAIModel(OpenAIServerModel):
             timeout_seconds: Timeout in seconds for HTTP requests (default: None, uses client default).
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
+            extra_body: Optional dict merged into every chat.completions.create
+                       request body. Defaults to None so production behaviour
+                       is unchanged for callers that do not opt in.
+            max_tokens: Per-call completion output cap. Defaults to None so
+                       production keeps the provider default (unbounded /
+                       model max). Benchmarks set this explicitly (e.g. 4096)
+                       to bound degenerate generation loops on long contexts.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -49,6 +59,8 @@ class OpenAIModel(OpenAIServerModel):
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
+        self.extra_body = extra_body or None
+        self.max_tokens = max_tokens
 
         # Create http_client based on ssl_verify parameter and timeout
         if not ssl_verify or timeout_seconds is not None:
@@ -159,6 +171,17 @@ class OpenAIModel(OpenAIServerModel):
         )
 
         completion_kwargs["stream_options"] = {"include_usage": True}
+
+        # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
+        # set when the caller actually supplied something so default OpenAI
+        # behaviour is unchanged for everyone else.
+        if self.extra_body:
+            completion_kwargs["extra_body"] = self.extra_body
+
+        # Bound completion length unless the caller passed their own override
+        # via kwargs (which already landed in completion_kwargs above).
+        if self.max_tokens is not None and "max_tokens" not in completion_kwargs:
+            completion_kwargs["max_tokens"] = self.max_tokens
 
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)

@@ -184,6 +184,8 @@ class NexentAgent:
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
             model_factory=model_config.model_factory,
             display_name=model_config.cite_name,
+extra_body=model_config.extra_body,
+            max_tokens=model_config.max_tokens,
             timeout_seconds=model_config.timeout_seconds,
         )
         model.stop_event = self.stop_event
@@ -241,7 +243,7 @@ class NexentAgent:
                                        data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
                                        validate_url_access=validate_url_access,
                                        **params)
-            elif class_name == "AnalyzeImageTool":
+            elif class_name in ["AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool"]:
                 # Extract validate_url_access from metadata if it's callable
                 validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
                 if validate_url_access is not None and not callable(validate_url_access):
@@ -423,6 +425,10 @@ class NexentAgent:
                     config=ctx_config,
                     max_steps=agent_config.max_steps
                 )
+                context_components = getattr(agent_config, 'context_components', None)
+                if context_components:
+                    for component in context_components:
+                        agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:

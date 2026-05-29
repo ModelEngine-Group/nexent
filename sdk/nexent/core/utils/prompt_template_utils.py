@@ -17,6 +17,14 @@ template_paths = {
         LANGUAGE["ZH"]: 'core/prompts/analyze_image_zh.yaml',
         LANGUAGE["EN"]: 'core/prompts/analyze_image_en.yaml'
     },
+    'analyze_audio': {
+        LANGUAGE["ZH"]: 'core/prompts/analyze_audio_zh.yaml',
+        LANGUAGE["EN"]: 'core/prompts/analyze_audio_en.yaml'
+    },
+    'analyze_video': {
+        LANGUAGE["ZH"]: 'core/prompts/analyze_video_zh.yaml',
+        LANGUAGE["EN"]: 'core/prompts/analyze_video_en.yaml'
+    },
     'analyze_file': {
         LANGUAGE["ZH"]: 'core/prompts/analyze_file_zh.yaml',
         LANGUAGE["EN"]: 'core/prompts/analyze_file_en.yaml'
@@ -30,6 +38,8 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     Args:
         template_type: Template type, supports the following values:
             - 'analyze_image': Analyze image template
+            - 'analyze_audio': Analyze audio template
+            - 'analyze_video': Analyze video template
             - 'analyze_file': Analyze file template (for text files)
         language: Language code ('zh' or 'en')
         **kwargs: Additional parameters, for agent type need to pass is_manager parameter
