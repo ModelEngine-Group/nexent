@@ -19,7 +19,16 @@ function normalizeTags(tags: unknown): string[] {
  * @returns Parsed inputs object with parameter names and descriptions
  */
 export const parseToolInputs = (inputsString: string): Record<string, any> => {
-  if (!inputsString || typeof inputsString !== "string") {
+  if (!inputsString) {
+    return {};
+  }
+
+  // Some frontend paths may already provide parsed object.
+  if (typeof inputsString === "object") {
+    return inputsString as Record<string, any>;
+  }
+
+  if (typeof inputsString !== "string") {
     return {};
   }
 

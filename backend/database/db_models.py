@@ -709,7 +709,7 @@ class UserOAuthAccount(TableBase):
     )
     user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
     provider = Column(
-        String(30), nullable=False, doc="OAuth provider name: github, wechat"
+        String(30), nullable=False, doc="OAuth provider name: github, wechat, gde, link_app"
     )
     provider_user_id = Column(
         String(200), nullable=False, doc="User ID from the OAuth provider"

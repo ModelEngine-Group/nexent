@@ -47,6 +47,32 @@ GDE_PROVIDER = OAuthProviderDefinition(
     client_secret_env="GDE_OAUTH_CLIENT_SECRET",
 )
 
+LINK_APP_PROVIDER = OAuthProviderDefinition(
+    name="link_app",
+    display_name="Link App",
+    icon="link_app",
+    authorize_url=f"{os.getenv('LINK_APP_URL')}/CNS/oauth2/authorize",
+    authorize_params={"response_type": "code", "scope": "read write"},
+    token_url=f"{os.getenv('LINK_APP_URL')}/CNS/oauth2/token",
+    token_params_map={
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
+    },
+    token_error_key="error",
+    token_error_message_key="error_description",
+    userinfo_url=f"{os.getenv('LINK_APP_URL')}/CNS/getUserInfo",
+    userinfo_field_map={
+        "id": "data.id",
+        "email": "data.email",
+        "username": "data.username",
+    },
+    client_id_env="LINK_APP_OAUTH_CLIENT_ID",
+    client_secret_env="LINK_APP_OAUTH_CLIENT_SECRET",
+)
+
 WECHAT_PROVIDER = OAuthProviderDefinition(
     name="wechat",
     display_name="WeChat",
@@ -89,6 +115,7 @@ OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
     "github": GITHUB_PROVIDER,
     "wechat": WECHAT_PROVIDER,
     "gde": GDE_PROVIDER,
+    "link_app": LINK_APP_PROVIDER,
 }
 
 
