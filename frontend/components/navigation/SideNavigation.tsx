@@ -60,6 +60,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 10 },
   { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 11 },
   { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 12 },
+  { path: "/asset-owner-resources", Icon: Building2, labelKey: "sidebar.assetOwnerResources", order: 13 },
 ];
 
 /**

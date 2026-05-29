@@ -44,6 +44,7 @@ export type EditableAgent = Pick<
 > & {
   skills: Skill[];
   external_sub_agent_id_list?: number[];
+  prompts_hidden?: boolean;
 };
 
 interface AgentConfigStoreState {
@@ -200,6 +201,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
+        prompts_hidden: agent.prompts_hidden,
       }
     : { ...emptyEditableAgent };
 

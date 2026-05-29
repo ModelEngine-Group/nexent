@@ -140,7 +140,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     if (!hasKnowledgeBaseModel) {
       return false;
     }
-    return !hasCurrentModel || currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
+    return (
+      !hasCurrentModel || currentEmbeddingModel !== knowledgeBaseEmbeddingModel
+    );
   }, [
     currentEmbeddingModel,
     hasCurrentModel,
@@ -205,7 +207,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         // Use setTimeout to ensure DOM is updated
         setTimeout(() => {
           if (contentScrollRef.current) {
-            contentScrollRef.current.scrollTop = contentScrollRef.current.scrollHeight;
+            contentScrollRef.current.scrollTop =
+              contentScrollRef.current.scrollHeight;
           }
         }, 100);
       }
@@ -297,6 +300,22 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
+    // Check embedding model consistency before searching
+    if (
+      isEmbeddingModelMismatch &&
+      currentEmbeddingModel &&
+      knowledgeBaseEmbeddingModel &&
+      knowledgeBaseEmbeddingModel !== "unknown"
+    ) {
+      message.error(
+        t("document.chunk.error.searchFailed", {
+          currentModel: currentEmbeddingModel,
+          knowledgeBaseModel: knowledgeBaseEmbeddingModel,
+        })
+      );
+      return;
+    }
+
     if (!effectiveIndexName) {
       message.error(t("document.chunk.error.searchFailed"));
       return;
@@ -344,6 +363,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
   }, [
     effectiveIndexName,
+    currentEmbeddingModel,
+    isEmbeddingModelMismatch,
+    knowledgeBaseEmbeddingModel,
     message,
     pagination.pageSize,
     resetChunkSearch,
@@ -581,8 +603,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   const tabItems = documents.map((doc) => {
     const chunkCount = isChunkSearchActive
-      ? chunkSearchResultMap?.[doc.id]?.length ?? 0
-      : documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0;
+      ? (chunkSearchResultMap?.[doc.id]?.length ?? 0)
+      : (documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0);
     const isActive = doc.id === activeDocumentKey;
     const chunkSearchChunks = chunkSearchResultMap?.[doc.id] ?? [];
     const docChunksData = isActive
@@ -606,7 +628,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       label: renderDocumentLabel(doc, chunkCount),
       children: (
         <div className="flex h-full flex-col min-h-0 overflow-hidden">
-          <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 pb-8">
+          <div
+            ref={contentScrollRef}
+            className="flex-1 min-h-0 overflow-y-auto p-4 pb-8"
+          >
             {showLoadingState ? (
               <div className="flex h-52 items-center justify-center">
                 <Spin size="large" />
@@ -713,12 +738,18 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                               </div>
                               <div className="text-xs text-gray-500">
                                 {chunk.source_type === "datamate"
-                                  ? t("document.chunk.source.datamate", "\u6765\u6e90: Datamate")
+                                  ? t(
+                                      "document.chunk.source.datamate",
+                                      "\u6765\u6e90: Datamate"
+                                    )
                                   : chunk.source_type === "file" ||
-                                    chunk.source_type === "minio" ||
-                                    chunk.source_type === "local"
-                                  ? t("document.chunk.source.nexent", "\u6765\u6e90: Nexent")
-                                  : ""}
+                                      chunk.source_type === "minio" ||
+                                      chunk.source_type === "local"
+                                    ? t(
+                                        "document.chunk.source.nexent",
+                                        "\u6765\u6e90: Nexent"
+                                      )
+                                    : ""}
                               </div>
                             </div>
                           )}
@@ -747,8 +778,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   }
 
   const activeDocumentTotal = isChunkSearchActive
-    ? chunkSearchResultMap?.[activeDocumentKey]?.length ?? 0
-    : documentChunkCounts[activeDocumentKey] ?? total ?? 0;
+    ? (chunkSearchResultMap?.[activeDocumentKey]?.length ?? 0)
+    : (documentChunkCounts[activeDocumentKey] ?? total ?? 0);
   const shouldShowPagination = !isChunkSearchActive && activeDocumentTotal > 0;
 
   return (
@@ -864,8 +895,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
             </div>
           </Form.Item>
           {/* Hidden field to preserve filename value for form submission */}
-          <Form.Item name="filename" hidden>
-          </Form.Item>
+          <Form.Item name="filename" hidden></Form.Item>
           <Form.Item
             label={
               <span className="font-semibold ml-1">
@@ -883,10 +913,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           </Form.Item>
         </Form>
       </Modal>
-
     </TooltipProvider>
   );
 };
 
 export default DocumentChunk;
-
