@@ -38,7 +38,7 @@ RUN if [ -n "$MCP_PROXY_VERSION" ]; then \
 
 # Install Node.js 20 from official binaries (pin exact version to avoid repo issues)
 ARG NODE_VERSION=20.17.0
-RUN set -euo pipefail && \
+RUN set -eu && \
     arch="$(dpkg --print-architecture)" && \
     case "${arch}" in \
         amd64) node_arch="x64" ;; \
