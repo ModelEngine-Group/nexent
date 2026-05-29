@@ -7,11 +7,10 @@ const { Text } = Typography;
 interface McpEditServerModalProps {
   open: boolean;
   onCancel: () => void;
-  onSave: (name: string, url: string, authorizationToken?: string | null, customHeaders?: string | null) => Promise<void>;
+  onSave: (name: string, url: string, authorizationToken?: string | null) => Promise<void>;
   initialName: string;
   initialUrl: string;
   initialAuthorizationToken?: string | null;
-  initialCustomHeaders?: string | null;
   loading: boolean;
 }
 
@@ -22,26 +21,23 @@ export default function McpEditServerModal({
   initialName,
   initialUrl,
   initialAuthorizationToken,
-  initialCustomHeaders,
   loading,
 }: McpEditServerModalProps) {
   const { t } = useTranslation("common");
   const [name, setName] = useState(initialName);
   const [url, setUrl] = useState(initialUrl);
   const [authorizationToken, setAuthorizationToken] = useState(initialAuthorizationToken || "");
-  const [customHeaders, setCustomHeaders] = useState(initialCustomHeaders || "");
 
   useEffect(() => {
     if (open) {
       setName(initialName);
       setUrl(initialUrl);
       setAuthorizationToken(initialAuthorizationToken || "");
-      setCustomHeaders(initialCustomHeaders || "");
     }
-  }, [open, initialName, initialUrl, initialAuthorizationToken, initialCustomHeaders]);
+  }, [open, initialName, initialUrl, initialAuthorizationToken]);
 
   const handleSave = () => {
-    onSave(name, url, authorizationToken || null, customHeaders || null);
+    onSave(name, url, authorizationToken || null);
   };
 
   return (
@@ -70,16 +66,6 @@ export default function McpEditServerModal({
             onChange={(e) => setAuthorizationToken(e.target.value)}
             placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
             className="mt-2"
-          />
-        </div>
-        <div>
-          <Text strong>{t("mcpConfig.editServer.customHeaders")}</Text>
-          <Input.TextArea
-            value={customHeaders}
-            onChange={(e) => setCustomHeaders(e.target.value)}
-            placeholder={t("mcpConfig.editServer.customHeadersPlaceholder")}
-            className="mt-2"
-            rows={3}
           />
         </div>
       </Space>

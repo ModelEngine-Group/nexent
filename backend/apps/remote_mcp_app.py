@@ -66,8 +66,6 @@ async def add_remote_proxies(
     service_name: str,
     authorization_token: Optional[str] = Query(
         None, description="Authorization token for MCP server authentication (e.g., Bearer token)"),
-    custom_headers: Optional[str] = Query(
-        None, description="Custom headers in JSON format for MCP server requests"),
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
@@ -84,8 +82,7 @@ async def add_remote_proxies(
                                          remote_mcp_server=mcp_url,
                                          remote_mcp_server_name=service_name,
                                          container_id=None,
-                                         authorization_token=authorization_token,
-                                         custom_headers=custom_headers)
+                                         authorization_token=authorization_token)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully added remote MCP proxy",
@@ -236,7 +233,6 @@ async def get_mcp_record(
                 "mcp_name": mcp_record.get("mcp_name"),
                 "mcp_server": mcp_record.get("mcp_server"),
                 "authorization_token": mcp_record.get("authorization_token"),
-                "custom_headers": mcp_record.get("custom_headers"),
                 "status": "success"
             }
         )

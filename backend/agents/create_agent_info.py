@@ -834,15 +834,14 @@ async def create_agent_run_info(
         "remote_mcp_server_name": "outer-apis",
         "remote_mcp_server": default_mcp_url,
         "status": True,
-        "authorization_token": None,
-        "custom_headers": None
+        "authorization_token": None
     })
     remote_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list if record["status"]}
 
     # Filter MCP servers and tools, and build mcp_host with authorization
     used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
 
-    # Build mcp_host list with authorization tokens and custom headers
+    # Build mcp_host list with authorization tokens
     mcp_host = []
     for url in used_mcp_urls:
         # Find the MCP record for this URL
@@ -861,16 +860,6 @@ async def create_agent_run_info(
             auth_token = mcp_record.get("authorization_token")
             if auth_token:
                 mcp_config["authorization"] = auth_token
-            # Add custom headers if present
-            custom_headers = mcp_record.get("custom_headers")
-            if custom_headers:
-                try:
-                    import json
-                    headers_dict = json.loads(custom_headers)
-                    if isinstance(headers_dict, dict):
-                        mcp_config["headers"] = headers_dict
-                except (json.JSONDecodeError, ValueError):
-                    logger.warning(f"Failed to parse custom_headers for {url}, ignoring")
             mcp_host.append(mcp_config)
         else:
             # Fallback to string format if record not found

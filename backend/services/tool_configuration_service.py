@@ -22,7 +22,6 @@ from database.outer_api_tool_db import (
 )
 from database.remote_mcp_db import (
     get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
 )
@@ -49,27 +48,19 @@ from utils.tool_utils import get_local_tools_classes, get_local_tools_descriptio
 logger = logging.getLogger("tool_configuration_service")
 
 
-def _create_mcp_transport(
-    url: str,
-    authorization_token: Optional[str] = None,
-    custom_headers: Optional[Dict[str, str]] = None
-):
+def _create_mcp_transport(url: str, authorization_token: Optional[str] = None):
     """
     Create appropriate MCP transport based on URL ending.
 
     Args:
         url: MCP server URL
         authorization_token: Optional authorization token
-        custom_headers: Optional custom headers dictionary
 
     Returns:
         Transport instance (SSETransport or StreamableHttpTransport)
     """
     url_stripped = url.strip()
     headers = {"Authorization": authorization_token} if authorization_token else {}
-    # Merge custom headers
-    if custom_headers:
-        headers.update(custom_headers)
 
     if url_stripped.endswith("/sse"):
         return SSETransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
@@ -364,8 +355,7 @@ async def get_tool_from_remote_mcp_server(
     mcp_server_name: str,
     remote_mcp_server: str,
     tenant_id: Optional[str] = None,
-    authorization_token: Optional[str] = None,
-    custom_headers: Optional[Dict[str, str]] = None
+    authorization_token: Optional[str] = None
 ):
     """
     Get the tool information from the remote MCP server, avoid blocking the event loop
@@ -375,7 +365,6 @@ async def get_tool_from_remote_mcp_server(
         remote_mcp_server: URL of the MCP server
         tenant_id: Optional tenant ID for database lookup of authorization_token
         authorization_token: Optional authorization token for authentication (if not provided and tenant_id is given, will be fetched from database)
-        custom_headers: Optional custom headers for the request
     """
     # Get authorization token from database if not provided
     if authorization_token is None and tenant_id:
@@ -385,24 +374,10 @@ async def get_tool_from_remote_mcp_server(
             tenant_id=tenant_id
         )
 
-    # Get custom headers from database if not provided
-    if custom_headers is None and tenant_id:
-        custom_headers_json = get_mcp_custom_headers_by_name_and_url(
-            mcp_name=mcp_server_name,
-            mcp_server=remote_mcp_server,
-            tenant_id=tenant_id
-        )
-        if custom_headers_json:
-            try:
-                import json
-                custom_headers = json.loads(custom_headers_json)
-            except (json.JSONDecodeError, ValueError):
-                custom_headers = None
-
     tools_info = []
 
     try:
-        transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
+        transport = _create_mcp_transport(remote_mcp_server, authorization_token)
         client = Client(transport=transport, timeout=10)
         async with client:
             # List available operations
@@ -575,8 +550,7 @@ async def _call_mcp_tool(
     mcp_url: str,
     tool_name: str,
     inputs: Optional[Dict[str, Any]],
-    authorization_token: Optional[str] = None,
-    custom_headers: Optional[Dict[str, str]] = None
+    authorization_token: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Common method to call MCP tool with connection handling.
@@ -586,7 +560,6 @@ async def _call_mcp_tool(
         tool_name: Name of the tool to call
         inputs: Parameters to pass to the tool
         authorization_token: Optional authorization token for authentication
-        custom_headers: Optional custom headers for the request
 
     Returns:
         Dict containing tool execution result
@@ -594,7 +567,7 @@ async def _call_mcp_tool(
     Raises:
         MCPConnectionError: If MCP connection fails
     """
-    transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
+    transport = _create_mcp_transport(mcp_url, authorization_token)
     client = Client(transport=transport)
     async with client:
         # Check if connected
@@ -667,22 +640,7 @@ async def _validate_mcp_tool_remote(
             tenant_id=tenant_id
         )
 
-    # Get custom headers from database
-    custom_headers = None
-    if tenant_id:
-        custom_headers_json = get_mcp_custom_headers_by_name_and_url(
-            mcp_name=usage,
-            mcp_server=actual_mcp_url,
-            tenant_id=tenant_id
-        )
-        if custom_headers_json:
-            try:
-                import json
-                custom_headers = json.loads(custom_headers_json)
-            except (json.JSONDecodeError, ValueError):
-                custom_headers = None
-
-    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs, authorization_token, custom_headers)
+    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs, authorization_token)
 
 
 def _get_tool_class_by_name(tool_name: str) -> Optional[type]:

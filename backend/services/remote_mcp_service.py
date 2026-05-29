@@ -18,7 +18,6 @@ from database.remote_mcp_db import (
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
     get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
     get_mcp_record_by_id_and_tenant,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -39,18 +38,11 @@ def create_httpx_client(
         verify=False, 
     )
 
-async def mcp_server_health(
-    remote_mcp_server: str,
-    authorization_token: str | None = None,
-    custom_headers: dict[str, str] | None = None
-) -> bool:
+async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None) -> bool:
     try:
         # Select transport based on URL ending
         url_stripped = remote_mcp_server.strip()
         headers = {"Authorization": authorization_token} if authorization_token else {}
-        # Merge custom headers
-        if custom_headers:
-            headers.update(custom_headers)
 
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
@@ -90,20 +82,7 @@ async def add_remote_mcp_server_list(
     remote_mcp_server_name: str,
     container_id: str | None = None,
     authorization_token: str | None = None,
-    custom_headers: str | None = None,
 ):
-
-    # Parse custom headers if provided
-    parsed_custom_headers = None
-    if custom_headers:
-        try:
-            import json
-            parsed_custom_headers = json.loads(custom_headers)
-            if not isinstance(parsed_custom_headers, dict):
-                logger.warning("custom_headers is not a valid JSON object, ignoring")
-                parsed_custom_headers = None
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Failed to parse custom_headers: {e}, ignoring")
 
     # check if MCP name already exists
     if check_mcp_name_exists(mcp_name=remote_mcp_server_name, tenant_id=tenant_id):
@@ -112,7 +91,7 @@ async def add_remote_mcp_server_list(
         raise MCPNameIllegal("MCP name already exists")
 
     # check if the address is available
-    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token, custom_headers=parsed_custom_headers):
+    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token):
         raise MCPConnectionError("MCP connection failed")
 
     # update the PG database record
@@ -122,7 +101,6 @@ async def add_remote_mcp_server_list(
         "status": True,
         "container_id": container_id,
         "authorization_token": authorization_token,
-        "custom_headers": custom_headers,
     }
     create_mcp_record(mcp_data=insert_mcp_data,
                       tenant_id=tenant_id, user_id=user_id)
@@ -221,7 +199,6 @@ async def get_remote_mcp_server_list(tenant_id: str, user_id: str | None = None,
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")
-            record_dict["custom_headers"] = record.get("custom_headers")
         mcp_records_list.append(record_dict)
     return mcp_records_list
 
@@ -285,30 +262,11 @@ async def check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_
         tenant_id=tenant_id
     )
 
-    # Get custom headers from database
-    custom_headers_json = get_mcp_custom_headers_by_name_and_url(
-        mcp_name=service_name,
-        mcp_server=mcp_url,
-        tenant_id=tenant_id
-    )
-
-    # Parse custom headers
-    parsed_custom_headers = None
-    if custom_headers_json:
-        try:
-            import json
-            parsed_custom_headers = json.loads(custom_headers_json)
-            if not isinstance(parsed_custom_headers, dict):
-                parsed_custom_headers = None
-        except (json.JSONDecodeError, ValueError):
-            parsed_custom_headers = None
-
     # check the health of the MCP server
     try:
         status = await mcp_server_health(
             remote_mcp_server=mcp_url,
-            authorization_token=authorization_token,
-            custom_headers=parsed_custom_headers
+            authorization_token=authorization_token
         )
     except BaseException:
         status = False
@@ -346,7 +304,7 @@ async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
         tenant_id: Tenant ID
 
     Returns:
-        Dictionary containing mcp_name, mcp_server, authorization_token, and custom_headers, or None if not found
+        Dictionary containing mcp_name, mcp_server, and authorization_token, or None if not found
     """
     mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not mcp_record:
@@ -356,7 +314,6 @@ async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
         "mcp_name": mcp_record.get("mcp_name"),
         "mcp_server": mcp_record.get("mcp_server"),
         "authorization_token": mcp_record.get("authorization_token"),
-        "custom_headers": mcp_record.get("custom_headers"),
     }
 
 
