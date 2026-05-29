@@ -92,15 +92,22 @@ export default function PromptOptimizeModal({
     if (!textarea) return;
 
     const { selectionStart, selectionEnd } = textarea;
-    if (selectionStart !== selectionEnd) {
+
+    // Insert mode: allow caret position even when no range is selected
+    if (selectionStart === selectionEnd) {
       setStartPos(String(selectionStart));
-      setEndPos(String(selectionEnd));
-      setIsContentSelected(true);
-      if (mode === "general") {
-        setMode("select");
-      }
+      setEndPos("");
+      setIsContentSelected(false);
+      setMode("insert");
+      return;
     }
-  }, [mode]);
+
+    // Select mode: range selected
+    setStartPos(String(selectionStart));
+    setEndPos(String(selectionEnd));
+    setIsContentSelected(true);
+    setMode("select");
+  }, []);
 
   const handleOptimize = async () => {
     if (!feedback.trim()) {
@@ -335,6 +342,9 @@ export default function PromptOptimizeModal({
                 background: "#fafafa",
                 minHeight: 200,
               }}
+              onSelect={handleContentSelect}
+              onClick={handleContentSelect}
+              onKeyUp={handleContentSelect}
             />
           </Card>
           <Card title={t("systemPrompt.optimize.optimized")}>

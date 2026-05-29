@@ -14,8 +14,11 @@ export interface DebugOptimizeModalProps {
   userQuestion: string;
   assistantAnswer: string;
   history: Array<{ role: string; content: string }>;
+  initialOriginalFullPrompt?: string;
   onCancel: () => void;
   onOptimized: (params: { originalFullPrompt: string; optimizedFullPrompt: string }) => void;
+  onApply: (optimizedFullPrompt: string) => void;
+  applying?: boolean;
 }
 
 export default function DebugOptimizeModal({
@@ -25,8 +28,11 @@ export default function DebugOptimizeModal({
   userQuestion,
   assistantAnswer,
   history,
+  initialOriginalFullPrompt,
   onCancel,
   onOptimized,
+  onApply,
+  applying,
 }: DebugOptimizeModalProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -34,14 +40,24 @@ export default function DebugOptimizeModal({
   const [feedback, setFeedback] = useState("");
   const [isOptimizing, setIsOptimizing] = useState(false);
 
+  const [originalFullPrompt, setOriginalFullPrompt] = useState("");
+  const [optimizedFullPrompt, setOptimizedFullPrompt] = useState("");
+
   useEffect(() => {
     if (!open) {
       setFeedback("");
       setIsOptimizing(false);
+      setOriginalFullPrompt("");
+      setOptimizedFullPrompt("");
       return;
     }
+
     setFeedback("");
     setIsOptimizing(false);
+    // Show original prompt immediately when opening the modal.
+    setOriginalFullPrompt((prev) => prev || initialOriginalFullPrompt || "");
+    // Keep original prompt visible while waiting for new optimized result.
+    setOptimizedFullPrompt("");
   }, [open, agentId, modelId]);
 
   const handleOk = async () => {
@@ -73,9 +89,18 @@ export default function DebugOptimizeModal({
       }
 
       const data = result?.data;
+      const original = data?.original_full_prompt || "";
+      const optimized = data?.optimized_full_prompt || "";
+
+      setOriginalFullPrompt(original);
+      setOptimizedFullPrompt(optimized);
+
+      // Ensure modal stays open and does not reset prompts.
+      setIsOptimizing(false);
+
       onOptimized({
-        originalFullPrompt: data?.original_full_prompt || "",
-        optimizedFullPrompt: data?.optimized_full_prompt || "",
+        originalFullPrompt: original,
+        optimizedFullPrompt: optimized,
       });
     } catch (e: any) {
       message.error(e?.message || t("systemPrompt.optimize.error"));
@@ -89,10 +114,18 @@ export default function DebugOptimizeModal({
       title={t("agent.debug.optimizeTitle", "Optimize prompt")}
       open={open}
       onCancel={onCancel}
-      width={720}
+      width={1200}
       footer={
         <Space>
           <Button onClick={onCancel}>{t("common.cancel")}</Button>
+          <Button
+            type="primary"
+            onClick={() => onApply(optimizedFullPrompt)}
+            disabled={!optimizedFullPrompt.trim()}
+            loading={applying}
+          >
+            {t("agent.debug.promptCompare.apply", "Apply")}
+          </Button>
           <Button type="primary" onClick={handleOk} loading={isOptimizing}>
             {t("systemPrompt.optimize.submit")}
           </Button>
@@ -102,8 +135,12 @@ export default function DebugOptimizeModal({
     >
       <div className="flex flex-col gap-3">
         <Text type="secondary">
-          {t("agent.debug.optimizeHint", "Select a reply, provide feedback, and we will optimize the full system prompt.")}
+          {t(
+            "agent.debug.optimizeHint",
+            "Select a reply, provide feedback, and we will optimize the full system prompt."
+          )}
         </Text>
+
         <div>
           <Text strong>{t("systemPrompt.optimize.feedbackLabel")}</Text>
           <TextArea
@@ -118,20 +155,45 @@ export default function DebugOptimizeModal({
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
-            <Text type="secondary" className="text-xs">
-              {t("agent.debug.selectedQuestion", "Selected question")}
-            </Text>
-            <Paragraph style={{ whiteSpace: "pre-wrap" }} className="text-sm">
-              {userQuestion || t("common.none")}
-            </Paragraph>
+            <Text strong>{t("agent.debug.selectedQuestion", "Selected question")}</Text>
+            <div className="mt-2 border border-gray-200 rounded-md p-3 bg-gray-50">
+              <Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }} className="text-sm">
+                {userQuestion || t("common.none")}
+              </Paragraph>
+            </div>
           </div>
           <div>
-            <Text type="secondary" className="text-xs">
-              {t("agent.debug.selectedAnswer", "Selected answer")}
-            </Text>
-            <Paragraph style={{ whiteSpace: "pre-wrap" }} className="text-sm">
-              {assistantAnswer || t("common.none")}
-            </Paragraph>
+            <Text strong>{t("agent.debug.selectedAnswer", "Selected answer")}</Text>
+            <div className="mt-2 border border-gray-200 rounded-md p-3 bg-gray-50">
+              <Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }} className="text-sm">
+                {assistantAnswer || t("common.none")}
+              </Paragraph>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div>
+            <Text strong>{t("agent.debug.promptCompare.original", "Original")}</Text>
+            <div className="mt-2 border border-gray-200 rounded-md p-3 bg-gray-50">
+              <Paragraph
+                style={{ whiteSpace: "pre-wrap", minHeight: 520, marginBottom: 0 }}
+                className="font-mono text-sm"
+              >
+                {originalFullPrompt || "-"}
+              </Paragraph>
+            </div>
+          </div>
+          <div>
+            <Text strong>{t("agent.debug.promptCompare.optimized", "Optimized")}</Text>
+            <div className="mt-2 border border-gray-200 rounded-md p-3">
+              <Paragraph
+                style={{ whiteSpace: "pre-wrap", minHeight: 520, marginBottom: 0 }}
+                className="font-mono text-sm"
+              >
+                {optimizedFullPrompt || ""}
+              </Paragraph>
+            </div>
           </div>
         </div>
       </div>

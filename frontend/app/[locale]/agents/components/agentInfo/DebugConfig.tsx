@@ -19,7 +19,6 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import DebugMessageList from "./DebugMessageList";
 import DebugOptimizeModal from "./DebugOptimizeModal";
-import DebugPromptCompareModal from "./DebugPromptCompareModal";
 import { useCompareStream } from "./useCompareStream";
 
 // Agent debugging component Props interface
@@ -171,7 +170,6 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     assistantAnswer: string;
     history: Array<{ role: string; content: string }>;
   }>(null);
-  const [debugCompareOpen, setDebugCompareOpen] = useState(false);
   const [compareOriginalPrompt, setCompareOriginalPrompt] = useState("");
   const [compareOptimizedPrompt, setCompareOptimizedPrompt] = useState("");
 
@@ -632,6 +630,28 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   }) => {
     if (!parsedAgentId) return;
     if (!editedAgent?.model_id) return;
+
+    const duty = (editedAgent?.duty_prompt || "").trim();
+    const constraint = (editedAgent?.constraint_prompt || "").trim();
+    const fewShots = (editedAgent?.few_shots_prompt || "").trim();
+
+    const originalFullPrompt = [
+      "# 智能体角色",
+      duty,
+      "",
+      "# 使用要求",
+      constraint,
+      "",
+      "# 示例",
+      fewShots,
+    ]
+      .filter((part) => part !== undefined)
+      .join("\n")
+      .trim();
+
+    setCompareOriginalPrompt(originalFullPrompt);
+    setCompareOptimizedPrompt("");
+
     setDebugOptimizeSelected(params);
     setDebugOptimizeOpen(true);
   };
@@ -640,17 +660,13 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     originalFullPrompt: string;
     optimizedFullPrompt: string;
   }) => {
-    setDebugOptimizeOpen(false);
-    setDebugOptimizeSelected(null);
     setCompareOriginalPrompt(params.originalFullPrompt || "");
     setCompareOptimizedPrompt(params.optimizedFullPrompt || "");
-    setDebugCompareOpen(true);
   };
 
-  const handleApplyOptimizedPrompt = () => {
-    const optimized = (compareOptimizedPrompt || "").trim();
+  const handleApplyOptimizedPrompt = (optimizedFullPrompt?: string) => {
+    const optimized = (optimizedFullPrompt || compareOptimizedPrompt || "").trim();
     if (!optimized) {
-      setDebugCompareOpen(false);
       return;
     }
 
@@ -668,9 +684,11 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       return section.replace(/^\s*\n/, "").trim();
     };
 
-    const duty = pickSection("duty");
-    const constraint = pickSection("constraint");
-    const fewShots = pickSection("fewshots");
+    const duty = pickSection("智能体角色") || pickSection("Duty") || pickSection("duty");
+    const constraint =
+      pickSection("使用要求") || pickSection("Constraint") || pickSection("constraint");
+    const fewShots =
+      pickSection("示例") || pickSection("FewShots") || pickSection("fewshots");
 
     const updateAgentConfig = useAgentConfigStore.getState().updateAgentConfig;
 
@@ -679,8 +697,11 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       ...(constraint ? { constraint_prompt: constraint } : {}),
       ...(fewShots ? { few_shots_prompt: fewShots } : {}),
     });
-
-    setDebugCompareOpen(false);
+    // Close optimize modal after applying.
+    setDebugOptimizeOpen(false);
+    setDebugOptimizeSelected(null);
+    setCompareOriginalPrompt("");
+    setCompareOptimizedPrompt("");
   };
 
   return (
@@ -692,19 +713,18 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         userQuestion={debugOptimizeSelected?.userQuestion || ""}
         assistantAnswer={debugOptimizeSelected?.assistantAnswer || ""}
         history={debugOptimizeSelected?.history || []}
+        initialOriginalFullPrompt={compareOriginalPrompt || ""}
         onCancel={() => {
           setDebugOptimizeOpen(false);
           setDebugOptimizeSelected(null);
+          setCompareOriginalPrompt("");
+          setCompareOptimizedPrompt("");
         }}
         onOptimized={handleOptimized}
-      />
-
-      <DebugPromptCompareModal
-        open={debugCompareOpen}
-        originalFullPrompt={compareOriginalPrompt}
-        optimizedFullPrompt={compareOptimizedPrompt}
-        onClose={() => setDebugCompareOpen(false)}
-        onApply={handleApplyOptimizedPrompt}
+        onApply={(optimizedFullPrompt) => {
+          setCompareOptimizedPrompt(optimizedFullPrompt || "");
+          handleApplyOptimizedPrompt(optimizedFullPrompt);
+        }}
       />
 
       <AgentDebugging
