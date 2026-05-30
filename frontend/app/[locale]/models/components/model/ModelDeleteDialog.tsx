@@ -168,11 +168,11 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.TTS:
         return t("model.type.tts");
       case MODEL_TYPES.VLM:
-        return t("model.type.vlm");
+        return t("model.type.imageUnderstanding");
       case MODEL_TYPES.VLM2:
-        return `${t("model.type.vlm")}2`;
+        return t("model.type.imageGeneration");
       case MODEL_TYPES.VLM3:
-        return `${t("model.type.vlm")}3`;
+        return t("model.type.videoUnderstanding");
       default:
         return t("model.type.unknown");
     }
