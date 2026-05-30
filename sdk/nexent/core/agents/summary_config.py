@@ -23,7 +23,8 @@ class ContextManagerConfig:
     keep_recent_pairs: int = 2
     max_chunk_count: int = 0
     max_memory_step_length: int = 2000
-
+    enable_reload: bool = False
+    max_offload_entries: int = 200
     summary_system_prompt: str = (
         "You are a conversation summarization assistant. Compress the following "
         "conversation history into a structured summary, preserving all key information: "

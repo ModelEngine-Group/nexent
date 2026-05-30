@@ -425,6 +425,13 @@ extra_body=model_config.extra_body,
                     config=ctx_config,
                     max_steps=agent_config.max_steps
                 )
+                # Inject reload tool if offload+reload is enabled
+                if ctx_config.enable_reload:
+                    from ..tools import ReloadOriginalContextTool
+                    reload_tool = ReloadOriginalContextTool(
+                        offload_store=agent.context_manager.offload_store
+                    )
+                    agent.tools[reload_tool.name] = reload_tool
                 context_components = getattr(agent_config, 'context_components', None)
                 if context_components:
                     for component in context_components:
