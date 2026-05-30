@@ -381,9 +381,7 @@ export default function ToolManagement({
                           const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
-                          const tooltipTitle = isReadOnly
-                            ? t("agent.noEditPermission")
-                            : isDisabledDueToVlm
+                          const tooltipTitle = isDisabledDueToVlm
                             ? t("toolPool.vlmDisabledTooltip")
                             : isDisabledDueToEmbedding
                             ? t("toolPool.embeddingDisabledTooltip")
@@ -490,9 +488,7 @@ export default function ToolManagement({
                 const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
-                const tooltipTitle = isReadOnly
-                  ? t("agent.noEditPermission")
-                  : isDisabledDueToVlm
+                const tooltipTitle = isDisabledDueToVlm
                   ? t("toolPool.vlmDisabledTooltip")
                   : isDisabledDueToEmbedding
                   ? t("toolPool.embeddingDisabledTooltip")
