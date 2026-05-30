@@ -921,6 +921,56 @@ deployment_apply_image_source() {
   export SUPABASE_DB="${SUPABASE_DB:-supabase/postgres:15.8.1.060}"
 }
 
+deployment_monitoring_enabled() {
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+deployment_monitoring_dashboard_url() {
+  local target="${1:-docker}"
+
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    printf ''
+    return 0
+  fi
+
+  case "$target:$DEPLOYMENT_MONITORING_PROVIDER" in
+    docker:phoenix)
+      printf 'http://localhost:%s' "${PHOENIX_PORT:-6006}"
+      ;;
+    docker:langfuse)
+      printf 'http://localhost:%s' "${LANGFUSE_PORT:-3001}"
+      ;;
+    docker:grafana)
+      printf 'http://localhost:%s/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1' "${GRAFANA_PORT:-3002}"
+      ;;
+    docker:zipkin)
+      printf 'http://localhost:%s' "${ZIPKIN_PORT:-9411}"
+      ;;
+    k8s:phoenix|helm:phoenix)
+      printf 'http://localhost:30006'
+      ;;
+    k8s:langfuse|helm:langfuse)
+      printf 'http://localhost:30001'
+      ;;
+    k8s:grafana|helm:grafana)
+      printf 'http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+      ;;
+    k8s:zipkin|helm:zipkin)
+      printf 'http://localhost:30011'
+      ;;
+    *:langsmith)
+      printf 'https://smith.langchain.com/'
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
+}
+
 deployment_render_docker_env() {
   local output_file="$1"
   mkdir -p "$(dirname "$output_file")"
@@ -937,6 +987,9 @@ deployment_render_docker_env() {
     printf 'SUPABASE_KONG="%s"\n' "$SUPABASE_KONG"
     printf 'SUPABASE_GOTRUE="%s"\n' "$SUPABASE_GOTRUE"
     printf 'SUPABASE_DB="%s"\n' "$SUPABASE_DB"
+    printf 'ENABLE_TELEMETRY="%s"\n' "$(deployment_monitoring_enabled)"
+    printf 'MONITORING_PROVIDER="%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    printf 'MONITORING_DASHBOARD_URL="%s"\n' "$(deployment_monitoring_dashboard_url docker)"
   } > "$output_file"
 }
 
@@ -1123,6 +1176,7 @@ deployment_render_helm_values() {
       printf '    enabled: false\n'
     fi
     printf '    provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    printf '    dashboardUrl: "%s"\n' "$(deployment_monitoring_dashboard_url k8s)"
     printf 'nexent-monitoring:\n'
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
       printf '  enabled: true\n'

@@ -436,6 +436,15 @@ persist_deploy_options() {
 }
 
 generate_minio_ak_sk() {
+  if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
+    echo "   Reusing existing MinIO access keys from docker/.env"
+    export MINIO_ACCESS_KEY
+    export MINIO_SECRET_KEY
+    update_env_var "MINIO_ACCESS_KEY" "$MINIO_ACCESS_KEY"
+    update_env_var "MINIO_SECRET_KEY" "$MINIO_SECRET_KEY"
+    return 0
+  fi
+
   echo "🔑 Generating MinIO keys..."
 
   if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "mingw" ] || [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "msys" ]; then
@@ -590,6 +599,12 @@ get_compose_version() {
 disable_dashboard() {
   update_env_var "DISABLE_RAY_DASHBOARD" "true"
   update_env_var "DISABLE_CELERY_FLOWER" "true"
+}
+
+sync_monitoring_env_vars() {
+  update_env_var "ENABLE_TELEMETRY" "$(deployment_monitoring_enabled)"
+  update_env_var "MONITORING_PROVIDER" "$DEPLOYMENT_MONITORING_PROVIDER"
+  update_env_var "MONITORING_DASHBOARD_URL" "$(deployment_monitoring_dashboard_url docker)"
 }
 
 pull_mcp_image() {
@@ -813,6 +828,17 @@ deploy_core_services() {
   fi
 }
 
+stop_unselected_data_process_service() {
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && return 0
+
+  local compose_file="docker-compose${COMPOSE_FILE_SUFFIX}"
+  [ -f "$compose_file" ] || return 0
+
+  echo "data-process is not selected; stopping existing Docker container if present..."
+  ${docker_compose_command} -p nexent -f "$compose_file" stop nexent-data-process >/dev/null 2>&1 || true
+  ${docker_compose_command} -p nexent -f "$compose_file" rm -f nexent-data-process >/dev/null 2>&1 || true
+}
+
 deploy_infrastructure() {
   # Start infrastructure services (basic services only)
   echo "🔧 Starting infrastructure services..."
@@ -960,6 +986,7 @@ apply_deployment_common_config() {
   set -a
   source "$SCRIPT_DIR/.env.generated"
   set +a
+  sync_monitoring_env_vars
   deployment_print_summary docker
 }
 
@@ -1341,6 +1368,8 @@ main_deploy() {
   # Select deployment components, port policy and image source via shared config.
   apply_deployment_common_config || { echo "❌ Deployment configuration failed"; exit 1; }
 
+  deployment_persist_local_config
+
   # Check only the ports published by the selected deployment configuration.
   check_deployment_ports
 
@@ -1366,6 +1395,8 @@ main_deploy() {
   deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
 
   deploy_monitoring || { echo "❌ Monitoring deployment failed"; exit 1; }
+
+  stop_unselected_data_process_service
 
   # Generate Elasticsearch API key
   generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
