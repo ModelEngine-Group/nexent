@@ -55,5 +55,5 @@ __all__ = [
     "run_skill_script",
     "read_skill_md",
     "read_skill_config",
-    ReloadOriginalContextTool
+    "ReloadOriginalContextTool"
 ]
