@@ -24,6 +24,11 @@ import {
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
 } from "./ModelChunkSizeSilder";
+import {
+  isValidMaxTokens,
+  ModelMaxTokensInput,
+  parseMaxTokens,
+} from "./ModelMaxTokensInput";
 
 const { Option } = Select;
 
@@ -49,7 +54,7 @@ const DEFAULT_FORM_STATE = {
   displayName: "",
   url: "",
   apiKey: "",
-  maxTokens: "4096",
+  maxTokens: "",
   isMultimodal: false,
   isBatchImport: false,
   provider: "modelengine",
@@ -270,7 +275,7 @@ export const ModelAddDialog = ({
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [selectedModelForSettings, setSelectedModelForSettings] =
     useState<any>(null);
-  const [modelMaxTokens, setModelMaxTokens] = useState("4096");
+  const [modelMaxTokens, setModelMaxTokens] = useState("");
 
   // Use the silicon model list hook
   const siliconHook  = useSiliconModelList({
@@ -432,7 +437,15 @@ export const ModelAddDialog = ({
 
   // Check if the form is valid
   const isFormValid = () => {
+    const needsMaxTokens =
+      form.type !== MODEL_TYPES.EMBEDDING &&
+      form.type !== MODEL_TYPES.MULTI_EMBEDDING &&
+      form.type !== MODEL_TYPES.STT;
+
     if (form.isBatchImport) {
+      if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
+        return false;
+      }
       // If provider is ModelEngine, require the ModelEngine URL as well.
       if (form.provider === "modelengine") {
         return (
@@ -442,6 +455,9 @@ export const ModelAddDialog = ({
         );
       }
       return form.provider.trim() !== "" && form.apiKey.trim() !== "";
+    }
+    if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
+      return false;
     }
     if (form.type === MODEL_TYPES.EMBEDDING) {
       return (
@@ -486,7 +502,7 @@ export const ModelAddDialog = ({
     return (
       form.name.trim() !== "" &&
       form.url.trim() !== "" &&
-      form.maxTokens.trim() !== ""
+      isValidMaxTokens(form.maxTokens)
     );
   };
 
@@ -569,7 +585,7 @@ export const ModelAddDialog = ({
               maxTokens:
                 form.type === MODEL_TYPES.EMBEDDING
                   ? parseInt(form.vectorDimension)
-                  : parseInt(form.maxTokens),
+                  : parseMaxTokens(form.maxTokens),
               embeddingDim:
                 form.type === MODEL_TYPES.EMBEDDING
                   ? parseInt(form.vectorDimension)
@@ -648,7 +664,7 @@ export const ModelAddDialog = ({
         } else {
           return {
             ...model,
-            max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
+            max_tokens: model.max_tokens ?? parseMaxTokens(form.maxTokens),
           };
         }
       });
@@ -720,18 +736,21 @@ export const ModelAddDialog = ({
   // Handle settings button click
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
-    setModelMaxTokens(model.max_tokens?.toString() || "4096");
+    setModelMaxTokens(model.max_tokens?.toString() || "");
     setSettingsModalVisible(true);
   };
 
   // Handle settings save
   const handleSettingsSave = () => {
+    const nextMaxTokens = parseMaxTokens(modelMaxTokens);
+    if (!nextMaxTokens) return;
+
     if (selectedModelForSettings) {
       // Update the model in the list with new max_tokens
       setModelList((prev) =>
         prev.map((model) =>
           model.id === selectedModelForSettings.id
-            ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+            ? { ...model, max_tokens: nextMaxTokens }
             : model
         )
       );
@@ -761,7 +780,7 @@ export const ModelAddDialog = ({
           : form.type;
 
       // Determine the maximum tokens value
-      let maxTokensValue = parseInt(form.maxTokens);
+      let maxTokensValue = parseMaxTokens(form.maxTokens) || 0;
       if (
         form.type === MODEL_TYPES.EMBEDDING ||
         form.type === MODEL_TYPES.MULTI_EMBEDDING
@@ -1382,19 +1401,20 @@ export const ModelAddDialog = ({
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && !isSTTModel && (
+        {!isEmbeddingModel && !isSTTModel && (
           <div>
             <label
               htmlFor="maxTokens"
               className="block mb-1 text-sm font-medium text-gray-700"
             >
-              {t("model.dialog.label.maxTokens")}
+              {t("model.dialog.label.maxTokens")}{" "}
+              <span className="text-red-500">*</span>
             </label>
-            <Input
+            <ModelMaxTokensInput
               id="maxTokens"
               placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
-              onChange={(e) => handleFormChange("maxTokens", e.target.value)}
+              onChange={(value) => handleFormChange("maxTokens", value)}
             />
           </div>
         )}
@@ -1936,6 +1956,7 @@ export const ModelAddDialog = ({
         open={settingsModalVisible}
         onCancel={() => setSettingsModalVisible(false)}
         onOk={handleSettingsSave}
+        okButtonProps={{ disabled: !isValidMaxTokens(modelMaxTokens) }}
         cancelText={t("common.cancel")}
         okText={t("common.confirm")}
         destroyOnHidden
@@ -1943,12 +1964,12 @@ export const ModelAddDialog = ({
         <div className="space-y-3">
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.settings.label.maxTokens")}
+              {t("model.dialog.settings.label.maxTokens")}{" "}
+              <span className="text-red-500">*</span>
             </label>
-            <Input
-              type="number"
+            <ModelMaxTokensInput
               value={modelMaxTokens}
-              onChange={(e) => setModelMaxTokens(e.target.value)}
+              onChange={setModelMaxTokens}
               placeholder={t("model.dialog.placeholder.maxTokens")}
             />
           </div>

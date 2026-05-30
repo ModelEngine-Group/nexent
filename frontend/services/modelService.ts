@@ -535,7 +535,7 @@ export const modelService = {
         model_type: config.modelType,
         api_key: config.apiKey || "sk-no-api-key",
         base_url: config.baseUrl || "",
-        max_tokens: config.maxTokens || 4096,
+        ...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
         embedding_dim: config.embeddingDim || 1024,
       };
 
@@ -723,7 +723,7 @@ export const modelService = {
         model_type: params.type,
         base_url: params.url,
         api_key: params.apiKey,
-        max_tokens: params.maxTokens || 4096,
+        ...(params.maxTokens !== undefined ? { max_tokens: params.maxTokens } : {}),
         display_name: params.displayName || params.name,
         model_factory: params.modelFactory || "OpenAI-API-Compatible",
         expected_chunk_size: params.expectedChunkSize,
