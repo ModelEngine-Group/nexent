@@ -7,8 +7,9 @@ const MAX_TOKEN_OPTIONS = [
   { value: "32768", label: "32K / 32,768" },
   { value: "65536", label: "64K / 65,536" },
   { value: "131072", label: "128K / 131,072" },
-  { value: "200000", label: "200K / 200,000" },
-  { value: "1000000", label: "1M / 1,000,000" },
+  { value: "204800", label: "200K / 204,800" },
+  { value: "262144", label: "256K / 262,144" },
+  { value: "1048576", label: "1M / 1,048,576" },
 ];
 
 interface ModelMaxTokensInputProps {
