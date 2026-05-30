@@ -24,7 +24,9 @@ import string
 
 # ============ Environment Setup ============
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-SDK_DIR = os.path.dirname(SCRIPTS_DIR)
+# temp_scripts 在 sdk/nexent/core/agents/ 下，需要向上 4 级到达 sdk 目录
+SDK_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(SCRIPTS_DIR))))
+# sdk 的父目录即为项目根目录
 PROJECT_ROOT = os.path.dirname(SDK_DIR)
 BACKEND_PATH = os.path.join(PROJECT_ROOT, "backend")
 
