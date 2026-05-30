@@ -255,19 +255,25 @@ export default function SkillManagement({
                   {isSelected && hasConfigurableParams && (
                     <Settings
                       size={16}
-                      className="cursor-pointer text-gray-400 hover:text-blue-600 transition-colors"
-                      onClick={(e) => handleConfigClick(skill, e)}
+                      className={`cursor-pointer text-gray-400 hover:text-blue-600 transition-colors ${
+                        isReadOnly ? "pointer-events-none opacity-50" : ""
+                      }`}
+                      onClick={isReadOnly ? undefined : (e) => handleConfigClick(skill, e)}
                     />
                   )}
                   <Info
                     size={16}
-                    className="cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
-                    onClick={(e) => handleInfoClick(skill, e)}
+                    className={`cursor-pointer text-gray-400 hover:text-gray-600 transition-colors ${
+                      isReadOnly ? "pointer-events-none opacity-50" : ""
+                    }`}
+                    onClick={isReadOnly ? undefined : (e) => handleInfoClick(skill, e)}
                   />
                   <Trash2
                     size={16}
-                    className="cursor-pointer text-gray-400 hover:text-red-500 transition-colors"
-                    onClick={(e) => handleDeleteClick(skill, e)}
+                    className={`cursor-pointer text-gray-400 hover:text-red-500 transition-colors ${
+                      isReadOnly ? "pointer-events-none opacity-50" : ""
+                    }`}
+                    onClick={isReadOnly ? undefined : (e) => handleDeleteClick(skill, e)}
                   />
                 </div>
               </div>
