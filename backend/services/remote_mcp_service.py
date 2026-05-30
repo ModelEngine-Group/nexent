@@ -4,12 +4,8 @@ import tempfile
 import asyncio
 import socket
 import random
-import httpx
-
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from httpx import AsyncClient
-
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
 from consts.exceptions import (
     MCPConnectionError,
@@ -40,22 +36,10 @@ from database.remote_mcp_db import (
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.mcp_container_service import MCPContainerManager
-from services.tool_configuration_service import get_tool_from_remote_mcp_server
+from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
 
-def create_httpx_client(
-    headers: dict[str, str] | None = None,
-    timeout: httpx.Timeout | None = None,
-    auth: httpx.Auth | None = None,
-) -> AsyncClient:
-    return AsyncClient(
-        headers=headers,
-        timeout=timeout,
-        auth=auth,
-        trust_env=False,
-        verify=False, 
-    )
 
 # ---------------------------------------------------------------------------
 # Health Check
@@ -1051,6 +1035,7 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
 
+    from services.tool_configuration_service import get_tool_from_remote_mcp_server
     tools_info = await get_tool_from_remote_mcp_server(
         mcp_server_name=service_name,
         remote_mcp_server=server_url,
