@@ -601,6 +601,12 @@ disable_dashboard() {
   update_env_var "DISABLE_CELERY_FLOWER" "true"
 }
 
+sync_monitoring_env_vars() {
+  update_env_var "ENABLE_TELEMETRY" "$(deployment_monitoring_enabled)"
+  update_env_var "MONITORING_PROVIDER" "$DEPLOYMENT_MONITORING_PROVIDER"
+  update_env_var "MONITORING_DASHBOARD_URL" "$(deployment_monitoring_dashboard_url docker)"
+}
+
 pull_mcp_image() {
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
     echo "🔄 Skipping MCP image pull because image source is local-latest."
@@ -980,6 +986,7 @@ apply_deployment_common_config() {
   set -a
   source "$SCRIPT_DIR/.env.generated"
   set +a
+  sync_monitoring_env_vars
   deployment_print_summary docker
 }
 
