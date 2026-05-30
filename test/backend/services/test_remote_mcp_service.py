@@ -775,7 +775,7 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test list_mcp_service_tools_by_id uses custom_headers from record."""
 
-    @patch('backend.services.remote_mcp_service.get_tool_from_remote_mcp_server')
+    @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     async def test_tools_with_custom_headers(self, mock_get, mock_get_tools):
         """Test list_mcp_service_tools_by_id passes custom_headers to tool retrieval."""
@@ -800,7 +800,7 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             custom_headers={"X-Tools-Custom": "tools-value"},
         )
 
-    @patch('backend.services.remote_mcp_service.get_tool_from_remote_mcp_server')
+    @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     async def test_tools_without_custom_headers(self, mock_get, mock_get_tools):
         """Test list_mcp_service_tools_by_id when custom_headers is None."""

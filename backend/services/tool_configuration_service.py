@@ -38,6 +38,7 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.image_service import get_video_understanding_model, get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
@@ -68,12 +69,12 @@ def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, c
         headers.update(custom_headers)
 
     if url_stripped.endswith("/sse"):
-        return SSETransport(url=url_stripped, headers=headers)
+        return SSETransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
     elif url_stripped.endswith("/mcp"):
-        return StreamableHttpTransport(url=url_stripped, headers=headers)
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
     else:
         # Default to StreamableHttpTransport for unrecognized formats
-        return StreamableHttpTransport(url=url_stripped, headers=headers)
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
 
 
 def python_type_to_json_schema(annotation: Any) -> str:
