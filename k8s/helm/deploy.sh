@@ -332,6 +332,22 @@ load_existing_supabase_secrets() {
     return 0
 }
 
+load_existing_minio_secrets() {
+    local existing_access_key
+    local existing_secret_key
+
+    existing_access_key="$(get_existing_secret_value "MINIO_ACCESS_KEY")" || return 1
+    existing_secret_key="$(get_existing_secret_value "MINIO_SECRET_KEY")" || return 1
+
+    if [ -z "$existing_access_key" ] || [ -z "$existing_secret_key" ]; then
+        return 1
+    fi
+
+    MINIO_ACCESS_KEY="$existing_access_key"
+    MINIO_SECRET_KEY="$existing_secret_key"
+    return 0
+}
+
 # Generate Supabase secrets (only for full version)
 generate_supabase_secrets() {
     if [ "$DEPLOYMENT_VERSION" != "full" ]; then
@@ -434,6 +450,19 @@ restart_supabase_auth_services() {
     done
 }
 
+restart_minio_for_current_secrets() {
+    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure" || return 0
+
+    echo ""
+    echo "Restarting MinIO to ensure current credentials are loaded..."
+    kubectl rollout restart deployment/nexent-minio -n "$NAMESPACE" 2>/dev/null || true
+    if kubectl rollout status deployment/nexent-minio -n "$NAMESPACE" --timeout=300s >/dev/null 2>&1; then
+        echo "  nexent-minio is ready."
+    else
+        echo "  Warning: nexent-minio did not become ready within timeout."
+    fi
+}
+
 render_runtime_secret_values() {
     {
         echo "nexent-common:"
@@ -457,6 +486,7 @@ apply() {
 
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
+    deployment_persist_local_config
 
     # Step 2: Render generated values with image tags from selected environment
     update_values_yaml
@@ -465,7 +495,10 @@ apply() {
     echo "=========================================="
     echo "  MinIO Access Key/Secret Key Setup"
     echo "=========================================="
-    if grep -q "minio:" "$COMMON_VALUES" && grep -q "accessKey:" "$COMMON_VALUES"; then
+    if load_existing_minio_secrets; then
+        echo "Reusing existing MinIO credentials from Kubernetes secret."
+        echo "Access Key: $MINIO_ACCESS_KEY"
+    elif grep -q "minio:" "$COMMON_VALUES" && grep -q "accessKey:" "$COMMON_VALUES"; then
         MINIO_ACCESS_KEY=$(grep "accessKey:" "$COMMON_VALUES" | head -1 | sed 's/.*accessKey: *//' | tr -d '"' | tr -d "'" | xargs)
         MINIO_SECRET_KEY=$(grep "secretKey:" "$COMMON_VALUES" | head -1 | sed 's/.*secretKey: *//' | tr -d '"' | tr -d "'" | xargs)
     fi
@@ -540,6 +573,7 @@ apply() {
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
 
+    restart_minio_for_current_secrets
     restart_supabase_auth_services
 
     # Step 9: Wait for Elasticsearch to be ready and initialize API key
