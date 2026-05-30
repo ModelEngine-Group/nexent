@@ -358,6 +358,7 @@
   "agent.prompts.noPermission": "您无权查看提示词内容。",
   "mcpConfig.permission.noEdit": "无MCP编辑权限",
   "agent.action.create": "创建智能体",
+  "agent.action.createOrSelect": "创建智能体或下拉选择一个智能体",
   "agent.action.modify": "编辑智能体信息",
   "agent.action.view": "查看智能体信息",
   "agent.action.viewCallRelationship": "查看调用关系",

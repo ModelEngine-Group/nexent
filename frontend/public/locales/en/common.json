@@ -356,6 +356,7 @@
   "agent.prompts.noPermission": "You do not have permission to view prompts.",
   "mcpConfig.permission.noEdit": "No permission to edit MCP",
   "agent.action.create": "Create Agent",
+  "agent.action.createOrSelect": "Create Agent or Dropdown to Select another Agent",
   "agent.action.modify": "Edit Agent Information",
   "agent.action.view": "View Agent Information",
   "agent.action.viewCallRelationship": "View Call Relationship",
