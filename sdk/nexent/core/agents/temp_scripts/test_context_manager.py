@@ -176,7 +176,7 @@ async def test_current_run_complex_opt():
     base_history = parse_conversation_to_history("./small_history.md")
     cm_config = ContextManagerConfig(
         enabled=True,
-        token_threshold=1200,
+        token_threshold=3000,
         keep_recent_steps=1,
     )
     shared_cm = ContextManager(config=cm_config, max_steps=10)
