@@ -657,7 +657,7 @@ extra_body=model_config.extra_body,
         lines.append(
             "-----"
         )
-        logger.debug("\n".join(lines))
+        print("\n".join(lines))
 
         # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:

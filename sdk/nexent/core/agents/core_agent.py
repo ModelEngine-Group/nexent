@@ -305,7 +305,7 @@ Additional Args:
         )
 
         input_messages = memory_messages.copy()
-        # import pdb; pdb.set_trace()
+
         # Trigger context compression if needed before building messages
         if self.context_manager and self.context_manager.config.enabled:
             input_messages = self.context_manager.compress_if_needed(
