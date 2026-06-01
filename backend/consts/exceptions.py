@@ -280,6 +280,11 @@ class UnsupportedOperationError(Exception):
     pass
 
 
+class AdminCreateUserException(Exception):
+    """Raised when admin user creation fails."""
+    pass
+
+
 # ==================== Legacy Aliases (same as above, for compatibility) ====================
 # These are additional aliases that map to the same simple exception classes above.
 # They provide backward compatibility for code that uses these names.

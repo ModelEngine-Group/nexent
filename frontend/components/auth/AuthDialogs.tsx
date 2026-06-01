@@ -81,33 +81,6 @@ export function AuthDialogs() {
               <LogIn className="h-5 w-5" />
               {t("page.loginPrompt.login")}
             </Button>
-
-            {/* Register button */}
-            <Button
-              onClick={() => {
-                closeAuthPromptModal();
-                openRegisterModal();
-              }}
-              type="default"
-              className="w-full h-12 border border-gray-300 rounded-lg font-medium flex items-center justify-center gap-2"
-              size="large"
-            >
-              <UserPlus className="h-5 w-5" />
-              {t("page.loginPrompt.register")}
-            </Button>
-          </div>
-
-          {/* GitHub support */}
-          <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
-            <GithubOutlined className="text-base" />
-            <a
-              href="https://github.com/ModelEngine-Group/nexent"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t("page.loginPrompt.githubSupport")}
-            </a>
-            <span></span>
           </div>
         </div>
       </Modal>

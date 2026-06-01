@@ -2123,6 +2123,9 @@
   "tenantResources.users.updated": "User updated",
   "tenantResources.users.email": "Email",
   "tenantResources.users.role": "Role",
+  "tenantResources.users.addUser": "Add User",
+  "tenantResources.users.created": "User created",
+  "tenantResources.users.emailAlreadyExists": "This email is already registered",
 
   "tenantResources.contactAdmin": "Please contact your administrator to assign a tenant.",
   "tenantResources.noTenantAssigned": "No tenant assigned",

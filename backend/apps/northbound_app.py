@@ -8,8 +8,9 @@ import uuid
 import httpx
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, EmailStr
 
-from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError
+from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError, AdminCreateUserException
 from consts.model import ToolParamsRequest
 from services.northbound_service import (
     NorthboundContext,
@@ -20,6 +21,7 @@ from services.northbound_service import (
     get_agent_info_list,
     update_conversation_title,
     upload_files_for_northbound,
+    admin_create_user,
 )
 
 from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_access_key
@@ -30,6 +32,13 @@ from .file_management_app import build_content_disposition_header
 router = APIRouter(prefix="/nb/v1", tags=["northbound"])
 
 __all__ = ["router", "_get_northbound_context"]
+
+
+class CreateUserRequest(BaseModel):
+    """Request model for creating a user via northbound API."""
+    email: EmailStr
+    password: str
+    role: str = "USER"
 
 
 def _resolve_proxy_download_filename(presigned_url: str, content_disposition: str) -> str:
@@ -492,3 +501,77 @@ async def fetch_file_from_presigned_url(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+
+
+# ==================== User Management ====================
+
+@router.post("/users")
+async def create_user(
+    request: Request,
+    payload: CreateUserRequest,
+):
+    """
+    Create a user for the tenant associated with the access key.
+
+    This endpoint allows batch user creation via northbound API using
+    the partner's access key for authentication.
+
+    Args:
+        request: FastAPI request object
+        payload: User creation request containing email, password, and role
+
+    Returns:
+        JSONResponse with created user information
+    """
+    try:
+        ctx: NorthboundContext = await _get_northbound_context(request)
+
+        logging.info(
+            f"Northbound user creation: email={payload.email}, "
+            f"role={payload.role}, tenant_id={ctx.tenant_id}, "
+            f"by user={ctx.user_id}"
+        )
+
+        user_data = await admin_create_user(
+            email=payload.email,
+            password=payload.password,
+            role=payload.role,
+            tenant_id=ctx.tenant_id
+        )
+
+        logging.info(f"Successfully created user {payload.email} in tenant {ctx.tenant_id}")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "User created successfully",
+                "data": user_data
+            }
+        )
+
+    except AdminCreateUserException as exc:
+        error_msg = str(exc)
+        if "EMAIL_ALREADY_EXISTS" in error_msg:
+            logging.warning(f"User creation failed: email already exists")
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail="EMAIL_ALREADY_EXISTS"
+            )
+        logging.error(f"Admin create user failed: {error_msg}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=error_msg
+        )
+    except LimitExceededError as e:
+        logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Failed to create user: {str(e)}", exc_info=e)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+

@@ -64,20 +64,12 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.2 }}
           className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
         >
-          {t("page.title")}
+          {t("灵犀智能体平台")}
           <span className="text-blue-600 dark:text-blue-500">
             {" "}
-            {t("page.subtitle")}
+            {t("灵犀知意，智启未来")}
           </span>
         </motion.h2>
-        <motion.p
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.3 }}
-          className="max-w-2xl text-slate-600 dark:text-slate-300 text-lg md:text-xl mb-8"
-        >
-          {t("page.description")}
-        </motion.p>
 
         {/* Three parallel buttons - responsive: row on wide, column on narrow */}
         <motion.div

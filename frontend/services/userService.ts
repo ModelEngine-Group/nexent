@@ -33,6 +33,12 @@ export interface UserDetailResponse {
   message: string;
 }
 
+export interface CreateUserRequest {
+  email: string;
+  password: string;
+  role: string;
+}
+
 export interface CreateUserResponse {
   data: User;
   message: string;
@@ -137,5 +143,27 @@ export async function deleteUser(userId: string): Promise<void> {
       throw error;
     }
     throw new ApiError(500, "Failed to delete user");
+  }
+}
+
+/**
+ * Create a new user within the current tenant
+ */
+export async function createUser(
+  payload: CreateUserRequest
+): Promise<User> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.users.create, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    const result: CreateUserResponse = await response.json();
+    return result.data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to create user");
   }
 }

@@ -596,3 +596,120 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
+
+
+# ==================== Admin User Management ====================
+
+
+async def admin_create_user(email: str, password: str, role: str, tenant_id: str) -> Dict[str, Any]:
+    """
+    Create a new user for the specified tenant using admin privileges.
+
+    This function bypasses invitation code requirements and creates users directly
+    under the given tenant. Users are automatically added to the tenant's default group.
+
+    Args:
+        email: User's email address
+        password: User's password (min 6 characters)
+        role: User role (USER, DEV, ADMIN)
+        tenant_id: Target tenant ID
+
+    Returns:
+        Dict containing created user info
+
+    Raises:
+        AdminCreateUserException: If user creation fails
+    """
+    from pydantic import ValidationError
+    from email_validator import validate_email, EmailNotValidError
+    from utils.auth_utils import get_supabase_admin_client
+    from database.user_tenant_db import insert_user_tenant
+    from services.group_service import add_user_to_groups, get_tenant_default_group_id
+    from services.tool_configuration_service import init_tool_list_for_tenant
+    from services.skill_service import init_skill_list_for_tenant
+    from consts.exceptions import AdminCreateUserException
+
+    try:
+        # Validate email format (skip deliverability check for test/local domains)
+        validate_email(email, check_deliverability=False)
+    except EmailNotValidError:
+        raise AdminCreateUserException("Invalid email format")
+
+    if len(password) < 6:
+        raise AdminCreateUserException("Password must be at least 6 characters")
+
+    valid_roles = ("USER", "DEV", "ADMIN")
+    if role not in valid_roles:
+        raise AdminCreateUserException(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+
+    admin_client = get_supabase_admin_client()
+    if not admin_client:
+        raise AdminCreateUserException("Admin client not available")
+
+    # Check if user already exists
+    try:
+        existing = admin_client.auth.admin.list_users()
+        for user in existing.users:
+            if user.email == email:
+                raise AdminCreateUserException(f"EMAIL_ALREADY_EXISTS: User with email {email} already exists")
+    except AdminCreateUserException:
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to check existing users: {str(e)}")
+
+    # Create user in Supabase auth
+    try:
+        create_resp = admin_client.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            "user_metadata": {
+                "role": role,
+                "tenant_id": tenant_id,
+            },
+        })
+        supabase_user_id = create_resp.user.id
+    except Exception as e:
+        error_msg = str(e)
+        if "already been registered" in error_msg.lower() or "email" in error_msg.lower():
+            raise AdminCreateUserException(f"EMAIL_ALREADY_EXISTS: {error_msg}")
+        raise AdminCreateUserException(f"Failed to create user: {error_msg}")
+
+    # Create user-tenant relationship
+    try:
+        insert_user_tenant(
+            user_id=supabase_user_id,
+            tenant_id=tenant_id,
+            user_role=role,
+            user_email=email,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create user-tenant relationship: {str(e)}")
+        raise AdminCreateUserException(f"Failed to create user-tenant relationship: {str(e)}")
+
+    # Add user to tenant's default group
+    try:
+        default_group_id = get_tenant_default_group_id(tenant_id)
+        if default_group_id:
+            add_user_to_groups(supabase_user_id, [default_group_id], supabase_user_id)
+            logger.info(f"Added user {email} to default group {default_group_id}")
+        else:
+            logger.warning(f"No default group found for tenant {tenant_id}, skipping group assignment")
+    except Exception as e:
+        logger.warning(f"Failed to add user to default group: {str(e)}")
+
+    # Initialize default tools and skills for the new user
+    try:
+        await init_tool_list_for_tenant(tenant_id, supabase_user_id)
+        await init_skill_list_for_tenant(tenant_id, supabase_user_id)
+    except Exception as e:
+        logger.warning(f"Failed to initialize tools/skills for user {supabase_user_id}: {str(e)}")
+
+    logger.info(f"Successfully created user {email} (id: {supabase_user_id}) in tenant {tenant_id} with role {role}")
+
+    return {
+        "user_id": supabase_user_id,
+        "email": email,
+        "role": role,
+        "tenant_id": tenant_id,
+    }

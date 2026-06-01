@@ -1015,9 +1015,7 @@ export const ModelConfigSection = forwardRef<
             gutter={[LAYOUT_CONFIG.CARD_GAP, LAYOUT_CONFIG.CARD_GAP]}
             style={{ flex: 1 }}
           >
-            {Object.entries(modelData)
-              .filter(([key]) => key !== "voice")
-              .map(([key, category]) => (
+            {Object.entries(modelData).map(([key, category]) => (
               <Col
                 xs={24}
                 md={8}
@@ -1079,8 +1077,13 @@ export const ModelConfigSection = forwardRef<
                     }}
                     size={12}
                   >
-                    {category.options.map((option) => (
-                      <ModelListCard
+                    {category.options
+                      .filter(
+                        (option) =>
+                          !(key === "voice" && option.id === MODEL_TYPES.TTS)
+                      )
+                      .map((option) => (
+                        <ModelListCard
                         key={option.id}
                         type={
                           key === "voice"

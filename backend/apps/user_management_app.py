@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from http import HTTPStatus
 from typing import Optional
 
+from pydantic import BaseModel, EmailStr
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
 from consts.const import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
@@ -17,6 +18,7 @@ from consts.exceptions import (
     AppException,
     UnauthorizedError,
     ValidationError,
+    AdminCreateUserException,
 )
 from consts.error_code import ErrorCode
 from services.cas_service import build_logout_url, CasAuthenticationError
@@ -26,6 +28,8 @@ from services.user_management_service import get_authorized_client, validate_tok
     update_password
 from services.user_service import delete_user_and_cleanup
 from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
+from database.user_tenant_db import get_user_tenant_by_user_id, get_user_tenant_by_user_email
+from services.northbound_service import admin_create_user
 
 
 load_dotenv()
@@ -472,3 +476,96 @@ async def update_password_endpoint(
         logging.error(f"Failed to update password: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Internal Server Error")
+
+
+async def _get_tenant_id_for_user(current_user_id: str) -> str:
+    """Get the tenant ID for the current user from their user-tenant relationship."""
+    user_tenant = get_user_tenant_by_user_id(current_user_id)
+    if not user_tenant:
+        raise ValueError(f"User {current_user_id} is not associated with any tenant")
+    return user_tenant["tenant_id"]
+
+
+class CreateUserRequest(BaseModel):
+    """Request model for creating a user within a tenant."""
+    email: EmailStr
+    password: str
+    role: str = "USER"
+
+
+@router.post("/create")
+async def create_user_endpoint(
+    payload: CreateUserRequest,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """
+    Create a new user within the current user's tenant.
+
+    The tenant is determined from the current authenticated user's tenant association.
+    The created user will be automatically added to the tenant's default group.
+
+    Args:
+        payload: User creation request containing email, password, and role
+        authorization: Bearer token for authentication
+
+    Returns:
+        JSONResponse: Created user information
+    """
+    try:
+        current_user_id, _ = get_current_user_id(authorization)
+        tenant_id = await _get_tenant_id_for_user(current_user_id)
+
+        existing = get_user_tenant_by_user_email(payload.email)
+        if existing:
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail="EMAIL_ALREADY_EXISTS"
+            )
+
+        user_data = await admin_create_user(
+            email=payload.email,
+            password=payload.password,
+            role=payload.role,
+            tenant_id=tenant_id
+        )
+
+        logger.info(
+            f"Created user {payload.email} (id: {user_data['user_id']}) "
+            f"in tenant {tenant_id} by admin {current_user_id}"
+        )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "User created successfully",
+                "data": user_data
+            }
+        )
+
+    except AdminCreateUserException as exc:
+        error_msg = str(exc)
+        if "EMAIL_ALREADY_EXISTS" in error_msg:
+            logger.warning(f"User creation failed: email already exists")
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail="EMAIL_ALREADY_EXISTS"
+            )
+        logger.error(f"Admin create user failed: {error_msg}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=error_msg
+        )
+    except ValueError as exc:
+        logger.warning(f"User creation validation error: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc)
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to create user: {str(exc)}", exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )

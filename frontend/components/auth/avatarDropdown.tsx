@@ -104,18 +104,18 @@ export function AvatarDropdown() {
       },
     ];
 
-    // Only show register button when SSO is disabled
-    if (!ssoConfig?.sso_enabled) {
-      items.push({
-        key: "register",
-        icon: <UserRoundPlus size={16} />,
-        label: t("auth.register"),
-        onClick: () => {
-          setDropdownOpen(false);
-          openRegisterModal();
-        },
-      });
-    }
+    // [Commented out] Only show register button when SSO is disabled
+    // if (!ssoConfig?.sso_enabled) {
+    //   items.push({
+    //     key: "register",
+    //     icon: <UserRoundPlus size={16} />,
+    //     label: t("auth.register"),
+    //     onClick: () => {
+    //       setDropdownOpen(false);
+    //       openRegisterModal();
+    //     },
+    //   });
+    // }
 
     return (
       <ConfigProvider getPopupContainer={() => document.body}>

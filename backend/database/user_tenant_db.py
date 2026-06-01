@@ -32,6 +32,27 @@ def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_user_tenant_by_user_email(email: str) -> Optional[Dict[str, Any]]:
+    """
+    Get user tenant relationship by user email
+
+    Args:
+        email (str): User email address
+
+    Returns:
+        Optional[Dict[str, Any]]: User tenant relationship record, or None if not found
+    """
+    with get_db_session() as session:
+        result = session.query(UserTenant).filter(
+            UserTenant.user_email == email,
+            UserTenant.delete_flag == "N"
+        ).first()
+
+        if result:
+            return as_dict(result)
+        return None
+
+
 def get_all_tenant_ids() -> list[str]:
     """
     Get all unique tenant IDs from the database

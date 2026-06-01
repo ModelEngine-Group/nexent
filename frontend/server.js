@@ -167,6 +167,7 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/cas/renew",
   "/api/user/cas/renew_callback",
   "/api/user/cas/logout_callback",
+  "/api/user/create",
 ]);
 
 function collectRequestBody(req) {

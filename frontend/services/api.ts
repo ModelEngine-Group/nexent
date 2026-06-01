@@ -510,6 +510,7 @@ export const API_ENDPOINTS = {
   },
   users: {
     list: `${API_BASE_URL}/users/list`,
+    create: `${API_BASE_URL}/user/create`,
     detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
     delete: (userId: string) => `${API_BASE_URL}/users/${userId}`,

@@ -12,23 +12,24 @@ import {
   Popconfirm,
   message,
   Tag,
-  Tooltip 
+  Tooltip
 } from "antd";
 import { Edit, Trash2 } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import { useUserList } from "@/hooks/user/useUserList";
-import { useGroupList } from "@/hooks/group/useGroupList";
 import {
   updateUser,
   deleteUser,
+  createUser,
   type User,
   type UpdateUserRequest,
+  type CreateUserRequest,
 } from "@/services/userService";
 import {
-  createGroup,
-  type Group,
-  type CreateGroupRequest,
-} from "@/services/groupService";
+  getPasswordChecks,
+  getStrengthLevel,
+  validatePassword as validatePasswordUtil,
+} from "@/lib/utils";
 
 export default function UserList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
   const { t } = useTranslation("common");
@@ -38,7 +39,6 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
   const [pageSize, setPageSize] = useState(10);
 
   const { data, isLoading, refetch } = useUserList(tenantId, page, pageSize);
-  const { data: groupsData } = useGroupList(tenantId);
 
   // Reset page to 1 when tenantId changes
   useEffect(() => {
@@ -54,17 +54,25 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
 
   const users = data?.users || [];
   const total = data?.total || 0;
-  const groups = groupsData?.groups || [];
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
+  const [createUserModalVisible, setCreateUserModalVisible] = useState(false);
+
+  // Password validation state for add user
+  const [addUserPasswordValue, setAddUserPasswordValue] = useState("");
+  const [addUserPasswordError, setAddUserPasswordError] = useState<{
+    target: "addUserPassword" | "confirmAddUserPassword" | "";
+    message: string;
+  }>({ target: "", message: "" });
 
   const [form] = Form.useForm();
-  const [groupForm] = Form.useForm();
+  const [addUserForm] = Form.useForm();
 
-  const openCreateGroup = () => {
-    groupForm.resetFields();
-    setCreateGroupModalVisible(true);
+  const openCreateUser = () => {
+    addUserForm.resetFields();
+    setAddUserPasswordValue("");
+    setAddUserPasswordError({ target: "", message: "" });
+    setCreateUserModalVisible(true);
   };
 
   const openEdit = (u: User) => {
@@ -110,27 +118,76 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
     }
   };
 
-  const handleCreateGroup = async () => {
-    try {
-      const values = await groupForm.validateFields();
-      if (!tenantId) throw new Error("No tenant selected");
+  const handleAddUserPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setAddUserPasswordValue(value);
 
-      const groupData: CreateGroupRequest = {
-        group_name: values.name,
-        group_description: values.description,
+    if (value && !validatePasswordUtil(value)) {
+      setAddUserPasswordError({
+        target: "addUserPassword",
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    setAddUserPasswordError({ target: "", message: "" });
+    const confirmPassword = addUserForm.getFieldValue("confirmPassword");
+    if (confirmPassword && confirmPassword !== value) {
+      setAddUserPasswordError({
+        target: "confirmAddUserPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    }
+  };
+
+  const handleConfirmAddUserPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const password = addUserForm.getFieldValue("password");
+
+    if (password && !validatePasswordUtil(password)) {
+      setAddUserPasswordError({
+        target: "addUserPassword",
+        message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    if (value && value !== password) {
+      setAddUserPasswordError({
+        target: "confirmAddUserPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    } else {
+      setAddUserPasswordError({ target: "", message: "" });
+    }
+  };
+
+  const handleAddUser = async () => {
+    try {
+      const values = await addUserForm.validateFields();
+
+      const userData: CreateUserRequest = {
+        email: values.email,
+        password: values.password,
+        role: values.role,
       };
 
-      const createdGroup = await createGroup(tenantId, groupData);
-      message.success(t("tenantResources.groups.created"));
+      await createUser(userData);
+      message.success(t("tenantResources.users.created"));
 
-      setCreateGroupModalVisible(false);
-      groupForm.resetFields();
-
-      // Refresh groups list
-      // Note: useGroupList will automatically refetch on tenant change
+      setCreateUserModalVisible(false);
+      addUserForm.resetFields();
+      setAddUserPasswordValue("");
+      setAddUserPasswordError({ target: "", message: "" });
+      refetch();
     } catch (err: any) {
-      if (err.response?.data?.message) {
+      const errorMessage = err?.response?.data?.detail || err?.message || "";
+      if (errorMessage.includes("EMAIL_ALREADY_EXISTS")) {
+        message.error(t("tenantResources.users.emailAlreadyExists"));
+      } else if (err.response?.data?.message) {
         message.error(err.response.data.message);
+      } else {
+        message.error(t("common.unknownError"));
       }
     }
   };
@@ -211,6 +268,15 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+        <div />
+        <div>
+          <Button type="primary" onClick={openCreateUser}>
+            + {t("tenantResources.users.addUser")}
+          </Button>
+        </div>
+      </div>
+
       <Table
         dataSource={users}
         columns={columns}
@@ -252,27 +318,156 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
         </Form>
       </Modal>
 
-      {/* Create Group Modal */}
+      {/* Add User Modal */}
       <Modal
-        title={t("tenantResources.groups.createGroup")}
-        open={createGroupModalVisible}
-        onOk={handleCreateGroup}
-        onCancel={() => setCreateGroupModalVisible(false)}
+        title={t("tenantResources.users.addUser")}
+        open={createUserModalVisible}
+        onOk={handleAddUser}
+        onCancel={() => setCreateUserModalVisible(false)}
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
+        width={480}
       >
-        <Form layout="vertical" form={groupForm}>
+        <Form layout="vertical" form={addUserForm}>
           <Form.Item
-            name="name"
-            label={t("tenantResources.groups.name")}
-            rules={[{ required: true, message: t("tenantResources.groups.enterName") }]}
+            name="email"
+            label={t("common.email")}
+            rules={[
+              { required: true, message: t("common.required") },
+              { type: "email", message: t("auth.invalidEmailFormat") || "Invalid email format" },
+            ]}
           >
-            <Input placeholder={t("tenantResources.groups.enterName")} />
+            <Input placeholder={t("tenantResources.users.enterEmail")} />
           </Form.Item>
-          <Form.Item name="description" label={t("common.description")}>
-            <Input.TextArea
-              placeholder={t("tenantResources.groups.enterDescription")}
-              rows={3}
+
+          <Form.Item
+            name="role"
+            label={t("common.type")}
+            rules={[{ required: true, message: t("common.required") }]}
+          >
+            <Select
+              options={[
+                { label: t("user.role.admin"), value: "ADMIN" },
+                { label: t("user.role.dev"), value: "DEV" },
+                { label: t("user.role.user"), value: "USER" },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label={t("auth.passwordLabel")}
+            validateStatus={addUserPasswordError.target === "addUserPassword" ? "error" : ""}
+            help={
+              addUserForm.getFieldError("password").length
+                ? undefined
+                : addUserPasswordError.target === "addUserPassword"
+                  ? addUserPasswordError.message
+                  : undefined
+            }
+            rules={[
+              { required: true, message: t("auth.passwordRequired") || "Password is required" },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  if (!validatePasswordUtil(value)) {
+                    return Promise.reject(
+                      new Error(
+                        t("auth.passwordStrengthError") ||
+                          "Password must contain uppercase, lowercase, and digit"
+                      )
+                    );
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+            hasFeedback
+          >
+            <Input.Password
+              placeholder={t("auth.passwordLabel")}
+              autoComplete="new-password"
+              onChange={handleAddUserPasswordChange}
+            />
+          </Form.Item>
+
+          {/* Password Strength Indicator */}
+          {addUserPasswordValue && addUserForm.getFieldValue("password") === addUserPasswordValue && (() => {
+              const checks = getPasswordChecks(addUserPasswordValue);
+              const levelInfo = getStrengthLevel(addUserPasswordValue, t);
+              return (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-gray-500">
+                      {t("auth.passwordStrength") || "Password strength"}
+                    </span>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: levelInfo.color }}
+                    >
+                      {levelInfo.label}
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3].map((level) => (
+                      <div
+                        key={level}
+                        className="h-1 flex-1 rounded-full transition-colors"
+                        style={{
+                          backgroundColor:
+                            level <= levelInfo.level ? levelInfo.color : "#e5e7eb",
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+          <Form.Item
+            name="confirmPassword"
+            label={t("auth.confirmPasswordLabel")}
+            validateStatus={addUserPasswordError.target === "confirmAddUserPassword" ? "error" : ""}
+            help={
+              addUserPasswordError.target === "confirmAddUserPassword"
+                ? addUserPasswordError.message
+                : undefined
+            }
+            dependencies={["password"]}
+            rules={[
+              { required: true, message: t("auth.passwordRequired") || "Password is required" },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const password = getFieldValue("password");
+                  if (password && !validatePasswordUtil(password)) {
+                    setAddUserPasswordError({
+                      target: "addUserPassword",
+                      message:
+                        t("auth.passwordStrengthError") ||
+                        "Password must contain uppercase, lowercase, and digit",
+                    });
+                    return Promise.reject(
+                      new Error(
+                        t("auth.passwordStrengthError") ||
+                          "Password must contain uppercase, lowercase, and digit"
+                      )
+                    );
+                  }
+                  if (!value || getFieldValue("password") === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(
+                    new Error(t("auth.passwordsDoNotMatch"))
+                  );
+                },
+              }),
+            ]}
+            hasFeedback
+          >
+            <Input.Password
+              placeholder={t("auth.confirmPasswordLabel")}
+              autoComplete="new-password"
+              onChange={handleConfirmAddUserPasswordChange}
             />
           </Form.Item>
         </Form>
