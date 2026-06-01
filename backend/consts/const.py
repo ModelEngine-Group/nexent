@@ -128,6 +128,9 @@ ASSET_OWNER_ATTACHMENTS_PREFIX = "attachments/asset_owner"
 ENABLE_ASSET_OWNER_ROLE = os.getenv(
     "ENABLE_ASSET_OWNER_ROLE", "false").lower() == "true"
 
+# HTTP detail key: asset owner must register via OAuth, not email/password signup.
+ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL = "ASSET_OWNER_USE_OAUTH"
+
 # Roles that can edit all resources within a tenant (permission = EDIT).
 # Keep this centralized to avoid drifting role logic across modules.
 CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}

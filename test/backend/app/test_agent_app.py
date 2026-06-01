@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -429,6 +429,34 @@ def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
     assert response.status_code == 200
     mock_get_agent_info.assert_called_once_with(
         123, "auth_tenant_id", 2, "user_id")
+
+
+def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_header):
+    """Non-asset-owner callers see masked prompts for asset-owner-scoped agents."""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+    mock_get_user_id.return_value = ("user_id", "regular_tenant")
+    mock_get_agent_info.return_value = {
+        "agent_id": 1,
+        "tenant_id": ASSET_OWNER_TENANT_ID,
+        "duty_prompt": "secret duty",
+        "constraint_prompt": "secret constraint",
+        "few_shots_prompt": "secret few",
+    }
+
+    response = config_client.post(
+        "/agent/search_info",
+        json={"agent_id": 1},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["duty_prompt"] is None
+    assert body["constraint_prompt"] is None
+    assert body["few_shots_prompt"] is None
+    assert body[AGENT_PROMPTS_HIDDEN_FLAG] is True
 
 
 # get_agent_by_name_api Tests
@@ -923,6 +951,23 @@ def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_heade
         tenant_id="auth_tenant", user_id="test_user")
     mock_list_all_agent.assert_any_call(
         tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user")
+
+
+def test_list_all_agent_info_api_asset_owner_tenant_single_query(mocker, mock_auth_header):
+    """Asset-owner tenant callers only query their own tenant (no merge)."""
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_list_all_agent = mocker.patch(
+        "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
+    mock_get_user_info.return_value = ("ao_user", ASSET_OWNER_TENANT_ID, "en")
+    mock_list_all_agent.return_value = [{"agent_id": 1, "name": "AO Agent"}]
+
+    response = config_client.get("/agent/list", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    mock_list_all_agent.assert_called_once_with(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="ao_user"
+    )
+    assert len(response.json()) == 1
 
 
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
@@ -1925,9 +1970,9 @@ def test_list_published_agents_api_success(mocker, mock_auth_header):
         "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
-    mock_list_published_agents.return_value = [
-        {"agent_id": 1, "name": "Agent 1", "published_version_no": 1},
-        {"agent_id": 2, "name": "Agent 2", "published_version_no": 2}
+    mock_list_published_agents.side_effect = [
+        [{"agent_id": 1, "name": "Agent 1", "published_version_no": 1}],
+        [{"agent_id": 2, "name": "Asset Agent", "published_version_no": 1}],
     ]
 
     response = config_client.get(
@@ -1936,10 +1981,33 @@ def test_list_published_agents_api_success(mocker, mock_auth_header):
     )
 
     assert response.status_code == 200
-    mock_list_published_agents.assert_called_once_with(
+    assert mock_list_published_agents.call_count == 2
+    mock_list_published_agents.assert_any_call(
         tenant_id="test_tenant_id", user_id="test_user_id"
     )
+    mock_list_published_agents.assert_any_call(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="test_user_id"
+    )
     assert len(response.json()) == 2
+
+
+def test_list_published_agents_api_asset_owner_tenant_single_query(mocker, mock_auth_header):
+    """Asset-owner tenant callers only query published agents once (no merge)."""
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_list_published_agents = mocker.patch(
+        "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
+    mock_get_user_info.return_value = ("ao_user", ASSET_OWNER_TENANT_ID, "en")
+    mock_list_published_agents.return_value = [
+        {"agent_id": 1, "name": "AO Agent", "published_version_no": 1},
+    ]
+
+    response = config_client.get("/agent/published_list", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    mock_list_published_agents.assert_called_once_with(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="ao_user"
+    )
+    assert len(response.json()) == 1
 
 
 def test_list_published_agents_api_exception(mocker, mock_auth_header):
