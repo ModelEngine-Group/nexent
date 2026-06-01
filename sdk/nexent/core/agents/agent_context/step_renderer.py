@@ -11,7 +11,6 @@ from ...utils.token_estimation import (
     _extract_text_from_messages,
     estimate_tokens_text,
 )
-from .budget import has_invoked_tools
 from .offload_store import OffloadStore
 from .summary_step import SummaryTaskStep
 
@@ -211,25 +210,12 @@ class StepRenderer:
     def render_action_step(self, action: ActionStep, offload_store: Optional[OffloadStore] = None) -> str:
         """Render an ActionStep to text, with optional per-step offload.
 
-        When ``invoked_tools`` is available on the ActionStep, the verbose
-        TOOL_CALL message (which repeats the full code as ``python_interpreter``
-        arguments) is replaced with a compact ``"Tool calls: name1, name2"``
-        summary. This eliminates ~37% token redundancy per step for CodeAgent
-        steps that call registered tools.
+        TOOL_CALL compaction is handled at the ToolCall storage level in
+        ``_step_stream`` via ``compact_arguments``, so this method just
+        serializes and optionally offloads.
         """
-        if has_invoked_tools(action):
-            msgs = action.to_messages(summary_mode=False)
-            parts = []
-            for msg in msgs:
-                text = _extract_text_from_messages([msg]) or ""
-                if text.startswith("Calling tools:"):
-                    parts.append(f"Tool calls: {', '.join(action.invoked_tools)}")
-                else:
-                    parts.append(text)
-            full_text = "\n".join(parts)
-        else:
-            msgs = action.to_messages(summary_mode=False)
-            full_text = _extract_text_from_messages(msgs) or ""
+        msgs = action.to_messages(summary_mode=False)
+        full_text = _extract_text_from_messages(msgs) or ""
         if offload_store is not None and self._config.per_step_render_limit > 0 and len(full_text) > self._config.per_step_render_limit:
             handle = offload_store.store(full_text)
             limit = self._config.per_step_render_limit
