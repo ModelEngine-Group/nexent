@@ -271,12 +271,14 @@ class ContextManager:
 
                 if compress_curr and curr_action_steps:
                     keep_n = min(self.config.keep_recent_steps, len(curr_action_steps))
-                    if keep_n > 0 and keep_n < len(curr_action_steps):
-                        boundary = curr_action_steps[-keep_n]
-                        prev_a = curr_action_steps[-keep_n - 1]
-                        if (getattr(boundary, "observations", None) is not None
-                                and getattr(prev_a, "tool_calls", None) is not None):
-                            keep_n += 1
+                    # Note: No cross-step pair detection needed here. Each ActionStep
+                    # is self-contained — tool_calls and observations always belong to
+                    # the same step (set in _step_stream), so there is no risk of
+                    # splitting a call-observation pair across the compression boundary.
+
+                    actions_to_compress = (
+                        curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
+                    )
 
                     actions_to_compress = (
                         curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
