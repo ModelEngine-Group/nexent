@@ -307,6 +307,7 @@ Additional Args:
         input_messages = memory_messages.copy()
 
         # Trigger context compression if needed before building messages
+        # import pdb; pdb.set_trace()
         if self.context_manager and self.context_manager.config.enabled:
             input_messages = self.context_manager.compress_if_needed(
                 self.model, self.memory, input_messages, self._history_step_count
