@@ -451,9 +451,6 @@ class DashScopeMultimodalEmbedding(MultimodalEmbedding):
                 {"image": f"data:image/png;base64,{image_base64}"}
             ]
             embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
-            # #region debug log
-            logging.warning(f"DEBUG: DashScopeMultimodalEmbedding.dimension_check returned type={type(embeddings)}, len={len(embeddings) if isinstance(embeddings, list) else 'N/A'}")
-            # #endregion
             return embeddings
         except requests.exceptions.Timeout:
             logging.error(f"DashScopeMultimodalEmbedding connection timed out ({timeout} seconds)")
