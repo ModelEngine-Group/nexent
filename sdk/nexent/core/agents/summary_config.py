@@ -120,3 +120,6 @@ class ContextManagerConfig:
     # === NEW: Buffered Strategy Settings ===
     buffer_size_per_component: int = 10
     """Number of items to keep per component type for 'buffered' strategy."""
+
+    per_step_render_limit = 2000
+    # max_offload_entries, enalbe_reload, max_observation_render_length
