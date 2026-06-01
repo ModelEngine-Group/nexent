@@ -28,10 +28,12 @@ if TYPE_CHECKING:
 
 from .agent_context import ContextManager
 from ..utils.token_estimation import msg_token_count
-from ..utils.code_analysis import extract_invoked_tools
+from ..utils.code_analysis import extract_invoked_tools, extract_invoked_tool_signatures
 
 if not hasattr(ActionStep, "invoked_tools"):
     ActionStep.invoked_tools = None
+if not hasattr(ActionStep, "invoked_tool_signatures"):
+    ActionStep.invoked_tool_signatures = None
 
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
@@ -364,8 +366,31 @@ Additional Args:
             arguments=code_action,
             id=f"call_{len(self.memory.steps)}",
         )
+        # memory_step.invoked_tools = extract_invoked_tools(code_action, self.tools) if self.tools else []
+        memory_step.invoked_tool_signatures = (
+            extract_invoked_tool_signatures(code_action, self.tools) if self.tools else []
+        )
+        # When context_manager is enabled, store a COMPACT call-signature in
+        # tool_call.arguments instead of the full code. to_messages() renders
+        # arguments into the TOOL_CALL message, while the same code already
+        # lives verbatim in model_output's <code> block. Compacting here makes
+        # every downstream path emit a bounded tool-call message. The full code
+        # is preserved untouched in memory_step.code_action and model_output.
+        if self.context_manager and self.context_manager.config.enabled:
+            compact_arguments = (
+                "\n".join(memory_step.invoked_tool_signatures)
+                if memory_step.invoked_tool_signatures
+                else truncate_content(code_action, max_length=100)
+            )
+        else:
+            compact_arguments = code_action
+        tool_call = ToolCall(
+            name="python_interpreter",
+            arguments=compact_arguments,
+            id=f"call_{len(self.memory.steps)}",
+        )
         memory_step.tool_calls = [tool_call]
-        memory_step.invoked_tools = extract_invoked_tools(code_action, self.tools) if self.tools else []
+
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
