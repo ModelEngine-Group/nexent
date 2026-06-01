@@ -385,12 +385,12 @@ deployment_tui_multiselect_components() {
 
   local components=(infrastructure application data-process supabase terminal monitoring)
   local details=(
-    "required: elasticsearch, postgresql, redis, minio"
-    "default: config, runtime, mcp, northbound, web"
-    "nexent-data-process"
-    "user and tenant services"
-    "OpenSSH terminal tool"
-    "optional observability stack"
+    "required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO"
+    "Nexent app services: config, runtime, MCP, northbound API, web UI"
+    "background file parsing, indexing, and knowledge processing workers"
+    "user, tenant, login, invitation, and permission services"
+    "OpenSSH container used by the terminal tool"
+    "OpenTelemetry collector and optional tracing dashboard"
   )
   local selected=(0 0 0 0 0 0)
   local cursor=0
@@ -405,6 +405,7 @@ deployment_tui_multiselect_components() {
   deployment_tui_render_components() {
     printf '\033[2J\033[H'
     printf 'Select deployment components\n'
+    printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.\n'
     printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.\n\n'
     local row marker check
     for row in "${!components[@]}"; do
@@ -479,6 +480,14 @@ deployment_tui_select_monitoring_provider() {
   [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
 
   local providers=(otlp phoenix langfuse langsmith grafana zipkin)
+  local details=(
+    "collector only; use this when forwarding to an external OTLP backend"
+    "local Phoenix UI for LLM traces and span inspection"
+    "local self-hosted Langfuse stack; replace default secrets for production"
+    "forward traces to hosted LangSmith; requires LANGSMITH_API_KEY"
+    "local Grafana + Tempo dashboard for traces"
+    "local Zipkin UI for trace browsing"
+  )
   local cursor=0
   local i key key_tail
 
@@ -492,6 +501,8 @@ deployment_tui_select_monitoring_provider() {
   deployment_tui_render_monitoring_provider() {
     printf '\033[2J\033[H'
     printf 'Select monitoring provider\n'
+    printf 'This is used only when the monitoring component is selected.\n'
+    printf 'Provider controls where OpenTelemetry traces are stored and viewed.\n'
     printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!providers[@]}"; do
@@ -499,7 +510,7 @@ deployment_tui_select_monitoring_provider() {
       [ "$row" -eq "$cursor" ] && marker=">"
       radio=" "
       [ "$row" -eq "$cursor" ] && radio="*"
-      printf '%s (%s) %s\n' "$marker" "$radio" "${providers[$row]}"
+      printf '%s (%s) %s - %s\n' "$marker" "$radio" "${providers[$row]}" "${details[$row]}"
     done
   }
 
@@ -549,8 +560,8 @@ deployment_tui_select_port_policy() {
 
   local policies=(development production)
   local details=(
-    "publish debug/internal ports for local troubleshooting"
-    "publish only production entry ports"
+    "publish web plus debug/internal service ports for local troubleshooting"
+    "publish only production entry ports; keep internal services private"
   )
   local cursor=0
   local i key key_tail
@@ -565,6 +576,8 @@ deployment_tui_select_port_policy() {
   deployment_tui_render_port_policy() {
     printf '\033[2J\033[H'
     printf 'Select port policy\n'
+    printf 'This controls which service ports are exposed on the host or cluster node.\n'
+    printf 'Choose development for local debugging; choose production for a smaller external surface.\n'
     printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!policies[@]}"; do
@@ -622,9 +635,9 @@ deployment_tui_select_image_source() {
 
   local sources=(general mainland local-latest)
   local details=(
-    "standard public registries"
-    "mainland China registry mirrors"
-    "use local Nexent latest images and avoid pulls"
+    "pull images from standard public registries"
+    "pull from mainland China mirrors for better access in mainland networks"
+    "use locally built Nexent :latest images and avoid pulling app images"
   )
   local cursor=0
   local i key key_tail
@@ -639,6 +652,8 @@ deployment_tui_select_image_source() {
   deployment_tui_render_image_source() {
     printf '\033[2J\033[H'
     printf 'Select image source\n'
+    printf 'This controls where deployment images come from.\n'
+    printf 'Use local-latest only after building Nexent images locally.\n'
     printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!sources[@]}"; do
@@ -802,8 +817,10 @@ deployment_maybe_select_local_config() {
   [ -t 0 ] || return 0
 
   deployment_log "Existing deployment config found: $DEPLOYMENT_LOCAL_CONFIG_PATH"
-  deployment_log "  1) Use local config"
-  deployment_log "  2) Reconfigure"
+  deployment_log "Choose how to handle saved deployment options:"
+  deployment_log "  1) Use local config - skip the menus and reuse the saved components, port policy, image source, and monitoring provider."
+  deployment_log "  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them."
+  deployment_log "     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope."
   local input
   read -r -p "Choose [1/2] (default: 1): " input
   if [ "${input:-1}" = "1" ]; then
