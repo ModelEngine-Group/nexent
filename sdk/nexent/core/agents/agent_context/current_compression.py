@@ -76,7 +76,7 @@ class CurrentCompressor:
                 new_actions = actions_to_compress[cache.end_steps:]
                 incremental_input = (
                     f"## Previous Summary\n{old_summary}\n\n"
-                    f"## New Steps\n{task_text}{self._renderer.actions_to_text(new_actions)}"
+                    f"## New Steps\n{task_text}{self._renderer.actions_to_text(new_actions, offload_store=self._renderer._offload_store)}"
                 )
                 input_tokens = estimate_tokens_text(incremental_input)
                 if input_tokens <= self._config.max_summary_input_tokens:
@@ -117,6 +117,7 @@ class CurrentCompressor:
         actions_budget = max(0, self._config.max_summary_input_tokens - estimate_tokens_text(task_text))
         full_text = task_text + self._renderer.render_steps_with_truncation(
             safe_actions, fmt="action", max_tokens=actions_budget,
+            offload_store=self._renderer._offload_store,
         )
         llm_result = self._llm.generate_summary(full_text, model, call_type="current_summary", prompt_type="initial")
         records.extend(llm_result.records)
@@ -139,6 +140,7 @@ class CurrentCompressor:
             )
             actions_text = self._renderer.render_steps_with_truncation(
                 reduced_actions, fmt="action", max_tokens=self._config.max_summary_reduce_tokens,
+                offload_store=self._renderer._offload_store,
             )
             fallback_text = (
                 "[CONTEXT COMPACTION \u2014 REFERENCE ONLY] Some recent action steps were removed to free context space. "

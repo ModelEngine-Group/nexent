@@ -80,7 +80,7 @@ class PreviousCompressor:
                 new_pairs = pairs_to_compress[cache.covered_pairs:]
                 incremental_input = (
                     f"## Previous Summary\n{old_summary}\n\n"
-                    f"## New Conversations\n{self._renderer.pairs_to_text(new_pairs)}"
+                    f"## New Conversations\n{self._renderer.pairs_to_text(new_pairs, offload_store=self._renderer._offload_store)}"
                 )
                 input_tokens = estimate_tokens_text(incremental_input)
                 if input_tokens <= self._config.max_summary_input_tokens:
@@ -145,7 +145,7 @@ class PreviousCompressor:
         if not pairs:
             return None, False, records
 
-        full_text = self._renderer.pairs_to_text(pairs)
+        full_text = self._renderer.pairs_to_text(pairs, offload_store=self._renderer._offload_store)
         if estimate_tokens_text(full_text) <= self._config.max_summary_input_tokens:
             target_text = full_text
         else:
@@ -157,6 +157,7 @@ class PreviousCompressor:
                 trimmed_pairs, fmt="pair",
                 max_tokens=self._config.max_summary_input_tokens,
                 task_budget_chars=800, action_budget_chars=1500,
+                offload_store=self._renderer._offload_store,
             )
 
         llm_result = self._llm.generate_summary(
@@ -173,6 +174,7 @@ class PreviousCompressor:
         )
         reduced_text = self._renderer.render_steps_with_truncation(
             reduced_pairs, fmt="pair", max_tokens=self._config.max_summary_reduce_tokens,
+            offload_store=self._renderer._offload_store,
         )
         first_task = pairs[0][0].task[:200] if pairs and pairs[0][0].task else ""
         fallback_text = (
