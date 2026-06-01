@@ -180,7 +180,7 @@ async def test_current_run_complex_opt():
         keep_recent_steps=1,
     )
     shared_cm = ContextManager(config=cm_config, max_steps=10)
-    queries = ["请用 Python 计算 2 的 10 到 15 次方，并告诉我哪些是质数。请分步执行。"]
+    queries = ["请用 Python 计算 2 的 10 到 15 次方，并告诉我哪些是质数。请分步执行。接下来，已知复数表示旋转，请使用python最基础的功能演示下"]
     results = await run_multi_turn(
         queries=queries,
         base_history=base_history,

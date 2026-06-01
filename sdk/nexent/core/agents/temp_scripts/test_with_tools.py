@@ -318,15 +318,16 @@ async def test_read_ana_file():
     tools = [make_read_tool_config(str(ws)), make_write_tool_config(str(ws))]
 
     cm_config = ContextManagerConfig(
-        enabled=True,
-        token_threshold=8000,
+        enabled=False,
+        token_threshold=30000,
         keep_recent_steps=2,
+        keep_recent_pairs=0
     )
     shared_cm = ContextManager(config=cm_config, max_steps=5)
-
+    base_history = parse_conversation_to_history("./small_history.md")
     agent_run_info = build_agent_run_info(
-        query="请用 read_file 读取 sample.txt 的内容，然后对其内容进行分析和总结，请直接调用 write_file 工具将分析结果写入文件 ana.txt，不要在调用工具前打印或输出分析的具体内容，只需简单说明你正在做什么即可。" ,
-        history=[],
+        query="请用 read_file 读取 sample.txt 的内容，然后对其内容进行分析和总结。后续调用 write_file 工具将分析结果写入文件 ana.txt." ,
+        history=base_history,
         tools=tools,
         max_steps=5,
         agent_name="file_agent",
