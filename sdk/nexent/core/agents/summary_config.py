@@ -67,6 +67,56 @@ class ContextManagerConfig:
     # change.
     max_observation_length: int = 0
 
+    per_step_render_limit: int = 0
+    """Per-segment character threshold for offload.
+    When a rendered message segment exceeds this length and offload_store
+    is available, the full text is stored and replaced with an [[OFFLOAD]]
+    marker. 0 = disabled (no offload). Suggested value: 15000~30000.
+    """
+
+    _offload_prompt_suffix: str = field(
+        default=(
+            "\n\n"
+            "When you see [[OBS_OFFLOAD: ...]] or [[CONTENT_OFFLOAD: ...]] markers in the "
+            "conversation, these indicate that the full content for that segment has been "
+            "archived externally and can be retrieved by the agent using the provided handle. "
+            "Handle them as follows:\n"
+            "- DO NOT copy the markers verbatim into your summary fields.\n"
+            "- Record each offloaded segment in the 'offloaded_content' list with its handle, "
+            "  a brief description (tool name, file name, size from the marker), and step number.\n"
+            "- In other fields (e.g., 'completed_work'), reference offloaded content concisely, "
+            "  e.g., 'Read config.json (full content archived, see offloaded_content).'\n"
+            "- If a marker's visible prefix is insufficient to determine what happened, note it "
+            "  as '[Step N: content archived]' rather than guessing.\n"
+            "- If no offload markers appear in the conversation, set 'offloaded_content' to an empty list []."
+        ),
+        repr=False,
+    )
+    """Prompt suffix for handling offload markers in full-compression summaries.
+    Only appended to ``summary_system_prompt`` when ``per_step_render_limit > 0``.
+    """
+
+    _offload_incremental_prompt_suffix: str = field(
+        default=(
+            "\n\n"
+            "When you see [[OBS_OFFLOAD: ...]] or [[CONTENT_OFFLOAD: ...]] markers in the "
+            "conversation, these indicate that the full content for that segment has been "
+            "archived externally and can be retrieved by the agent using the provided handle. "
+            "Handle them as follows:\n"
+            "- DO NOT copy the markers verbatim into your summary fields.\n"
+            "- Record each offloaded segment in the 'offloaded_content' list with its handle, "
+            "  a brief description (tool name, file name, size from the marker), and step number.\n"
+            "- In other fields, reference offloaded content concisely.\n"
+            "- If the previous summary already contains an 'offloaded_content' list, MERGE new "
+            "  entries into it rather than replacing it.\n"
+            "- If no offload markers appear, set 'offloaded_content' to an empty list []."
+        ),
+        repr=False,
+    )
+    """Prompt suffix for handling offload markers in incremental-compression summaries.
+    Only appended to ``incremental_summary_system_prompt`` when ``per_step_render_limit > 0``.
+    """
+
     # === NEW: Strategy Selection ===
     strategy: StrategyType = "token_budget"
     """Context component selection strategy.
@@ -121,5 +171,31 @@ class ContextManagerConfig:
     buffer_size_per_component: int = 10
     """Number of items to keep per component type for 'buffered' strategy."""
 
-    per_step_render_limit = 2000
-    # max_offload_entries, enalbe_reload, max_observation_render_length
+    # === Effective prompt / schema helpers ===
+
+    def effective_summary_system_prompt(self) -> str:
+        """Return the summary system prompt, with offload guidance if enabled."""
+        prompt = self.summary_system_prompt
+        if self.per_step_render_limit > 0:
+            prompt += self._offload_prompt_suffix
+        return prompt
+
+    def effective_incremental_summary_system_prompt(self) -> str:
+        """Return the incremental summary system prompt, with offload guidance if enabled."""
+        prompt = self.incremental_summary_system_prompt
+        if self.per_step_render_limit > 0:
+            prompt += self._offload_incremental_prompt_suffix
+        return prompt
+
+    def effective_summary_json_schema(self) -> Dict[str, Any]:
+        """Return the summary JSON schema, with ``offloaded_content`` field if offload is enabled."""
+        schema = dict(self.summary_json_schema)
+        if self.per_step_render_limit > 0:
+            schema["offloaded_content"] = [
+                {
+                    "handle": "str: UUID handle for reloading the full archived content",
+                    "description": "str: what was offloaded (tool name, file name, segment type, size)",
+                    "step": "int: step number where the offload occurred",
+                }
+            ]
+        return schema
