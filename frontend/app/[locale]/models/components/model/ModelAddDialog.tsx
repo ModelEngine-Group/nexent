@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
@@ -534,68 +534,63 @@ export const ModelAddDialog = ({
           form.displayName || form.name,
           modelType
         );
-      } else {
+      } else if (form.type === MODEL_TYPES.STT) {
         // For STT models, build the appropriate config based on provider
-        if (form.type === MODEL_TYPES.STT) {
-          const sttConfig: any = {
-            modelType: modelType,
-          };
+        const sttConfig: any = {
+          modelType: modelType,
+          baseUrl: form.url,
+        };
 
-          if (form.sttProvider === "volcengine") {
-            sttConfig.modelFactory = "volcengine";
-            sttConfig.modelAppid = form.modelAppid.trim();
-            sttConfig.accessToken = form.accessToken.trim();
-            sttConfig.baseUrl = form.url;
-          } else {
-            sttConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
-            sttConfig.modelFactory = "dashscope";
-            sttConfig.modelName = form.name;
-            sttConfig.baseUrl = form.url;
-          }
-
-          const result = await modelService.verifyModelConfigConnectivity(sttConfig);
-          connectivity = result.connectivity;
+        if (form.sttProvider === "volcengine") {
+          sttConfig.modelFactory = "volcengine";
+          sttConfig.modelAppid = form.modelAppid.trim();
+          sttConfig.accessToken = form.accessToken.trim();
         } else {
-          // For TTS models, build the appropriate config based on provider
-          if (form.type === MODEL_TYPES.TTS) {
-            const ttsConfig: any = {
-              modelType: modelType,
-            };
-
-            if (form.ttsProvider === "volcengine") {
-              ttsConfig.modelFactory = "volcengine";
-              ttsConfig.modelAppid = form.modelAppid.trim();
-              ttsConfig.accessToken = form.accessToken.trim();
-              ttsConfig.baseUrl = form.url;
-            } else {
-              ttsConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
-              ttsConfig.modelFactory = "dashscope";
-              ttsConfig.modelName = form.name;
-              ttsConfig.baseUrl = form.url;
-            }
-
-            const result = await modelService.verifyModelConfigConnectivity(ttsConfig);
-            connectivity = result.connectivity;
-          } else {
-            const config = {
-              modelName: form.name,
-              modelType: modelType,
-              baseUrl: form.url,
-              apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-              maxTokens:
-                form.type === MODEL_TYPES.EMBEDDING
-                  ? parseInt(form.vectorDimension)
-                  : parseMaxTokens(form.maxTokens),
-              embeddingDim:
-                form.type === MODEL_TYPES.EMBEDDING
-                  ? parseInt(form.vectorDimension)
-                  : undefined,
-            };
-
-            const result = await modelService.verifyModelConfigConnectivity(config);
-            connectivity = result.connectivity;
-          }
+          sttConfig.apiKey = form.apiKey.trim() || "sk-no-api-key";
+          sttConfig.modelFactory = "dashscope";
+          sttConfig.modelName = form.name;
         }
+
+        const result = await modelService.verifyModelConfigConnectivity(sttConfig);
+        connectivity = result.connectivity;
+      } else if (form.type === MODEL_TYPES.TTS) {
+        // For TTS models, build the appropriate config based on provider
+        const ttsConfig: any = {
+          modelType: modelType,
+          baseUrl: form.url,
+        };
+
+        if (form.ttsProvider === "volcengine") {
+          ttsConfig.modelFactory = "volcengine";
+          ttsConfig.modelAppid = form.modelAppid.trim();
+          ttsConfig.accessToken = form.accessToken.trim();
+        } else {
+          ttsConfig.apiKey = form.apiKey.trim() || "sk-no-api-key";
+          ttsConfig.modelFactory = "dashscope";
+          ttsConfig.modelName = form.name;
+        }
+
+        const result = await modelService.verifyModelConfigConnectivity(ttsConfig);
+        connectivity = result.connectivity;
+      } else {
+        // For other model types (LLM, Embedding, VLM, Rerank, etc.)
+        const config = {
+          modelName: form.name,
+          modelType: modelType,
+          baseUrl: form.url,
+          apiKey: form.apiKey.trim() || "sk-no-api-key",
+          maxTokens:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : parseMaxTokens(form.maxTokens),
+          embeddingDim:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : undefined,
+        };
+
+        const result = await modelService.verifyModelConfigConnectivity(config);
+        connectivity = result.connectivity;
       }
 
       // Set connectivity status
