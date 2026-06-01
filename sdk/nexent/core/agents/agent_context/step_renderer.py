@@ -97,15 +97,15 @@ def compress_history_offline(
         input_text = "...[Earlier content truncated]...\n" + input_text[-approx_chars:]
 
     # Build prompt
-    schema_desc = json.dumps(config.summary_json_schema, ensure_ascii=False, indent=2)
+    schema_desc = json.dumps(config.effective_summary_json_schema(), ensure_ascii=False, indent=2)
     if is_incremental:
-        system_prompt = config.incremental_summary_system_prompt
+        system_prompt = config.effective_incremental_summary_system_prompt()
         user_prompt = (
             f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
             f"{input_text}"
         )
     else:
-        system_prompt = config.summary_system_prompt
+        system_prompt = config.effective_summary_system_prompt()
         user_prompt = (
             f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
             f"TURNS TO SUMMARIZE:\n{input_text}"
@@ -208,19 +208,68 @@ class StepRenderer:
         self._offload_store = offload_store
 
     def render_action_step(self, action: ActionStep, offload_store: Optional[OffloadStore] = None) -> str:
-        """Render an ActionStep to text, with optional per-step offload.
+        """Render an ActionStep to text, with per-segment offload.
 
-        TOOL_CALL compaction is handled at the ToolCall storage level in
-        ``_step_stream`` via ``compact_arguments``, so this method just
-        serializes and optionally offloads.
+        Each message segment (model_output, tool_call, observation) is independently
+        checked against the offload threshold. Only oversized segments are offloaded;
+        short segments remain intact, giving the compression LLM sufficient context
+        to produce a high-quality summary.
         """
         msgs = action.to_messages(summary_mode=False)
-        full_text = _extract_text_from_messages(msgs) or ""
-        if offload_store is not None and self._config.per_step_render_limit > 0 and len(full_text) > self._config.per_step_render_limit:
-            handle = offload_store.store(full_text)
-            limit = self._config.per_step_render_limit
-            return full_text[:limit] + f"\n...[Content offloaded: [[OFFLOAD:handle={handle}]]]"
-        return full_text
+
+        # Fast path: no offload configured — simple concatenation
+        if offload_store is None or self._config.per_step_render_limit <= 0:
+            return _extract_text_from_messages(msgs) or ""
+
+        # Per-segment rendering with offload
+        parts = []
+        for msg in msgs:
+            text = _extract_text_from_messages([msg]) or ""
+            if text.startswith("Calling tools:"):
+                # Tool call is always short — keep verbatim
+                parts.append(text)
+            else:
+                # Per-segment offload: observation or model_output
+                parts.append(self._render_segment(text, offload_store))
+        return "\n".join(parts)
+
+    def _render_segment(self, text: str, offload_store: Optional[OffloadStore] = None) -> str:
+        """Render a single message segment, offloading if oversized.
+
+        When the segment exceeds ``per_step_render_limit``, the full text is archived
+        in ``offload_store`` and replaced with a self-describing marker so the
+        compression LLM knows what was offloaded and how to retrieve it.
+
+        Args:
+            text: The raw segment text (e.g., model_output or observation).
+            offload_store: OffloadStore for archiving oversized segments.
+
+        Returns:
+            Rendered segment — either the full text, or a truncated version ending
+            with a self-describing offload marker.
+        """
+        limit = self._config.per_step_render_limit
+        if offload_store is None or limit <= 0 or len(text) <= limit:
+            return text
+
+        # Offload triggered — archive full text
+        handle = offload_store.store(text)
+
+        # Build a self-describing marker so the LLM understands what was offloaded
+        if text.startswith("Observation:"):
+            first_line = text.split("\n")[0] if "\n" in text else text[:100]
+            marker = (
+                f"\n...[[OBS_OFFLOAD: {first_line[:80]}, "
+                f"{len(text)} chars, handle={handle}]]"
+            )
+        else:
+            preview = text[:80].replace("\n", " ").strip()
+            marker = (
+                f"\n...[[CONTENT_OFFLOAD: {preview}..., "
+                f"{len(text)} chars, handle={handle}]]"
+            )
+
+        return text[:limit] + marker
 
     def truncate_text_to_tokens(self, text: str, max_tokens: int) -> str:
         if max_tokens <= 0:
