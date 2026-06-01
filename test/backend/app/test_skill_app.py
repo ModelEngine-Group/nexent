@@ -609,6 +609,34 @@ class TestGetSkillEndpoint:
             assert response.status_code == 404
 
 
+class TestAssetOwnerSkillVisibility:
+    """Test ASSET_OWNER skill visibility enforcement at the app layer."""
+
+    def test_get_skill_file_tree_denied_for_non_asset_owner_tenant(self, mocker):
+        """Non-asset-owner callers receive a denial payload for asset-owner skills."""
+        asset_owner_tenant_id = "asset_owner_tenant_id"
+
+        with patch("backend.apps.skill_app.can_view_skill", return_value=False), \
+             patch("backend.apps.skill_app.get_current_user_id", return_value=("user123", "regular_tenant")), \
+             patch("backend.apps.skill_app.SkillService") as mock_service_class:
+            mock_service = MagicMock()
+            mock_service_class.return_value = mock_service
+            mock_service.get_skill.return_value = {
+                "name": "ao_skill",
+                "tenant_id": asset_owner_tenant_id,
+            }
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+
+            response = client.get("/skills/ao_skill/files")
+
+            assert response.status_code == 200
+            assert response.json() == {"content": "您无权限查看"}
+            mock_service.get_skill_file_tree.assert_not_called()
+
+
 # ===== Update Skill Endpoint Tests =====
 class TestUpdateSkillEndpoint:
     """Test PUT /skills/{skill_name} endpoint."""
