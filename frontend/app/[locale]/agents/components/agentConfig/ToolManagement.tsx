@@ -17,8 +17,7 @@ import { Settings, AlertTriangle } from "lucide-react";
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
-  currentAgentId?: number | undefined;
-  isReadOnly?: boolean;
+  currentAgentId?: number;
 }
 
 // Tool types that require knowledge base selection
@@ -89,16 +88,13 @@ function isToolDisabledDueToEmbedding(toolName: string, embeddingAvailable: bool
 export default function ToolManagement({
   toolGroups,
   isCreatingMode,
-  currentAgentId,
-  isReadOnly: isReadOnlyProp,
+  currentAgentId
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
 
-  // Use prop if provided, otherwise fall back to store
-  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
@@ -385,9 +381,7 @@ export default function ToolManagement({
                           const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
-                          const tooltipTitle = isReadOnly
-                            ? t("agent.noEditPermission")
-                            : isDisabledDueToVlm
+                          const tooltipTitle = isDisabledDueToVlm
                             ? t("toolPool.vlmDisabledTooltip")
                             : isDisabledDueToEmbedding
                             ? t("toolPool.embeddingDisabledTooltip")
@@ -494,9 +488,7 @@ export default function ToolManagement({
                 const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
-                const tooltipTitle = isReadOnly
-                  ? t("agent.noEditPermission")
-                  : isDisabledDueToVlm
+                const tooltipTitle = isDisabledDueToVlm
                   ? t("toolPool.vlmDisabledTooltip")
                   : isDisabledDueToEmbedding
                   ? t("toolPool.embeddingDisabledTooltip")

@@ -594,9 +594,8 @@ export default function AgentSelectorHeader({
               }}
               getPopupContainer={(triggerNode) => triggerNode.parentNode as HTMLElement}
               styles={{
-                root: { 
-                  minWidth: 0, 
-                  width: '100%', 
+                root: {
+                  width: 'calc(100% - 32px)',
                 }
               }}
             >
@@ -614,12 +613,12 @@ export default function AgentSelectorHeader({
                 <div className="flex-1 min-w-0 mx-2">
                   <div className="text-lg font-medium text-gray-900 leading-tight mb-2">
                     {isCreatingMode
-                      ? t("subAgentPool.button.create")
+                      ? t("agent.action.create")
                       : currentAgent?.display_name || currentAgent?.name || t("agentConfig.agents.selectAgent")}
                   </div>
                   <div className="text-sm text-gray-500 leading-tight truncate">
                     {isCreatingMode
-                    ? t("subAgentPool.button.create")
+                    ? t("agent.action.createOrSelect")
                     : currentAgent?.description || t("agentConfig.agents.noAgentSelected")}
                   </div>
                 </div>
@@ -666,7 +665,6 @@ export default function AgentSelectorHeader({
                 <span>{t("agentConfig.button.new")}</span>
               </Button>
               <Button
-                type="text"
                 size="middle"
                 onClick={handleImportAgent}
                 className="flex items-center gap-1"

@@ -49,8 +49,7 @@ sys.modules['elasticsearch'] = MagicMock()
 sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.create_engine'] = MagicMock()
 
-# Mock database submodules
-sys.modules['database'] = MagicMock()
+# Mock database submodules (do not replace the parent `database` package to avoid breaking other tests)
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.remote_mcp_db'] = MagicMock()
@@ -61,6 +60,16 @@ sys.modules['database.model_management_db'] = MagicMock()
 
 # Mock a2a_agent_db (referenced by agent_service.py)
 sys.modules['database.a2a_agent_db'] = MagicMock()
+sys.modules['database.skill_db'] = MagicMock()
+
+# Stub database.client early so real DB modules are not loaded during import
+_mock_db_client = MagicMock()
+_mock_db_client.get_db_session = MagicMock()
+_mock_db_client.as_dict = MagicMock()
+_mock_db_client.MinioClient = MagicMock()
+_mock_db_client.db_client = MagicMock()
+sys.modules['database.client'] = _mock_db_client
+sys.modules['backend.database.client'] = _mock_db_client
 
 # Mock services submodules
 services_module = types.ModuleType("services")
@@ -85,6 +94,19 @@ sys.modules['services.skill_service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 sys.modules['services.skill_service'] = MagicMock()
 setattr(services_module, 'skill_service', sys.modules['services.skill_service'])
+
+# Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
+import importlib.util
+from pathlib import Path
+
+_asset_owner_path = Path(__file__).resolve().parents[3] / "backend" / "services" / "asset_owner_visibility.py"
+_asset_owner_spec = importlib.util.spec_from_file_location(
+    "services.asset_owner_visibility", _asset_owner_path
+)
+_asset_owner_mod = importlib.util.module_from_spec(_asset_owner_spec)
+_asset_owner_spec.loader.exec_module(_asset_owner_mod)
+sys.modules["services.asset_owner_visibility"] = _asset_owner_mod
+setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 
 # Mock agents submodules
 sys.modules['agents'] = MagicMock()
@@ -8654,6 +8676,60 @@ async def test_list_all_agent_info_impl_admin_gets_edit_permission(
 
     assert len(result) == 1
     assert result[0]["permission"] == PERMISSION_EDIT  # Admin gets EDIT
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """ASSET_OWNER-scoped agents are READ_ONLY for non-ASSET_OWNER roles even when admin."""
+    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+
+    mock_agents = [
+        {
+            "agent_id": 99,
+            "name": "Asset Agent",
+            "display_name": "Asset Agent",
+            "description": "Asset owner scoped",
+            "enabled": True,
+            "group_ids": "1",
+            "ingroup_permission": PERMISSION_EDIT,
+            "created_by": "admin_user",
+            "tenant_id": ASSET_OWNER_TENANT_ID,
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = [1]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        return [int(p.strip()) for p in str(x).split(",") if p.strip().isdigit()]
+
+    mock_convert_list.side_effect = convert_side_effect
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="admin_user"
+    )
+
+    assert len(result) == 1
+    assert result[0]["permission"] == PERMISSION_READ
 
 
 @pytest.mark.asyncio

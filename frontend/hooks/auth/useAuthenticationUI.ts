@@ -105,6 +105,12 @@ export function useAuthenticationUI({
     if (isSpeedMode) return;
 
     const handleSessionExpired = () => {
+      // Prevent showing session expired modal when login/register modal is already open
+      // This avoids race conditions when mousemove events trigger session checks
+      // while the user is already filling in the login form
+      if (isLoginModalOpen || isRegisterModalOpen) {
+        return;
+      }
       setIsSessionExpiredModalOpen(true);
     };
 
@@ -128,7 +134,7 @@ export function useAuthenticationUI({
       cleanup();
       cleanupRegister();
     };
-  }, [isSpeedMode, setIsSessionExpiredModalOpen]);
+  }, [isSpeedMode, isLoginModalOpen, isRegisterModalOpen]);
 
   // Auto-open login modal when returning from a failed OAuth redirect
   useEffect(() => {

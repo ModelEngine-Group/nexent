@@ -31,30 +31,52 @@ import {
   type CreateInvitationRequest,
   type UpdateInvitationRequest,
 } from "@/services/invitationService";
-import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, Copy, CircleSlash } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  CheckCircle,
+  Clock,
+  XCircle,
+  Copy,
+  CircleSlash,
+} from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatDate } from "@/lib/date";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+import {
+  ASSET_OWNER_INVITE_CODE_TYPE,
+  ASSET_OWNER_TENANT_ID,
+  USER_ROLES,
+} from "@/const/auth";
 
 const { Panel } = Collapse;
 
-export default function InvitationList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
+export default function InvitationList({
+  tenantId,
+  refreshKey,
+}: {
+  tenantId: string | null;
+  refreshKey?: number;
+}) {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const userRole = user?.role;
   const isAdminRole = userRole === USER_ROLES.ADMIN;
-
+  const isSuperAdmin = userRole === USER_ROLES.SU;
+  const isAssetOwnerInviteContext = tenantId === ASSET_OWNER_TENANT_ID;
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [editingInvitation, setEditingInvitation] = useState<Invitation | null>(null);
+  const [editingInvitation, setEditingInvitation] = useState<Invitation | null>(
+    null
+  );
   const [modalVisible, setModalVisible] = useState(false);
 
   const [form] = Form.useForm();
 
   // Fetch invitations
   const { data, isLoading, refetch } = useInvitationList({
-    tenant_id: tenantId || undefined,
+    tenant_id: tenantId === null ? undefined : tenantId,
     page: currentPage,
     page_size: pageSize,
     sort_by: "update_time",
@@ -63,13 +85,15 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
 
   // Trigger refetch when refreshKey changes
   useEffect(() => {
-    if (refreshKey && refreshKey > 0 && tenantId) {
+    if (refreshKey && refreshKey > 0 && tenantId !== null) {
       refetch();
     }
   }, [refreshKey, tenantId, refetch]);
 
   // Fetch groups for group selection
-  const { data: groupData } = useGroupList(tenantId); // Get all groups for selection
+  const { data: groupData } = useGroupList(
+    isAssetOwnerInviteContext ? null : tenantId
+  );
   const groups = groupData?.groups || [];
 
   const invitations = data?.items || [];
@@ -78,27 +102,33 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
     setEditingInvitation(null);
     form.resetFields();
 
-    // Get default group for the tenant
     let defaultGroupIds: number[] = [];
-    if (tenantId) {
-      try {
-        const defaultGroupId = await getTenantDefaultGroupId(tenantId);
-        if (defaultGroupId) {
-          defaultGroupIds = [defaultGroupId];
-        }
-      } catch (error) {
-        console.warn("Failed to get default group:", error);
-        // Show user-friendly message
-        message.warning(t("tenantResources.invitation.loadDefaultGroupFailed"));
-      }
+    if (isAssetOwnerInviteContext) {
+      form.setFieldsValue({
+        code_type: ASSET_OWNER_INVITE_CODE_TYPE,
+        capacity: 1,
+        group_ids: [],
+      });
     } else {
-      console.log("No tenantId available for getting default group");
+      if (tenantId) {
+        try {
+          const defaultGroupId = await getTenantDefaultGroupId(tenantId);
+          if (defaultGroupId) {
+            defaultGroupIds = [defaultGroupId];
+          }
+        } catch (error) {
+          console.warn("Failed to get default group:", error);
+          message.warning(
+            t("tenantResources.invitation.loadDefaultGroupFailed")
+          );
+        }
+      }
+      form.setFieldsValue({
+        code_type: "USER_INVITE",
+        capacity: 1,
+        group_ids: defaultGroupIds,
+      });
     }
-    form.setFieldsValue({
-      code_type: "USER_INVITE",
-      capacity: 1,
-      group_ids: defaultGroupIds,
-    });
     setModalVisible(true);
   };
 
@@ -109,7 +139,9 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       capacity: invitation.capacity,
       invitation_code: invitation.invitation_code,
       group_ids: invitation.group_ids || [],
-      expiry_date: invitation.expiry_date ? dayjs(invitation.expiry_date) : undefined,
+      expiry_date: invitation.expiry_date
+        ? dayjs(invitation.expiry_date)
+        : undefined,
     });
     setModalVisible(true);
   };
@@ -121,12 +153,19 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       refetch();
     } catch (error: any) {
       // Check if it's an authentication error
-      if (error.code === 401 || error.code === 499 || error.message?.includes("Login expired")) {
+      if (
+        error.code === 401 ||
+        error.code === 499 ||
+        error.message?.includes("Login expired")
+      ) {
         // Let the global session expired handler deal with it
         throw error;
       } else {
         // For other errors, show specific error message
-        const errorMessage = error.response?.data?.message || error.message || "Failed to delete invitation";
+        const errorMessage =
+          error.response?.data?.message ||
+          error.message ||
+          "Failed to delete invitation";
         message.error(errorMessage);
       }
     }
@@ -136,7 +175,7 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
     try {
       const values = await form.validateFields();
 
-      if (!tenantId) {
+      if (tenantId === null) {
         message.error(t("common.noTenantSelected"));
         return;
       }
@@ -157,13 +196,18 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         await updateInvitation(editingInvitation.invitation_code, updateData);
         message.success(t("tenantResources.invitation.invitationUpdated"));
       } else {
-        // Create invitation
+        // Asset-owner page hides code_type in the form; always send ASSET_OWNER_INVITE on create.
+        const codeType = isAssetOwnerInviteContext
+          ? ASSET_OWNER_INVITE_CODE_TYPE
+          : values.code_type;
         const createData: CreateInvitationRequest = {
-          tenant_id: tenantId,
-          code_type: values.code_type,
+          tenant_id: isAssetOwnerInviteContext
+            ? ASSET_OWNER_TENANT_ID
+            : tenantId!,
+          code_type: codeType,
           invitation_code: values.invitation_code?.toUpperCase(),
           capacity: values.capacity,
-          group_ids: values.group_ids || [],
+          group_ids: isAssetOwnerInviteContext ? [] : values.group_ids || [],
           expiry_date: formattedExpiryDate,
         };
         await createInvitation(createData);
@@ -173,12 +217,17 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       refetch();
     } catch (error: any) {
       // Check if it's an authentication error
-      if (error.code === 401 || error.code === 499 || error.message?.includes("Login expired")) {
+      if (
+        error.code === 401 ||
+        error.code === 499 ||
+        error.message?.includes("Login expired")
+      ) {
         // Let the global session expired handler deal with it
         throw error;
       } else {
         // For other errors, show specific error message
-        const errorMessage = error.response?.data?.message || error.message || "Operation failed";
+        const errorMessage =
+          error.response?.data?.message || error.message || "Operation failed";
         message.error(errorMessage);
       }
     }
@@ -196,7 +245,9 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
   // Get group names for invitation
   const getGroupNames = (groupIds?: number[]) => {
     if (!groupIds || groupIds.length === 0) return [];
-    return groupIds.map((id) => groupNameMap.get(id) || `Group ${id}`).filter(Boolean);
+    return groupIds
+      .map((id) => groupNameMap.get(id) || `Group ${id}`)
+      .filter(Boolean);
   };
 
   const columns: ColumnsType<Invitation> = useMemo(
@@ -229,7 +280,11 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         key: "code_type",
         width: 80,
         render: (type: string) => {
-          return <Tag color="default">{t(`tenantResources.invitation.codeType.${type}`)}</Tag>;
+          return (
+            <Tag color="default">
+              {t(`tenantResources.invitation.codeType.${type}`)}
+            </Tag>
+          );
         },
       },
       {
@@ -246,7 +301,9 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
                 type="dashboard"
                 percent={percent}
                 gapDegree={100}
-                format={() => t("tenantResources.invitation.remaining", { remaining })}
+                format={() =>
+                  t("tenantResources.invitation.remaining", { remaining })
+                }
                 size={20}
                 strokeColor={remaining > 0 ? "#52c41a" : "#ff4d4f"}
               />
@@ -260,7 +317,13 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         key: "expiry_date",
         width: 120,
         render: (date: string) =>
-          date ? formatDate(date) : <span className="text-gray-400">{t("tenantResources.invitation.noExpiry")}</span>,
+          date ? (
+            formatDate(date)
+          ) : (
+            <span className="text-gray-400">
+              {t("tenantResources.invitation.noExpiry")}
+            </span>
+          ),
       },
       {
         title: t("tenantResources.invitation.groupNames"),
@@ -273,16 +336,14 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
             <div className="flex flex-wrap gap-1">
               {names.length > 0 ? (
                 names.map((name, index) => (
-                  <Tag
-                    key={index}
-                    color="blue"
-                    variant="outlined"
-                  >
+                  <Tag key={index} color="blue" variant="outlined">
                     {name}
                   </Tag>
                 ))
               ) : (
-                <span className="text-gray-400">{t("tenantResources.invitation.noGroups")}</span>
+                <span className="text-gray-400">
+                  {t("tenantResources.invitation.noGroups")}
+                </span>
               )}
             </div>
           );
@@ -295,14 +356,24 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         width: 120,
         render: (status: string) => {
           const color =
-            status === "IN_USE" ? "#229954" :
-            status === "EXPIRE" ? "#AEB6BF" :
-            status === "RUN_OUT" ? "#E74C3C" : "#2E4053";
+            status === "IN_USE"
+              ? "#229954"
+              : status === "EXPIRE"
+                ? "#AEB6BF"
+                : status === "RUN_OUT"
+                  ? "#E74C3C"
+                  : "#2E4053";
 
-          const icon = status === "IN_USE" ? <CheckCircle className="w-3 h-3 mr-1" /> :
-                      status === "EXPIRE" ? <Clock className="w-3 h-3 mr-1" /> :
-                      status === "RUN_OUT" ? <CircleSlash className="w-3.5 h-3 mr-1" /> :
-                      <XCircle className="w-3 h-3 mr-1" />;
+          const icon =
+            status === "IN_USE" ? (
+              <CheckCircle className="w-3 h-3 mr-1" />
+            ) : status === "EXPIRE" ? (
+              <Clock className="w-3 h-3 mr-1" />
+            ) : status === "RUN_OUT" ? (
+              <CircleSlash className="w-3.5 h-3 mr-1" />
+            ) : (
+              <XCircle className="w-3 h-3 mr-1" />
+            );
 
           return (
             <Tag
@@ -332,7 +403,9 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
               />
             </Tooltip>
             <Popconfirm
-              title={t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code })}
+              title={t("tenantResources.invitation.confirmDeleteInvitation", {
+                code: record.invitation_code,
+              })}
               description={t("common.cannotBeUndone")}
               onConfirm={() => handleDelete(record.invitation_code)}
               okText={t("common.confirm")}
@@ -374,7 +447,11 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       <div className="mb-4 flex justify-between items-center flex-shrink-0">
         <div />
         <div>
-          <Button type="primary" onClick={openCreate} icon={<Plus className="h-4 w-4"/>}>
+          <Button
+            type="primary"
+            onClick={openCreate}
+            icon={<Plus className="h-4 w-4" />}
+          >
             {t("tenantResources.invitation.createInvitation")}
           </Button>
         </div>
@@ -394,19 +471,28 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       ) : (
         // Multi-tenant view with collapse
         <Collapse>
-          {Object.entries(groupedInvitations || {}).map(([tenantId, tenantInvitations]) => (
-            <Panel header={`Tenant: ${tenantId}`} key={tenantId}>
-              <Table
-                columns={columns}
-                dataSource={tenantInvitations}
-                loading={isLoading}
-                rowKey="invitation_id"
-                pagination={{ pageSize: 10 }}
-                size="small"
-                scroll={{ x: 1000 }}
-              />
-            </Panel>
-          ))}
+          {Object.entries(groupedInvitations || {}).map(
+            ([tenantId, tenantInvitations]) => (
+              <Panel
+                header={
+                  tenantId === ASSET_OWNER_TENANT_ID
+                    ? t("tenantResources.invitation.assetOwnerTab")
+                    : `Tenant: ${tenantId}`
+                }
+                key={tenantId}
+              >
+                <Table
+                  columns={columns}
+                  dataSource={tenantInvitations}
+                  loading={isLoading}
+                  rowKey="invitation_id"
+                  pagination={{ pageSize: 10 }}
+                  size="small"
+                  scroll={{ x: 1000 }}
+                />
+              </Panel>
+            )
+          )}
         </Collapse>
       )}
 
@@ -427,18 +513,38 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
         width={600}
       >
         <Form form={form} layout="vertical">
-          {!editingInvitation && (
+          {!editingInvitation && !isAssetOwnerInviteContext && (
             <Form.Item
               name="code_type"
               label={t("tenantResources.invitation.codeType")}
-              rules={[{ required: true, message: t("tenantResources.invitation.codeTypeRequired") }]}
+              rules={[
+                {
+                  required: true,
+                  message: t("tenantResources.invitation.codeTypeRequired"),
+                },
+              ]}
             >
               <Select
                 placeholder={t("tenantResources.invitation.codeType")}
                 options={[
-                  ...(isAdminRole ? [] : [{ value: "ADMIN_INVITE", label: t("tenantResources.invitation.codeType.ADMIN_INVITE") }]),
-                  { value: "DEV_INVITE", label: t("tenantResources.invitation.codeType.DEV_INVITE") },
-                  { value: "USER_INVITE", label: t("tenantResources.invitation.codeType.USER_INVITE") },
+                  ...(isAdminRole
+                    ? []
+                    : [
+                        {
+                          value: "ADMIN_INVITE",
+                          label: t(
+                            "tenantResources.invitation.codeType.ADMIN_INVITE"
+                          ),
+                        },
+                      ]),
+                  {
+                    value: "DEV_INVITE",
+                    label: t("tenantResources.invitation.codeType.DEV_INVITE"),
+                  },
+                  {
+                    value: "USER_INVITE",
+                    label: t("tenantResources.invitation.codeType.USER_INVITE"),
+                  },
                 ]}
               />
             </Form.Item>
@@ -451,30 +557,38 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
               rules={[
                 {
                   pattern: /^[A-Z0-9]*$/,
-                  message: t("tenantResources.invitation.invitationCodeInvalid")
+                  message: t(
+                    "tenantResources.invitation.invitationCodeInvalid"
+                  ),
                 },
                 {
                   validator: async (_, value) => {
                     if (!value) {
-                      return Promise.resolve();
+                      return;
                     }
+                    let exists: boolean;
                     try {
-                      const exists = await checkInvitationCodeExists(value);
-                      if (exists) {
-                        return Promise.reject(new Error(t("tenantResources.invitation.alreadyExists")));
-                      }
-                      return Promise.resolve();
+                      exists = await checkInvitationCodeExists(value);
                     } catch {
-                      return Promise.reject(new Error("Failed to check invitation code"));
+                      throw new Error("Failed to check invitation code");
+                    }
+                    if (exists) {
+                      throw new Error(
+                        t("tenantResources.invitation.alreadyExists")
+                      );
                     }
                   },
-                }
+                },
               ]}
             >
               <Input
-                placeholder={t("tenantResources.invitation.invitationCodePlaceholder")}
+                placeholder={t(
+                  "tenantResources.invitation.invitationCodePlaceholder"
+                )}
                 onChange={(e) => {
-                  const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+                  const value = e.target.value
+                    .toUpperCase()
+                    .replace(/[^A-Z0-9]/g, "");
                   form.setFieldsValue({ invitation_code: value });
                 }}
               />
@@ -485,41 +599,57 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
             name="capacity"
             label={t("tenantResources.invitation.capacity")}
             rules={[
-              { required: true, message: t("tenantResources.invitation.capacityRequired") },
               {
-                validator: (_, value) => {
-                  if (!value) return Promise.resolve();
+                required: true,
+                message: t("tenantResources.invitation.capacityRequired"),
+              },
+              {
+                validator: async (_, value) => {
+                  if (!value) return;
                   const numValue = Number(value);
                   if (isNaN(numValue) || numValue < 1) {
-                    return Promise.reject(new Error(t("tenantResources.invitation.capacityMin")));
+                    throw new Error(t("tenantResources.invitation.capacityMin"));
                   }
-                  return Promise.resolve();
-                }
-              }
+                },
+              },
             ]}
           >
-            <Input type="number" placeholder={t("tenantResources.invitation.capacity")} min={1} />
-          </Form.Item>
-
-          <Form.Item name="group_ids" label={t("tenantResources.invitation.groupNames")}>
-            <Select
-              mode="multiple"
-              placeholder={t("tenantResources.invitation.groupNames")}
-              options={groups.map((group) => ({
-                label: group.group_name,
-                value: group.group_id,
-              }))}
+            <Input
+              type="number"
+              placeholder={t("tenantResources.invitation.capacity")}
+              min={1}
             />
           </Form.Item>
 
-          <Form.Item name="expiry_date" label={t("tenantResources.invitation.expiryDate")}>
+          {!isAssetOwnerInviteContext && (
+            <Form.Item
+              name="group_ids"
+              label={t("tenantResources.invitation.groupNames")}
+            >
+              <Select
+                mode="multiple"
+                placeholder={t("tenantResources.invitation.groupNames")}
+                options={groups.map((group) => ({
+                  label: group.group_name,
+                  value: group.group_id,
+                }))}
+              />
+            </Form.Item>
+          )}
+
+          <Form.Item
+            name="expiry_date"
+            label={t("tenantResources.invitation.expiryDate")}
+          >
             <DatePicker
               format="YYYY-MM-DD"
-              placeholder={t("tenantResources.invitation.expiryDatePlaceholder")}
+              placeholder={t(
+                "tenantResources.invitation.expiryDatePlaceholder"
+              )}
               style={{ width: "100%" }}
               disabledDate={(current) => {
                 if (!current) return false;
-                return current < dayjs().startOf('day');
+                return current < dayjs().startOf("day");
               }}
             />
           </Form.Item>

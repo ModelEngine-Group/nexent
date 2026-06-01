@@ -63,6 +63,8 @@ export interface Agent {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
+  prompts_hidden?: boolean;
   current_version_no?: number;
   is_a2a_server?: boolean;
 }

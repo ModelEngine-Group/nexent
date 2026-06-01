@@ -168,11 +168,11 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.TTS:
         return t("model.type.tts");
       case MODEL_TYPES.VLM:
-        return t("model.type.vlm");
+        return t("model.type.imageUnderstanding");
       case MODEL_TYPES.VLM2:
-        return `${t("model.type.vlm")}2`;
+        return t("model.type.imageGeneration");
       case MODEL_TYPES.VLM3:
-        return `${t("model.type.vlm")}3`;
+        return t("model.type.videoUnderstanding");
       default:
         return t("model.type.unknown");
     }
@@ -669,7 +669,7 @@ export const ModelDeleteDialog = ({
         setProviderModels((prev) =>
           prev.map((model) => ({
             ...model,
-            max_tokens: maxTokens || model.max_tokens || 4096,
+            max_tokens: maxTokens || model.max_tokens,
             timeout_seconds: timeoutSeconds || model.timeout_seconds,
             concurrency_limit: concurrencyLimit !== undefined ? concurrencyLimit : model.concurrency_limit,
           }))
@@ -844,7 +844,7 @@ export const ModelDeleteDialog = ({
                           } else {
                             return {
                               ...model,
-                              max_tokens: model.max_tokens || 4096,
+                              max_tokens: model.max_tokens,
                             };
                           }
                         }),
@@ -893,7 +893,7 @@ export const ModelDeleteDialog = ({
                             } else {
                               return {
                                 ...model,
-                                max_tokens: model.max_tokens || 4096,
+                                max_tokens: model.max_tokens,
                               };
                             }
                           }),
@@ -939,7 +939,7 @@ export const ModelDeleteDialog = ({
                             } else {
                               return {
                                 ...model,
-                                max_tokens: model.max_tokens || 4096,
+                                max_tokens: model.max_tokens,
                               };
                             }
                           }),
@@ -985,7 +985,7 @@ export const ModelDeleteDialog = ({
                             } else {
                               return {
                                 ...model,
-                                max_tokens: model.max_tokens || 4096,
+                                max_tokens: model.max_tokens,
                               };
                             }
                           }),
@@ -1523,13 +1523,15 @@ export const ModelDeleteDialog = ({
         isOpen={isProviderConfigOpen}
         onClose={() => setIsProviderConfigOpen(false)}
         initialApiKey={getApiKeyByType(deletingModelType, selectedSource || undefined)}
-        initialMaxTokens={(
-          models.find(
-            (m) =>
-              m.type === deletingModelType &&
-              m.source === (selectedSource || MODEL_SOURCES.SILICON)
-          )?.maxTokens || 4096
-        ).toString()}
+        initialMaxTokens={
+          models
+            .find(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource || MODEL_SOURCES.SILICON)
+            )
+            ?.maxTokens?.toString() || ""
+        }
         initialTimeoutSeconds={(
           models.find(
             (m) =>
@@ -1555,7 +1557,7 @@ export const ModelDeleteDialog = ({
           setIsSingleModelSettingsOpen(false);
           setSelectedSingleModel(null);
         }}
-        initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || "4096"}
+        initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || ""}
         initialTimeoutSeconds={selectedSingleModel?.timeout_seconds?.toString() || "120"}
         initialConcurrencyLimit={selectedSingleModel?.concurrency_limit?.toString() || ""}
         modelType={deletingModelType || undefined}

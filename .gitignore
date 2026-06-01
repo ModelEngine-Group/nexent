@@ -60,3 +60,5 @@ MAC_DEVELOPMENT_GUIDE.md
 data/
 sdk/benchmark/.env
 /docker/.env.bak
+
+.venv

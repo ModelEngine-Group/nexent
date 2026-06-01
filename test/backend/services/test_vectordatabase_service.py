@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import io
 import sys
 import os
@@ -58,6 +59,7 @@ sys.modules['nexent'] = nexent_mock
 monitor_module = types.ModuleType('nexent.monitor')
 monitor_module.set_monitoring_context = MagicMock()
 monitor_module.set_monitoring_operation = MagicMock()
+monitor_module.get_monitoring_manager = MagicMock()
 sys.modules['nexent.monitor'] = monitor_module
 setattr(nexent_mock, 'monitor', monitor_module)
 
@@ -75,29 +77,42 @@ setattr(nexent_memory_module, 'memory_service', memory_service_module)
 embedding_model_module = types.ModuleType('nexent.core.models.embedding_model')
 
 
-consts_mock = MagicMock()
-consts_mock.const = MagicMock()
-consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
-consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
-consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
-consts_mock.const.MINIO_REGION = "us-east-1"
-consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
-consts_mock.const.POSTGRES_HOST = "localhost"
-consts_mock.const.POSTGRES_USER = "test_user"
-consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
-consts_mock.const.POSTGRES_DB = "test_db"
-consts_mock.const.POSTGRES_PORT = 5432
-consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
-consts_mock.const.PERMISSION_EDIT = "EDIT"
-consts_mock.const.PERMISSION_READ = "READ_ONLY"
-consts_mock.const.PERMISSION_PRIVATE = "PRIVATE"
-sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
-sys.modules['consts.model'] = MagicMock()
-sys.modules['consts.error_code'] = MagicMock()
-sys.modules['consts.exceptions'] = MagicMock()
-sys.modules['consts.scheduler'] = MagicMock()
-sys.modules['consts.prompt_template'] = MagicMock()
+consts_exceptions_mod = types.ModuleType("consts.exceptions")
+
+
+class UnauthorizedError(Exception):
+    pass
+
+
+class NotFoundException(Exception):
+    pass
+
+
+class DuplicateError(Exception):
+    pass
+
+
+class ValidationError(Exception):
+    pass
+
+
+consts_exceptions_mod.UnauthorizedError = UnauthorizedError
+consts_exceptions_mod.NotFoundException = NotFoundException
+consts_exceptions_mod.DuplicateError = DuplicateError
+consts_exceptions_mod.ValidationError = ValidationError
+
+# Use real consts.const/scheduler (env vars are configured in test/conftest.py)
+consts_pkg = importlib.import_module("consts")
+consts_const_mod = importlib.import_module("consts.const")
+consts_scheduler_mod = importlib.import_module("consts.scheduler")
+
+sys.modules["consts"] = consts_pkg
+sys.modules["consts.const"] = consts_const_mod
+sys.modules["consts.exceptions"] = consts_exceptions_mod
+sys.modules["consts.model"] = MagicMock()
+sys.modules["consts.scheduler"] = consts_scheduler_mod
+sys.modules["consts.error_code"] = MagicMock()
+sys.modules["consts.prompt_template"] = MagicMock()
 
 
 class _VectorDatabaseCore:
@@ -264,6 +279,16 @@ group_service_mock.get_tenant_default_group_id = MagicMock(return_value=1)
 sys.modules['services.group_service'] = group_service_mock
 setattr(sys.modules['services'], 'group_service', group_service_mock)
 
+# Create mock asset_owner_visibility module
+def _mock_postprocess_knowledge_visibility(items, caller_role=None, caller_tenant_id=None):
+    return items
+
+
+asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
+asset_owner_visibility_mock.postprocess_knowledge_visibility = _mock_postprocess_knowledge_visibility
+sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
+setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibility_mock)
+
 # Create mock utils modules - backend.utils needs __path__ for submodule lookups
 utils_mock = types.ModuleType('utils')  # No __path__ so Python won't try submodule lookup
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
@@ -324,7 +349,6 @@ minio_client_mock.storage_config.default_bucket = 'test-bucket'
 minio_client_mock._storage_client = storage_client_mock
 
 # Load actual backend modules so that patch targets resolve correctly
-import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
 # Set backend.utils as attribute so imports like 'from backend.utils.xxx import yyy' work
@@ -1891,7 +1915,7 @@ class TestElasticSearchService(unittest.TestCase):
                 patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
                 patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
             mock_get_record.return_value = {
-                "tenant_id": consts_mock.const.DEFAULT_TENANT_ID}
+                "tenant_id": consts_const_mod.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 6}
 
             result = ElasticSearchService.index_documents(
@@ -1903,7 +1927,7 @@ class TestElasticSearchService(unittest.TestCase):
 
             self.assertTrue(result["success"])
             mock_tenant_cfg.get_model_config.assert_called_once_with(
-                key="MULTI_EMBEDDING_ID", tenant_id=consts_mock.const.DEFAULT_TENANT_ID
+                key="MULTI_EMBEDDING_ID", tenant_id=consts_const_mod.DEFAULT_TENANT_ID
             )
 
     def test_index_documents_fetches_image_bytes(self):
@@ -1918,7 +1942,7 @@ class TestElasticSearchService(unittest.TestCase):
                 patch('backend.services.vectordatabase_service.get_file_stream') as mock_get_stream, \
                 patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
             mock_get_record.return_value = {
-                "tenant_id": consts_mock.const.DEFAULT_TENANT_ID}
+                "tenant_id": consts_const_mod.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
             mock_get_stream.return_value = io.BytesIO(b"img-bytes")
 
@@ -2449,7 +2473,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
+            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.5,
             vdb_core=self.mock_vdb_core
@@ -2472,7 +2496,7 @@ class TestElasticSearchService(unittest.TestCase):
             top_k=10,
             weight_accurate=0.5
         )
-        mock_get_embedding_by_index.assert_called_once_with(consts_mock.const.DEFAULT_TENANT_ID, "test_index")
+        mock_get_embedding_by_index.assert_called_once_with(consts_const_mod.DEFAULT_TENANT_ID, "test_index")
 
     def test_search_hybrid_missing_tenant_id(self):
         """Test search_hybrid raises ValueError when tenant_id is missing."""
@@ -2553,7 +2577,7 @@ class TestElasticSearchService(unittest.TestCase):
             ElasticSearchService.search_hybrid(
                 index_names=["test_index"],
                 query="test query",
-                tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
+                tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
                 top_k=10,
                 weight_accurate=0.5,
                 vdb_core=self.mock_vdb_core
@@ -2595,7 +2619,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
+            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.0,
             vdb_core=self.mock_vdb_core
@@ -2614,7 +2638,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
+            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=1.0,
             vdb_core=self.mock_vdb_core
@@ -2632,7 +2656,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_mock.const.DEFAULT_TENANT_ID,
+            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.3,
             vdb_core=self.mock_vdb_core

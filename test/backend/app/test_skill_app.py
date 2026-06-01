@@ -168,10 +168,14 @@ consts_model_mock.SkillCreateInteractiveRequest = MockSkillCreateInteractiveRequ
 
 # Mock services
 services_mock = types.ModuleType('services')
+services_mock.__path__ = []  # Make it a package so submodules can be imported
 services_skill_service_mock = types.ModuleType('services.skill_service')
+services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
+sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
+setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
 
 class MockSkillService:
     def __init__(self):
@@ -184,6 +188,7 @@ services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("tas
 services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
@@ -602,6 +607,34 @@ class TestGetSkillEndpoint:
             response = client.get("/skills/nonexistent")
 
             assert response.status_code == 404
+
+
+class TestAssetOwnerSkillVisibility:
+    """Test ASSET_OWNER skill visibility enforcement at the app layer."""
+
+    def test_get_skill_file_tree_denied_for_non_asset_owner_tenant(self, mocker):
+        """Non-asset-owner callers receive a denial payload for asset-owner skills."""
+        asset_owner_tenant_id = "asset_owner_tenant_id"
+
+        with patch("backend.apps.skill_app.can_view_skill", return_value=False), \
+             patch("backend.apps.skill_app.get_current_user_id", return_value=("user123", "regular_tenant")), \
+             patch("backend.apps.skill_app.SkillService") as mock_service_class:
+            mock_service = MagicMock()
+            mock_service_class.return_value = mock_service
+            mock_service.get_skill.return_value = {
+                "name": "ao_skill",
+                "tenant_id": asset_owner_tenant_id,
+            }
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+
+            response = client.get("/skills/ao_skill/files")
+
+            assert response.status_code == 200
+            assert response.json() == {"content": "您无权限查看"}
+            mock_service.get_skill_file_tree.assert_not_called()
 
 
 # ===== Update Skill Endpoint Tests =====
