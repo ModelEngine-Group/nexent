@@ -192,7 +192,18 @@ services_health_mod = types.ModuleType("services.model_health_service")
 
 async def _embedding_dimension_check(model_config):
     return 0
+
+
+def _infer_model_factory(model_type, base_url, current_factory=None):
+    """Mock implementation of _infer_model_factory for testing."""
+    base_url_lower = base_url.lower()
+    if "dashscope" in base_url_lower:
+        return "dashscope"
+    return current_factory
+
+
 services_health_mod.embedding_dimension_check = _embedding_dimension_check
+services_health_mod._infer_model_factory = _infer_model_factory
 sys.modules["services.model_health_service"] = services_health_mod
 
 # Stub utils.model_name_utils used by service
@@ -1453,3 +1464,182 @@ async def test_list_models_for_admin_type_mapping():
 
         assert len(out["models"]) == 1
         assert out["models"][0]["model_type"] == "llm"  # Should be mapped from "chat"
+
+
+# ============================================================
+# Coverage tests for uncovered lines
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_embedding_dimension_none():
+    """Test that dimension=None raises ValueError (covered by outer exception handler, line 116)."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=None)), \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
+
+        model_data = {
+            "model_name": "openai/text-embedding-ada-002",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+        }
+
+        # ValueError is raised at line 116 but caught by outer except Exception at line 144,
+        # which re-raises as Exception with "Failed to create model: ..."
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant("u1", "t1", model_data)
+        assert "Failed to get embedding dimension" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_modelengine_provider():
+    """Test MODELENGINE provider sets model_url to empty string (covers line 185)."""
+    svc = import_svc()
+
+    # Ensure MODELENGINE exists in ProviderEnum
+    if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
+        modelengine_item = _EnumItem("modelengine")
+        svc.ProviderEnum.MODELENGINE = modelengine_item
+
+    batch_payload = {
+        "provider": "modelengine",
+        "type": "llm",
+        "models": [{"id": "modelengine/gpt-4", "max_tokens": 4096}],
+        "api_key": "me-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "split_repo_name", return_value=("modelengine", "gpt-4")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="modelengine/gpt-4"), \
+            mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # MODELENGINE should pass empty string as model_url
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == ""
+
+
+async def test_update_single_model_for_tenant_api_key_sets_ssl_verify():
+    """Test that providing api_key in model_data auto-sets ssl_verify (covers lines 305-308)."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "api_key": "my-secret-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        # ssl_verify should be set to True since api_key is non-empty
+        update_call = mock_update.call_args
+        assert update_call[0][1]["ssl_verify"] is True
+
+
+async def test_update_single_model_for_tenant_empty_api_key_sets_ssl_verify_false():
+    """Test that empty api_key in model_data sets ssl_verify to False (covers lines 305-308)."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "api_key": "",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_call = mock_update.call_args
+        assert update_call[0][1]["ssl_verify"] is False
+
+
+async def test_update_single_model_for_tenant_generic_exception():
+    """Test that generic exceptions are caught and re-raised (covers lines 329-331)."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record", side_effect=RuntimeError("db failure")):
+
+        with pytest.raises(Exception) as exc:
+            await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+        assert "Failed to update model" in str(exc.value)
+
+
+async def test_batch_update_models_for_tenant_by_name_only_not_found():
+    """Test batch_update with model_name only (no slash) when model not found (covers lines 351-352, 359-360)."""
+    svc = import_svc()
+
+    models = [{"model_id": "gpt-4", "max_tokens": 4096}]  # No slash -> goes to else branch
+
+    with mock.patch.object(
+        svc,
+        "get_model_by_name_factory",
+        return_value=None,
+    ) as mock_lookup:
+        await svc.batch_update_models_for_tenant("u1", "t1", models)
+
+        mock_lookup.assert_called_once_with("gpt-4", None, "t1")
+
+
+async def test_delete_model_for_tenant_generic_exception():
+    """Test that generic exceptions are caught and re-raised (covers line 426)."""
+    svc = import_svc()
+
+    with mock.patch.object(
+        svc,
+        "get_models_by_display_name",
+        side_effect=RuntimeError("db connection lost"),
+    ):
+        with pytest.raises(Exception) as exc:
+            await svc.delete_model_for_tenant("u1", "t1", "name")
+        assert "Failed to delete model" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_true():
+    """Test that non-empty api_key and no open/router URL sets ssl_verify=True (covers line 73)."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)), \
+            mock.patch.object(svc, "create_model_record") as mock_create, \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
+
+        model_data = {
+            "model_name": "openai/text-embedding-ada-002",
+            "display_name": None,
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+            "api_key": "sk-my-secret-key",
+        }
+
+        await svc.create_model_for_tenant("u1", "t1", model_data)
+
+        assert mock_create.call_count == 1
+        create_args = mock_create.call_args[0][0]
+        assert create_args["ssl_verify"] is True
+
