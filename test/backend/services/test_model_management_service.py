@@ -159,6 +159,8 @@ class _ProviderEnum:
 consts_provider_mod.ProviderEnum = _ProviderEnum
 consts_provider_mod.SILICON_BASE_URL = "http://silicon.test"
 consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 sys.modules["consts.provider"] = consts_provider_mod
 
@@ -205,6 +207,17 @@ def _infer_model_factory(model_type, base_url, current_factory=None):
 services_health_mod.embedding_dimension_check = _embedding_dimension_check
 services_health_mod._infer_model_factory = _infer_model_factory
 sys.modules["services.model_health_service"] = services_health_mod
+
+# Stub parent utils package and memory helpers used by service imports. Some
+# test modules replace `utils` with a plain mock during collection, so keep this
+# file's service import setup self-contained.
+utils_mod = types.ModuleType("utils")
+utils_mod.__path__ = []
+sys.modules["utils"] = utils_mod
+
+utils_memory_mod = types.ModuleType("utils.memory_utils")
+utils_memory_mod.build_memory_config = lambda *args, **kwargs: {}
+sys.modules["utils.memory_utils"] = utils_memory_mod
 
 # Stub utils.model_name_utils used by service
 utils_name_mod = types.ModuleType("utils.model_name_utils")
@@ -724,6 +737,56 @@ async def test_batch_create_models_for_tenant_dashscope_provider():
 
         call_args = svc.prepare_model_dict.call_args
         assert call_args[1]["model_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_dashscope_stt_uses_realtime_url():
+    """DashScope STT batch creation must use the realtime websocket URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "stt",
+        "models": [{"id": "qwen3-asr-flash-realtime"}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "qwen3-asr-flash-realtime")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen3-asr-flash-realtime"), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_dashscope_tts_uses_realtime_url():
+    """DashScope TTS batch creation must use the realtime websocket URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "tts",
+        "models": [{"id": "qwen-tts-realtime"}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("", "qwen-tts-realtime")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen-tts-realtime"), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 
 
 @pytest.mark.asyncio
@@ -1642,4 +1705,3 @@ async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_tr
         assert mock_create.call_count == 1
         create_args = mock_create.call_args[0][0]
         assert create_args["ssl_verify"] is True
-

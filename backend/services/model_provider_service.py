@@ -6,7 +6,7 @@ from consts.const import (
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import ProviderEnum
+from consts.provider import ProviderEnum, DASHSCOPE_REALTIME_BASE_URL
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from services.providers.base import AbstractModelProvider
@@ -137,6 +137,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         else:
             model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
+    elif model["model_type"] in ("stt", "tts") and provider == ProviderEnum.DASHSCOPE.value:
+        model_dict["base_url"] = DASHSCOPE_REALTIME_BASE_URL
     elif model["model_type"] == "rerank":
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
