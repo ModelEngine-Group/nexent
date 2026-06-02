@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional, Any, List, Dict
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
@@ -454,7 +454,15 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    verification_config: Optional[Dict[str, Any]] = None
     version_no: int = 0
+
+    @field_validator("verification_config", mode="before")
+    @classmethod
+    def normalize_verification_config(cls, value):
+        if value is None:
+            return None
+        return AgentVerificationConfig.model_validate(value).model_dump()
 
 
 class AgentIDRequest(BaseModel):
@@ -527,6 +535,7 @@ class ExportAndImportAgentInfo(BaseModel):
     author: Optional[str] = None
     max_steps: int
     provide_run_summary: bool
+    verification_config: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
     few_shots_prompt: Optional[str] = None

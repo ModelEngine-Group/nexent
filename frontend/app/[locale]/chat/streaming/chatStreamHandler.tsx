@@ -148,6 +148,7 @@ export const handleStreamResponse = async (
     | typeof chatConfig.contentTypes.SEARCH_CONTENT
     | typeof chatConfig.contentTypes.CARD
     | typeof chatConfig.contentTypes.MEMORY_SEARCH
+    | typeof chatConfig.contentTypes.VERIFICATION
     | typeof chatConfig.contentTypes.PREPROCESS
     | null = null;
   let lastModelOutputIndex = -1; // Track the index of the last model output in currentStep.contents
@@ -793,6 +794,36 @@ export const handleStreamResponse = async (
                     expanded: true,
                     timestamp: Date.now(),
                   });
+                  break;
+
+                case chatConfig.messageTypes.VERIFICATION:
+                  if (!currentStep) {
+                    currentStep = {
+                      id: `step-verification-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 9)}`,
+                      title: "Verification",
+                      content: "",
+                      expanded: true,
+                      contents: [],
+                      metrics: null,
+                      thinking: { content: "", expanded: true },
+                      code: { content: "", expanded: true },
+                      output: { content: "", expanded: true },
+                    };
+                  }
+
+                  currentStep.contents.push({
+                    id: `verification-${Date.now()}-${Math.random()
+                      .toString(36)
+                      .substring(2, 7)}`,
+                    type: chatConfig.messageTypes.VERIFICATION,
+                    subType: "verification",
+                    content: messageContent,
+                    expanded: true,
+                    timestamp: Date.now(),
+                  });
+                  lastContentType = chatConfig.contentTypes.VERIFICATION;
                   break;
 
                 case chatConfig.messageTypes.MEMORY_SEARCH:

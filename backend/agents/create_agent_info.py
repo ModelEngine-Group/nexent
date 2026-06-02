@@ -6,7 +6,7 @@ from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.agent_context import ContextManagerConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
@@ -484,6 +484,7 @@ async def create_agent_config(
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_components=context_components,
+        verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
     )
     return agent_config
 

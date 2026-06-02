@@ -22,6 +22,40 @@ const processSpecialTag = (content: string, t: any): string => {
   return content;
 };
 
+const createAgentStep = (
+  id: string,
+  title: string,
+  expanded = false
+): AgentStep => ({
+  id,
+  title,
+  content: "",
+  expanded,
+  contents: [],
+  metrics: null,
+  thinking: { content: "", expanded },
+  code: { content: "", expanded },
+  output: { content: "", expanded },
+});
+
+const getOrCreateCurrentStep = (
+  steps: AgentStep[],
+  fallbackTitle: string
+): AgentStep => {
+  const currentStep = steps[steps.length - 1];
+  if (currentStep) {
+    return currentStep;
+  }
+
+  const recoveredStep = createAgentStep(
+    `step-history-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    fallbackTitle,
+    true
+  );
+  steps.push(recoveredStep);
+  return recoveredStep;
+};
+
 export function extractAssistantMsgFromResponse(
   dialog_msg: ApiMessage,
   index: number,
@@ -70,17 +104,9 @@ export function extractAssistantMsgFromResponse(
         }
 
         case chatConfig.messageTypes.STEP_COUNT: {
-          steps.push({
-            id: `step-${steps.length + 1}`,
-            title: msg.content.trim(),
-            content: "",
-            expanded: false,
-            contents: [],
-            metrics: null,
-            thinking: { content: "", expanded: false },
-            code: { content: "", expanded: false },
-            output: { content: "", expanded: false },
-          });
+          steps.push(
+            createAgentStep(`step-${steps.length + 1}`, msg.content.trim())
+          );
           break;
         }
 
@@ -216,6 +242,22 @@ export function extractAssistantMsgFromResponse(
           break;
         }
 
+        case chatConfig.messageTypes.VERIFICATION: {
+          const currentStep = getOrCreateCurrentStep(steps, "Verification");
+          const contentId = `verification-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: chatConfig.messageTypes.VERIFICATION,
+            subType: "verification",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          break;
+        }
+
         case chatConfig.messageTypes.MAX_STEPS_REACHED: {
           // Parse the max steps reached event data for historical messages
           try {
@@ -300,7 +342,7 @@ export function extractUserMsgFromResponse(
         size: item.size || 0,
         object_name: item.object_name,
         url: item.url,
-        presigned_url: item.presigned_url,  // Preserve presigned_url for MCP tool access
+        presigned_url: item.presigned_url, // Preserve presigned_url for MCP tool access
         description: item.description,
       };
     });
