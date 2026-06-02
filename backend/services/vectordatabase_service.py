@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
+from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, DashScopeMultimodalEmbedding, BaseEmbedding
 from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
@@ -335,6 +335,9 @@ def _create_embedding_model(model: dict) -> Any:
         "ssl_verify": model_config.get("ssl_verify", True),
     }
     if model.get("model_type", "embedding") == "multi_embedding":
+        model_factory = model.get("model_factory", "").lower()
+        if model_factory == "dashscope":
+            return DashScopeMultimodalEmbedding(**common_kwargs)
         return JinaEmbedding(**common_kwargs)
     return OpenAICompatibleEmbedding(**common_kwargs)
 

@@ -150,9 +150,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     if (mime.startsWith('image/')) return 'image';
     
     if (mime === 'text/markdown') return 'markdown';
-    
+
     if (mime === 'text/csv') return 'csv';
-    
+
+    if (mime === 'text/html') return 'html';
+
     if (mime === 'text/plain') return 'text';
 
     const extension = fileName.split('.').pop()?.toLowerCase() || '';
@@ -164,6 +166,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension)) return 'image';
     if (['md', 'markdown'].includes(extension)) return 'markdown';
     if (extension === 'csv') return 'csv';
+    if (['html', 'htm'].includes(extension)) return 'html';
     if (['txt', 'log', 'json', 'xml', 'yaml', 'yml'].includes(extension)) return 'text';
 
     return 'unknown';
@@ -513,7 +516,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           }
           previewUrlRef.current = '';
 
-          if (isTooLargeToPreview && ['text', 'markdown', 'csv'].includes(detectedFileType)) {
+          if (isTooLargeToPreview && ['text', 'markdown', 'csv', 'html'].includes(detectedFileType)) {
             setLoading(false);
             return;
           }
@@ -543,6 +546,13 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             return;
           }
 
+          if (detectedFileType === 'html') {
+            const html = await decodeLocalTextFile(localFile);
+            setTextContent(html);
+            setLoading(false);
+            return;
+          }
+
           if (detectedFileType === 'csv') {
             const text = await decodeLocalTextFile(localFile);
             const delimiter = detectCsvDelimiter(text);
@@ -559,15 +569,15 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
         const url = storageService.getPreviewUrl(objectName, fileName);
 
-        if (['markdown', 'csv', 'text'].includes(detectedFileType)) {
-          textFetchSessionRef.current += 1;
-          const sessionId = textFetchSessionRef.current;
-          resetTextPreviewState();
-          setPreviewUrl(url);
-          previewUrlRef.current = url;
-          await fetchTextChunk(url, true, sessionId);
-          return;
-        }
+          if (['markdown', 'csv', 'text', 'html'].includes(detectedFileType)) {
+            textFetchSessionRef.current += 1;
+            const sessionId = textFetchSessionRef.current;
+            resetTextPreviewState();
+            setPreviewUrl(url);
+            previewUrlRef.current = url;
+            await fetchTextChunk(url, true, sessionId);
+            return;
+          }
 
         setPreviewUrl(url);
         previewUrlRef.current = url;
@@ -904,6 +914,35 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     </div>
   );
 
+  const renderHtmlViewer = () => {
+    return (
+      <div
+        className="h-full w-full overflow-auto bg-white"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (
+            !isLocalSource &&
+            el.scrollTop + el.clientHeight >= el.scrollHeight - el.clientHeight * 0.5 &&
+            !isFetchingRef.current &&
+            (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)
+          ) {
+            fetchNextTextChunk();
+          }
+        }}
+      >
+        <div
+          className="html-preview-content px-6 py-4"
+          dangerouslySetInnerHTML={{ __html: textContent }}
+        />
+        {loadingMore && (
+          <div className="flex justify-center py-4">
+            <Spin size="small" />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderCsvViewer = () => {
     if (csvRows.length === 0) {
       return renderCenteredErrorState();
@@ -1056,6 +1095,8 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         return renderCsvViewer();
       case 'text':
         return renderTextViewer();
+      case 'html':
+        return renderHtmlViewer();
       case 'office':
         return renderUploadToPreview();
       default:
