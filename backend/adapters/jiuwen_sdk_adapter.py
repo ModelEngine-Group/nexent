@@ -17,7 +17,24 @@ import logging
 import os
 import sys
 import types
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal, Optional, Tuple
+
+from openjiuwen.dev_tools.tune.base import Case as _Case, EvaluatedCase as _EvaluatedCase
+
+
+def _case_from_inputs_label(inputs: dict, label: dict) -> "_Case":
+    # Keep stable keys for schema; allow extra fields to exist.
+    return _Case(inputs=inputs, label=label)
+
+
+def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
+    """Try to normalize Jiuwen EvaluatedCase into (score, reason)."""
+    try:
+        score = float(getattr(evaluated, "score", 0.0) or 0.0)
+    except Exception:
+        score = 0.0
+    reason = getattr(evaluated, "reason", "") or ""
+    return score, str(reason)
 
 logger = logging.getLogger("jiuwen_adapter")
 
@@ -275,6 +292,9 @@ def _lazy_import_jiuwen():
     )
     from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
 
+    # Evaluator metrics (avoid importing openjiuwen.dev_tools.tune package root)
+    from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import LLMAsJudgeMetric
+
     return (
         ModelRequestConfig,
         ModelClientConfig,
@@ -283,6 +303,7 @@ def _lazy_import_jiuwen():
         BadCasePromptBuilder,
         Case,
         EvaluatedCase,
+        LLMAsJudgeMetric,
     )
 
 
@@ -291,7 +312,7 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     from database.model_management_db import get_model_by_model_id
     from utils.config_utils import get_model_name_from_config
 
-    ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _ = _lazy_import_jiuwen()
+    ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _, _ = _lazy_import_jiuwen()
 
     model_config = get_model_by_model_id(model_id, tenant_id)
     if not model_config:
@@ -406,7 +427,7 @@ def _unwrap_prompt_response(text: str) -> str:
 
 def to_jiuwen_evaluated_case(bad_case) -> Any:
     """将 nexent BadCase 转换为 Jiuwen EvaluatedCase"""
-    _, _, _, _, _, Case, EvaluatedCase = _lazy_import_jiuwen()
+    _, _, _, _, _, Case, EvaluatedCase, _ = _lazy_import_jiuwen()
 
     case = Case(
         inputs={"question": bad_case.question},
@@ -475,7 +496,7 @@ class JiuwenSDKAdapter:
             f"api_base={client_config.api_base}, model={request_config.model_name}, "
             f"timeout={getattr(client_config, 'timeout', None)}, max_retries={getattr(client_config, 'max_retries', None)}"
         )
-        _, _, _, FeedbackPromptBuilder, _, _, _ = _lazy_import_jiuwen()
+        _, _, _, FeedbackPromptBuilder, _, _, _, _ = _lazy_import_jiuwen()
 
         builder = FeedbackPromptBuilder(
             model_config=request_config,
@@ -514,7 +535,7 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        _, _, _, _, BadCasePromptBuilder, _, _ = _lazy_import_jiuwen()
+        _, _, _, _, BadCasePromptBuilder, _, _, _ = _lazy_import_jiuwen()
 
         request_config, client_config = build_jiuwen_model_configs(
             self.model_id, self.tenant_id
@@ -540,6 +561,52 @@ class JiuwenSDKAdapter:
         except Exception as e:
             self.logger.error(f"Jiuwen BadCasePromptBuilder 调用失败: {e}")
             raise JiuwenSDKError(f"BadCasePromptBuilder 调用失败: {e}") from e
+
+    def evaluate_semantic_consistency(
+        self,
+        *,
+        question: str,
+        expected_answer: str,
+        model_answer: str,
+        user_metrics: str = "",
+    ) -> Tuple[float, str]:
+        """LLM-as-judge semantic consistency scoring.
+
+        Returns:
+            (score, reason)
+
+        Notes:
+            openjiuwen 0.1.13 implements LLMAsJudgeMetric as a binary metric
+            (1.0 pass / 0.0 fail) by parsing a JSON result from the judge model.
+        """
+        self._ensure_available()
+
+        try:
+            _, _, _, _, _, _, _, LLMAsJudgeMetric = _lazy_import_jiuwen()
+        except Exception as exc:
+            raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
+
+        request_config, client_config = build_jiuwen_model_configs(self.model_id, self.tenant_id)
+
+        metric = LLMAsJudgeMetric(
+            model_config=request_config,
+            model_client_config=client_config,
+            user_metrics=user_metrics or "",
+        )
+
+        try:
+            score = float(
+                metric.compute(
+                    prediction=model_answer,
+                    label=expected_answer,
+                    question=question,
+                )
+            )
+        except Exception as exc:
+            raise JiuwenSDKError(f"LLMAsJudgeMetric compute failed: {exc}") from exc
+
+        reason = "pass" if score >= 1.0 else "fail"
+        return score, reason
 
     def generate(self, **kwargs) -> dict:
         """调用 Jiuwen 提示词生成能力"""

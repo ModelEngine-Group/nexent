@@ -97,6 +97,21 @@ export const API_ENDPOINTS = {
     update: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
     delete: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
   },
+  evaluationSets: {
+    list: `${API_BASE_URL}/evaluation-sets`,
+    create: `${API_BASE_URL}/evaluation-sets`,
+    detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
+    upload: `${API_BASE_URL}/evaluation-sets/upload`,
+    template: `${API_BASE_URL}/evaluation-sets/template`,
+  },
+  agentEvaluations: {
+    create: `${API_BASE_URL}/agent-evaluations`,
+    listByAgent: `${API_BASE_URL}/agent-evaluations`,
+    detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
+    cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
+  },
   stt: {
     ws: `/api/voice/stt/ws`,
   },

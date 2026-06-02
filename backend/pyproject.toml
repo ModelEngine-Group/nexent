@@ -45,6 +45,8 @@ data-process = [
     "flower>=2.0.1",
     "nest_asyncio>=1.5.6",
     "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
+    "openpyxl>=3.1.5",
+    "xlrd>=2.0.1",
     "huggingface_hub>=0.19.0,<0.21.0"
 ]
 test = [

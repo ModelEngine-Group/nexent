@@ -16,6 +16,7 @@ import {
   Alert,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import AgentEvaluationTab from "./AgentEvaluationTab";
 import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
 
 import {
@@ -685,11 +686,12 @@ export default function AgentGenerateDetail({}) {
             }}
             className="agent-config-tabs flex flex-col h-full w-full"
           >
-            <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
+            <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
               <TabsTrigger value="agent-info">{t("agent.info.title")}</TabsTrigger>
               <TabsTrigger value="duty">{t("systemPrompt.card.duty.title")}</TabsTrigger>
               <TabsTrigger value="constraint">{t("systemPrompt.card.constraint.title")}</TabsTrigger>
               <TabsTrigger value="few-shots">{t("systemPrompt.card.fewShots.title")}</TabsTrigger>
+              <TabsTrigger value="evaluation">{t("agentEvaluation.tab")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="agent-info" className="flex-1 min-h-0 overflow-y-auto">
@@ -961,6 +963,12 @@ export default function AgentGenerateDetail({}) {
                 t("systemPrompt.card.fewShots.title"),
                 (value) => updateAgentConfig({ few_shots_prompt: value })
               )}
+            </TabsContent>
+
+            <TabsContent value="evaluation" className="flex-1 min-h-0 overflow-y-auto">
+              <div className="h-full px-3 pb-3">
+                {activeTab === "evaluation" && <AgentEvaluationTab agentId={currentAgentId} />}
+              </div>
             </TabsContent>
           </Tabs>
         </Col>

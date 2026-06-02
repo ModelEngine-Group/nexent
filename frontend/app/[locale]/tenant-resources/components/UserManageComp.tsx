@@ -1039,7 +1039,7 @@ export default function UserManageComp() {
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const params = useParams();
-  const locale = (params.locale as string) || "en";
+  const locale = (React.use(params) as { locale?: string })?.locale || "en";
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
