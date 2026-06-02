@@ -132,6 +132,18 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         sub_agent_info_list = get_enabled_sub_agent_description_for_generate_prompt(
             tenant_id=tenant_id, agent_id=agent_id)
 
+    # Re-evaluate has_selected_resources based on the actual resolved lists.
+    # The frontend value indicates user intent, but after resolving tool_ids/sub_agent_ids
+    # the actual lists are the source of truth. If both lists are empty, constraint and
+    # few_shots sections have no meaningful content to generate, so we force False.
+    has_selected_resources = bool(tool_info_list or sub_agent_info_list)
+    logger.info(
+        "Resolved resource availability: tools=%d, sub_agents=%d, has_selected_resources=%s",
+        len(tool_info_list),
+        len(sub_agent_info_list),
+        has_selected_resources,
+    )
+
     # 1. Real-time streaming push
     final_results = {"duty": "", "constraint": "", "few_shots": "", "agent_var_name": "", "agent_display_name": "",
                      "agent_description": ""}
