@@ -457,7 +457,7 @@ export const ModelAddDialog = ({
 
   // Verify if the vector dimension is valid
   const isValidVectorDimension = (value: string): boolean => {
-    const dimension = parseInt(value);
+    const dimension = Number.parseInt(value, 10);
     return !isNaN(dimension) && dimension > 0;
   };
 
@@ -603,11 +603,11 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() || "sk-no-api-key",
           maxTokens:
             form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
+              ? Number.parseInt(form.vectorDimension, 10)
               : parseMaxTokens(form.maxTokens),
           embeddingDim:
             form.type === MODEL_TYPES.EMBEDDING
-              ? parseInt(form.vectorDimension)
+              ? Number.parseInt(form.vectorDimension, 10)
               : undefined,
         };
 
@@ -647,96 +647,121 @@ export const ModelAddDialog = ({
     }
   };
 
+  const getResolvedModelType = (): ModelType =>
+    form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
+      ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+      : form.type;
+
+  const getApiKeyOrPlaceholder = () =>
+    form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
+
+  const getChunkingBatchSize = () =>
+    Number.parseInt(form.chunkingBatchSize, 10) || 10;
+
+  const buildEmbeddingBatchModelData = (model: any) => {
+    const { max_tokens, ...modelWithoutMaxTokens } = model;
+    return {
+      ...modelWithoutMaxTokens,
+      ...(isEmbeddingModel
+        ? {
+            expected_chunk_size: form.chunkSizeRange[0],
+            maximum_chunk_size: form.chunkSizeRange[1],
+            chunk_batch: getChunkingBatchSize(),
+          }
+        : {}),
+    };
+  };
+
+  const buildBatchModelData = (model: any, modelType: ModelType) => {
+    const isEmbeddingType =
+      modelType === MODEL_TYPES.EMBEDDING ||
+      modelType === MODEL_TYPES.MULTI_EMBEDDING;
+
+    if (isEmbeddingType) {
+      // Backend sets max_tokens for embedding models during connectivity checks.
+      return buildEmbeddingBatchModelData(model);
+    }
+
+    if (modelType === MODEL_TYPES.STT) {
+      const { max_tokens, ...modelWithoutMaxTokens } = model;
+      return modelWithoutMaxTokens;
+    }
+
+    return {
+      ...model,
+      max_tokens: model.max_tokens ?? parseMaxTokens(form.maxTokens),
+    };
+  };
+
+  const createBatchModels = async (modelType: ModelType, modelsData: any[]) => {
+    // Use manage interface if tenantId is provided (for super admin), otherwise use current tenant.
+    if (tenantId) {
+      await modelService.batchCreateManageTenantModels({
+        tenantId,
+        provider: form.provider,
+        type: modelType,
+        apiKey: getApiKeyOrPlaceholder(),
+        models: modelsData,
+      });
+      return;
+    }
+
+    await modelService.addBatchCustomModel({
+      api_key: getApiKeyOrPlaceholder(),
+      provider: form.provider,
+      type: modelType,
+      models: modelsData,
+    });
+  };
+
+  const persistBatchVlmConfig = async (enabledModels: any[]) => {
+    if (!isVlmConfigType(form.type) || enabledModels.length === 0) {
+      return;
+    }
+
+    const selectedModel = enabledModels[0];
+    const selectedDisplayName =
+      selectedModel.displayName || selectedModel.id || "";
+    const configKey = resolveConfigKey(form.type);
+    const vlmConfigUpdate: any = {
+      [configKey]: {
+        modelName: selectedModel.id || selectedModel.model_name || "",
+        displayName: selectedDisplayName,
+        apiConfig: {
+          apiKey: form.apiKey,
+          modelUrl: "",
+        },
+      },
+    };
+
+    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+      if (
+        key !== configKey &&
+        currentModelConfig?.[key]?.displayName === selectedDisplayName
+      ) {
+        vlmConfigUpdate[key] = emptyModelConfig;
+      }
+    }
+
+    updateModelConfig(vlmConfigUpdate);
+    await persistModelConfig();
+  };
+
   // Handle batch adding models
   const handleBatchAddModel = async () => {
     // Only include models whose id is in selectedModelIds (i.e., switch is ON)
     const enabledModels = modelList.filter((model: any) =>
       selectedModelIds.has(model.id)
     );
-    const modelType =
-      form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
-        ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-        : form.type;
+    const modelType = getResolvedModelType();
+
     try {
-      const isEmbeddingType =
-        modelType === MODEL_TYPES.EMBEDDING ||
-        modelType === MODEL_TYPES.MULTI_EMBEDDING;
+      const modelsData = enabledModels.map((model: any) =>
+        buildBatchModelData(model, modelType)
+      );
 
-      // Prepare the model data
-      const modelsData = enabledModels.map((model: any) => {
-        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
-        if (isEmbeddingType) {
-          const { max_tokens, ...modelWithoutMaxTokens } = model;
-          return {
-            ...modelWithoutMaxTokens,
-            // Add chunk size range for embedding models
-            ...(isEmbeddingModel
-              ? {
-                  expected_chunk_size: form.chunkSizeRange[0],
-                  maximum_chunk_size: form.chunkSizeRange[1],
-                  chunk_batch: parseInt(form.chunkingBatchSize) || 10,
-                }
-              : {}),
-          };
-        } else if (modelType === MODEL_TYPES.STT) {
-          const { max_tokens, ...modelWithoutMaxTokens } = model;
-          return modelWithoutMaxTokens;
-        } else {
-          return {
-            ...model,
-            max_tokens: model.max_tokens ?? parseMaxTokens(form.maxTokens),
-          };
-        }
-      });
-
-      // Use manage interface if tenantId is provided (for super admin), otherwise use current tenant
-      if (tenantId) {
-        await modelService.batchCreateManageTenantModels({
-          tenantId,
-          provider: form.provider,
-          type: modelType,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          models: modelsData,
-        });
-      } else {
-        await modelService.addBatchCustomModel({
-          api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          provider: form.provider,
-          type: modelType,
-          models: modelsData,
-        });
-      }
-
-      if (isVlmConfigType(form.type) && enabledModels.length > 0) {
-        const selectedModel = enabledModels[0];
-        const selectedDisplayName =
-          selectedModel.displayName || selectedModel.id || "";
-        const configKey = resolveConfigKey(form.type);
-        const vlmConfigUpdate: any = {
-          [configKey]: {
-            modelName: selectedModel.id || selectedModel.model_name || "",
-            displayName: selectedDisplayName,
-            apiConfig: {
-              apiKey: form.apiKey,
-              modelUrl: "",
-            },
-          },
-        };
-        for (const key of [
-          MODEL_TYPES.VLM,
-          MODEL_TYPES.VLM2,
-          MODEL_TYPES.VLM3,
-        ]) {
-          if (
-            key !== configKey &&
-            currentModelConfig?.[key]?.displayName === selectedDisplayName
-          ) {
-            vlmConfigUpdate[key] = emptyModelConfig;
-          }
-        }
-        updateModelConfig(vlmConfigUpdate);
-        await persistModelConfig();
-      }
+      await createBatchModels(modelType, modelsData);
+      await persistBatchVlmConfig(enabledModels);
 
       // Reset form state and close dialog on success
       resetForm();
@@ -852,7 +877,7 @@ export const ModelAddDialog = ({
           modelParams.expectedChunkSize = form.chunkSizeRange[0];
           modelParams.maximumChunkSize = form.chunkSizeRange[1];
           modelParams.chunkingBatchSize =
-            parseInt(form.chunkingBatchSize) || 10;
+            Number.parseInt(form.chunkingBatchSize, 10) || 10;
         }
 
         await modelService.createManageTenantModel(modelParams);
@@ -892,7 +917,7 @@ export const ModelAddDialog = ({
           modelParams.expectedChunkSize = form.chunkSizeRange[0];
           modelParams.maximumChunkSize = form.chunkSizeRange[1];
           modelParams.chunkingBatchSize =
-            parseInt(form.chunkingBatchSize) || 10;
+            Number.parseInt(form.chunkingBatchSize, 10) || 10;
         }
 
         await modelService.addCustomModel(modelParams);
@@ -932,7 +957,7 @@ export const ModelAddDialog = ({
 
       // Add the dimension field for embedding models
       if (form.type === MODEL_TYPES.EMBEDDING) {
-        modelConfig.dimension = parseInt(form.vectorDimension);
+        modelConfig.dimension = Number.parseInt(form.vectorDimension, 10);
       }
 
       // Update the local storage according to the model type
