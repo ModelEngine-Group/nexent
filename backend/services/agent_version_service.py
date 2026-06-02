@@ -128,6 +128,7 @@ def publish_version_impl(
         'status': STATUS_RELEASED,
         'is_a2a': publish_as_a2a,
         'created_by': user_id,
+        'updated_by': user_id,
     }
     version_id = insert_version(version_data)
 
