@@ -48,13 +48,9 @@ COPY sdk /opt/sdk
 RUN uv pip install --no-cache-dir "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR") && \
     uv cache clean
 
-# Layer 2.5: install openjiuwen without its heavyweight transitive deps
-RUN uv pip install --no-cache-dir --no-deps openjiuwen $(test -n "$MIRROR" && echo "-i $MIRROR") && \
-    uv pip install --no-cache-dir pydantic openai tiktoken httpx $(test -n "$MIRROR" && echo "-i $MIRROR") && \
-    uv cache clean
-
 # Pre-download tiktoken cl100k_base model to avoid network issues during runtime
 RUN uv run python -c "import tiktoken; enc = tiktoken.get_encoding('cl100k_base')"
+
 # Layer 3: copy backend code
 COPY backend /opt/backend
 

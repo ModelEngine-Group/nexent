@@ -33,8 +33,6 @@ dependencies = [
 # openjiuwen's heavy transitive deps are not needed by backend's prompt_builder module
 exclude-dependencies = [
     "transformers",
-    "dashscope",
-    "pymilvus",
     "pdfplumber",
 ]
 
