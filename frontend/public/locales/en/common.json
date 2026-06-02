@@ -2362,6 +2362,8 @@
   "agentEvaluation.createSetModal.descPlaceholder": "Description (optional)",
   "agentEvaluation.createSetModal.nameRequired": "Name is required",
   "agentEvaluation.createSetModal.fileRequired": "Please choose a .xlsx or .xls file",
+  "agentEvaluation.createSetModal.chooseFile": "Choose File",
+  "agentEvaluation.createSetModal.noFile": "No file selected",
   "agentEvaluation.selectEvaluationSetFirst": "Please select an evaluation set",
   "agentEvaluation.status.pending": "Pending",
   "agentEvaluation.status.running": "Running",

@@ -15,12 +15,14 @@ export const evaluationService = {
   uploadEvaluationSetExcel: async (params: {
     name: string;
     description?: string;
-    file: File;
+    files: File[];
   }): Promise<EvaluationSet> => {
     const formData = new FormData();
     formData.append("name", params.name);
     if (params.description) formData.append("description", params.description);
-    formData.append("file", params.file);
+    for (const file of params.files) {
+      formData.append("files", file);
+    }
 
     const resp = await fetch(API_ENDPOINTS.evaluationSets.upload, {
       method: "POST",

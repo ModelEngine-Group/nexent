@@ -73,24 +73,22 @@ async def _run_agent_to_final_answer(
         allow_memory_search=False,
     )
 
-    # Stream chunks from core agent runner and concatenate text-like parts.
+    # Stream chunks from core agent runner and extract final_answer content.
     from nexent.core.agents.run_agent import agent_run
 
-    parts: List[str] = []
+    final_answer_parts: List[str] = []
     async for chunk in agent_run(agent_run_info):
-        # chunk might be a dict or a string depending on implementation; keep it resilient
         try:
             if isinstance(chunk, str):
-                parts.append(chunk)
-            elif isinstance(chunk, dict):
-                # Common formats: {"type": "message", "content": "..."} or similar
-                c = chunk.get("content")
-                if isinstance(c, str):
-                    parts.append(c)
+                data = json.loads(chunk)
+                if isinstance(data, dict) and data.get("type") == "final_answer":
+                    content = data.get("content")
+                    if isinstance(content, str):
+                        final_answer_parts.append(content)
         except Exception:
             continue
 
-    return "".join(parts).strip()
+    return "".join(final_answer_parts).strip()
 
 
 def create_agent_evaluation_run_impl(

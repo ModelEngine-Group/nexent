@@ -1,7 +1,8 @@
 import io
+import json
 import logging
 from http import HTTPStatus
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -66,41 +67,57 @@ async def create_evaluation_set_api(
 async def upload_evaluation_set_api(
     name: str = Form(...),
     description: Optional[str] = Form(None),
-    file: UploadFile = File(..., alias="file"),
+    files: List[UploadFile] = File(...),
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        raw = await file.read()
+        if not files:
+            raise ValueError("At least one file is required")
 
-        filename = file.filename or ""
-        lower = filename.lower()
+        all_cases: List[Dict[str, Any]] = []
+        source_filenames: List[str] = []
 
-        if lower.endswith(".xlsx") or lower.endswith(".xls"):
-            cases = parse_evaluation_cases_from_excel(filename=filename, raw=raw)
-            meta = create_evaluation_set_from_cases(
-                tenant_id=tenant_id,
-                name=name,
-                description=description,
-                source_filename=filename,
-                cases=cases,
-                created_by=user_id,
-            )
-        else:
-            # Backward compatible: still accept JSONL upload
-            try:
-                jsonl_text = raw.decode("utf-8")
-            except Exception:
-                jsonl_text = raw.decode("utf-8", errors="ignore")
+        for file in files:
+            raw = await file.read()
+            filename = file.filename or ""
+            source_filenames.append(filename)
+            lower = filename.lower()
 
-            meta = create_evaluation_set_from_jsonl(
-                tenant_id=tenant_id,
-                name=name,
-                description=description,
-                source_filename=filename,
-                jsonl_text=jsonl_text,
-                created_by=user_id,
-            )
+            if lower.endswith(".xlsx") or lower.endswith(".xls"):
+                cases = parse_evaluation_cases_from_excel(filename=filename, raw=raw)
+                all_cases.extend(cases)
+            else:
+                # Backward compatible: still accept JSONL upload
+                try:
+                    jsonl_text = raw.decode("utf-8")
+                except Exception:
+                    jsonl_text = raw.decode("utf-8", errors="ignore")
+
+                # Parse JSONL into cases
+                for line in jsonl_text.strip().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    obj = json.loads(line)
+                    all_cases.append({
+                        "query": obj.get("query", ""),
+                        "answer": obj.get("answer", ""),
+                        "context": obj.get("context"),
+                        "case_id": obj.get("case_id"),
+                    })
+
+        if not all_cases:
+            raise ValueError("No valid cases found in uploaded files")
+
+        meta = create_evaluation_set_from_cases(
+            tenant_id=tenant_id,
+            name=name,
+            description=description,
+            source_filename=", ".join(source_filenames),
+            cases=all_cases,
+            created_by=user_id,
+        )
 
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success", "data": meta})
     except ValueError as ve:

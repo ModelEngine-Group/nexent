@@ -2391,6 +2391,8 @@
   "agentEvaluation.createSetModal.descPlaceholder": "描述（可选）",
   "agentEvaluation.createSetModal.nameRequired": "评估集名称不能为空",
   "agentEvaluation.createSetModal.fileRequired": "请选择 .xlsx 或 .xls 文件",
+  "agentEvaluation.createSetModal.chooseFile": "选择文件",
+  "agentEvaluation.createSetModal.noFile": "未选择任何文件",
   "agentEvaluation.selectEvaluationSetFirst": "请选择一个评估集",
   "agentEvaluation.status.pending": "等待中",
   "agentEvaluation.status.running": "运行中",

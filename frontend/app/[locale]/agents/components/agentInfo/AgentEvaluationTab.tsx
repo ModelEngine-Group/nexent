@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Divider, Flex, Input, Modal, Select, Table, Typography, message } from "antd";
+import { Upload, X } from "lucide-react";
 
 import type { ColumnsType } from "antd/es/table";
 
@@ -26,10 +27,10 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
   const [createSetOpen, setCreateSetOpen] = useState(false);
   const [setName, setSetName] = useState("");
   const [setDesc, setSetDesc] = useState("");
-  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelFiles, setExcelFiles] = useState<File[]>([]);
 
   const [judgeModelId, setJudgeModelId] = useState<number | null>(null);
-  const [selectedEvaluationSetId, setSelectedEvaluationSetId] = useState<number | null>(null);
+  const [selectedEvaluationSetIds, setSelectedEvaluationSetIds] = useState<number[]>([]);
 
   const { availableLlmModels } = useModelList();
 
@@ -45,8 +46,8 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
     try {
       const data = await evaluationService.listEvaluationSets({ limit: 200, offset: 0 });
       setEvaluationSets(data);
-      if (data?.length && selectedEvaluationSetId == null) {
-        setSelectedEvaluationSetId(data[0].evaluation_set_id);
+      if (data?.length && !selectedEvaluationSetIds.length) {
+        setSelectedEvaluationSetIds([data[0].evaluation_set_id]);
       }
     } catch (e: any) {
       message.error(e?.message || t("agentEvaluation.message.loadSetsFailed"));
@@ -177,28 +178,39 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
     },
   ];
 
-  const startEvaluation = async (evaluationSetId: number) => {
+  const startEvaluations = async () => {
     if (!agentId) return;
     if (!judgeModelId) {
       message.error(t("agentEvaluation.selectJudgeModelFirst"));
       return;
     }
-    if (!evaluationSetId) {
+    if (!selectedEvaluationSetIds.length) {
       message.error(t("agentEvaluation.selectEvaluationSetFirst"));
       return;
     }
     try {
-      await evaluationService.createAgentEvaluation({
-        agent_id: agentId,
-        evaluation_set_id: evaluationSetId,
-        judge_model_id: judgeModelId,
-      });
+      for (const evaluation_set_id of selectedEvaluationSetIds) {
+        await evaluationService.createAgentEvaluation({
+          agent_id: agentId,
+          evaluation_set_id,
+          judge_model_id: judgeModelId,
+        });
+      }
       message.success(t("agentEvaluation.message.startSuccess"));
       await loadRuns();
     } catch (e: any) {
       message.error(e?.message || t("agentEvaluation.message.startFailed"));
     }
   };
+
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!createSetOpen) {
+      setSetName("");
+      setSetDesc("");
+      setExcelFiles([]);
+    }
+  }, [createSetOpen]);
 
   const createSet = async () => {
     try {
@@ -207,7 +219,7 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
         message.error(t("agentEvaluation.createSetModal.nameRequired"));
         return;
       }
-      if (!excelFile) {
+      if (!excelFiles.length) {
         message.error(t("agentEvaluation.createSetModal.fileRequired"));
         return;
       }
@@ -215,13 +227,10 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
       await evaluationService.uploadEvaluationSetExcel({
         name,
         description: setDesc || undefined,
-        file: excelFile,
+        files: excelFiles,
       });
       message.success(t("agentEvaluation.message.createSetSuccess"));
       setCreateSetOpen(false);
-      setSetName("");
-      setSetDesc("");
-      setExcelFile(null);
       await loadSets();
     } catch (e: any) {
       message.error(e?.message || t("agentEvaluation.message.createSetFailed"));
@@ -268,17 +277,17 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
           />
           <Button
             type="primary"
-            disabled={!agentId || !judgeModelId || !selectedEvaluationSetId}
+            disabled={!agentId || !judgeModelId || !selectedEvaluationSetIds.length}
             onClick={() => {
               if (!judgeModelId) {
                 message.error(t("agentEvaluation.selectJudgeModelFirst"));
                 return;
               }
-              if (!selectedEvaluationSetId) {
+              if (!selectedEvaluationSetIds.length) {
                 message.error(t("agentEvaluation.selectEvaluationSetFirst"));
                 return;
               }
-              startEvaluation(selectedEvaluationSetId);
+              startEvaluations();
             }}
           >
             {t("agentEvaluation.startEvaluation")}
@@ -294,11 +303,10 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
         loading={loadingSets}
         pagination={false}
         rowSelection={{
-          type: "radio",
-          selectedRowKeys: selectedEvaluationSetId != null ? [selectedEvaluationSetId] : [],
+          type: "checkbox",
+          selectedRowKeys: selectedEvaluationSetIds,
           onChange: (keys) => {
-            const id = Number(keys?.[0]);
-            setSelectedEvaluationSetId(Number.isFinite(id) ? id : null);
+            setSelectedEvaluationSetIds(keys.map((k) => Number(k)));
           },
         }}
       />
@@ -327,18 +335,54 @@ export default function AgentEvaluationTab(props: { agentId: number | null | und
         onOk={createSet}
         title={t("agentEvaluation.createSetModal.title")}
         okText={t("agentEvaluation.createSetModal.create")}
+        cancelText={t("common.cancel")}
       >
         <Flex vertical gap={8}>
           <Input value={setName} onChange={(e) => setSetName(e.target.value)} placeholder={t("agentEvaluation.createSetModal.namePlaceholder")} />
           <Input value={setDesc} onChange={(e) => setSetDesc(e.target.value)} placeholder={t("agentEvaluation.createSetModal.descPlaceholder")} />
-          <Input
-            type="file"
-            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-            onChange={(e) => {
-              const f = e.target.files?.[0] || null;
-              setExcelFile(f);
-            }}
-          />
+          <div className="space-y-2">
+            <input
+              id="excel-file-input"
+              type="file"
+              multiple
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) {
+                  setExcelFiles((prev) => [...prev, ...files]);
+                }
+                e.target.value = "";
+              }}
+            />
+            <Button
+              onClick={() => {
+                document.getElementById("excel-file-input")?.click();
+              }}
+              icon={<Upload size={14} />}
+            >
+              {t("agentEvaluation.createSetModal.chooseFile")}
+            </Button>
+            {excelFiles.length > 0 ? (
+              <div className="space-y-1">
+                {excelFiles.map((f, idx) => (
+                  <Flex key={idx} align="center" gap={4} className="text-xs">
+                    <Text className="truncate max-w-[300px]">{f.name}</Text>
+                    <button
+                      onClick={() => setExcelFiles((prev) => prev.filter((_, i) => i !== idx))}
+                      className="flex-shrink-0 text-gray-400 hover:text-red-500"
+                    >
+                      <X size={12} />
+                    </button>
+                  </Flex>
+                ))}
+              </div>
+            ) : (
+              <Text type="secondary" className="text-xs">
+                {t("agentEvaluation.createSetModal.noFile")}
+              </Text>
+            )}
+          </div>
         </Flex>
       </Modal>
     </Flex>
