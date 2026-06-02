@@ -300,7 +300,7 @@ async def test_get_models_embedding_success():
 
 @pytest.mark.asyncio
 async def test_get_models_unknown_type():
-    """Unknown model types should not have extra annotations and should hit the base URL."""
+    """Unknown model types should be ignored without calling the API."""
     provider_config = {"model_type": "other", "api_key": "test-key"}
 
     with mock.patch(
@@ -309,25 +309,10 @@ async def test_get_models_unknown_type():
         "backend.services.providers.silicon_provider.SILICON_GET_URL",
         "https://silicon.com",
     ):
-
-        mock_client_instance = mock.AsyncMock()
-        mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response._json_data = {"data": [{"id": "model-x"}]}
-        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
-        mock_response.raise_for_status = mock.Mock()
-        mock_client_instance.get.return_value = mock_response
-
         result = await SiliconModelProvider().get_models(provider_config)
 
-        # No additional keys should be injected for unknown type
-        assert result == [{"id": "model-x"}]
-        mock_client_instance.get.assert_called_once_with(
-            "https://silicon.com",
-            headers={"Authorization": "Bearer test-key"},
-        )
+        assert result == []
+        mock_client.assert_not_called()
 
 
 @pytest.mark.asyncio
