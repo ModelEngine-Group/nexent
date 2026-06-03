@@ -92,7 +92,7 @@ class SiliconModelProvider(AbstractModelProvider):
             elif provider_model_type == "rerank":
                 silicon_url = f"{SILICON_GET_URL}?sub_type=reranker"
             else:
-                silicon_url = SILICON_GET_URL
+                return []
 
             async with httpx.AsyncClient(verify=False) as client:
                 response = await client.get(silicon_url, headers=headers)

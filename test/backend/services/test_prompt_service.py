@@ -2049,7 +2049,7 @@ class TestPromptService(unittest.TestCase):
             elif "display_name" in sys_prompt.lower():
                 return "Test Agent"
             elif "description" in sys_prompt.lower():
-                return "desc"
+                return             "desc"
             return "content"
 
         mock_call_llm.side_effect = mock_llm
@@ -2203,3 +2203,136 @@ class TestPromptOptimizationService(unittest.TestCase):
         self.assertEqual(res.section_type, "duty")
         self.assertEqual(res.section_title, "title")
         self.assertEqual(res.original_content, "old")
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_no_resources(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to False when both tool and sub-agent lists are empty.
+
+        This covers the fix for the regression where adding the prompt template feature inadvertently
+        bypassed the conditional generation of constraint/few_shots sections.
+        """
+        mock_enabled_tools.return_value = []
+        mock_enabled_sub_agents.return_value = []
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty content", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=True,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    False,
+                    "has_selected_resources should be False when both tool and sub-agent lists are empty",
+                )
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_has_tools(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to True when tools are present."""
+        mock_enabled_tools.return_value = [{"name": "db_tool"}]
+        mock_enabled_sub_agents.return_value = []
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty", "is_complete": True}
+                    yield {"type": "constraint", "content": "constraints", "is_complete": True}
+                    yield {"type": "few_shots", "content": "examples", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=False,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    True,
+                    "has_selected_resources should be True when tools are present",
+                )
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_has_sub_agents(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to True when sub-agents are present."""
+        mock_enabled_tools.return_value = []
+        mock_enabled_sub_agents.return_value = [{"name": "sub_agent"}]
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty", "is_complete": True}
+                    yield {"type": "constraint", "content": "constraints", "is_complete": True}
+                    yield {"type": "few_shots", "content": "examples", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=False,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    True,
+                    "has_selected_resources should be True when sub-agents are present",
+                )
