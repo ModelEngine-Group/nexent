@@ -170,8 +170,15 @@ def build_prompt_templates(
 
 # ============ AgentRunInfo 构建函数 ============
 
+# 关闭模型原生思考的 extra_body（兼容多种后端）
+THINKING_OFF_EXTRA_BODY = {
+    "chat_template_kwargs": {"enable_thinking": False},
+    "thinking": {"type": "disabled"},
+}
+
+
 def build_agent_run_info(
-    query: str, 
+    query: str,
     history: list[AgentHistory],
     duty_prompt: str = "",
     constraint_prompt: str = "",
@@ -187,11 +194,12 @@ def build_agent_run_info(
     is_manager: bool = False,
     context_manager_config: Optional[ContextManagerConfig] = None,
     user_id: str = "",
-    skills: list = None
+    skills: list = None,
+    extra_body: Optional[dict] = None,
 ) -> AgentRunInfo:
     """
     构造 AgentRunInfo
-    
+
     Args:
         query: 用户查询
         history: 对话历史
@@ -208,7 +216,12 @@ def build_agent_run_info(
         language: 语言
         is_manager: 是否为管理 Agent
         context_manager_config: 上下文管理器配置，None则使用默认配置
-    
+        user_id: 用户ID
+        skills: 技能列表
+        extra_body: 附加的 API 请求体参数，可用于关闭模型原生思考等。
+                    None 时使用模型默认行为。
+                    THINKING_OFF_EXTRA_BODY 常量可关闭思考（兼容多后端）。
+
     Returns:
         AgentRunInfo 对象
     """
@@ -227,6 +240,7 @@ def build_agent_run_info(
         url=LLM_API_URL,
         temperature=temperature,
         ssl_verify=False,
+        extra_body=extra_body,
     )
     
     if duty or constraint or few_shots:

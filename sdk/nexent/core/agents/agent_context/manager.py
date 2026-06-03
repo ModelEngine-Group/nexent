@@ -45,7 +45,8 @@ class ContextManager:
     delegates computation to pure functions and sub-component methods.
     """
 
-    def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: Optional[int] = None):
+    def __init__(self, config: Optional[ContextManagerConfig] = None,
+                 max_steps: Optional[int] = None, offload_store: Optional[OffloadStore] = None):
         self.config = config or ContextManagerConfig()
 
         # --- Owned state ---
@@ -63,7 +64,7 @@ class ContextManager:
         self.compression_calls_log: List[CompressionCallRecord] = []
         self._step_local_log: List[CompressionCallRecord] = []
         self._lock = threading.Lock()
-        self._offload_store = OffloadStore(
+        self._offload_store = offload_store or OffloadStore(
             max_entries=self.config.max_offload_entries,
             max_entry_chars=getattr(self.config, 'max_offload_entry_chars', 30000),
         )

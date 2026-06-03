@@ -19,7 +19,7 @@ from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .agent_context import ContextManager
+from .agent_context import ContextManager, OffloadStore
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -421,15 +421,24 @@ extra_body=model_config.extra_body,
             # Mount context manager if config provided
             ctx_config = getattr(agent_config, 'context_manager_config', None)
             if ctx_config:
+                # OffloadStore is independent of ContextManager: use externally
+                # injected instance if available, otherwise create from config.
+                offload_store = getattr(agent_config, 'offload_store', None)
+                if offload_store is None:
+                    offload_store = OffloadStore(
+                        max_entries=ctx_config.max_offload_entries,
+                        max_entry_chars=getattr(ctx_config, 'max_offload_entry_chars', 30000),
+                    )
                 agent.context_manager = ContextManager(
                     config=ctx_config,
-                    max_steps=agent_config.max_steps
+                    max_steps=agent_config.max_steps,
+                    offload_store=offload_store,
                 )
                 # Inject reload tool if offload+reload is enabled
                 if ctx_config.enable_reload:
                     from ..tools import ReloadOriginalContextTool
                     reload_tool = ReloadOriginalContextTool(
-                        offload_store=agent.context_manager.offload_store
+                        offload_store=offload_store,
                     )
                     agent.tools[reload_tool.name] = reload_tool
                 context_components = getattr(agent_config, 'context_components', None)
