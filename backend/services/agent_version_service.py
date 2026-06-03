@@ -909,6 +909,8 @@ async def list_published_agents_impl(
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "published_version_no": agent.get("published_version_no"),
+                "greeting_message": agent.get("greeting_message"),
+                "example_questions": agent.get("example_questions"),
             })
 
         return simple_agent_list
