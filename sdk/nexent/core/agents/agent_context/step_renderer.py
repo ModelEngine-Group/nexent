@@ -230,18 +230,24 @@ class StepRenderer:
                 parts.append(text)
             else:
                 # Per-segment offload: observation or model_output
-                parts.append(self._render_segment(text, offload_store))
+                parts.append(self._render_segment(text, action, offload_store))
         return "\n".join(parts)
 
-    def _render_segment(self, text: str, offload_store: Optional[OffloadStore] = None) -> str:
+    def _render_segment(self, text: str, action: ActionStep, offload_store: Optional[OffloadStore] = None) -> str:
         """Render a single message segment, offloading if oversized.
 
         When the segment exceeds ``per_step_render_limit``, the full text is archived
         in ``offload_store`` and replaced with a self-describing marker so the
         compression LLM knows what was offloaded and how to retrieve it.
 
+        If the action has a ``_raw_observation`` attribute (preserved before
+        ``max_observation_length`` truncation), the original text is used for
+        offload so that ``reload`` can retrieve the truly original content.
+
         Args:
-            text: The raw segment text (e.g., model_output or observation).
+            text: The display segment text (possibly already truncated by
+                  ``max_observation_length``).
+            action: The ActionStep being rendered; may carry ``_raw_observation``.
             offload_store: OffloadStore for archiving oversized segments.
 
         Returns:
@@ -249,24 +255,39 @@ class StepRenderer:
             with a self-describing offload marker.
         """
         limit = self._config.per_step_render_limit
-        if offload_store is None or limit <= 0 or len(text) <= limit:
+        if offload_store is None or limit <= 0:
             return text
 
-        # Offload triggered — archive full text
-        handle = offload_store.store(text)
+        # Determine the source text for offload decisions and archiving.
+        # For observations, prefer the pre-truncation raw content if available.
+        source_text = text
+        if text.startswith("Observation:") and hasattr(action, '_raw_observation'):
+            source_text = action._raw_observation
 
-        # Build a self-describing marker so the LLM understands what was offloaded
+        # If the source (original) content is within limit, no offload needed.
+        if len(source_text) <= limit:
+            return text
+
+        # Offload triggered — archive the original (or raw) content.
+        handle = offload_store.store(source_text)
+        if handle is None:
+            # Content too large even for offload store; fall back to plain truncation.
+            return text[:limit] + "\n...[CONTENT_TOO_LARGE_TO_OFFLOAD]"
+
+        # Build a self-describing marker so the LLM understands what was offloaded.
+        # Preview is based on *display* text (``text``) because that is what the
+        # LLM already sees in the conversation context.
         if text.startswith("Observation:"):
             first_line = text.split("\n")[0] if "\n" in text else text[:100]
             marker = (
                 f"\n...[[OBS_OFFLOAD: {first_line[:80]}, "
-                f"{len(text)} chars, handle={handle}]]"
+                f"{len(source_text)} chars, handle={handle}]]"
             )
         else:
             preview = text[:80].replace("\n", " ").strip()
             marker = (
                 f"\n...[[CONTENT_OFFLOAD: {preview}..., "
-                f"{len(text)} chars, handle={handle}]]"
+                f"{len(source_text)} chars, handle={handle}]]"
             )
 
         return text[:limit] + marker
