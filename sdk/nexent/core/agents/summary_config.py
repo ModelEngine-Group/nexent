@@ -25,6 +25,10 @@ class ContextManagerConfig:
     max_memory_step_length: int = 2000
     enable_reload: bool = False
     max_offload_entries: int = 200
+    max_offload_entry_chars: int = 30000
+    """单条 offload 原始内容的最大字符数。超过此限制的内容即使 enable_reload=True
+    也不会完整存档，只保留前 N 字符。防止超大 observation（如百万行日志）爆内存。
+    """
     summary_system_prompt: str = (
         "You are a conversation summarization assistant. Compress the following "
         "conversation history into a structured summary, preserving all key information: "
