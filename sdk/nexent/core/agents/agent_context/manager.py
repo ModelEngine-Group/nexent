@@ -63,7 +63,10 @@ class ContextManager:
         self.compression_calls_log: List[CompressionCallRecord] = []
         self._step_local_log: List[CompressionCallRecord] = []
         self._lock = threading.Lock()
-        self._offload_store = OffloadStore(max_entries=self.config.max_offload_entries)
+        self._offload_store = OffloadStore(
+            max_entries=self.config.max_offload_entries,
+            max_entry_chars=getattr(self.config, 'max_offload_entry_chars', 30000),
+        )
         self._last_uncompressed_token_count: Optional[int] = None
         self._last_compressed_token_count: Optional[int] = None
 
