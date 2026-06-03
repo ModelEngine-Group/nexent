@@ -10,13 +10,13 @@ import {
   App,
   Modal,
   Input,
-  Tooltip,
   Form,
   Switch,
   InputNumber,
 } from "antd";
 import { ColumnsType } from "antd/es/table";
-import { Settings } from "lucide-react";
+import { Download } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 
 import {
   fetchSkillsList,
@@ -24,6 +24,7 @@ import {
   type SkillListItem,
 } from "@/services/skillService";
 import log from "@/lib/logger";
+import { InstallOfficialSkillsModal } from "@/components/skill/InstallOfficialSkillsModal";
 
 function pathToKey(path: (string | number)[]): string {
   return path.map(String).join(".");
@@ -101,7 +102,10 @@ function coercePrimitiveToken(token: string, hint?: unknown): unknown {
 }
 
 /** Parse one input string back to a primitive JSON array (for save). */
-function parseListInputToPrimitiveArray(input: string, hint?: unknown[]): unknown[] {
+function parseListInputToPrimitiveArray(
+  input: string,
+  hint?: unknown[]
+): unknown[] {
   const s = input.trim();
   if (!s) return [];
   if (s.startsWith("[")) {
@@ -124,7 +128,10 @@ function parseListInputToPrimitiveArray(input: string, hint?: unknown[]): unknow
 /**
  * Form stores primitive arrays as a single string; merge back to real arrays before save.
  */
-function restorePrimitiveArraysFromForm(edited: unknown, snapshot: unknown): unknown {
+function restorePrimitiveArraysFromForm(
+  edited: unknown,
+  snapshot: unknown
+): unknown {
   if (edited === null || edited === undefined) return edited;
   if (snapshot === null || snapshot === undefined) return edited;
 
@@ -152,7 +159,11 @@ function restorePrimitiveArraysFromForm(edited: unknown, snapshot: unknown): unk
     return out;
   }
 
-  if (Array.isArray(snapshot) && Array.isArray(edited) && !isPrimitiveArray(snapshot)) {
+  if (
+    Array.isArray(snapshot) &&
+    Array.isArray(edited) &&
+    !isPrimitiveArray(snapshot)
+  ) {
     return edited.map((e, i) => restorePrimitiveArraysFromForm(e, snapshot[i]));
   }
 
@@ -160,7 +171,10 @@ function restorePrimitiveArraysFromForm(edited: unknown, snapshot: unknown): unk
 }
 
 /** Split "value # comment" for tooltip (first ` # ` only). */
-function parseStringWithComment(s: string): { display: string; comment?: string } {
+function parseStringWithComment(s: string): {
+  display: string;
+  comment?: string;
+} {
   const idx = s.indexOf(" # ");
   if (idx === -1) return { display: s };
   return { display: s.slice(0, idx), comment: s.slice(idx + 3) };
@@ -198,7 +212,10 @@ function buildFormStateFromParams(
       return { initialValues: primitiveArrayToListInput(obj) };
     }
     return {
-      initialValues: obj.map((item, i) => buildFormStateFromParams(item, [...path, i], meta).initialValues),
+      initialValues: obj.map(
+        (item, i) =>
+          buildFormStateFromParams(item, [...path, i], meta).initialValues
+      ),
     };
   }
   if (typeof obj === "object" && !Array.isArray(obj)) {
@@ -239,7 +256,10 @@ function applyStringComments(
  * Merge edited form values back into the original snapshot, preserving `_` keys and nested `_` keys.
  * When `edited` omits a nested object, still merges from snapshot so internal `_` keys are kept.
  */
-function deepMergePreserveUnderscore(snapshot: unknown, edited: unknown): unknown {
+function deepMergePreserveUnderscore(
+  snapshot: unknown,
+  edited: unknown
+): unknown {
   if (Array.isArray(snapshot) && Array.isArray(edited)) {
     const out = [...edited];
     for (let i = 0; i < snapshot.length; i++) {
@@ -280,7 +300,12 @@ function deepMergePreserveUnderscore(snapshot: unknown, edited: unknown): unknow
       if (k.startsWith("_")) continue;
       if (v !== null && typeof v === "object" && !Array.isArray(v)) {
         const existing = out[k];
-        if (existing !== undefined && typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+        if (
+          existing !== undefined &&
+          typeof existing === "object" &&
+          existing !== null &&
+          !Array.isArray(existing)
+        ) {
           out[k] = deepMergePreserveUnderscore(v, existing);
         } else {
           out[k] = deepMergePreserveUnderscore(v, {});
@@ -302,7 +327,11 @@ function normalizeSkillParams(raw: unknown): Record<string, unknown> {
   if (typeof raw === "string") {
     try {
       const parsed = JSON.parse(raw) as unknown;
-      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        !Array.isArray(parsed)
+      ) {
         return { ...(parsed as Record<string, unknown>) };
       }
     } catch {
@@ -333,10 +362,16 @@ function ParamsDynamicFields({
   const { t } = useTranslation("common");
   const label = namePath.length ? String(namePath[namePath.length - 1]) : "";
   const locked = isLockedKeyPath(namePath);
-  const lockTip = locked && lockedFieldTooltip ? { title: lockedFieldTooltip } : undefined;
+  const lockTip =
+    locked && lockedFieldTooltip ? { title: lockedFieldTooltip } : undefined;
 
-  if (shapeSample !== undefined && Array.isArray(shapeSample) && isPrimitiveArray(shapeSample)) {
-    const inlineCommentTip = typeof sample === "string" ? meta.get(pathToKey(namePath)) : undefined;
+  if (
+    shapeSample !== undefined &&
+    Array.isArray(shapeSample) &&
+    isPrimitiveArray(shapeSample)
+  ) {
+    const inlineCommentTip =
+      typeof sample === "string" ? meta.get(pathToKey(namePath)) : undefined;
     const listTooltip = locked
       ? lockTip
       : inlineCommentTip
@@ -345,7 +380,9 @@ function ParamsDynamicFields({
     return (
       <Form.Item name={namePath} label={label} tooltip={listTooltip}>
         <Input
-          placeholder={t("tenantResources.skills.configModal.listFieldPlaceholder")}
+          placeholder={t(
+            "tenantResources.skills.configModal.listFieldPlaceholder"
+          )}
           readOnly={locked}
           className={`font-mono text-sm${locked ? " bg-neutral-100 dark:bg-neutral-800" : ""}`}
         />
@@ -367,8 +404,11 @@ function ParamsDynamicFields({
 
   if (typeof sample === "string") {
     const inlineCommentTip = meta.get(pathToKey(namePath));
-    const tooltip =
-      locked ? lockTip : inlineCommentTip ? { title: inlineCommentTip } : undefined;
+    const tooltip = locked
+      ? lockTip
+      : inlineCommentTip
+        ? { title: inlineCommentTip }
+        : undefined;
     return (
       <Form.Item name={namePath} label={label} tooltip={tooltip}>
         <Input
@@ -392,7 +432,12 @@ function ParamsDynamicFields({
 
   if (typeof sample === "boolean") {
     return (
-      <Form.Item name={namePath} label={label} valuePropName="checked" tooltip={lockTip}>
+      <Form.Item
+        name={namePath}
+        label={label}
+        valuePropName="checked"
+        tooltip={lockTip}
+      >
         <Switch disabled={locked} />
       </Form.Item>
     );
@@ -412,13 +457,17 @@ function ParamsDynamicFields({
     return (
       <div className="mb-3 pl-3 border-l border-neutral-200 dark:border-neutral-600">
         {namePath.length > 0 && (
-          <div className="mb-2 text-sm font-medium text-neutral-600 dark:text-neutral-400">{label}</div>
+          <div className="mb-2 text-sm font-medium text-neutral-600 dark:text-neutral-400">
+            {label}
+          </div>
         )}
         {sample.map((item, i) => (
           <ParamsDynamicFields
             key={pathToKey([...namePath, i])}
             sample={item}
-            shapeSample={Array.isArray(shapeSample) ? shapeSample[i] : undefined}
+            shapeSample={
+              Array.isArray(shapeSample) ? shapeSample[i] : undefined
+            }
             namePath={[...namePath, i]}
             meta={meta}
             lockedFieldTooltip={lockedFieldTooltip}
@@ -445,7 +494,9 @@ function ParamsDynamicFields({
     return (
       <div className="flex flex-col">
         {namePath.length > 0 && (
-          <div className="mb-1 text-sm font-medium text-neutral-600 dark:text-neutral-400">{label}</div>
+          <div className="mb-1 text-sm font-medium text-neutral-600 dark:text-neutral-400">
+            {label}
+          </div>
         )}
         <div
           className={
@@ -492,11 +543,7 @@ function formatSkillUpdateTime(iso: string | null | undefined): string {
   return `${y}/${m}/${day} ${h}:${min}`;
 }
 
-export default function SkillList({
-  tenantId,
-}: {
-  tenantId: string | null;
-}) {
+export default function SkillList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [form] = Form.useForm();
@@ -504,13 +551,14 @@ export default function SkillList({
   const [paramsModalOpen, setParamsModalOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillListItem | null>(null);
   const [savingParams, setSavingParams] = useState(false);
+  const [installModalOpen, setInstallModalOpen] = useState(false);
 
   const snapshotRef = useRef<Record<string, unknown>>({});
   const metaRef = useRef<Map<string, string>>(new Map());
 
   const paramsEditorState = useMemo(() => {
     if (!paramsModalOpen || !editingSkill) return null;
-    const parsed = normalizeSkillParams(editingSkill.params);
+    const parsed = normalizeSkillParams(editingSkill.config_schemas);
     const meta = new Map<string, string>();
     const { initialValues } = buildFormStateFromParams(parsed, [], meta);
     return { parsed, initialValues, meta };
@@ -530,7 +578,7 @@ export default function SkillList({
     queryKey: ["skills", "list", tenantId],
     queryFn: async () => {
       try {
-        return await fetchSkillsList();
+        return await fetchSkillsList(tenantId);
       } catch (e) {
         log.error("Failed to fetch skills list", e);
         throw e;
@@ -543,7 +591,9 @@ export default function SkillList({
   useEffect(() => {
     if (!paramsEditorState) return;
     try {
-      snapshotRef.current = JSON.parse(JSON.stringify(paramsEditorState.parsed)) as Record<string, unknown>;
+      snapshotRef.current = JSON.parse(
+        JSON.stringify(paramsEditorState.parsed)
+      ) as Record<string, unknown>;
     } catch {
       snapshotRef.current = paramsEditorState.parsed;
     }
@@ -568,16 +618,29 @@ export default function SkillList({
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true) as Record<string, unknown>;
-      const restored = restorePrimitiveArraysFromForm(values, snapshotRef.current) as Record<string, unknown>;
-      const withComments = applyStringComments(restored, metaRef.current) as Record<string, unknown>;
-      const merged = deepMergePreserveUnderscore(snapshotRef.current, withComments) as Record<string, unknown>;
+      const restored = restorePrimitiveArraysFromForm(
+        values,
+        snapshotRef.current
+      ) as Record<string, unknown>;
+      const withComments = applyStringComments(
+        restored,
+        metaRef.current
+      ) as Record<string, unknown>;
+      const merged = deepMergePreserveUnderscore(
+        snapshotRef.current,
+        withComments
+      ) as Record<string, unknown>;
 
-      if (merged === null || typeof merged !== "object" || Array.isArray(merged)) {
+      if (
+        merged === null ||
+        typeof merged !== "object" ||
+        Array.isArray(merged)
+      ) {
         message.error(t("tenantResources.skills.configModal.invalidJson"));
         return;
       }
 
-      await updateSkill(editingSkill.name, { params: merged });
+      await updateSkill(editingSkill.name, { config_values: merged });
       message.success(t("tenantResources.skills.updateSuccess"));
       // Wait for list refetch so the next "edit config" opens with server params, not stale row data.
       await refetch();
@@ -598,13 +661,34 @@ export default function SkillList({
       title: t("tenantResources.skills.column.name"),
       dataIndex: "name",
       key: "name",
+      width: 100,
       ellipsis: true,
+    },
+    {
+      title: t("tenantResources.skills.column.description"),
+      dataIndex: "description",
+      key: "description",
+      width: 500,
+      render: (description: string) => {
+        if (!description) return "—";
+        const truncated = description.length > 120;
+        return (
+          <Tooltip title={description}>
+            <span
+              className="line-clamp-1 text-neutral-600 dark:text-neutral-400 cursor-default"
+              style={{ wordBreak: "break-word" }}
+            >
+              {description}
+            </span>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("tenantResources.skills.column.source"),
       dataIndex: "source",
       key: "source",
-      width: 110,
+      width: 100,
       render: (source: string) => (
         <Tag color={source === "official" ? "blue" : "default"}>{source}</Tag>
       ),
@@ -626,27 +710,10 @@ export default function SkillList({
         ),
     },
     {
-      title: t("tenantResources.skills.column.config"),
-      key: "params",
-      width: 72,
-      align: "center",
-      render: (_: unknown, record: SkillListItem) => (
-        <Tooltip title={t("tenantResources.skills.editParams")}>
-          <Button
-            type="text"
-            size="small"
-            icon={<Settings className="h-4 w-4" />}
-            onClick={() => openParamsEditor(record)}
-            aria-label={t("tenantResources.skills.editParams")}
-          />
-        </Tooltip>
-      ),
-    },
-    {
       title: t("tenantResources.skills.column.updatedAt"),
       dataIndex: "update_time",
       key: "update_time",
-      width: 148,
+      width: 100,
       render: (v: string | null | undefined) =>
         v ? (
           <Tooltip title={v}>
@@ -658,10 +725,21 @@ export default function SkillList({
     },
   ];
 
-  const formKey = editingSkill ? `skill-params-${editingSkill.skill_id}` : "closed";
+  const formKey = editingSkill
+    ? `skill-params-${editingSkill.skill_id}`
+    : "closed";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex justify-end mb-2">
+        <Button
+          type="primary"
+          icon={<Download className="h-4 w-4" />}
+          onClick={() => setInstallModalOpen(true)}
+        >
+          {t("tenantResources.skills.installOfficialSkills")}
+        </Button>
+      </div>
       <Table<SkillListItem>
         columns={columns}
         dataSource={skills}
@@ -689,7 +767,6 @@ export default function SkillList({
         cancelText={t("common.cancel")}
         width={660}
         centered
-        destroyOnClose
         styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
       >
         <Form
@@ -714,8 +791,11 @@ export default function SkillList({
             paramsEditorState.initialValues !== undefined &&
             typeof paramsEditorState.initialValues === "object" &&
             !Array.isArray(paramsEditorState.initialValues) &&
-            Object.keys(paramsEditorState.initialValues as object).length === 0 && (
-              <p className="text-sm text-neutral-500 mb-0">{t("tenantResources.skills.configModal.emptyParams")}</p>
+            Object.keys(paramsEditorState.initialValues as object).length ===
+              0 && (
+              <p className="text-sm text-neutral-500 mb-0">
+                {t("tenantResources.skills.configModal.emptyParams")}
+              </p>
             )}
           {paramsEditorState && (
             <ParamsDynamicFields
@@ -723,11 +803,18 @@ export default function SkillList({
               shapeSample={paramsEditorState.parsed}
               namePath={[]}
               meta={paramsEditorState.meta}
-              lockedFieldTooltip={t("tenantResources.skills.configModal.lockedField")}
+              lockedFieldTooltip={t(
+                "tenantResources.skills.configModal.lockedField"
+              )}
             />
           )}
         </Form>
       </Modal>
+      <InstallOfficialSkillsModal
+        open={installModalOpen}
+        onClose={() => setInstallModalOpen(false)}
+        onInstalled={refetch}
+      />
     </div>
   );
 }

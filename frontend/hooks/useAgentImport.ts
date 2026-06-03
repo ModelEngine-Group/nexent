@@ -1,25 +1,24 @@
 import { useState } from "react";
+import JSZip from "jszip";
 import {
   checkAgentNameConflictBatch,
   importAgent,
   regenerateAgentNameBatch,
 } from "@/services/agentConfigService";
+import {
+  arrayBufferToBase64,
+  extractSkillNameFromPath,
+  ImportAgentData,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 
-export interface ImportAgentData {
-  agent_id: number;
-  agent_info: Record<string, any>;
-  mcp_info?: Array<{
-    mcp_server_name: string;
-    mcp_url: string;
-  }>;
-  business_logic_model_id?: number | null;
-  business_logic_model_name?: string | null;
-}
+// Re-export for consumers that import this type from the hook module.
+export type { ImportAgentData };
 
 export interface UseAgentImportOptions {
   onSuccess?: () => void;
   onError?: (error: Error) => void;
+  onSkillDuplicate?: (duplicateNames: string[]) => Promise<boolean>;
   forceImport?: boolean;
   /**
    * Optional: handle name/display_name conflicts before import
@@ -67,25 +66,11 @@ export function useAgentImport(
     setError(null);
 
     try {
-      // Read file content
-      const fileContent = await readFileAsText(file);
-      
-      // Parse JSON
-      let agentData: ImportAgentData;
-      try {
-        agentData = JSON.parse(fileContent);
-      } catch (parseError) {
-        throw new Error("Invalid JSON file format");
+      if (file.name.toLowerCase().endsWith(".zip")) {
+        await importFromZip(file);
+      } else {
+        await importFromJsonFile(file);
       }
-
-      // Validate structure
-      if (!agentData.agent_id || !agentData.agent_info) {
-        throw new Error("Invalid agent data structure");
-      }
-
-      // Import using unified logic
-      await importAgentData(agentData);
-      
       onSuccess?.();
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Unknown error");
@@ -96,6 +81,76 @@ export function useAgentImport(
     } finally {
       setIsImporting(false);
     }
+  };
+
+  /**
+   * Import agent from a ZIP file (agent export with skills)
+   */
+  const importFromZip = async (file: File): Promise<void> => {
+    let zip: InstanceType<typeof JSZip>;
+    try {
+      zip = await JSZip.loadAsync(file);
+    } catch {
+      throw new Error("Invalid ZIP file");
+    }
+
+    const agentJsonFile = zip.file("agent.json");
+    if (!agentJsonFile) {
+      throw new Error("agent.json not found in ZIP");
+    }
+
+    const agentJsonContent = await agentJsonFile.async("string");
+    let agentData: ImportAgentData;
+    try {
+      agentData = JSON.parse(agentJsonContent);
+    } catch {
+      throw new Error("Invalid agent.json format");
+    }
+
+    if (!agentData.agent_id || !agentData.agent_info) {
+      throw new Error("Invalid agent data structure");
+    }
+
+    const skillZips: any[] = [];
+    const skillsFolder = zip.folder("skills");
+    if (skillsFolder) {
+      const skillFiles = Object.keys(zip.files).filter(
+        (name) => name.startsWith("skills/") && name.toLowerCase().endsWith(".zip")
+      );
+      for (const skillFileName of skillFiles) {
+        const skillZipFile = zip.file(skillFileName);
+        if (skillZipFile) {
+          const skillZipContent = await skillZipFile.async("arraybuffer");
+          const base64 = arrayBufferToBase64(skillZipContent);
+          const skillName = extractSkillNameFromPath(skillFileName);
+          skillZips.push({ skill_name: skillName, skill_zip_base64: base64 });
+        }
+      }
+    }
+
+    agentData.skills = skillZips;
+
+    await importAgentData(agentData);
+  };
+
+  /**
+   * Import agent from a JSON file (agent export without skills)
+   */
+  const importFromJsonFile = async (file: File): Promise<void> => {
+    const fileContent = await readFileAsText(file);
+
+    let agentData: ImportAgentData;
+    try {
+      agentData = JSON.parse(fileContent);
+    } catch (parseError) {
+      throw new Error("Invalid JSON file format");
+    }
+
+    if (!agentData.agent_id || !agentData.agent_info) {
+      throw new Error("Invalid agent data structure");
+    }
+
+    await importAgentData(agentData);
   };
 
   /**
@@ -113,7 +168,7 @@ export function useAgentImport(
 
       // Import using unified logic
       await importAgentData(data);
-      
+
       onSuccess?.();
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Unknown error");
@@ -129,7 +184,9 @@ export function useAgentImport(
   /**
    * Core import logic - calls backend API
    */
-  const importAgentData = async (data: ImportAgentData): Promise<void> => {
+  const importAgentData = async (
+    data: ImportAgentData
+  ): Promise<void> => {
     // Step 1: check name/display name conflicts before import (only check main agent name and display name)
     const mainAgent = data.agent_info?.[String(data.agent_id)];
     if (mainAgent?.name) {
@@ -155,8 +212,16 @@ export function useAgentImport(
     }
 
     const result = await importAgent(data, { forceImport });
-    
+
     if (!result.success) {
+      const errDetail = result.data?.detail;
+      if (errDetail?.type === "skill_duplicate" && Array.isArray(errDetail.duplicate_skills)) {
+        const duplicateNames = errDetail.duplicate_skills as string[];
+        const shouldContinue = await options.onSkillDuplicate?.(duplicateNames);
+        if (!shouldContinue) {
+          throw new Error("Skill duplicate conflict; import cancelled by user.");
+        }
+      }
       throw new Error(result.message || "Failed to import agent");
     }
   };
@@ -266,4 +331,3 @@ export function useAgentImport(
     error,
   };
 }
-

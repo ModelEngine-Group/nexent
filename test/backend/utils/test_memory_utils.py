@@ -57,7 +57,7 @@ class TestMemoryUtils:
         ]
 
         # Mock get_model_name_from_config
-        mock_get_model_name = mocker.MagicMock()
+        mock_get_model_name = MagicMock()
         mock_get_model_name.side_effect = [
             "openai/gpt-4", "openai/text-embedding-ada-002"]
 
@@ -132,7 +132,7 @@ class TestMemoryUtils:
 
     def test_build_memory_config_llm_config_missing_model_name(self, mocker):
         """Raises when LLM config lacks model_name"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"api_key": "test-key"},  # LLM missing model_name
             {"model_name": "test-embed", "max_tokens": 1536}  # embedding present
@@ -166,7 +166,7 @@ class TestMemoryUtils:
 
     def test_build_memory_config_embedding_config_missing_max_tokens(self, mocker):
         """Raises when embedding config lacks max_tokens"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm"},  # LLM present
             {"model_name": "test-embed"}  # embedding missing max_tokens
@@ -184,13 +184,13 @@ class TestMemoryUtils:
 
     def test_build_memory_config_missing_es_host(self, mocker):
         """Raises when ES_HOST is missing"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm"},
             {"model_name": "test-embed", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = None  # ES_HOST is None
 
         mocker.patch('backend.utils.memory_utils.tenant_config_manager',
@@ -205,13 +205,13 @@ class TestMemoryUtils:
 
     def test_build_memory_config_invalid_es_host_format(self, mocker):
         """Raises when ES_HOST format is invalid"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm"},
             {"model_name": "test-embed", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "invalid-host"  # invalid format
 
         mocker.patch('backend.utils.memory_utils.tenant_config_manager',
@@ -227,13 +227,13 @@ class TestMemoryUtils:
 
     def test_build_memory_config_es_host_missing_scheme(self, mocker):
         """Raises when ES_HOST is missing scheme"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm"},
             {"model_name": "test-embed", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "localhost:9200"  # missing scheme
 
         mocker.patch('backend.utils.memory_utils.tenant_config_manager',
@@ -249,13 +249,13 @@ class TestMemoryUtils:
 
     def test_build_memory_config_es_host_missing_port(self, mocker):
         """Raises when ES_HOST is missing port"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm"},
             {"model_name": "test-embed", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "http://localhost"  # missing port
 
         mocker.patch('backend.utils.memory_utils.tenant_config_manager',
@@ -271,7 +271,7 @@ class TestMemoryUtils:
 
     def test_build_memory_config_with_https_es_host(self, mocker):
         """HTTPS ES_HOST is parsed correctly and collection name composes"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm", "model_repo": "openai",
                 "base_url": "https://api.openai.com/v1", "api_key": "test-llm-key"},
@@ -279,13 +279,13 @@ class TestMemoryUtils:
                 "base_url": "https://api.openai.com/v1", "api_key": "test-embed-key", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "https://elastic.example.com:9200"
         mock_const.ES_API_KEY = "test-es-key"
         mock_const.ES_USERNAME = "elastic"
         mock_const.ES_PASSWORD = "test-password"
 
-        mock_get_model_name = mocker.MagicMock()
+        mock_get_model_name = MagicMock()
         mock_get_model_name.side_effect = [
             "openai/test-llm", "openai/test-embed"]
 
@@ -308,7 +308,7 @@ class TestMemoryUtils:
 
     def test_build_memory_config_with_custom_port(self, mocker):
         """Custom ES port is parsed and applied; collection name composed"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "test-llm", "model_repo": "openai",
                 "base_url": "https://api.openai.com/v1", "api_key": "test-llm-key"},
@@ -316,13 +316,13 @@ class TestMemoryUtils:
                 "base_url": "https://api.openai.com/v1", "api_key": "test-embed-key", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "http://localhost:9300"  # custom port
         mock_const.ES_API_KEY = "test-es-key"
         mock_const.ES_USERNAME = "elastic"
         mock_const.ES_PASSWORD = "test-password"
 
-        mock_get_model_name = mocker.MagicMock()
+        mock_get_model_name = MagicMock()
         mock_get_model_name.side_effect = [
             "openai/test-llm", "openai/test-embed"]
 
@@ -345,7 +345,7 @@ class TestMemoryUtils:
 
     def test_build_memory_config_sanitizes_slashes_in_repo_and_name(self, mocker):
         """Slash characters in repo/name are replaced with underscores in collection name"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "gpt-4", "model_repo": "azure/openai",
                 "base_url": "https://api.example.com/v1", "api_key": "llm-key"},
@@ -353,14 +353,14 @@ class TestMemoryUtils:
                 "base_url": "https://api.example.com/v1", "api_key": "embed-key", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "http://localhost:9200"
         mock_const.ES_API_KEY = "test-es-key"
         mock_const.ES_USERNAME = "elastic"
         mock_const.ES_PASSWORD = "test-password"
 
         model_mapping = {"llm": "llm", "embedding": "embedding"}
-        mock_get_model_name = mocker.MagicMock()
+        mock_get_model_name = MagicMock()
         mock_get_model_name.side_effect = [
             "azure/openai/gpt-4", "azure/openai/text-embed/ada-002"]
 
@@ -378,7 +378,7 @@ class TestMemoryUtils:
 
     def test_build_memory_config_with_empty_model_repo(self, mocker):
         """Empty model_repo yields collection name without repo segment"""
-        mock_tenant_config_manager = mocker.MagicMock()
+        mock_tenant_config_manager = MagicMock()
         mock_tenant_config_manager.get_model_config.side_effect = [
             {"model_name": "gpt-4", "model_repo": "",
                 "base_url": "https://api.openai.com/v1", "api_key": "test-llm-key"},
@@ -386,13 +386,13 @@ class TestMemoryUtils:
                 "base_url": "https://api.openai.com/v1", "api_key": "test-embed-key", "max_tokens": 1536}
         ]
 
-        mock_const = mocker.MagicMock()
+        mock_const = MagicMock()
         mock_const.ES_HOST = "http://localhost:9200"
         mock_const.ES_API_KEY = "test-es-key"
         mock_const.ES_USERNAME = "elastic"
         mock_const.ES_PASSWORD = "test-password"
 
-        mock_get_model_name = mocker.MagicMock()
+        mock_get_model_name = MagicMock()
         mock_get_model_name.side_effect = [
             "gpt-4", "text-embedding-ada-002"]  # no repo prefix
 

@@ -61,6 +61,28 @@ class TestGetPromptTemplate:
         # Verify result
         assert result == {"system_prompt": "Test prompt", "user_prompt": "User prompt"}
 
+    @pytest.mark.parametrize(
+        "template_type,language,expected_file",
+        [
+            ("analyze_audio", "en", "prompts/analyze_audio_en.yaml"),
+            ("analyze_audio", "zh", "prompts/analyze_audio_zh.yaml"),
+            ("analyze_video", "en", "prompts/analyze_video_en.yaml"),
+            ("analyze_video", "zh", "prompts/analyze_video_zh.yaml"),
+        ],
+    )
+    @patch('builtins.open', new_callable=mock_open, read_data='system_prompt: "Test prompt"\nuser_prompt: "User prompt"')
+    @patch('yaml.safe_load')
+    def test_get_prompt_template_analyze_audio_video(
+            self, mock_yaml_load, mock_file, template_type, language, expected_file):
+        """Test get_prompt_template for audio/video templates."""
+        mock_yaml_load.return_value = {"system_prompt": "Test prompt", "user_prompt": "User prompt"}
+
+        result = get_prompt_template(template_type=template_type, language=language)
+
+        call_args = mock_file.call_args[0]
+        assert expected_file in call_args[0].replace('\\', '/')
+        assert result == {"system_prompt": "Test prompt", "user_prompt": "User prompt"}
+
     @patch('builtins.open', new_callable=mock_open, read_data='system_prompt: "Test prompt"')
     @patch('yaml.safe_load')
     @patch('sdk.nexent.core.utils.prompt_template_utils.LANGUAGE', {'ZH': 'zh', 'EN': 'en'})

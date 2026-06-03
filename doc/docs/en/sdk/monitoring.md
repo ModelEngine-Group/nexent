@@ -1,289 +1,327 @@
-# 🚀 Nexent LLM Monitoring System
+# Nexent Agent Observability (OTLP)
 
-Enterprise-grade monitoring solution specifically designed for monitoring LLM token generation speed and performance.
+Enterprise-grade observability for AI agents using OpenTelemetry OTLP protocol. Supports integration with observability platforms like Arize Phoenix, Langfuse, LangSmith, Grafana Tempo, Zipkin, and more.
 
-## 📊 System Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                Nexent LLM Monitoring System            │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  Nexent API ──► OpenTelemetry ──► Jaeger (Tracing)     │
-│      │                  │                               │
-│      │                  └──────► Prometheus (Metrics)   │
-│      │                             │                   │
-│      └─► OpenAI LLM                └──► Grafana (Visualization) │
-│          (Token Monitoring)                             │
-└─────────────────────────────────────────────────────────┘
+NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize Phoenix / Langfuse / LangSmith / Grafana Tempo / Zipkin / OTLP Backend
+     │                                        │
+     │   OpenInference Semantics              │
+     │   (llm.*, agent.* attributes)          │
+     └────────────────────────────────────────┘
 ```
 
-## ⚡ Quick Start (5 minutes)
+## Quick Start
 
 ```bash
-# 1. Start monitoring services
-./docker/start-monitoring.sh
+cd docker
+[ -f .env ] || cp .env.example .env
+cp monitoring/monitoring.env.example monitoring/monitoring.env
 
-# 2. Install performance monitoring dependencies  
-uv sync --extra performance
+vim .env
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
 
-# 3. Enable monitoring
-export ENABLE_TELEMETRY=true
+vim monitoring/monitoring.env
+MONITORING_PROVIDER=otlp
 
-# 4. Start backend service
-python backend/config_service.py
-python backend/runtime_service.py
+./start-monitoring.sh --stack collector
 ```
 
-## 📊 Access Monitoring Interfaces
+## AI Observability Platforms
 
-| Interface | URL | Purpose |
-|-----------|-----|---------|
-| **Grafana Dashboard** | http://localhost:3005 | LLM Performance Monitoring |
-| **Jaeger Tracing** | http://localhost:16686 | Request Trace Analysis |  
-| **Prometheus Metrics** | http://localhost:9090 | Raw Monitoring Data |
+### Arize Phoenix
 
-### 🔐 Grafana Login Information
+Arize Phoenix provides AI-specific observability with OpenInference semantic support.
 
-When first accessing Grafana (http://localhost:3005), you need to login:
+**Configuration:**
 
+```bash
+MONITORING_PROVIDER=phoenix
+OTEL_EXPORTER_OTLP_ENDPOINT=https://app.phoenix.arize.com/s/YOUR_SPACE
+OTEL_EXPORTER_OTLP_AUTHORIZATION="Bearer YOUR_PHOENIX_API_KEY"
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 ```
-Username: admin
-Password: admin
+
+**Features:**
+- LLM trace visualization with prompt/completion
+- Token-level performance metrics
+- Agent step tracing
+- Cost analysis
+
+### Langfuse
+
+Langfuse offers prompt management and LLM observability with OTLP support.
+
+**Configuration:**
+
+```bash
+MONITORING_PROVIDER=langfuse
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+
+LANGFUSE_PUBLIC_KEY=pk-xxx
+LANGFUSE_SECRET_KEY=sk-xxx
+
+OTEL_EXPORTER_OTLP_AUTHORIZATION=Basic BASE64_ENCODED_KEY
+OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4
 ```
 
-**After first login, you'll be prompted to change password:**
-- Set a new password (recommended)
-- Click "Skip" to skip (development environment)
+Generate the encoded key:
 
-**After login, you can see:**
-- 📊 **LLM Performance Dashboard** - Pre-configured performance dashboard
-- 📈 **Data Source Configuration** - Auto-connected to Prometheus and Jaeger
-- 🎯 **Real-time Monitoring Panel** - Key metrics like token generation speed, latency
+```bash
+echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
+```
 
-## 🎯 Core Features
+**Features:**
+- Prompt versioning and management
+- Session-based trace grouping
+- User feedback collection
+- Model cost tracking
 
-### ⚡ LLM-Specific Monitoring
-- **Token Generation Speed**: Real-time monitoring of tokens generated per second
-- **TTFT (Time to First Token)**: First token return latency
-- **Streaming Response Analysis**: Generation timestamp for each token
-- **Model Performance Comparison**: Performance benchmarks across different models
+### LangSmith
 
-### 🔍 Distributed Tracing
-- **Complete Request Chain**: End-to-end tracing from HTTP to LLM
-- **Performance Bottleneck Detection**: Automatically identify slow queries and anomalies
-- **Error Root Cause Analysis**: Quickly locate problem sources
+LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoint. Nexent can send traces to a local Collector first, and the Collector forwards them to LangSmith.
 
-### 🛠️ Developer-Friendly Design
-- **One-Line Integration**: Quick monitoring with decorators
-- **Zero-Dependency Degradation**: Auto-skip when monitoring dependencies are missing
-- **Zero-Touch Usage**: No need to manually check monitoring status, handled automatically
-- **Flexible Configuration**: Environment variable controlled behavior
+**Collector forwarding:**
 
-## 🛠️ Adding Monitoring to Code
+```bash
+cd docker
+vim monitoring/monitoring.env
 
-### 🎯 Recommended Approach: Singleton Pattern (v2.1+)
+MONITORING_PROVIDER=langsmith
+LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_PROJECT=nexent
+LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
+
+./start-monitoring.sh --stack langsmith
+```
+
+Nexent backend configuration when it sends OTLP to the Collector:
+
+```bash
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=langsmith
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
+```
+
+For direct backend-to-LangSmith export, set `OTEL_EXPORTER_OTLP_ENDPOINT=https://api.smith.langchain.com/otel`, `LANGSMITH_API_KEY`, and optionally `LANGSMITH_PROJECT`.
+
+### Zipkin
+
+Zipkin provides a lightweight local trace query UI. For local deployment, Nexent sends OTLP to the Collector, and the Collector forwards traces to Zipkin.
+
+```bash
+MONITORING_PROVIDER=zipkin
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+MONITORING_DASHBOARD_URL=http://localhost:9411
+```
+
+Set `MONITORING_DASHBOARD_URL` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path.
+
+```bash
+MONITORING_DASHBOARD_URL=http://localhost:6006
+MONITORING_DASHBOARD_URL=http://localhost:3001/project/nexent
+MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_URL=http://localhost:9411
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
+| `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
+| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
+| `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
+| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
+| `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |
+| `MONITORING_TRACE_MAX_ITEMS` | `20` | Maximum dict keys/list items included in payload previews |
+| `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint; SDK derives `/v1/traces` and `/v1/metrics` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | (empty) | Optional trace-specific endpoint |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | (empty) | Optional metric-specific endpoint |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http` | Protocol: `http` or `grpc` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (empty) | Generic auth headers (comma-separated) |
+| `OTEL_EXPORTER_OTLP_AUTHORIZATION` | (empty) | `Authorization` header, commonly used by Phoenix bearer auth and Langfuse |
+| `OTEL_EXPORTER_OTLP_X_API_KEY` | (empty) | `x-api-key` header for platforms that require it |
+| `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION` | (empty) | Langfuse ingestion version, for example `4` |
+| `OTEL_EXPORTER_OTLP_METRICS_ENABLED` | `true` | Whether to export OTLP metrics |
+| `LANGSMITH_API_KEY` | (empty) | LangSmith API key; mapped to the `x-api-key` OTLP header |
+| `LANGSMITH_PROJECT` | (empty) | Optional LangSmith project header |
+| `LANGSMITH_OTLP_TRACES_ENDPOINT` | `https://api.smith.langchain.com/otel/v1/traces` | Collector trace endpoint for online LangSmith |
+
+## Code Integration
+
+### Agent Boundary Context
+
+At the request boundary, business code only binds the resolved user and Agent metadata once. The SDK then creates Agent, LLM, and Tool spans from the runtime lifecycle:
 
 ```python
-# Backend service usage - directly use globally configured monitoring_manager
+from nexent.monitor.agent_observability import AgentRunMetadata
 from utils.monitoring import monitoring_manager
 
-# API endpoint monitoring
-@monitoring_manager.monitor_endpoint("my_service.my_function")
-async def my_api_function():
-    return {"status": "ok"}
+monitoring_manager.bind_agent_context(AgentRunMetadata(
+    tenant_id=tenant_id,
+    user_id=user_id,
+    agent_id=agent_request.agent_id,
+    conversation_id=agent_request.conversation_id,
+    query=agent_request.query,
+    is_debug=agent_request.is_debug,
+    language=language,
+))
+```
 
-# LLM call monitoring
+`monitor_endpoint` is still kept as a compatibility API and low-level escape hatch, but it is no longer the recommended way to add normal Agent observability.
+
+### Trace Payload Policy
+
+Tool input/output, retriever output, and Langfuse-compatible `input.value` / `output.value` attributes share the same payload policy. By default Nexent writes a bounded preview plus structured metadata such as `type`, `size_chars`, `item_count`, `truncated`, and `keys`. Memory search spans intentionally record only result summaries and statistics, not full memory text bodies.
+
+Agent context metrics are emitted from the SDK lifecycle. Each action step records an `agent.step.metrics` event with estimated context tokens, compression calls, cache hits, compression ratio, and token threshold. The final Agent span also receives aggregate step count, max context size, average compression ratio, total compression calls, and cache hit totals.
+
+### LLM Call Monitoring
+
+```python
 @monitoring_manager.monitor_llm_call("gpt-4", "chat_completion")
 def call_llm(messages):
-    # Automatically get token-level monitoring
     return llm_response
-
-# Manual monitoring events
-monitoring_manager.add_span_event("custom_event", {"key": "value"})
-monitoring_manager.set_span_attributes(user_id="123", action="process")
 ```
 
-### 📦 Direct SDK Usage
+### Agent Step Tracing
 
 ```python
-from nexent.monitor import get_monitoring_manager
-
-# Get global monitoring manager - already configured in backend
-monitor = get_monitoring_manager()
-
-# Use decorators
-@monitor.monitor_llm_call("claude-3", "completion")
-def my_llm_function():
-    return "response"
-
-# Or use directly in business logic
-with monitor.trace_llm_request("custom_operation", "my_model") as span:
-    # Execute business logic
-    result = process_data()
-    monitor.add_span_event("processing_completed")
-    return result
+with monitoring_manager.trace_agent_step("agent.run.loop", step_type="agent_loop") as span:
+    result = execute_tool()
+    monitoring_manager.set_tool_output(result)
 ```
 
-### ✨ Global Configuration Automation
-
-Monitoring configuration is auto-initialized in `backend/utils/monitoring.py`:
+### Tool Call Tracing
 
 ```python
-# No manual configuration needed - auto-completed at system startup
-# monitoring_manager already configured with environment variables
-from utils.monitoring import monitoring_manager
-
-# Direct usage without checking if enabled
-@monitoring_manager.monitor_endpoint("my_function")
-def my_function():
-    pass
-
-# FastAPI application initialization
-monitoring_manager.setup_fastapi_app(app)
+with monitoring_manager.trace_tool_call("web_search", "agent_name", {"query": "test"}) as span:
+    results = search_web("test")
+    monitoring_manager.set_tool_output({"results": results})
 ```
 
-### 🔒 Auto Start/Stop Design
+### Retriever Call Tracing
 
-- **Smart Monitoring**: Auto start/stop based on `ENABLE_TELEMETRY` environment variable
-- **Zero-Touch Usage**: External code doesn't need to check monitoring status, use all features directly
-- **Graceful Degradation**: Silent no-effect when disabled, normal operation when enabled
-- **Default Off**: Auto-disabled when not configured
+Knowledge-base search tools are classified as retriever spans automatically by the SDK. Custom retriever integrations can use the same semantics directly:
 
-```bash
-# Enable monitoring
-export ENABLE_TELEMETRY=true
-
-# Disable monitoring  
-export ENABLE_TELEMETRY=false
+```python
+with monitoring_manager.trace_retriever_call("knowledge_base_search", "agent_name", {"query": "test"}) as span:
+    documents = search_knowledge_base("test")
+    monitoring_manager.set_retriever_output(documents)
 ```
 
-## 📊 Core Monitoring Metrics
+## OpenInference Semantic Attributes
 
-| Metric | Description | Importance |
-|--------|-------------|------------|
-| `llm_token_generation_rate` | Token generation speed (tokens/s) | ⭐⭐⭐ |
-| `llm_time_to_first_token_seconds` | First token latency | ⭐⭐⭐ |
-| `llm_request_duration_seconds` | Complete request duration | ⭐⭐⭐ |
-| `llm_total_tokens` | Input/output token count | ⭐⭐ |
-| `llm_error_count` | LLM call error count | ⭐⭐⭐ |
+The system uses OpenInference semantic conventions for AI-specific observability:
 
-## 🔧 Environment Configuration
+### LLM Attributes
 
-```bash
-# Add to .env file
-cat >> .env << EOF
-ENABLE_TELEMETRY=true
-SERVICE_NAME=nexent-backend
-JAEGER_ENDPOINT=http://localhost:14268/api/traces
-LLM_SLOW_REQUEST_THRESHOLD_SECONDS=5.0
-LLM_SLOW_TOKEN_RATE_THRESHOLD=10.0
-TELEMETRY_SAMPLE_RATE=1.0  # Development environment, production recommended 0.1
-EOF
+| Attribute | Description |
+|-----------|-------------|
+| `llm.model_name` | Model identifier (e.g., `gpt-4`) |
+| `llm.operation.name` | Operation type (e.g., `chat_completion`) |
+| `llm.token_count.prompt` | Input token count |
+| `llm.token_count.completion` | Output token count |
+| `llm.invocation_parameters` | Model parameters (JSON) |
+| `llm.time_to_first_token` | TTFT in seconds |
+
+### Agent Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `agent.name` | Agent identifier |
+| `agent.step.name` | Step name (e.g., `web_search`) |
+| `agent.step.type` | Step type: `tool_call`, `reasoning`, `action_selection` |
+| `agent.tool.name` | Tool name |
+| `agent.tool.input` | Tool input preview using the configured trace payload policy |
+| `agent.tool.input.*` | Structured tool input metadata: type, size, item count, truncation, keys |
+| `agent.tool.output` | Tool output preview using the configured trace payload policy |
+| `agent.tool.output.*` | Structured tool output metadata: type, size, item count, truncation, keys |
+| `agent.tool.success` | Whether the tool call completed successfully |
+| `agent.tool.duration_ms` | Tool call duration |
+| `retriever.name` | Retriever name |
+| `retrieval.query` | Retriever query |
+| `retrieval.results.count` | Retriever result count |
+| `retrieval.top_score` | Highest numeric result score when available |
+| `retriever.input.*` | Structured retriever input metadata |
+| `retriever.output` | Retriever output preview using the configured trace payload policy |
+| `retriever.output.*` | Structured retriever output metadata |
+| `context.tokens.estimated_input` | Estimated context input tokens per Agent step event |
+| `context.tokens.uncompressed_estimated` | Estimated uncompressed context tokens per Agent step event |
+| `context.compression.calls` | Compression calls per Agent step event |
+| `context.compression.cache_hits` | Compression cache hits per Agent step event |
+| `context.compression.ratio` | Compression ratio per Agent step event |
+
+## Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `llm.request.duration` | Request latency |
+| `llm.token.generation_rate` | Tokens per second |
+| `llm.time_to_first_token` | TTFT |
+| `llm.token_count.prompt` | Input tokens |
+| `llm.token_count.completion` | Output tokens |
+| `agent.step.count` | Agent step count |
+| `agent.execution.duration` | Agent execution time |
+| `agent.error.count` | Agent errors |
+
+## Collector Configuration
+
+By default, the OpenTelemetry Collector only logs data through the debug exporter. This avoids forwarding data back into itself when no external backend is configured. To forward through the Collector, add a platform exporter:
+
+```yaml
+exporters:
+  otlphttp/langsmith:
+    traces_endpoint: https://api.smith.langchain.com/otel/v1/traces
+    headers:
+      x-api-key: YOUR_LANGSMITH_API_KEY
+      Langsmith-Project: nexent
+
+service:
+  pipelines:
+    traces:
+      exporters: [otlphttp/langsmith, debug]
 ```
 
-## 🛠️ System Verification
+See `docker/monitoring/otel-collector-config.yml` for full configuration with platform examples.
 
-```bash
-# Check metrics endpoint
-curl http://localhost:8000/metrics
+## Graceful Degradation
 
-# Verify dependency installation
-python -c "from backend.utils.monitoring import MONITORING_AVAILABLE; print(f'Monitoring Available: {MONITORING_AVAILABLE}')"
+When OpenTelemetry dependencies are not installed, monitoring gracefully disables:
+
+```python
+pip install nexent          # Basic package - no monitoring
+pip install nexent[performance]  # With OTLP support
 ```
 
-## 🆘 Troubleshooting
+All monitoring methods work without errors when disabled - decorators pass through, context managers yield None.
 
-### No monitoring data?
-```bash
-# Check service status
-docker-compose -f docker/docker-compose-monitoring.yml ps
+## Troubleshooting
 
-# Check dependency installation
-python -c "import opentelemetry; print('✅ Monitoring dependencies installed')"
-```
+### No data appearing
 
-### Port conflicts?
-```bash
-# Check port usage
-lsof -i :3005 -i :9090 -i :16686
-```
+1. Check `ENABLE_TELEMETRY=true` in `.env`
+2. Verify OTLP endpoint is reachable
+3. Check authentication headers are correct
 
-### Dependency installation issues?
-```bash
-# Reinstall performance dependencies
-uv sync --extra performance
+### Connection errors
 
-# Check performance configuration in pyproject.toml
-cat backend/pyproject.toml | grep -A 20 "performance"
-```
+1. Test endpoint: `curl -v $OTEL_EXPORTER_OTLP_ENDPOINT/v1/traces`
+2. Verify protocol matches endpoint (`http` vs `grpc`)
+3. Check Collector logs: `docker logs nexent-otel-collector`
 
-### Service name shows as unknown_service?
-```bash
-# Check environment variable configuration
-echo "SERVICE_NAME: $SERVICE_NAME"
+### Wrong attributes
 
-# Restart monitoring service to apply new configuration
-./docker/start-monitoring.sh
-```
-
-## 🧹 Data Management
-
-### Clean Jaeger Trace Data
-```bash
-# Method 1: Restart Jaeger container (simplest)
-docker-compose -f docker/docker-compose-monitoring.yml restart nexent-jaeger
-
-# Method 2: Completely rebuild Jaeger container and data
-docker-compose -f docker/docker-compose-monitoring.yml stop nexent-jaeger
-docker-compose -f docker/docker-compose-monitoring.yml rm -f nexent-jaeger
-docker-compose -f docker/docker-compose-monitoring.yml up -d nexent-jaeger
-
-# Method 3: Clean all monitoring data (rebuild all containers)
-docker-compose -f docker/docker-compose-monitoring.yml down
-docker-compose -f docker/docker-compose-monitoring.yml up -d
-```
-
-### Clean Prometheus Metrics Data
-```bash
-# Restart Prometheus container
-docker-compose -f docker/docker-compose-monitoring.yml restart nexent-prometheus
-
-# Completely clean Prometheus data
-docker-compose -f docker/docker-compose-monitoring.yml stop nexent-prometheus
-docker volume rm docker_prometheus_data 2>/dev/null || true
-docker-compose -f docker/docker-compose-monitoring.yml up -d nexent-prometheus
-```
-
-### Clean Grafana Configuration
-```bash
-# Reset Grafana configuration and dashboards
-docker-compose -f docker/docker-compose-monitoring.yml stop nexent-grafana
-docker volume rm docker_grafana_data 2>/dev/null || true
-docker-compose -f docker/docker-compose-monitoring.yml up -d nexent-grafana
-```
-
-## 📈 Typical Problem Analysis
-
-### Slow token generation (< 5 tokens/s)
-1. **Analysis**: Grafana → Token Generation Rate panel
-2. **Solution**: Check model service load, optimize input prompt length
-
-### Slow request response (> 10s)
-1. **Analysis**: Jaeger → View complete trace chain
-2. **Solution**: Locate bottleneck (database/LLM/network)
-
-### Error rate spike (> 10%)
-1. **Analysis**: Prometheus → llm_error_count metric
-2. **Solution**: Check model service availability, verify API keys
-
-## 🎉 Getting Started
-
-After setup completion, you can:
-
-1. 📊 View **LLM Performance Dashboard** in Grafana
-2. 🔍 Trace complete request chains in Jaeger  
-3. 📈 Analyze token generation speed and performance bottlenecks
-4. 🚨 Set performance alerts and thresholds
-
-Enjoy efficient LLM performance monitoring! 🚀
+1. Verify OpenInference attributes in platform UI
+2. Check span attribute naming: `llm.model_name` not `model_name`
+3. Review platform-specific attribute requirements

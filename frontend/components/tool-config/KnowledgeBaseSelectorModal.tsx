@@ -19,8 +19,12 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { ToolKbType } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
+import { ToolKbType, getKnowledgeBaseSourcesForTool } from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import {
+  isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
+  isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
+} from "@/lib/knowledgeBaseCompatibility";
 import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
@@ -46,23 +50,6 @@ interface KnowledgeBaseSelectorProps {
   };
 }
 
-function getKnowledgeBaseSourcesForTool(
-  toolType: ToolKbType
-): string[] {
-  switch (toolType) {
-    case "knowledge_base_search":
-      return ["nexent"];
-    case "dify_search":
-      return ["dify"];
-    case "datamate_search":
-      return ["datamate"];
-    case "idata_search":
-      return ["idata"];
-    default:
-      return ["nexent"];
-  }
-}
-
 interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   knowledgeBases: KnowledgeBase[];
   isLoading?: boolean;
@@ -77,6 +64,8 @@ interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   // Selection validation props
   isSelectable?: (kb: KnowledgeBase) => boolean;
   currentEmbeddingModel?: string | null;
+  currentMultiEmbeddingModel?: string | null;
+  toolMultimodal?: boolean | null;
   // Dify/iData configuration for fetching knowledge bases
   difyConfig?: {
     serverUrl?: string;
@@ -103,6 +92,8 @@ export default function KnowledgeBaseSelectorModal({
   syncLoading = false,
   isSelectable,
   currentEmbeddingModel = null,
+  currentMultiEmbeddingModel = null,
+  toolMultimodal = null,
   difyConfig,
 }: KnowledgeBaseSelectorModalProps) {
   const { t } = useTranslation("common");
@@ -222,6 +213,24 @@ export default function KnowledgeBaseSelectorModal({
     }
   }, []);
 
+  const isMultimodalConstraintMismatch = useCallback(
+    (kb: KnowledgeBase) => {
+      return isMultimodalConstraintMismatchBase(kb, toolMultimodal);
+    },
+    [toolMultimodal]
+  );
+
+  const isEmbeddingModelCompatible = useCallback(
+    (kb: KnowledgeBase) => {
+      return isEmbeddingModelCompatibleBase(
+        kb,
+        currentEmbeddingModel,
+        currentMultiEmbeddingModel
+      );
+    },
+    [currentEmbeddingModel, currentMultiEmbeddingModel]
+  );
+
   // Check if a knowledge base can be selected
   const checkCanSelect = useCallback(
     (kb: KnowledgeBase): boolean => {
@@ -238,9 +247,53 @@ export default function KnowledgeBaseSelectorModal({
         return false;
       }
 
+      // For nexent source, check model matching against current tenant config and tool multimodal constraint.
+      if (kb.source === "nexent") {
+        if (isMultimodalConstraintMismatch(kb)) {
+          return false;
+        }
+        return isEmbeddingModelCompatible(kb);
+      }
+
       return true;
     },
-    [isSelectable]
+    [
+      isSelectable,
+      isEmbeddingModelCompatible,
+      isMultimodalConstraintMismatch,
+    ]
+  );
+
+  const getModelMismatch = useCallback(
+    (kb: KnowledgeBase): boolean => {
+      if (kb.source !== "nexent") {
+        return false;
+      }
+
+      const hasMultimodalConstraintMismatch =
+        isMultimodalConstraintMismatchBase(kb, toolMultimodal);
+      if (hasMultimodalConstraintMismatch) {
+        return true;
+      }
+
+      const embeddingModel = kb.embeddingModel;
+      if (!embeddingModel || embeddingModel === "unknown") {
+        return false;
+      }
+
+      if (kb.is_multimodal) {
+        if (!currentMultiEmbeddingModel) {
+          return true;
+        }
+        return embeddingModel !== currentMultiEmbeddingModel;
+      }
+
+      if (!currentEmbeddingModel) {
+        return false;
+      }
+      return embeddingModel !== currentEmbeddingModel;
+    },
+    [currentEmbeddingModel, currentMultiEmbeddingModel, toolMultimodal]
   );
 
   // Filter knowledge bases based on tool type, search, and filters
@@ -528,6 +581,7 @@ export default function KnowledgeBaseSelectorModal({
       knowledge_base_search: t("toolConfig.knowledgeBaseSelector.title.local"),
       dify_search: t("toolConfig.knowledgeBaseSelector.title.dify"),
       datamate_search: t("toolConfig.knowledgeBaseSelector.title.datamate"),
+      idata_search: t("toolConfig.knowledgeBaseSelector.title.idata", "选择 iData 知识库"),
     };
     return (
       titles[toolType] || t("toolConfig.knowledgeBaseSelector.title.default")
@@ -776,7 +830,7 @@ export default function KnowledgeBaseSelectorModal({
       <div className="flex-1 overflow-y-auto overflow-x-hidden bg-white">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <Spin tip={t("common.loading")} />
+            <Spin description={t("common.loading")} />
           </div>
         ) : filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
@@ -787,6 +841,7 @@ export default function KnowledgeBaseSelectorModal({
                   String(selectedId).trim() === String(kb.id).trim()
               );
               const canSelect = checkCanSelect(kb);
+              const hasModelMismatch = getModelMismatch(kb);
 
               return (
                 <div
@@ -915,6 +970,20 @@ export default function KnowledgeBaseSelectorModal({
                               })}
                             </span>
                           )}
+                        {kb.is_multimodal && (
+                          <span
+                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red} mr-1`}
+                          >
+                            multimodal
+                          </span>
+                        )}
+                        {hasModelMismatch && (
+                          <span
+                            className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.warning} mr-1`}
+                          >
+                            {t("knowledgeBase.tag.modelMismatch")}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

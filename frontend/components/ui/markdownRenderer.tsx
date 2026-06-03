@@ -974,20 +974,19 @@ export const CodeBlock: React.FC<{
 }> = ({ codeContent, language = "python" }) => {
   const { t } = useTranslation("common");
 
-  const customStyle = {
+const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {
       ...oneLight['pre[class*="language-"]'],
       background: "#f8f8f8",
-      borderRadius: "0",
-      padding: "12px 16px",
       margin: "0",
+      padding: "1rem",
       fontSize: "0.875rem",
       lineHeight: "1.5",
       whiteSpace: "pre-wrap",
       wordWrap: "break-word",
-      wordBreak: "break-word",
-      overflowWrap: "break-word",
+      wordBreak: "normal",
+      overflowWrap: "anywhere",
       overflow: "auto",
       width: "100%",
       boxSizing: "border-box",
@@ -1002,8 +1001,8 @@ export const CodeBlock: React.FC<{
       lineHeight: "1.5",
       whiteSpace: "pre-wrap",
       wordWrap: "break-word",
-      wordBreak: "break-word",
-      overflowWrap: "break-word",
+      wordBreak: "normal",
+      overflowWrap: "anywhere",
       width: "100%",
       padding: "0",
       display: "block",

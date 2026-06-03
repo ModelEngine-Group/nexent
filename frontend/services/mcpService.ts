@@ -39,6 +39,19 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           status: server.status || false,
           permission: server.permission,
           mcp_id: server.mcp_id,
+          // New fields from merged endpoint
+          container_id: server.container_id,
+          description: server.description,
+          enabled: server.enabled,
+          source: server.source,
+          update_time: server.update_time,
+          tags: server.tags || [],
+          container_port: server.container_port,
+          registry_json: server.registry_json,
+          config_json: server.config_json,
+          container_status: server.container_status,
+          authorization_token: server.authorization_token,
+          custom_headers: server.custom_headers,
         };
       });
 
@@ -82,25 +95,27 @@ export const getMcpServerList = async (tenantId?: string | null) => {
 /**
  * Add MCP server
  */
-export const addMcpServer = async (mcpUrl: string, serviceName: string, authorizationToken?: string | null, tenantId?: string | null) => {
+export const addMcpServer = async (mcpUrl: string, serviceName: string, authorizationToken?: string | null, customHeaders?: Record<string, string> | null, tenantId?: string | null) => {
   try {
-    const params = new URLSearchParams({
-      mcp_url: mcpUrl,
-      service_name: serviceName,
-    });
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.add}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.add;
+    const body: any = {
+      name: serviceName,
+      server_url: mcpUrl,
+      enabled: true,
+    };
     if (authorizationToken) {
-      params.append('authorization_token', authorizationToken);
+      body.authorization_token = authorizationToken;
     }
-    if (tenantId) {
-      params.append('tenant_id', tenantId);
+    if (customHeaders) {
+      body.custom_headers = customHeaders;
     }
-    const response = await fetch(
-      `${API_ENDPOINTS.mcp.add}?${params.toString()}`,
-      {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      }
-    );
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+    });
 
     const data = await response.json();
 
@@ -112,7 +127,7 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string, authoriz
       };
     } else {
       // Handle specific error status codes and error information
-      let errorMessage = data.message || t('mcpService.message.addServerFailed');
+      let errorMessage = data.detail || data.message || t('mcpService.message.addServerFailed');
 
       if (response.status === 409) {
         errorMessage = t('mcpService.message.nameAlreadyUsed');
@@ -142,11 +157,13 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string, authoriz
  * Update MCP server
  */
 export const updateMcpServer = async (
-  currentServiceName: string,
-  currentMcpUrl: string,
+  mcpId: number,
   newServiceName: string,
   newMcpUrl: string,
   newAuthorizationToken?: string | null,
+  newCustomHeaders?: Record<string, string> | null,
+  description?: string | null,
+  tags?: string[],
   tenantId?: string | null
 ) => {
   try {
@@ -154,13 +171,17 @@ export const updateMcpServer = async (
       ? `${API_ENDPOINTS.mcp.update}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.mcp.update;
     const body: any = {
-      current_service_name: currentServiceName,
-      current_mcp_url: currentMcpUrl,
-      new_service_name: newServiceName,
-      new_mcp_url: newMcpUrl,
+      mcp_id: mcpId,
+      name: newServiceName,
+      server_url: newMcpUrl,
+      description: description ?? null,
+      tags: tags ?? [],
     };
     if (newAuthorizationToken !== undefined) {
-      body.new_authorization_token = newAuthorizationToken;
+      body.authorization_token = newAuthorizationToken;
+    }
+    if (newCustomHeaders !== undefined) {
+      body.custom_headers = newCustomHeaders;
     }
     const response = await fetch(url, {
       method: "PUT",
@@ -206,24 +227,17 @@ export const updateMcpServer = async (
 };
 
 /**
- * Delete MCP server
+ * Delete MCP server by ID
  */
-export const deleteMcpServer = async (mcpUrl: string, serviceName: string, tenantId?: string | null) => {
+export const deleteMcpServer = async (mcpId: number, tenantId?: string | null) => {
   try {
-    const params = new URLSearchParams({
-      mcp_url: mcpUrl,
-      service_name: serviceName,
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.delete(mcpId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.delete(mcpId);
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
     });
-    if (tenantId) {
-      params.append('tenant_id', tenantId);
-    }
-    const response = await fetch(
-      `${API_ENDPOINTS.mcp.delete}?${params.toString()}`,
-      {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      }
-    );
 
     const data = await response.json();
 
@@ -234,15 +248,17 @@ export const deleteMcpServer = async (mcpUrl: string, serviceName: string, tenan
         message: data.message || t('mcpService.message.deleteServerSuccess')
       };
     } else {
-      // Handle specific error information based on HTTP status code
-      let errorMessage = data.message || t('mcpService.message.deleteServerFailed');
+      let errorMessage = data.detail || data.message || t('mcpService.message.deleteServerFailed');
 
       switch (response.status) {
+        case 404:
+          errorMessage = t('mcpService.message.mcpServerNotFound');
+          break;
         case 500:
           errorMessage = t('mcpService.message.deleteProxyFailed');
           break;
         default:
-          errorMessage = data.message || t('mcpService.message.deleteServerFailed');
+          errorMessage = data.detail || data.message || t('mcpService.message.deleteServerFailed');
       }
 
       return {
@@ -262,14 +278,16 @@ export const deleteMcpServer = async (mcpUrl: string, serviceName: string, tenan
 };
 
 /**
- * Get tool list from remote MCP server
+ * Get tool list from remote MCP server by ID
  */
-export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
+export const getMcpTools = async (mcpId: number) => {
   try {
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
     const response = await fetch(
-      `${API_ENDPOINTS.mcp.tools}?service_name=${encodeURIComponent(serviceName)}&mcp_url=${encodeURIComponent(mcpUrl)}`,
+      `${API_ENDPOINTS.mcp.tools}?${query.toString()}`,
       {
-        method: 'POST',
+        method: 'GET',
         headers: getAuthHeaders(),
       }
     );
@@ -283,8 +301,7 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
         message: ''
       };
     } else {
-      // Handle specific error information based on HTTP status code
-      let errorMessage = data.message || t('mcpService.message.getToolsFailed');
+      let errorMessage = data.detail || data.message || t('mcpService.message.getToolsFailed');
 
       switch (response.status) {
         case 500:
@@ -293,8 +310,11 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
         case 503:
           errorMessage = t('mcpService.message.cannotConnectToServer');
           break;
+        case 404:
+          errorMessage = t('mcpService.message.mcpServerNotFound');
+          break;
         default:
-          errorMessage = data.message || t('mcpService.message.getToolsFailed');
+          errorMessage = data.detail || data.message || t('mcpService.message.getToolsFailed');
       }
 
       return {
@@ -314,7 +334,7 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
 };
 
 /**
- * 更新工具列表及状态
+ * Update tool list and status
  */
 export const updateToolList = async () => {
   try {
@@ -364,21 +384,14 @@ export const updateToolList = async () => {
 /**
  * checkMcpServerHealth
  */
-export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string, tenantId?: string | null) => {
+export const checkMcpServerHealth = async (mcpId: number) => {
   try {
-    const params = new URLSearchParams({
-      mcp_url: mcpUrl,
-      service_name: serviceName,
+    const query = new URLSearchParams();
+    query.set('mcp_id', mcpId.toString());
+    const response = await fetch(`${API_ENDPOINTS.mcp.healthcheck}?${query.toString()}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
     });
-    if (tenantId) {
-      params.append('tenant_id', tenantId);
-    }
-    const response = await fetch(
-      `${API_ENDPOINTS.mcp.healthcheck}?${params.toString()}`,
-      {
-        headers: getAuthHeaders(),
-      }
-    );
 
     const data = await response.json();
 
@@ -799,6 +812,7 @@ export const getMcpRecord = async (mcpId: number, tenantId?: string | null) => {
           mcp_name: data.mcp_name,
           mcp_server: data.mcp_server,
           authorization_token: data.authorization_token,
+          custom_headers: data.custom_headers,
         },
         message: ''
       };

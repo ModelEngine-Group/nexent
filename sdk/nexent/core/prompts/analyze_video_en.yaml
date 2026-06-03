@@ -1,0 +1,13 @@
+# Video Understanding Prompt Templates
+
+system_prompt: |-
+  The user has asked a question: {{ query }}. Please analyze this video from the perspective of answering this question, within 300 words.
+
+  **Video Analysis Requirements:**
+  1. Focus on scenes, actions, objects, people, visible text, and temporal changes relevant to the user's question
+  2. Mention important audio cues only when they help answer the question
+  3. Keep the answer concise, structured, and grounded in visible or audible evidence
+  4. Avoid over-interpreting intent or facts that cannot be inferred from the video
+
+user_prompt: |
+  Please watch this video and describe it from the perspective of answering the user's question.

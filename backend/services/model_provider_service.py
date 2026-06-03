@@ -6,7 +6,7 @@ from consts.const import (
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import ProviderEnum
+from consts.provider import ProviderEnum, DASHSCOPE_REALTIME_BASE_URL
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from services.providers.base import AbstractModelProvider
@@ -100,11 +100,13 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
     # For embedding/multi_embedding models, max_tokens will be set via connectivity check later,
-    # so use 0 as placeholder if not provided
+    # so use 0 as placeholder if not provided.
+    # Set default timeout_seconds to 120 for LLM models (embedding models don't need it).
     model_type = model["model_type"]
     is_embedding_type = model_type in ["embedding", "multi_embedding"]
     max_tokens_value = model.get(
         "max_tokens", 0) if not is_embedding_type else 0
+    timeout_seconds_value = 120 if not is_embedding_type else None
 
     model_obj = ModelRequest(
         model_factory=provider,
@@ -115,7 +117,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         display_name=model_display_name,
         expected_chunk_size=expected_chunk_size,
         maximum_chunk_size=maximum_chunk_size,
-        chunk_batch=chunk_batch
+        chunk_batch=chunk_batch,
+        timeout_seconds=timeout_seconds_value
     )
 
     model_dict = model_obj.model_dump()
@@ -124,14 +127,18 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Determine the correct base_url and, for embeddings, update the actual
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
-        if provider != ProviderEnum.MODELENGINE.value:
-            # Ensure proper slash between base URL and endpoint
+        if provider == ProviderEnum.DASHSCOPE.value and model["model_type"] == "embedding":
             model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
-        else:
-            # For ModelEngine embedding models, append the embeddings path
+        elif provider == ProviderEnum.MODELENGINE.value:
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
-        # The embedding dimension might differ from the provided max_tokens.
+        elif "/embeddings" in model_url:
+            # URL already contains /embeddings endpoint, use as-is
+            model_dict["base_url"] = model_url.rstrip('/')
+        else:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
+    elif model["model_type"] in ("stt", "tts") and provider == ProviderEnum.DASHSCOPE.value:
+        model_dict["base_url"] = DASHSCOPE_REALTIME_BASE_URL
     elif model["model_type"] == "rerank":
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
@@ -155,19 +162,29 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     return model_dict
 
 
-def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider: str, model_type: str) -> List[dict]:
+def merge_existing_model_attributes(
+    model_list: List[dict],
+    tenant_id: str,
+    provider: str,
+    model_type: str,
+    fields: List[str] = None
+) -> List[dict]:
     """
-    Merge existing model's max_tokens attribute into the model list.
+    Merge existing model's attributes into the model list.
 
     Args:
         model_list: List of models
         tenant_id: Tenant ID
         provider: Provider
         model_type: Model type
+        fields: List of fields to merge (defaults to max_tokens, api_key, timeout_seconds, concurrency_limit)
 
     Returns:
         List[dict]: Merged model list
     """
+    if fields is None:
+        fields = ["max_tokens", "api_key", "timeout_seconds", "concurrency_limit"]
+
     if model_type == "embedding" or model_type == "multi_embedding":
         return model_list
 
@@ -184,13 +201,33 @@ def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider
             "/" + existing_model["model_name"]
         existing_model_map[model_full_name] = existing_model
 
-    # Iterate through the model list, if the model exists in the existing model list, add max_tokens attribute
+    # Iterate through the model list, merge specified fields from existing models
     for model in model_list:
         if model.get("id") in existing_model_map:
-            model["max_tokens"] = existing_model_map[model.get(
-                "id")].get("max_tokens")
+            existing_model = existing_model_map[model.get("id")]
+            for field in fields:
+                if existing_model.get(field) is not None:
+                    model[field] = existing_model.get(field)
 
     return model_list
+
+
+def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider: str, model_type: str) -> List[dict]:
+    """
+    Merge existing model's max_tokens attribute into the model list.
+
+    DEPRECATED: Use merge_existing_model_attributes instead.
+
+    Args:
+        model_list: List of models
+        tenant_id: Tenant ID
+        provider: Provider
+        model_type: Model type
+
+    Returns:
+        List[dict]: Merged model list
+    """
+    return merge_existing_model_attributes(model_list, tenant_id, provider, model_type, ["max_tokens"])
 
 
 # Re-export provider classes for backward compatibility
@@ -200,6 +237,7 @@ __all__ = [
     "ModelEngineProvider",
     "prepare_model_dict",
     "merge_existing_model_tokens",
+    "merge_existing_model_attributes",
     "get_provider_models",
     "get_model_engine_raw_url",
 ]

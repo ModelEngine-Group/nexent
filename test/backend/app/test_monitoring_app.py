@@ -153,3 +153,110 @@ class TestListModelsEndpoint:
             headers={"Authorization": "Bearer test"},
         )
         assert response.status_code == 500
+
+
+class TestMonitoringStatus:
+    """Verify monitoring status endpoint used by the frontend top bar."""
+
+    def test_dashboard_url_comes_from_configuration(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "grafana")
+        monkeypatch.setattr(
+            "apps.monitoring_app.MONITORING_DASHBOARD_URL",
+            "http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1",
+        )
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["provider"] == "grafana"
+        assert (
+            status["dashboard_url"]
+            == "http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1"
+        )
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
+    def test_otlp_provider_status_has_no_ui(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "otlp")
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_DASHBOARD_URL", "")
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["dashboard_url"] is None
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
+    def test_zipkin_provider_status_uses_configured_url(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "zipkin")
+        monkeypatch.setattr(
+            "apps.monitoring_app.MONITORING_DASHBOARD_URL",
+            "http://localhost:9411",
+        )
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["provider"] == "zipkin"
+        assert status["dashboard_url"] == "http://localhost:9411"
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
+    def test_langsmith_provider_status_has_no_local_ui(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "langsmith")
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_DASHBOARD_URL", "")
+
+        status = get_monitoring_status()
+
+        assert status["telemetry_enabled"] is True
+        assert status["provider"] == "langsmith"
+        assert status["dashboard_url"] is None
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
+    def test_unsupported_provider_has_no_ui(self, monkeypatch):
+        from apps.monitoring_app import get_monitoring_status
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "unsupported")
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_DASHBOARD_URL", "")
+
+        status = get_monitoring_status()
+
+        assert status["provider"] == "unsupported"
+        assert status["dashboard_url"] is None
+        assert status["dashboard_port"] is None
+        assert status["dashboard_path"] is None
+
+    def test_status_endpoint_returns_success(self, monkeypatch):
+        from apps.monitoring_app import router
+
+        monkeypatch.setattr("apps.monitoring_app.ENABLE_TELEMETRY", True)
+        monkeypatch.setattr("apps.monitoring_app.MONITORING_PROVIDER", "phoenix")
+        monkeypatch.setattr(
+            "apps.monitoring_app.MONITORING_DASHBOARD_URL",
+            "http://localhost:6006",
+        )
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        response = client.get("/monitoring/status")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == 0
+        assert body["data"]["dashboard_url"] == "http://localhost:6006"

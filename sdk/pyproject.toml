@@ -58,6 +58,7 @@ dependencies = [
     "ijson==3.5.0",
     "langchain-text-splitters==1.1.2",
     "ebooklib==0.20",
+    "pypandoc==1.17",
 ]
 
 [tool.uv]
@@ -81,19 +82,13 @@ data_process = [
     "unstructured-inference==1.2.0",
 ]
 performance = [
-    # OpenTelemetry Core Components
-    "opentelemetry-api==1.20.0",
-    "opentelemetry-sdk==1.20.0",
-    "opentelemetry-semantic-conventions==0.41b0",
-    # OpenTelemetry Instrumentation
-    "opentelemetry-instrumentation==0.41b0",
-    "opentelemetry-instrumentation-fastapi==0.41b0",
-    "opentelemetry-instrumentation-requests==0.41b0",
-    # OpenTelemetry Exporters
-    "opentelemetry-exporter-jaeger",
-    "opentelemetry-exporter-prometheus",
-    # Additional monitoring dependencies
-    "prometheus-client"
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-semantic-conventions>=0.41b0",
+    "opentelemetry-instrumentation>=0.41b0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+    "opentelemetry-exporter-otlp>=1.20.0",
 ]
 dev = [
     "nexent[quality, data_process, performance]"

@@ -1,6 +1,6 @@
 // File type definitions shared across file preview components
 
-export type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'office' | 'unknown';
+export type DetectedFileType = 'pdf' | 'image' | 'markdown' | 'csv' | 'text' | 'html' | 'office' | 'unknown';
 
 export type ImageBaseMode = 'fit' | 'actual';
 

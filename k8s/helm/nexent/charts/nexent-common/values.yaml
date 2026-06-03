@@ -1,5 +1,5 @@
 # Nexent Common Chart - Shared resources configuration
-# This chart provides shared resources (ConfigMap, Secret, RBAC, Namespace, init.sql)
+# This chart provides shared resources (ConfigMap, Secret, RBAC, init.sql)
 # that are required by other Nexent charts.
 
 # Images used by common templates
@@ -43,6 +43,7 @@ config:
   skipProxy: "true"
   umask: "0022"
   isDeployedByKubernetes: "true"
+  skillsPath: "/mnt/nexent/skills"
   marketBackend: "http://60.204.251.153:8010"
   modelEngine:
     enabled: "false"
@@ -55,6 +56,8 @@ config:
   modelPath:
     clipModelPath: "/opt/models/clip-vit-base-patch32"
     nltkData: "/opt/models/nltk_data"
+    tableTransformerModelPath: "/opt/models/table-transformer-structure-recognition"
+    unstructuredDefaultModelInitializeParamsJsonPath: "/opt/models/yolox"
   terminal:
     sshPrivateKeyPath: "/path/to/openssh-server/ssh-keys/openssh_server_key"
   supabase:
@@ -101,12 +104,29 @@ config:
     workerConcurrency: "4"
   telemetry:
     enabled: "false"
+    provider: "otlp"
+    projectName: ""
     serviceName: "nexent-backend"
-    jaegerEndpoint: "http://localhost:14268/api/traces"
-    prometheusPort: "8000"
+    otlpEndpoint: "http://nexent-otel-collector:4318"
+    otlpTracesEndpoint: ""
+    otlpMetricsEndpoint: ""
+    otlpProtocol: "http"
+    otlpHeaders: ""
+    otlpAuthorization: ""
+    otlpApiKey: ""
+    otlpLangfuseIngestionVersion: ""
+    langsmithApiKey: ""
+    langsmithProject: ""
+    otlpMetricsEnabled: "true"
+    instrumentRequests: "false"
+    fastapiIncludedUrls: ""
+    fastapiExcludedUrls: ""
+    fastapiExcludeSpans: "receive,send"
+    dashboardUrl: ""
     telemetrySampleRate: "1.0"
-    slowRequestThresholdSeconds: "5.0"
-    slowTokenRateThreshold: "10.0"
+    traceContentMode: "full"
+    traceMaxChars: "4000"
+    traceMaxItems: "20"
   oauth:
     githubClientId: ""
     githubClientSecret: ""

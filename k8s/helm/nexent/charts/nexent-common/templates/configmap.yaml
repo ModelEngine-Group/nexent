@@ -1,3 +1,4 @@
+{{- $monitoring := default dict .Values.global.monitoring -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -56,6 +57,8 @@ data:
   # Model Path Config
   CLIP_MODEL_PATH: {{ .Values.config.modelPath.clipModelPath | quote }}
   NLTK_DATA: {{ .Values.config.modelPath.nltkData | quote }}
+  TABLE_TRANSFORMER_MODEL_PATH: {{ .Values.config.modelPath.tableTransformerModelPath | quote }}
+  UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH: {{ .Values.config.modelPath.unstructuredDefaultModelInitializeParamsJsonPath | quote }}
 
   # Terminal Tool SSH Config
   SSH_PRIVATE_KEY_PATH: {{ .Values.config.terminal.sshPrivateKeyPath | quote }}
@@ -106,13 +109,30 @@ data:
   WORKER_CONCURRENCY: {{ .Values.config.dataProcess.workerConcurrency | quote }}
 
   # Telemetry and Monitoring Configuration
-  ENABLE_TELEMETRY: {{ .Values.config.telemetry.enabled | quote }}
-  SERVICE_NAME: {{ .Values.config.telemetry.serviceName | quote }}
-  JAEGER_ENDPOINT: {{ .Values.config.telemetry.jaegerEndpoint | quote }}
-  PROMETHEUS_PORT: {{ .Values.config.telemetry.prometheusPort | quote }}
-  TELEMETRY_SAMPLE_RATE: {{ .Values.config.telemetry.telemetrySampleRate | quote }}
-  LLM_SLOW_REQUEST_THRESHOLD_SECONDS: {{ .Values.config.telemetry.slowRequestThresholdSeconds | quote }}
-  LLM_SLOW_TOKEN_RATE_THRESHOLD: {{ .Values.config.telemetry.slowTokenRateThreshold | quote }}
+  ENABLE_TELEMETRY: {{ ternary (get $monitoring "enabled") .Values.config.telemetry.enabled (hasKey $monitoring "enabled") | quote }}
+  MONITORING_PROVIDER: {{ default .Values.config.telemetry.provider $monitoring.provider | quote }}
+  MONITORING_PROJECT_NAME: {{ default .Values.config.telemetry.projectName $monitoring.projectName | quote }}
+  OTEL_SERVICE_NAME: {{ default .Values.config.telemetry.serviceName $monitoring.serviceName | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ default .Values.config.telemetry.otlpEndpoint $monitoring.otlpEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{ default .Values.config.telemetry.otlpTracesEndpoint $monitoring.otlpTracesEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{ default .Values.config.telemetry.otlpMetricsEndpoint $monitoring.otlpMetricsEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: {{ default .Values.config.telemetry.otlpProtocol $monitoring.otlpProtocol | quote }}
+  OTEL_EXPORTER_OTLP_HEADERS: {{ default .Values.config.telemetry.otlpHeaders $monitoring.otlpHeaders | quote }}
+  OTEL_EXPORTER_OTLP_AUTHORIZATION: {{ default .Values.config.telemetry.otlpAuthorization $monitoring.otlpAuthorization | quote }}
+  OTEL_EXPORTER_OTLP_X_API_KEY: {{ default .Values.config.telemetry.otlpApiKey $monitoring.otlpApiKey | quote }}
+  OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION: {{ default .Values.config.telemetry.otlpLangfuseIngestionVersion $monitoring.otlpLangfuseIngestionVersion | quote }}
+  LANGSMITH_API_KEY: {{ default .Values.config.telemetry.langsmithApiKey $monitoring.langsmithApiKey | quote }}
+  LANGSMITH_PROJECT: {{ default .Values.config.telemetry.langsmithProject $monitoring.langsmithProject | quote }}
+  OTEL_EXPORTER_OTLP_METRICS_ENABLED: {{ ternary (get $monitoring "otlpMetricsEnabled") .Values.config.telemetry.otlpMetricsEnabled (hasKey $monitoring "otlpMetricsEnabled") | quote }}
+  MONITORING_INSTRUMENT_REQUESTS: {{ ternary (get $monitoring "instrumentRequests") .Values.config.telemetry.instrumentRequests (hasKey $monitoring "instrumentRequests") | quote }}
+  MONITORING_FASTAPI_INCLUDED_URLS: {{ default .Values.config.telemetry.fastapiIncludedUrls $monitoring.fastapiIncludedUrls | quote }}
+  MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}
+  MONITORING_FASTAPI_EXCLUDE_SPANS: {{ default .Values.config.telemetry.fastapiExcludeSpans $monitoring.fastapiExcludeSpans | quote }}
+  MONITORING_DASHBOARD_URL: {{ default .Values.config.telemetry.dashboardUrl $monitoring.dashboardUrl | quote }}
+  TELEMETRY_SAMPLE_RATE: {{ default .Values.config.telemetry.telemetrySampleRate $monitoring.telemetrySampleRate | quote }}
+  MONITORING_TRACE_CONTENT_MODE: {{ default .Values.config.telemetry.traceContentMode $monitoring.traceContentMode | quote }}
+  MONITORING_TRACE_MAX_CHARS: {{ default .Values.config.telemetry.traceMaxChars $monitoring.traceMaxChars | quote }}
+  MONITORING_TRACE_MAX_ITEMS: {{ default .Values.config.telemetry.traceMaxItems $monitoring.traceMaxItems | quote }}
 
   # Market Backend Address
   MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}
@@ -120,6 +140,7 @@ data:
   # Skip proxy
   skip_proxy: {{ .Values.config.skipProxy | quote }}
   UMASK: {{ .Values.config.umask | quote }}
+  SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

@@ -1347,7 +1347,8 @@ def test_call_without_tracker_creates_tracker(openai_model_instance):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
         openai_model_instance(messages=[{"role": "user", "content": "hello"}])
 
-    openai_model_instance._monitoring.create_token_tracker.assert_called_once_with("dummy-model")
+    openai_model_instance._monitoring.create_token_tracker.assert_called_once()
+    assert openai_model_instance._monitoring.create_token_tracker.call_args.args[0] == "dummy-model"
     mock_tracker.record_token.assert_called()
 
 

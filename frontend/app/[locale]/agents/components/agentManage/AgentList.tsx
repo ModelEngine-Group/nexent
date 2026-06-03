@@ -10,7 +10,7 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
+import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import {
   searchAgentInfo,
   updateAgentInfo,
@@ -24,6 +24,7 @@ import { clearAgentNewMark } from "@/services/agentConfigService";
 import { a2aClientService } from "@/services/a2aService";
 import A2AServerSettingsPanel from "../a2a/A2AServerSettingsPanel";
 import log from "@/lib/logger";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 interface AgentListProps {
   agentList: Agent[];
@@ -162,13 +163,7 @@ export default function AgentList({
     try {
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
-        // Get permission from agent list (agentList prop contains permission from /agent/list)
-        const permissionFromList = agent.permission ?? undefined;
-        // Merge permission into agent detail before setting as current
-        setCurrentAgent({
-          ...result.data,
-          permission: permissionFromList,
-        });
+        setCurrentAgent(result.data);
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
@@ -259,6 +254,8 @@ export default function AgentList({
         few_shots_prompt: detail.few_shots_prompt,
         business_logic_model_name: detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
+        prompt_template_id: detail.prompt_template_id ?? 0,
+        prompt_template_name: detail.prompt_template_name ?? "system_default",
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
       });
@@ -429,18 +426,8 @@ export default function AgentList({
                             <Tooltip
                               title={(() => {
                                 const reasons = agent.unavailable_reasons || [];
-                                if (reasons.includes('agent_not_found')) {
-                                  return t('subAgentPool.tooltip.unavailableAgent');
-                                } else if (reasons.includes('tool_unavailable')) {
-                                  return t('toolPool.tooltip.unavailableTool');
-                                } else if (reasons.includes('duplicate_name')) {
-                                  return t('agent.error.nameExists', { name });
-                                } else if (reasons.includes('duplicate_display_name')) {
-                                  return t('agent.error.displayNameExists', { displayName });
-                                } else if (reasons.includes('model_unavailable')) {
-                                  return t('agent.error.modelUnavailable');
-                                }
-                                return t('subAgentPool.tooltip.unavailableAgent'); // fallback
+                                const labels = getUnavailableReasonLabels(reasons, t);
+                                return labels.join(", ") || t('subAgentPool.tooltip.unavailableAgent');
                               })()}
                             >
                               <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />

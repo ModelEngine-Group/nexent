@@ -1,21 +1,27 @@
-import pytest
+"""
+Unit tests for knowledge_summary_app module.
+
+These tests focus on testing the app layer endpoints with services mocked.
+All module mocks are provided by conftest.py.
+"""
+import asyncio
 import sys
 import os
 import types
+import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock
 
-# Add path for correct imports
-CURRENT_DIR = os.path.dirname(__file__)
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../../.."))
-BACKEND_DIR = os.path.join(PROJECT_ROOT, "backend")
-for path in (PROJECT_ROOT, BACKEND_DIR):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+import pytest
 
-# Environment variables are now configured in conftest.py
+# Apply patches that need to be active before imports
+from unittest.mock import patch as mock_patch
 
 # Mock external dependencies
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['botocore'] = MagicMock()
 sys.modules['botocore.client'] = MagicMock()
 sys.modules['botocore.exceptions'] = MagicMock()
@@ -24,108 +30,78 @@ nexent_core = types.ModuleType('nexent.core')
 sys.modules['nexent.core'] = nexent_core
 nexent_core_agents = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents'] = nexent_core_agents
+
+
 nexent_core_agents_agent_model = types.ModuleType('nexent.core.agents.agent_model')
-sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
 
-# nexent.core.models must be a ModuleType (not MagicMock) to allow submodules
-nexent_core_models = types.ModuleType('nexent.core.models')
-sys.modules['nexent.core.models'] = nexent_core_models
-sys.modules['nexent.core.models.embedding_model'] = types.ModuleType('nexent.core.models.embedding_model')
 
-# Mock rerank_model module with proper class exports
-class MockBaseRerank:
+class MockToolConfig:
     pass
 
-class MockOpenAICompatibleRerank(MockBaseRerank):
-    def __init__(self, *args, **kwargs):
-        pass
 
-rerank_module = MagicMock()
-rerank_module.BaseRerank = MockBaseRerank
-rerank_module.OpenAICompatibleRerank = MockOpenAICompatibleRerank
-sys.modules['nexent.core.models.rerank_model'] = rerank_module
-
-sys.modules['nexent.core.models.stt_model'] = MagicMock()
-sys.modules['nexent.core.nlp'] = MagicMock()
-sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
-vector_db_module = types.ModuleType("nexent.vector_database")
-vector_db_base_module = types.ModuleType("nexent.vector_database.base")
+nexent_core_agents_agent_model.ToolConfig = MockToolConfig
+sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
+nexent_nexent_vector_database = types.ModuleType('nexent.vector_database')
+sys.modules['nexent.vector_database'] = nexent_nexent_vector_database
+nexent_nexent_vector_database = types.ModuleType('nexent.vector_database.base')
 
 
 class MockVectorDatabaseCore:
+    pass
+
+
+nexent_nexent_vector_database.VectorDatabaseCore = MockVectorDatabaseCore
+sys.modules['nexent.vector_database.base'] = nexent_nexent_vector_database
+# Create mock for vectordatabase_service BEFORE importing the app
+vectordatabase_service_mock = types.ModuleType('services.vectordatabase_service')
+
+
+class MockElasticSearchService:
     def __init__(self, *args, **kwargs):
         pass
 
 
-vector_db_base_module.VectorDatabaseCore = MockVectorDatabaseCore
-vector_db_module.base = vector_db_base_module
+def mock_get_vector_db_core():
+    return MagicMock()
 
-sys.modules['nexent.vector_database'] = vector_db_module
-sys.modules['nexent.vector_database.base'] = vector_db_base_module
-sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
-# Provide datamate_core module with DataMateCore to satisfy imports like
-# `from nexent.vector_database.datamate_core import DataMateCore`
-datamate_core_module = types.ModuleType("nexent.vector_database.datamate_core")
-datamate_core_module.DataMateCore = MagicMock()
-sys.modules['nexent.vector_database.datamate_core'] = datamate_core_module
 
-# Mock specific classes that are imported
-class MockToolConfig:
-    def __init__(self, *args, **kwargs): pass
-class MockBaseEmbedding:
-    def __init__(self, *args, **kwargs): pass
-class MockOpenAICompatibleEmbedding:
-    def __init__(self, *args, **kwargs): pass
-class MockJinaEmbedding:
-    def __init__(self, *args, **kwargs): pass
-class MockTokenizer:
-    def __init__(self, *args, **kwargs): pass
-class MockSTTConfig:
-    def __init__(self, *args, **kwargs): pass
-class MockSTTModel:
-    def __init__(self, *args, **kwargs): pass
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
-sys.modules['nexent.core.models.embedding_model'].BaseEmbedding = MockBaseEmbedding
-sys.modules['nexent.core.models.embedding_model'].OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
-sys.modules['nexent.core.models.embedding_model'].JinaEmbedding = MockJinaEmbedding
-sys.modules['nexent.core.nlp.tokenizer'].Tokenizer = MockTokenizer
-sys.modules['nexent.core.models.stt_model'].STTConfig = MockSTTConfig
-sys.modules['nexent.core.models.stt_model'].STTModel = MockSTTModel
-sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
-sys.modules['nexent.memory.memory_service'] = MagicMock()
+vectordatabase_service_mock.ElasticSearchService = MockElasticSearchService
+vectordatabase_service_mock.get_vector_db_core = mock_get_vector_db_core
+sys.modules['services.vectordatabase_service'] = vectordatabase_service_mock
 
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+# Mock other services that might be imported
+sys.modules['services.redis_service'] = types.ModuleType('services.redis_service')
+sys.modules['services.group_service'] = types.ModuleType('services.group_service')
 
-# Import the modules we need with all dependencies mocked
-with patch('botocore.client.BaseClient._make_api_call'), \
-     patch('elasticsearch.Elasticsearch', return_value=MagicMock()), \
-     patch('database.client.db_client', MagicMock()), \
-     patch('database.client.get_db_session', MagicMock()), \
-     patch('database.client.as_dict', MagicMock()):
-    from fastapi.testclient import TestClient
-    from fastapi import FastAPI
-    from pydantic import BaseModel
-    from backend.apps.knowledge_summary_app import router
+# Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
+utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
+utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("test_user_id", "test_tenant_id", "en"))
+sys.modules['utils.auth_utils'] = utils_auth_utils_mock
 
-# Define test models
-class ChangeSummaryRequest(BaseModel):
-    summary_result: str
+utils_config_utils_mock = types.ModuleType('utils.config_utils')
+mock_tenant_config_manager = MagicMock()
+mock_tenant_config = MagicMock()
+mock_tenant_config.get.return_value = None
+mock_tenant_config_manager.load_config.return_value = mock_tenant_config
+utils_config_utils_mock.tenant_config_manager = mock_tenant_config_manager
+sys.modules['utils.config_utils'] = utils_config_utils_mock
 
-# Create test app and client
+# Import the modules we need
+from fastapi.testclient import TestClient
+from fastapi import FastAPI
+from pydantic import BaseModel
+from apps.knowledge_summary_app import router
+
+# Create a test app and client
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 
+
 # Fixture for test setup
 @pytest.fixture
 def test_data():
-    # Sample test data
     data = {
         "index_name": "test_index",
         "user_id": ("test_user_id", "test_tenant_id"),
@@ -135,209 +111,280 @@ def test_data():
     }
     return data
 
-def test_auto_summary_success(test_data):
-    """Test successful auto summary generation"""
-    # Setup mock responses
-    mock_vdb_core_instance = MagicMock()
-    mock_user_info = ("test_user_id", "test_tenant_id", "en")
 
-    # Setup service mock
-    mock_service_instance = MagicMock()
-    mock_service_instance.summary_index_name = AsyncMock()
-    stream_response = MagicMock()
-    mock_service_instance.summary_index_name.return_value = stream_response
+class TestAutoSummary:
+    """Test auto summary generation endpoint"""
 
-    # Patch all necessary components directly in the app module
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
-            patch('backend.apps.knowledge_summary_app.get_vector_db_core', return_value=mock_vdb_core_instance), \
-            patch('backend.apps.knowledge_summary_app.get_current_user_info', return_value=mock_user_info):
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_vector_db_core')
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    def test_auto_summary_success(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
+        """Test successful auto summary generation"""
+        mock_vdb_core_instance = MagicMock()
+        mock_vdb_core.return_value = mock_vdb_core_instance
 
-        # Execute test with model_id parameter
+        mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
+        mock_user_info.return_value = mock_user_info_value
+
+        mock_service_instance = MagicMock()
+        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_class.return_value = mock_service_instance
+
         response = client.post(
             f"/summary/{test_data['index_name']}/auto_summary?batch_size=500&model_id=1",
             headers=test_data["auth_header"]
         )
 
         assert response.status_code == 200
-
-        # Assertions - verify the function was called exactly once
         assert mock_service_instance.summary_index_name.call_count == 1
 
-        # Extract the call arguments to verify expected values without comparing object identity
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
         assert call_kwargs['batch_size'] == 500
-        assert call_kwargs['tenant_id'] == mock_user_info[1]
-        assert call_kwargs['language'] == mock_user_info[2]
+        assert call_kwargs['tenant_id'] == mock_user_info_value[1]
+        assert call_kwargs['language'] == mock_user_info_value[2]
         assert call_kwargs['model_id'] == 1
 
-def test_auto_summary_without_model_id(test_data):
-    """Test successful auto summary generation without model_id parameter"""
-    # Setup mock responses
-    mock_vdb_core_instance = MagicMock()
-    mock_user_info = ("test_user_id", "test_tenant_id", "en")
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_vector_db_core')
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    def test_auto_summary_without_model_id(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
+        """Test successful auto summary generation without model_id parameter"""
+        mock_vdb_core_instance = MagicMock()
+        mock_vdb_core.return_value = mock_vdb_core_instance
 
-    # Setup service mock
-    mock_service_instance = MagicMock()
-    mock_service_instance.summary_index_name = AsyncMock()
-    stream_response = MagicMock()
-    mock_service_instance.summary_index_name.return_value = stream_response
+        mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
+        mock_user_info.return_value = mock_user_info_value
 
-    # Patch all necessary components directly in the app module
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
-            patch('backend.apps.knowledge_summary_app.get_vector_db_core', return_value=mock_vdb_core_instance), \
-            patch('backend.apps.knowledge_summary_app.get_current_user_info', return_value=mock_user_info):
+        mock_service_instance = MagicMock()
+        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_class.return_value = mock_service_instance
 
-        # Execute test without model_id parameter
         response = client.post(
             f"/summary/{test_data['index_name']}/auto_summary?batch_size=500",
             headers=test_data["auth_header"]
         )
 
         assert response.status_code == 200
-
-        # Assertions - verify the function was called exactly once
         assert mock_service_instance.summary_index_name.call_count == 1
 
-        # Extract the call arguments to verify expected values without comparing object identity
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
         assert call_kwargs['batch_size'] == 500
-        assert call_kwargs['tenant_id'] == mock_user_info[1]
-        assert call_kwargs['language'] == mock_user_info[2]
         assert call_kwargs['model_id'] is None
 
-def test_auto_summary_exception(test_data):
-    """Test auto summary generation with exception"""
-    # Setup mock to raise exception
-    mock_vdb_core_instance = MagicMock()
-    mock_user_info = ("test_user_id", "test_tenant_id", "en")
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_vector_db_core')
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    def test_auto_summary_exception(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
+        """Test auto summary generation with exception"""
+        mock_vdb_core_instance = MagicMock()
+        mock_vdb_core.return_value = mock_vdb_core_instance
 
-    # Setup service mock to raise exception
-    mock_service_instance = MagicMock()
-    mock_service_instance.summary_index_name = AsyncMock(
-        side_effect=Exception("Error generating summary")
-    )
+        mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
+        mock_user_info.return_value = mock_user_info_value
 
-    # Patch both the ElasticSearchService and get_vector_db_core in the route handler
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
-            patch('backend.apps.knowledge_summary_app.get_vector_db_core', return_value=mock_vdb_core_instance), \
-            patch('backend.apps.knowledge_summary_app.get_current_user_info', return_value=mock_user_info):
+        mock_service_instance = MagicMock()
+        mock_service_instance.summary_index_name = AsyncMock(
+            side_effect=Exception("Error generating summary")
+        )
+        mock_service_class.return_value = mock_service_instance
 
-        # Execute test
         response = client.post(
             f"/summary/{test_data['index_name']}/auto_summary",
             headers=test_data["auth_header"]
         )
 
-        # Assertions
         assert response.status_code == 500
         assert "text/event-stream" in response.headers["content-type"]
         assert "Knowledge base summary generation failed" in response.text
 
-def test_change_summary_success(test_data):
-    """Test successful summary update"""
-    # Setup request data using a dictionary that conforms to ChangeSummaryRequest model
-    request_data = {
-        "summary_result": test_data["summary_result"]
-    }
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_vector_db_core')
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('apps.knowledge_summary_app.tenant_config_manager')
+    def test_auto_summary_uses_tenant_llm_id(
+        self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
+    ):
+        """Test that auto summary uses LLM_ID from tenant config when model_id is not provided"""
+        mock_vdb_core_instance = MagicMock()
+        mock_vdb_core.return_value = mock_vdb_core_instance
 
-    # Ensure we return a dictionary instead of a MagicMock object
-    expected_response = {
-        "success": True,
-        "index_name": test_data["index_name"],
-        "summary": test_data["summary_result"]
-    }
+        mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
+        mock_user_info.return_value = mock_user_info_value
 
-    # Setup service mock
-    mock_service_instance = MagicMock()
-    mock_service_instance.change_summary.return_value = expected_response
+        mock_config = MagicMock()
+        mock_config.get.return_value = "5"
+        mock_config_manager.load_config.return_value = mock_config
 
-    # Execute test with direct patching of route handler function
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
-            patch('backend.apps.knowledge_summary_app.get_current_user_id', return_value=test_data["user_id"]):
+        mock_service_instance = MagicMock()
+        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_class.return_value = mock_service_instance
 
+        response = client.post(
+            f"/summary/{test_data['index_name']}/auto_summary?batch_size=100",
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        mock_config_manager.load_config.assert_called_once_with("test_tenant_id")
+
+        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        assert call_kwargs['model_id'] == 5
+
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_vector_db_core')
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('apps.knowledge_summary_app.tenant_config_manager')
+    def test_auto_summary_tenant_config_no_llm_id(
+        self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
+    ):
+        """Test auto summary when tenant config has no LLM_ID"""
+        mock_vdb_core_instance = MagicMock()
+        mock_vdb_core.return_value = mock_vdb_core_instance
+
+        mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
+        mock_user_info.return_value = mock_user_info_value
+
+        mock_config = MagicMock()
+        mock_config.get.return_value = None
+        mock_config_manager.load_config.return_value = mock_config
+
+        mock_service_instance = MagicMock()
+        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_class.return_value = mock_service_instance
+
+        response = client.post(
+            f"/summary/{test_data['index_name']}/auto_summary",
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        assert call_kwargs['model_id'] is None
+
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_vector_db_core')
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('apps.knowledge_summary_app.tenant_config_manager')
+    def test_auto_summary_tenant_config_exception(
+        self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
+    ):
+        """Test auto summary when loading tenant config raises exception"""
+        mock_vdb_core_instance = MagicMock()
+        mock_vdb_core.return_value = mock_vdb_core_instance
+
+        mock_user_info_value = ("test_user_id", "test_tenant_id", "en")
+        mock_user_info.return_value = mock_user_info_value
+
+        mock_config_manager.load_config.side_effect = Exception("Config error")
+
+        mock_service_instance = MagicMock()
+        mock_service_instance.summary_index_name = AsyncMock(return_value=MagicMock())
+        mock_service_class.return_value = mock_service_instance
+
+        response = client.post(
+            f"/summary/{test_data['index_name']}/auto_summary",
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
+        assert call_kwargs['model_id'] is None
+
+
+class TestChangeSummary:
+    """Test change summary endpoint"""
+
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_current_user_id')
+    def test_change_summary_success(self, mock_get_user_id, mock_service_class, test_data):
+        """Test successful summary update"""
+        mock_get_user_id.return_value = test_data["user_id"]
+
+        expected_response = {
+            "success": True,
+            "index_name": test_data["index_name"],
+            "summary": test_data["summary_result"]
+        }
+
+        mock_service_instance = MagicMock()
+        mock_service_instance.change_summary.return_value = expected_response
+        mock_service_class.return_value = mock_service_instance
+
+        request_data = {"summary_result": test_data["summary_result"]}
         response = client.post(
             f"/summary/{test_data['index_name']}/summary",
             json=request_data,
             headers=test_data["auth_header"]
         )
 
-    # Assertions
-    assert response.status_code == 200
-    response_json = response.json()
-    assert response_json["success"] is True
-    assert response_json["index_name"] == test_data["index_name"]
-    assert response_json["summary"] == test_data["summary_result"]
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["success"] is True
+        assert response_json["index_name"] == test_data["index_name"]
+        assert response_json["summary"] == test_data["summary_result"]
 
-    # Verify service calls
-    mock_service_instance.change_summary.assert_called_once_with(
-        index_name=test_data["index_name"],
-        summary_result=test_data["summary_result"],
-        user_id=test_data["user_id"][0]
-    )
+        mock_service_instance.change_summary.assert_called_once_with(
+            index_name=test_data["index_name"],
+            summary_result=test_data["summary_result"],
+            user_id=test_data["user_id"][0]
+        )
 
-def test_change_summary_exception(test_data):
-    """Test summary update with exception"""
-    # Setup request data
-    request_data = {
-        "summary_result": test_data["summary_result"]
-    }
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('apps.knowledge_summary_app.get_current_user_id')
+    def test_change_summary_exception(self, mock_get_user_id, mock_service_class, test_data):
+        """Test summary update with exception"""
+        mock_get_user_id.return_value = test_data["user_id"]
 
-    # Setup service mock to raise exception
-    mock_service_instance = MagicMock()
-    mock_service_instance.change_summary.side_effect = Exception("Error updating summary")
+        mock_service_instance = MagicMock()
+        mock_service_instance.change_summary.side_effect = Exception("Error updating summary")
+        mock_service_class.return_value = mock_service_instance
 
-    # Execute test
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
-            patch('backend.apps.knowledge_summary_app.get_current_user_id', return_value=test_data["user_id"]):
-
+        request_data = {"summary_result": test_data["summary_result"]}
         response = client.post(
             f"/summary/{test_data['index_name']}/summary",
             json=request_data,
             headers=test_data["auth_header"]
         )
 
-    # Assertions
-    assert response.status_code == 500
-    assert "Knowledge base summary update failed" in response.json()["detail"]
+        assert response.status_code == 500
+        assert "Knowledge base summary update failed" in response.json()["detail"]
 
-def test_get_summary_success(test_data):
-    """Test successful summary retrieval"""
-    # Ensure we return a dictionary instead of a MagicMock object
-    expected_response = {
-        "success": True,
-        "index_name": test_data["index_name"],
-        "summary": test_data["summary_result"]
-    }
 
-    # Setup service mock
-    mock_service_instance = MagicMock()
-    mock_service_instance.get_summary.return_value = expected_response
+class TestGetSummary:
+    """Test get summary endpoint"""
 
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance):
-        # Execute test
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    def test_get_summary_success(self, mock_service_class, test_data):
+        """Test successful summary retrieval"""
+        expected_response = {
+            "success": True,
+            "index_name": test_data["index_name"],
+            "summary": test_data["summary_result"]
+        }
+
+        mock_service_instance = MagicMock()
+        mock_service_instance.get_summary.return_value = expected_response
+        mock_service_class.return_value = mock_service_instance
+
         response = client.get(f"/summary/{test_data['index_name']}/summary")
 
-    # Assertions
-    assert response.status_code == 200
-    assert response.json() == expected_response
+        assert response.status_code == 200
+        assert response.json() == expected_response
 
-    # Verify service calls
-    mock_service_instance.get_summary.assert_called_once_with(
-        index_name=test_data["index_name"]
-    )
+        mock_service_instance.get_summary.assert_called_once_with(
+            index_name=test_data["index_name"]
+        )
 
-def test_get_summary_exception(test_data):
-    """Test summary retrieval with exception"""
-    # Setup service mock to raise exception
-    mock_service_instance = MagicMock()
-    mock_service_instance.get_summary.side_effect = Exception("Error getting summary")
+    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    def test_get_summary_exception(self, mock_service_class, test_data):
+        """Test summary retrieval with exception"""
+        mock_service_instance = MagicMock()
+        mock_service_instance.get_summary.side_effect = Exception("Error getting summary")
+        mock_service_class.return_value = mock_service_instance
 
-    with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance):
-        # Execute test
         response = client.get(f"/summary/{test_data['index_name']}/summary")
 
-    # Assertions
-    assert response.status_code == 500
-    assert "Failed to get knowledge base summary" in response.json()["detail"]
+        assert response.status_code == 500
+        assert "Failed to get knowledge base summary" in response.json()["detail"]

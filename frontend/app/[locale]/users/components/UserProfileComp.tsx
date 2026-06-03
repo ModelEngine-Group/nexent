@@ -37,11 +37,14 @@ import { useMemo } from "react";
 import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
+import { authService } from "@/services/authService";
+import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
 import {
   getUserTokens,
   deleteUserToken,
   createUserToken,
 } from "@/services/tokenService";
+import { ErrorCode } from "@/const/errorCode";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -56,8 +59,8 @@ import {
 export default function UserProfileComp() {
   const { t } = useTranslation("common");
   const { message: antdMessage } = App.useApp();
-  const { logout, revoke, isLoading } = useAuthenticationContext()
-  const { user, groupIds } = useAuthorizationContext()
+  const { logout, revoke, isLoading } = useAuthenticationContext();
+  const { user, groupIds } = useAuthorizationContext();
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(user?.tenantId || null);
@@ -78,7 +81,8 @@ export default function UserProfileComp() {
     return groupIds.map((id) => ({
       id,
       name: groupNameMap.get(id) || t("common.unknown"),
-      description: groups.find((g) => g.group_id === id)?.group_description || "",
+      description:
+        groups.find((g) => g.group_id === id)?.group_description || "",
     }));
   }, [groupIds, groupNameMap, groups, t]);
 
@@ -86,6 +90,9 @@ export default function UserProfileComp() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // Password strength state for change password modal
+  const [newPasswordValue, setNewPasswordValue] = useState("");
 
   // AK/SK state
   const [akInfo, setAkInfo] = useState<string | null>(null);
@@ -98,7 +105,8 @@ export default function UserProfileComp() {
   const [passwordForm] = Form.useForm();
 
   // Check if user is admin or super admin (cannot delete account)
-  const isAdminOrSuperAdmin = user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
+  const isAdminOrSuperAdmin =
+    user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
   const getRoleDisplayName = (role: string) => {
     switch (role) {
       case USER_ROLES.SPEED:
@@ -169,9 +177,13 @@ export default function UserProfileComp() {
       const newToken = await createUserToken();
       setAkInfo(newToken.access_key);
       setExistingTokenIds([newToken.token_id]);
-      antdMessage.success(t("profile.generateAkSkSuccess") || "Access key generated successfully");
+      antdMessage.success(
+        t("profile.generateAkSkSuccess") || "Access key generated successfully"
+      );
     } catch (error) {
-      antdMessage.error(t("profile.generateAkSkFailed") || "Failed to generate access key");
+      antdMessage.error(
+        t("profile.generateAkSkFailed") || "Failed to generate access key"
+      );
     } finally {
       setIsGeneratingAkSk(false);
     }
@@ -182,9 +194,13 @@ export default function UserProfileComp() {
     if (akInfo) {
       try {
         await navigator.clipboard.writeText(akInfo);
-        antdMessage.success(t("profile.copyAkSuccess") || "Access key copied to clipboard");
+        antdMessage.success(
+          t("profile.copyAkSuccess") || "Access key copied to clipboard"
+        );
       } catch (error) {
-        antdMessage.error(t("profile.copyAkFailed") || "Failed to copy access key");
+        antdMessage.error(
+          t("profile.copyAkFailed") || "Failed to copy access key"
+        );
       }
     }
   };
@@ -279,9 +295,12 @@ export default function UserProfileComp() {
                     {userGroupNames.length > 0 ? (
                       userGroupNames.map((group) => (
                         <Tooltip
-                            key={group.id}
-                            title={group.description || t("tenantResources.groups.noDescription")}
-                          >
+                          key={group.id}
+                          title={
+                            group.description ||
+                            t("tenantResources.groups.noDescription")
+                          }
+                        >
                           <Tag
                             color="blue"
                             className="cursor-pointer hover:opacity-80 transition-opacity"
@@ -316,9 +335,7 @@ export default function UserProfileComp() {
               </div>
 
               <div className="divide-y divide-gray-50 dark:divide-gray-700/50">
-                <div
-                  className="w-full px-6 py-3 flex items-center justify-between opacity-50 cursor-not-allowed"
-                >
+                <div className="w-full px-6 py-3 flex items-center justify-between opacity-50 cursor-not-allowed">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
                       <Edit className="h-4 w-4 text-blue-500" />
@@ -328,7 +345,8 @@ export default function UserProfileComp() {
                         {t("profile.editProfile") || "Edit Profile"}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {t("profile.editProfileDesc") || "Update your account information"}
+                        {t("profile.editProfileDesc") ||
+                          "Update your account information"}
                       </div>
                     </div>
                   </div>
@@ -336,7 +354,8 @@ export default function UserProfileComp() {
                 </div>
 
                 <div
-                  className="w-full px-6 py-3 flex items-center justify-between opacity-50 cursor-not-allowed"
+                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                  onClick={() => setIsPasswordModalOpen(true)}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
@@ -360,8 +379,12 @@ export default function UserProfileComp() {
                   onClick={() => {
                     if (akInfo) {
                       Modal.confirm({
-                        title: t("profile.generateAkSkConfirmTitle") || "Generate New Access Key",
-                        content: t("profile.generateAkSkConfirmContent") || "You already have an access key. Generating a new one will overwrite the existing key. Continue?",
+                        title:
+                          t("profile.generateAkSkConfirmTitle") ||
+                          "Generate New Access Key",
+                        content:
+                          t("profile.generateAkSkConfirmContent") ||
+                          "You already have an access key. Generating a new one will overwrite the existing key. Continue?",
                         okText: t("common.confirm") || "Confirm",
                         cancelText: t("common.cancel") || "Cancel",
                         onOk: handleGenerateAkSk,
@@ -402,8 +425,12 @@ export default function UserProfileComp() {
                             onClick={(e) => {
                               e.stopPropagation();
                               Modal.confirm({
-                                title: t("profile.deleteAkSkConfirmTitle") || "Delete Access Key",
-                                content: t("profile.deleteAkSkConfirmContent") || "Are you sure you want to delete this access key? This action cannot be undone.",
+                                title:
+                                  t("profile.deleteAkSkConfirmTitle") ||
+                                  "Delete Access Key",
+                                content:
+                                  t("profile.deleteAkSkConfirmContent") ||
+                                  "Are you sure you want to delete this access key? This action cannot be undone.",
                                 okText: t("common.confirm") || "Confirm",
                                 cancelText: t("common.cancel") || "Cancel",
                                 okButtonProps: { danger: true },
@@ -414,9 +441,15 @@ export default function UserProfileComp() {
                                     }
                                     setAkInfo(null);
                                     setExistingTokenIds([]);
-                                    antdMessage.success(t("profile.deleteAkSkSuccess") || "Access key deleted successfully");
+                                    antdMessage.success(
+                                      t("profile.deleteAkSkSuccess") ||
+                                        "Access key deleted successfully"
+                                    );
                                   } catch (error) {
-                                    antdMessage.error(t("profile.deleteAkSkFailed") || "Failed to delete access key");
+                                    antdMessage.error(
+                                      t("profile.deleteAkSkFailed") ||
+                                        "Failed to delete access key"
+                                    );
                                   }
                                 },
                               });
@@ -426,7 +459,8 @@ export default function UserProfileComp() {
                         </div>
                       ) : (
                         <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {t("profile.generateAkSkDesc") || "Create or regenerate your API access key"}
+                          {t("profile.generateAkSkDesc") ||
+                            "Create or regenerate your API access key"}
                         </div>
                       )}
                     </div>
@@ -447,7 +481,8 @@ export default function UserProfileComp() {
                         {t("profile.deleteAccount") || "Delete Account"}
                       </div>
                       <div className="text-xs text-red-400 dark:text-red-500">
-                        {t("profile.deleteAccountDesc") || "Permanently delete your account"}
+                        {t("profile.deleteAccountDesc") ||
+                          "Permanently delete your account"}
                       </div>
                     </div>
                   </div>
@@ -465,7 +500,9 @@ export default function UserProfileComp() {
                     loading={isLoading}
                     className="text-gray-500 hover:text-red-500"
                   >
-                    <span className="text-sm font-medium">{t("auth.logout") || "Logout"}</span>
+                    <span className="text-sm font-medium">
+                      {t("auth.logout") || "Logout"}
+                    </span>
                   </Button>
                 </div>
               </div>
@@ -492,7 +529,9 @@ export default function UserProfileComp() {
           form={editForm}
           layout="vertical"
           onFinish={(values) => {
-            antdMessage.success(t("profile.updateSuccess") || "Profile updated successfully");
+            antdMessage.success(
+              t("profile.updateSuccess") || "Profile updated successfully"
+            );
             setIsEditModalOpen(false);
           }}
         >
@@ -500,12 +539,13 @@ export default function UserProfileComp() {
             name="displayName"
             label={t("profile.displayName") || "Display Name"}
           >
-            <Input placeholder={t("profile.enterDisplayName") || "Enter your display name"} />
+            <Input
+              placeholder={
+                t("profile.enterDisplayName") || "Enter your display name"
+              }
+            />
           </Form.Item>
-          <Form.Item
-            name="email"
-            label={t("common.email") || "Email"}
-          >
+          <Form.Item name="email" label={t("common.email") || "Email"}>
             <Input disabled placeholder={user?.email} />
           </Form.Item>
         </Form>
@@ -521,23 +561,43 @@ export default function UserProfileComp() {
         }
         open={isPasswordModalOpen}
         onOk={() => passwordForm.submit()}
-        onCancel={() => setIsPasswordModalOpen(false)}
+        onCancel={() => {
+          setIsPasswordModalOpen(false);
+          passwordForm.resetFields();
+          setNewPasswordValue("");
+        }}
         okText={t("common.save") || "Save"}
         cancelText={t("common.cancel") || "Cancel"}
         width={500}
+        confirmLoading={false}
       >
-        <Alert
-          message={t("profile.passwordAlertTitle") || "Note"}
-          description={t("profile.passwordAlertDesc") || "Password change functionality will be available soon."}
-          type="info"
-          showIcon
-          className="mb-4"
-        />
         <Form
           form={passwordForm}
           layout="vertical"
-          onFinish={(values) => {
-            antdMessage.success(t("profile.passwordUpdateSuccess") || "Password updated successfully");
+          onFinish={async (values) => {
+            const result = await authService.updatePassword(
+              values.currentPassword,
+              values.newPassword
+            );
+            if (result.errorCode) {
+              const errorMessages: Record<string, string> = {
+                [ErrorCode.INVALID_CREDENTIALS]: t(
+                  "profile.invalidOldPassword"
+                ),
+                [ErrorCode.PASSWORD_WEAK]: t("profile.passwordWeak"),
+                [ErrorCode.PASSWORD_SAME_AS_OLD]: t(
+                  "profile.passwordSameAsOld"
+                ),
+              };
+              const translatedError =
+                errorMessages[result.errorCode] || result.error;
+              antdMessage.error(translatedError);
+              return;
+            }
+            antdMessage.success(
+              t("profile.passwordUpdateSuccess") ||
+                "Password updated successfully"
+            );
             setIsPasswordModalOpen(false);
             passwordForm.resetFields();
           }}
@@ -554,11 +614,58 @@ export default function UserProfileComp() {
             label={t("profile.newPassword") || "New Password"}
             rules={[
               { required: true, message: t("auth.passwordRequired") },
-              { min: 6, message: t("auth.passwordMinLength") },
+              {
+                pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/,
+                message:
+                  t("auth.passwordStrengthError") ||
+                  "Password must contain uppercase, lowercase, and digit",
+              },
             ]}
           >
-            <Input.Password placeholder={t("profile.enterNewPassword") || "Enter new password"} />
+            <Input.Password
+              placeholder={
+                t("profile.enterNewPassword") || "Enter new password"
+              }
+              onChange={(e) => setNewPasswordValue(e.target.value)}
+            />
           </Form.Item>
+
+          {/* Password Strength Indicator */}
+          {newPasswordValue &&
+            (() => {
+              const checks = getPasswordChecks(newPasswordValue);
+              const levelInfo = getStrengthLevel(newPasswordValue, t);
+              return (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-gray-500">
+                      {t("auth.passwordStrength") || "Password strength"}
+                    </span>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: levelInfo.color }}
+                    >
+                      {levelInfo.label}
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3].map((level) => (
+                      <div
+                        key={level}
+                        className="h-1 flex-1 rounded-full transition-colors"
+                        style={{
+                          backgroundColor:
+                            level <= levelInfo.level
+                              ? levelInfo.color
+                              : "#e5e7eb",
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
           <Form.Item
             name="confirmPassword"
             label={t("auth.confirmPasswordLabel") || "Confirm Password"}
@@ -570,7 +677,9 @@ export default function UserProfileComp() {
                   if (!value || getFieldValue("newPassword") === value) {
                     return Promise.resolve();
                   }
-                  return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
+                  return Promise.reject(
+                    new Error(t("auth.passwordsDoNotMatch"))
+                  );
                 },
               }),
             ]}

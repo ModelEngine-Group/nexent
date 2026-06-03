@@ -1,0 +1,212 @@
+{{- if and .Values.enabled .Values.persistence.enabled .Values.persistence.createPv }}
+{{- if include "nexent-monitoring.phoenixEnabled" . }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-phoenix-pv
+  labels:
+    app: nexent-phoenix
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.phoenix.storage.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.phoenix.storage.hostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-phoenix
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.phoenix.storage.size }}
+  volumeName: nexent-phoenix-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+---
+{{- end }}
+{{- if include "nexent-monitoring.tempoEnabled" . }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-tempo-pv
+  labels:
+    app: nexent-tempo
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.tempo.storage.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.tempo.storage.hostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-tempo
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.tempo.storage.size }}
+  volumeName: nexent-tempo-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+---
+{{- end }}
+{{- if include "nexent-monitoring.grafanaEnabled" . }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-grafana-pv
+  labels:
+    app: nexent-grafana
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.grafana.storage.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.grafana.storage.hostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-grafana
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.grafana.storage.size }}
+  volumeName: nexent-grafana-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+---
+{{- end }}
+{{- if include "nexent-monitoring.langfuseEnabled" . }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-langfuse-postgres-pv
+  labels:
+    app: nexent-langfuse-postgres
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.langfuse.postgres.storage.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.langfuse.postgres.storage.hostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-langfuse-postgres
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.langfuse.postgres.storage.size }}
+  volumeName: nexent-langfuse-postgres-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-langfuse-clickhouse-pv
+  labels:
+    app: nexent-langfuse-clickhouse
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.langfuse.clickhouse.storage.dataSize }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.langfuse.clickhouse.storage.dataHostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-langfuse-clickhouse
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.langfuse.clickhouse.storage.dataSize }}
+  volumeName: nexent-langfuse-clickhouse-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-langfuse-minio-pv
+  labels:
+    app: nexent-langfuse-minio
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.langfuse.minio.storage.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.langfuse.minio.storage.hostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-langfuse-minio
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.langfuse.minio.storage.size }}
+  volumeName: nexent-langfuse-minio-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-langfuse-redis-pv
+  labels:
+    app: nexent-langfuse-redis
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  capacity:
+    storage: {{ .Values.langfuse.redis.storage.size }}
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: {{ .Values.langfuse.redis.storage.hostPath }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-langfuse-redis
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.langfuse.redis.storage.size }}
+  volumeName: nexent-langfuse-redis-pv
+  storageClassName: {{ .Values.persistence.storageClassName }}
+{{- end }}
+{{- end }}

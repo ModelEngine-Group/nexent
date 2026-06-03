@@ -9,6 +9,64 @@ from consts.provider import TOKENPONY_GET_URL
 from services.providers.base import AbstractModelProvider, _classify_provider_error
 
 
+TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS = (
+    "qwen-vl",
+    "qwen2-vl",
+    "qwen2.5-vl",
+    "qwen3-vl",
+    "qwen3.5-vl",
+    "qwen3.6-vl",
+    "-vl",
+    "vl-",
+    "vision",
+    "visual",
+    "ocr",
+    "gpt-4o",
+    "qwen3.6",
+    "qwen-3.6",
+)
+TOKENPONY_IMAGE_GENERATION_KEYWORDS = (
+    "image",
+    "dall",
+    "flux",
+    "stable-diffusion",
+    "sdxl",
+    "midjourney",
+    "wanx",
+    "kolors",
+    "seedream",
+    "ideogram",
+    "recraft",
+)
+TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS = ("omni", "video")
+
+
+def _has_keyword(text: str, keywords: tuple) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _is_tokenpony_explicit_image_understanding_model(model_id: str) -> bool:
+    return _has_keyword(model_id, TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS)
+
+
+def _is_tokenpony_image_generation_model(model_id: str) -> bool:
+    if _is_tokenpony_explicit_image_understanding_model(model_id):
+        return False
+    return _has_keyword(model_id, TOKENPONY_IMAGE_GENERATION_KEYWORDS)
+
+
+def _is_tokenpony_video_understanding_model(model_id: str) -> bool:
+    return _has_keyword(model_id, TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS)
+
+
+def _is_tokenpony_image_understanding_model(model_id: str) -> bool:
+    if _is_tokenpony_image_generation_model(model_id):
+        return False
+    if _is_tokenpony_video_understanding_model(model_id):
+        return False
+    return _is_tokenpony_explicit_image_understanding_model(model_id)
+
+
 class TokenPonyModelProvider(AbstractModelProvider):
     """Concrete implementation for TokenPony provider."""
 
@@ -46,6 +104,8 @@ class TokenPonyModelProvider(AbstractModelProvider):
             categorized_models = {
                 "chat": [],       # Maps to "llm"
                 "vlm": [],        # Maps to "vlm"
+                "vlm2": [],       # Maps to image generation models
+                "vlm3": [],       # Maps to video understanding models
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
                 "rerank": [],   # Maps to "rerank"
                 "tts": [],        # Maps to "tts"
@@ -86,9 +146,14 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     cleaned_model.update({"model_tag": "tts", "model_type": "tts"})
                     categorized_models['tts'].append(cleaned_model)
 
-                # 5. VLM (Vision Language Model / Image & Video Generation)
-
-                elif any(keyword in m_id for keyword in ['-vl', 'vl-', 'ocr', 'vision']):
+                # 5. Multimodal models
+                elif _is_tokenpony_video_understanding_model(m_id):
+                    cleaned_model.update({"model_tag": "chat", "model_type": "vlm3"})
+                    categorized_models['vlm3'].append(cleaned_model)
+                elif _is_tokenpony_image_generation_model(m_id):
+                    cleaned_model.update({"model_tag": "chat", "model_type": "vlm2"})
+                    categorized_models['vlm2'].append(cleaned_model)
+                elif _is_tokenpony_image_understanding_model(m_id):
                     cleaned_model.update({"model_tag": "chat", "model_type": "vlm"})
                     categorized_models['vlm'].append(cleaned_model)
 
@@ -104,7 +169,10 @@ class TokenPonyModelProvider(AbstractModelProvider):
             elif target_model_type in ("embedding", "multi_embedding"):
                 return categorized_models["embedding"]
             elif target_model_type in categorized_models:
-                return categorized_models[target_model_type]
+                return [
+                    {**model, "model_type": target_model_type}
+                    for model in categorized_models[target_model_type]
+                ]
             else:
                 return []
 

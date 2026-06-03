@@ -5,7 +5,7 @@ Tests cover model fetching, type handling, and error handling.
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from pytest_mock import MockFixture
+from typing import Any as MockFixture
 
 import httpx
 
@@ -66,7 +66,13 @@ class TestSiliconModelProvider:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
-                {"id": "gpt-4v", "name": "GPT-4 Vision"},
+                {"id": "deepseek-ai/DeepSeek-R1", "name": "DeepSeek R1"},
+                {"id": "Qwen/Qwen2.5-VL-72B-Instruct", "name": "Qwen2.5 VL"},
+                {"id": "OpenGVLab/InternVL2-26B", "name": "InternVL2 26B"},
+                {"id": "Pro/moonshotai/Kimi-K2.6", "name": "Kimi K2.6"},
+                {"id": "Pro/moonshotai/Kimi-K2.5", "name": "Kimi K2.5"},
+                {"id": "Qwen/Qwen3.6-27B", "name": "Qwen3.6 27B"},
+                {"id": "Qwen/Qwen3.6-35B-A3B", "name": "Qwen3.6 35B A3B"},
             ]
         }
         mock_response.raise_for_status = MagicMock()
@@ -95,10 +101,66 @@ class TestSiliconModelProvider:
 
         result = await provider.get_models(provider_config)
 
-        assert len(result) == 1
-        assert result[0]["id"] == "gpt-4v"
-        assert result[0]["model_type"] == "vlm"
-        assert result[0]["model_tag"] == "chat"
+        assert [model["id"] for model in result] == [
+            "Qwen/Qwen2.5-VL-72B-Instruct",
+            "OpenGVLab/InternVL2-26B",
+            "Pro/moonshotai/Kimi-K2.6",
+            "Pro/moonshotai/Kimi-K2.5",
+            "Qwen/Qwen3.6-27B",
+            "Qwen/Qwen3.6-35B-A3B",
+        ]
+        assert all(model["model_type"] == "vlm" for model in result)
+        assert all(model["model_tag"] == "chat" for model in result)
+
+    @pytest.mark.asyncio
+    async def test_get_models_vlm3_only_returns_omni_models(self, mocker: MockFixture):
+        """Test that SiliconFlow video understanding models are restricted to Omni models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "Qwen/Qwen3-VL-32B-Instruct", "name": "Qwen3 VL"},
+                {"id": "Qwen/Qwen3-Omni-30B-A3B-Instruct", "name": "Qwen3 Omni Instruct"},
+                {"id": "Qwen/Qwen3-Omni-30B-A3B-Thinking", "name": "Qwen3 Omni Thinking"},
+                {"id": "Qwen/Qwen3-Omni-30B-A3B-Captioner", "name": "Qwen3 Omni Captioner"},
+                {"id": "zai-org/GLM-4.5V", "name": "GLM 4.5V"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.silicon_provider.SILICON_GET_URL",
+            "https://api.siliconflow.com/v1/models"
+        )
+
+        provider = SiliconModelProvider()
+        provider_config = {
+            "model_type": "vlm3",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
+        assert [model["id"] for model in result] == [
+            "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+            "Qwen/Qwen3-Omni-30B-A3B-Thinking",
+            "Qwen/Qwen3-Omni-30B-A3B-Captioner",
+        ]
+        assert all(model["model_type"] == "vlm3" for model in result)
+        assert all(model["model_tag"] == "chat" for model in result)
+        call_args = mock_client.get.call_args
+        assert "sub_type=chat" in call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_get_models_embedding_success(self, mocker: MockFixture):
@@ -184,30 +246,10 @@ class TestSiliconModelProvider:
 
     @pytest.mark.asyncio
     async def test_get_models_unknown_type(self, mocker: MockFixture):
-        """Test model retrieval for unknown model types."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [
-                {"id": "unknown-model", "name": "Unknown Model"},
-            ]
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
+        """Test unsupported model types are ignored without calling the API."""
+        mock_async_client = mocker.patch(
             "backend.services.providers.silicon_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
-        mocker.patch(
-            "backend.services.providers.silicon_provider.SILICON_GET_URL",
-            "https://api.siliconflow.com/v1/models"
+            return_value=MagicMock()
         )
 
         provider = SiliconModelProvider()
@@ -218,8 +260,8 @@ class TestSiliconModelProvider:
 
         result = await provider.get_models(provider_config)
 
-        assert len(result) == 1
-        assert result[0]["id"] == "unknown-model"
+        assert result == []
+        mock_async_client.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_models_empty_response(self, mocker: MockFixture):

@@ -15,11 +15,35 @@ from pydantic import EmailStr
 
 from utils.auth_utils import (
     get_supabase_client,
+    get_supabase_admin_client,
     calculate_expires_at,
     get_jwt_expiry_seconds,
+    resolve_tenant_id_from_user_tenant_record,
 )
-from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.const import (
+    INVITE_CODE,
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    DEFAULT_TENANT_ID,
+    ASSET_OWNER_TENANT_ID,
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
+)
+
+from services.asset_owner_visibility import (
+    filter_accessible_routes_for_asset_owner_feature,
+    require_asset_owner_enabled,
+)
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    UnauthorizedError,
+    ValidationError,
+)
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
@@ -29,7 +53,7 @@ from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
-
+from services.skill_service import init_skill_list_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -133,6 +157,12 @@ async def signup_user_with_invitation(email: EmailStr,
                                       auto_login: Optional[bool] = True):
     """User registration with invitation code support"""
     client = get_supabase_client()
+
+    # Validate password strength before registration
+    if not validate_password_strength(password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK,
+                           "Password must be at least 8 characters with uppercase, lowercase, and digit.")
+
     logging.info(
         f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}, auto_login={auto_login}")
 
@@ -163,11 +193,16 @@ async def signup_user_with_invitation(email: EmailStr,
                 user_role = "ADMIN"
             elif code_type == "DEV_INVITE":
                 user_role = "DEV"
+            elif code_type == ASSET_OWNER_INVITE_CODE_TYPE:
+                require_asset_owner_enabled()
+                raise ValidationError(ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL)
 
             logging.info(
                 f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
 
         except IncorrectInviteCodeException:
+            raise
+        except ValidationError:
             raise
         except Exception as e:
             logging.error(
@@ -187,14 +222,20 @@ async def signup_user_with_invitation(email: EmailStr,
         # Determine tenant_id based on invitation code
         if invitation_info:
             tenant_id = invitation_info["tenant_id"]
+            if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
+                tenant_id = ASSET_OWNER_TENANT_ID
         else:
             tenant_id = DEFAULT_TENANT_ID
 
+        is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
+
         # Create user tenant relationship
-        logging.debug(f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
+        logging.debug(
+            f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
         insert_user_tenant(
             user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
-        logging.debug(f"User tenant relationship created successfully for user {user_id}")
+        logging.debug(
+            f"User tenant relationship created successfully for user {user_id}")
 
         # Use invitation code now that we have the real user_id
         if invitation_info:
@@ -205,7 +246,7 @@ async def signup_user_with_invitation(email: EmailStr,
 
                 # Add user to groups specified in invitation code
                 group_ids = invitation_result.get("group_ids", [])
-                if group_ids:
+                if group_ids and not is_asset_owner_registration:
                     try:
                         # Convert group_ids from string to list if needed
                         if isinstance(group_ids, str):
@@ -213,7 +254,8 @@ async def signup_user_with_invitation(email: EmailStr,
                             group_ids = convert_string_to_list(group_ids)
 
                         if group_ids:
-                            group_results = add_user_to_groups(user_id, group_ids, user_id)
+                            group_results = add_user_to_groups(
+                                user_id, group_ids, user_id)
                             successful_adds = [
                                 r for r in group_results if not r.get("error")]
                             logging.info(
@@ -235,7 +277,9 @@ async def signup_user_with_invitation(email: EmailStr,
             await generate_tts_stt_4_admin(tenant_id, user_id)
 
         # Initialize tool list for the new tenant (only once per tenant)
-        await init_tool_list_for_tenant(tenant_id, user_id)
+        if not is_asset_owner_registration:
+            await init_tool_list_for_tenant(tenant_id, user_id)
+            await init_skill_list_for_tenant(tenant_id, user_id)
 
         return await parse_supabase_response(False, response, user_role, auto_login)
     else:
@@ -330,14 +374,24 @@ async def signin_user(email: EmailStr,
         "password": password
     })
 
+    user_tenant = get_user_tenant_by_user_id(response.user.id)
+    if user_tenant and user_tenant.get("user_role") == ASSET_OWNER_ROLE:
+        try:
+            require_asset_owner_enabled()
+        except ValidationError:
+            client.auth.sign_out()
+            raise
+
     # Get actual expiration time from access_token
     expiry_seconds = get_jwt_expiry_seconds(response.session.access_token)
     expires_at = calculate_expires_at(response.session.access_token)
 
-    # Get role information from user metadata
-    user_role = "user"  # Default role
-    if 'role' in response.user.user_metadata:  # Adapt to historical user data
-        user_role = response.user.user_metadata['role']
+    # Prefer user_tenant_t role; fall back to Supabase metadata for legacy users
+    user_role = "user"
+    if user_tenant and user_tenant.get("user_role"):
+        user_role = user_tenant["user_role"]
+    elif "role" in response.user.user_metadata:
+        user_role = response.user.user_metadata["role"]
 
     logging.info(
         f"User {email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
@@ -374,7 +428,8 @@ async def refresh_user_token(authorization, refresh_token: str):
 
 async def get_session_by_authorization(authorization):
     # Extract clean token from authorization header
-    clean_token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+    clean_token = authorization.replace(
+        "Bearer ", "") if authorization.startswith("Bearer ") else authorization
 
     # Use the unified token validation function
     is_valid, user = validate_token(clean_token)
@@ -411,9 +466,27 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         # Get user tenant relationship
         user_tenant = get_user_tenant_by_user_id(user_id)
         if not user_tenant:
+            # User exists in Supabase but not in local database - this is an inconsistent state.
+            # Delete the orphaned Supabase account and return None to trigger 401.
+            logging.warning(
+                f"User {user_id} not found in local database, cleaning up orphaned Supabase account"
+            )
+            try:
+                admin_client = get_supabase_admin_client()
+                if admin_client and hasattr(admin_client.auth, "admin"):
+                    admin_client.auth.admin.delete_user(user_id)
+                    logging.info(f"Deleted orphaned Supabase user {user_id}")
+                else:
+                    logging.warning(
+                        f"Could not get Supabase admin client to delete user {user_id}"
+                    )
+            except Exception as delete_err:
+                logging.error(
+                    f"Failed to delete orphaned Supabase user {user_id}: {str(delete_err)}"
+                )
             return None
 
-        tenant_id = user_tenant["tenant_id"]
+        tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant)
         user_role = user_tenant["user_role"]
         user_email = user_tenant["user_email"]
 
@@ -437,7 +510,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "user_email": user_email,
                 "user_role": user_role,
                 "permissions": permissions_data["permissions"],
-                "accessibleRoutes": permissions_data["accessibleRoutes"]
+                "accessibleRoutes": permissions_data["accessibleRoutes"],
             }
         }
 
@@ -469,16 +542,20 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
         permission_subtype = perm.get("permission_subtype", "")
 
         if permission_category == "RESOURCE" and permission_type and permission_subtype:
-            # Format as "permission_type:permission_subtype" 
+            # Format as "permission_type:permission_subtype"
             formatted_permissions.append(
                 f"{permission_type}:{permission_subtype}")
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
             # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
             accessible_routes.append(permission_subtype)
 
+    accessible_routes = filter_accessible_routes_for_asset_owner_feature(
+        accessible_routes
+    )
+
     return {
         "permissions": formatted_permissions,
-        "accessibleRoutes": accessible_routes
+        "accessibleRoutes": accessible_routes,
     }
 
 
@@ -522,3 +599,85 @@ def delete_token(token_id: int, user_id: str) -> bool:
         True if the token was deleted, False if not found or not owned by user.
     """
     return delete_token_record(token_id, user_id)
+
+
+# -----------------------------
+# Password Management
+# -----------------------------
+
+def validate_password_strength(password: str) -> bool:
+    """Validate password meets minimum security requirements.
+
+    Args:
+        password: The password to validate.
+
+    Returns:
+        True if password meets requirements, False otherwise.
+    """
+    if len(password) < 8:
+        return False
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    return has_upper and has_lower and has_digit
+
+
+async def update_password(user_id: str, old_password: str, new_password: str) -> bool:
+    """Update user password with old password verification.
+
+    This method first re-authenticates the user with their old password,
+    then updates to the new password.
+
+    Args:
+        user_id: The user ID to update password for.
+        old_password: The current password for verification.
+        new_password: The new password to set.
+
+    Returns:
+        True if password was updated successfully.
+
+    Raises:
+        UnauthorizedError: If old password is incorrect.
+        AppException (PROFILE_PASSWORD_WEAK): If new password does not meet requirements.
+        AppException (PROFILE_PASSWORD_SAME_AS_OLD): If new password is the same as old password.
+    """
+    if not validate_password_strength(new_password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
+
+    if old_password == new_password:
+        raise AppException(ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD)
+
+    admin_client = get_supabase_admin_client()
+
+    try:
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant or not user_tenant.get("user_email"):
+            raise UnauthorizedError("Unable to retrieve user email")
+
+        user_email = user_tenant["user_email"]
+
+        # Re-authenticate with old password to verify identity using admin client
+        try:
+            admin_client.auth.sign_in_with_password({
+                "email": user_email,
+                "password": old_password
+            })
+        except Exception as auth_err:
+            logging.warning(
+                f"Password verification failed for user {user_id}: {str(auth_err)}")
+            raise UnauthorizedError("Invalid old password")
+
+        # Update to new password using admin client
+        admin_client.auth.update_user({"password": new_password})
+
+        logging.info(f"Password updated successfully for user {user_id}")
+        return True
+
+    except UnauthorizedError:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logging.error(
+            f"Failed to update password for user {user_id}: {str(exc)}")
+        raise

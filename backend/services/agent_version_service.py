@@ -33,6 +33,7 @@ from database.agent_version_db import (
 )
 from database.model_management_db import get_model_by_model_id
 from utils.str_utils import convert_string_to_list
+from consts.agent_unavailable_reasons import AgentUnavailableReason
 
 logger = logging.getLogger("agent_version_service")
 
@@ -127,6 +128,7 @@ def publish_version_impl(
         'status': STATUS_RELEASED,
         'is_a2a': publish_as_a2a,
         'created_by': user_id,
+        'updated_by': user_id,
     }
     version_id = insert_version(version_data)
 
@@ -337,21 +339,18 @@ def _check_version_snapshot_availability(
 
     # Check if agent info exists
     if not agent_info:
-        return False, ["agent_not_found"]
+        return False, [AgentUnavailableReason.AGENT_NOT_FOUND]
 
     # Check model availability
     model_id = agent_info.get('model_id')
     if model_id is None or model_id == 0:
-        unavailable_reasons.append("model_not_configured")
+        unavailable_reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
 
-    # Check tools availability
-    if not tool_instances:
-        unavailable_reasons.append("no_tools")
-    else:
-        # Check if at least one tool is enabled
+    # Check tools availability (only when tools are configured)
+    if tool_instances:
         has_enabled_tool = any(t.get('enabled', True) for t in tool_instances)
         if not has_enabled_tool:
-            unavailable_reasons.append("all_tools_disabled")
+            unavailable_reasons.append(AgentUnavailableReason.ALL_TOOLS_DISABLED)
 
     return len(unavailable_reasons) == 0, unavailable_reasons
 
@@ -386,6 +385,11 @@ def rollback_version_impl(
      target_relations) = query_agent_snapshot(agent_id, tenant_id, target_version_no)
     if not target_agent:
         raise ValueError(f"Agent snapshot for version {target_version_no} not found")
+
+    # Ensure the draft still exists before attempting an in-place restore.
+    draft_agent, _, _ = query_agent_draft(agent_id, tenant_id)
+    if not draft_agent:
+        raise ValueError("Agent draft not found")
 
     # Get skill snapshots for target version
     from database import skill_db as skill_db_module
@@ -817,7 +821,7 @@ async def list_published_agents_impl(
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
-                is_creator = str(agent.get("created_by)) == str(user_id)"))
+                is_creator = str(agent.get("created_by")) == str(user_id)
                 if not is_creator and len(user_group_ids.intersection(agent_group_ids)) == 0:
                     continue
 

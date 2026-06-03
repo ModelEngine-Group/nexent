@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
+from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_READ
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
@@ -17,6 +18,7 @@ from services.vectordatabase_service import (
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
 )
+from services.file_management_service import check_file_access
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
@@ -26,6 +28,8 @@ from database.model_management_db import get_model_by_model_id
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
+
+INTERNAL_INDEX_NAME_DESC = "Internal index_name from knowledge_record_t"
 
 
 @router.get("/summary_frequency_options")
@@ -41,6 +45,7 @@ async def get_summary_frequency_options():
             "valid_values": VALID_SUMMARY_FREQUENCIES,
         }
     )
+
 
 @router.post("/check_exist")
 async def check_knowledge_base_exist(
@@ -82,11 +87,13 @@ def create_new_index(
         # Extract optional fields from request body
         ingroup_permission = None
         group_ids = None
-        embedding_model_name = None
+        embedding_model_name: Optional[str] = None
+        is_multimodal: Optional[bool] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
-            embedding_model_name = request.get("embedding_model_name")
+            embedding_model_name = request.get("embeddingModel")
+            is_multimodal = request.get("is_multimodal")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -98,6 +105,7 @@ def create_new_index(
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
             embedding_model_name=embedding_model_name,
+            is_multimodal=is_multimodal,
         )
     except Exception as e:
         raise HTTPException(
@@ -206,7 +214,8 @@ async def update_summary_frequency_endpoint(
         if success:
             return JSONResponse(
                 status_code=HTTPStatus.OK,
-                content={"message": "Summary frequency updated successfully", "status": "success"}
+                content={
+                    "message": "Summary frequency updated successfully", "status": "success"}
             )
         else:
             raise HTTPException(
@@ -243,7 +252,8 @@ def get_embedding_model_status(
         # Get the knowledge base record by index_name
         knowledge_record = get_knowledge_record({
             "index_name": index_name,
-            "tenant_id": tenant_id
+            "tenant_id": tenant_id,
+            "include_asset_owner_assets": True,
         })
 
         if not knowledge_record:
@@ -301,7 +311,8 @@ def get_embedding_model_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
+        logger.error(
+            f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error checking embedding model status: {str(e)}"
@@ -310,7 +321,8 @@ def get_embedding_model_status(
 
 @router.put("/{index_name}/embedding-model")
 def update_embedding_model(
-        index_name: str = Path(..., description="Internal index name of the knowledge base to update"),
+        index_name: str = Path(
+            ..., description="Internal index name of the knowledge base to update"),
         request: Dict[str, Any] = Body(...,
                                        description="Update payload with model_id"),
         authorization: Optional[str] = Header(None)
@@ -350,11 +362,43 @@ def update_embedding_model(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
+        logger.error(
+            f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error updating embedding model: {str(exc)}"
         )
+
+
+def _apply_read_only_to_asset_indices_info(asset_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Force READ_ONLY permission on asset-owner indices_info before merge."""
+    indices_info = asset_result.get("indices_info")
+    if not indices_info:
+        return asset_result
+    normalized = dict(asset_result)
+    normalized["indices_info"] = [
+        {**info, "permission": PERMISSION_READ} for info in indices_info
+    ]
+    return normalized
+
+
+def _merge_list_indices_results(
+        primary: Dict[str, Any],
+        asset_owner: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge tenant and ASSET_OWNER list_indices responses (concat, no dedup)."""
+    merged_indices = primary.get("indices", []) + \
+        asset_owner.get("indices", [])
+    merged: Dict[str, Any] = {
+        "indices": merged_indices,
+        "count": len(merged_indices),
+    }
+    if "indices_info" in primary or "indices_info" in asset_owner:
+        merged["indices_info"] = (
+            primary.get("indices_info", []) +
+            asset_owner.get("indices_info", [])
+        )
+    return merged
 
 
 @router.get("")
@@ -370,9 +414,21 @@ def get_list_indices(
     """List all user indices with optional stats"""
     try:
         user_id, auth_tenant_id = get_current_user_id(authorization)
-        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
-        effective_tenant_id = tenant_id or auth_tenant_id
-        return ElasticSearchService.list_indices(pattern, include_stats, effective_tenant_id, user_id, vdb_core)
+        if tenant_id is None:
+            result = ElasticSearchService.list_indices(
+                pattern, include_stats, auth_tenant_id, user_id, vdb_core
+            )
+            if auth_tenant_id != ASSET_OWNER_TENANT_ID:
+                asset_result = ElasticSearchService.list_indices(
+                    pattern, include_stats, ASSET_OWNER_TENANT_ID, user_id, vdb_core
+                )
+                asset_result = _apply_read_only_to_asset_indices_info(
+                    asset_result)
+                return _merge_list_indices_results(result, asset_result)
+            return result
+        return ElasticSearchService.list_indices(
+            pattern, include_stats, tenant_id, user_id, vdb_core
+        )
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
@@ -402,10 +458,12 @@ def create_index_documents(
         knowledge_record = get_knowledge_record({'index_name': index_name})
         saved_embedding_model_id = None
         if knowledge_record:
-            saved_embedding_model_id = knowledge_record.get('embedding_model_id')
+            saved_embedding_model_id = knowledge_record.get(
+                'embedding_model_id')
 
         # Use the saved model from knowledge base by model_id
-        embedding_model, _ = get_embedding_model_by_id(tenant_id, saved_embedding_model_id) if saved_embedding_model_id else (None, None)
+        embedding_model, _ = get_embedding_model_by_id(
+            tenant_id, saved_embedding_model_id) if saved_embedding_model_id else (None, None)
 
         return ElasticSearchService.index_documents(
             embedding_model=embedding_model,
@@ -565,13 +623,14 @@ def health_check(vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)):
         # Try to list indices as a health check
         return ElasticSearchService.health_check(vdb_core)
     except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"{str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"{str(e)}")
 
 
 @router.post("/{index_name}/chunks")
 def get_index_chunks(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name) to get chunks from"),
+                               description=INTERNAL_INDEX_NAME_DESC),
         page: int = Query(
             None, description="Page number (1-based) for pagination"),
         page_size: int = Query(
@@ -583,12 +642,18 @@ def get_index_chunks(
 ):
     """Get chunks from the specified index, with optional pagination support"""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        if path_or_url is not None and not check_file_access(
+            path_or_url, user_id, tenant_id
+        ):
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="You don't have permission to access this file",
+            )
 
         result = ElasticSearchService.get_index_chunks(
-            index_name=actual_index_name,
+            index_name=index_name,
             page=page,
             page_size=page_size,
             path_or_url=path_or_url,
@@ -602,8 +667,6 @@ def get_index_chunks(
         )
     except Exception as e:
         error_msg = str(e)
-        logger.error(
-            f"Error getting chunks for index '{index_name}': {error_msg}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error getting chunks: {error_msg}")
 
@@ -611,7 +674,7 @@ def get_index_chunks(
 @router.post("/{index_name}/chunk")
 def create_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description=INTERNAL_INDEX_NAME_DESC),
         payload: ChunkCreateRequest = Body(..., description="Chunk data"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
@@ -619,10 +682,8 @@ def create_chunk(
     """Create a manual chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
         result = ElasticSearchService.create_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
@@ -646,7 +707,7 @@ def create_chunk(
 @router.put("/{index_name}/chunk/{chunk_id}")
 def update_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description=INTERNAL_INDEX_NAME_DESC),
         chunk_id: str = Path(..., description="Chunk identifier"),
         payload: ChunkUpdateRequest = Body(...,
                                            description="Chunk update payload"),
@@ -656,14 +717,13 @@ def update_chunk(
     """Update an existing chunk."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
         result = ElasticSearchService.update_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_id=chunk_id,
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
+            tenant_id=tenant_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
@@ -687,18 +747,16 @@ def update_chunk(
 @router.delete("/{index_name}/chunk/{chunk_id}")
 def delete_chunk(
         index_name: str = Path(...,
-                               description="Name of the index (or knowledge_name)"),
+                               description=INTERNAL_INDEX_NAME_DESC),
         chunk_id: str = Path(..., description="Chunk identifier"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """Delete a chunk."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        actual_index_name = get_index_name_by_knowledge_name(
-            index_name, tenant_id)
+        get_current_user_id(authorization)
         result = ElasticSearchService.delete_chunk(
-            index_name=actual_index_name,
+            index_name=index_name,
             chunk_id=chunk_id,
             vdb_core=vdb_core,
         )
@@ -730,8 +788,17 @@ async def hybrid_search(
     """Run a hybrid (accurate + semantic) search across indices."""
     try:
         _, tenant_id = get_current_user_id(authorization)
+        resolved_index_names: List[str] = []
+        for requested_name in payload.index_names:
+            try:
+                resolved_name = get_index_name_by_knowledge_name(
+                    requested_name, tenant_id
+                )
+            except Exception:
+                resolved_name = requested_name
+            resolved_index_names.append(resolved_name)
         result = ElasticSearchService.search_hybrid(
-            index_names=payload.index_names,
+            index_names=resolved_index_names,
             query=payload.query,
             tenant_id=tenant_id,
             top_k=payload.top_k,
@@ -751,7 +818,8 @@ async def hybrid_search(
             }
         )
     except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

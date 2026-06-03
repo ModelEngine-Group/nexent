@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Modal, Tabs, Tag, Descriptions, Empty } from "antd";
+import { Modal, Tabs, Tag, Descriptions, Empty, Alert } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
@@ -15,6 +15,10 @@ import { MarketAgentDetail } from "@/types/market";
 import { getToolSourceLabel, getGenericLabel } from "@/lib/agentLabelMapper";
 import { getCategoryIcon } from "@/const/marketConfig";
 import { getLocalizedDescription } from "@/lib/utils";
+import {
+  isAgentPromptsHidden,
+  renderAgentPromptFieldValue,
+} from "@/lib/agentPromptVisibility";
 import { useLocalTools } from "@/hooks/useLocalTools";
 
 interface MarketAgentDetailModalProps {
@@ -210,13 +214,24 @@ export default function MarketAgentDetailModal({
       ),
       children: (
         <div className="space-y-4">
+          {isAgentPromptsHidden(agentDetails) && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+            />
+          )}
           <div>
             <h4 className="font-semibold mb-2 flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
               {t("market.detail.dutyPrompt", "Duty Prompt")}
             </h4>
             <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-              {needsConfig(agentDetails?.duty_prompt) ? (
+              {isAgentPromptsHidden(agentDetails) ? (
+                <span className="text-sm text-slate-500">
+                  {renderAgentPromptFieldValue(agentDetails, "duty_prompt", t)}
+                </span>
+              ) : needsConfig(agentDetails?.duty_prompt) ? (
                 renderFieldValue(agentDetails?.duty_prompt)
               ) : (
                 <pre className="whitespace-pre-wrap text-sm">
@@ -231,7 +246,11 @@ export default function MarketAgentDetailModal({
               {t("market.detail.constraintPrompt", "Constraint Prompt")}
             </h4>
             <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-              {needsConfig(agentDetails?.constraint_prompt) ? (
+              {isAgentPromptsHidden(agentDetails) ? (
+                <span className="text-sm text-slate-500">
+                  {renderAgentPromptFieldValue(agentDetails, "constraint_prompt", t)}
+                </span>
+              ) : needsConfig(agentDetails?.constraint_prompt) ? (
                 renderFieldValue(agentDetails?.constraint_prompt)
               ) : (
                 <pre className="whitespace-pre-wrap text-sm">
@@ -246,7 +265,11 @@ export default function MarketAgentDetailModal({
               {t("market.detail.fewShotsPrompt", "Few-Shots Prompt")}
             </h4>
             <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-              {needsConfig(agentDetails?.few_shots_prompt) ? (
+              {isAgentPromptsHidden(agentDetails) ? (
+                <span className="text-sm text-slate-500">
+                  {renderAgentPromptFieldValue(agentDetails, "few_shots_prompt", t)}
+                </span>
+              ) : needsConfig(agentDetails?.few_shots_prompt) ? (
                 renderFieldValue(agentDetails?.few_shots_prompt)
               ) : (
                 <pre className="whitespace-pre-wrap text-sm">

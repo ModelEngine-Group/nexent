@@ -20,7 +20,7 @@ from consts.const import (
     MODEL_ENGINE_ENABLED,
     TENANT_NAME
 )
-from database.model_management_db import get_model_id_by_display_name
+from database.model_management_db import get_model_id_by_display_name, get_model_records
 from utils.config_utils import (
     get_env_key,
     get_model_name_from_config,
@@ -29,6 +29,20 @@ from utils.config_utils import (
 )
 
 logger = logging.getLogger("config_sync_service")
+
+
+def get_model_id_for_config(model_type: str, display_name: str, tenant_id: str) -> Optional[int]:
+    if not display_name:
+        return None
+
+    records = get_model_records(
+        {"display_name": display_name, "model_type": model_type},
+        tenant_id
+    )
+    if records:
+        return records[0].get("model_id")
+
+    return get_model_id_by_display_name(display_name, tenant_id)
 
 
 def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id: Optional[int], tenant_config_dict: dict) -> None:
@@ -98,8 +112,8 @@ async def save_config_impl(config, tenant_id, user_id):
         model_display_name = model_config.get("displayName")
 
         config_key = get_env_key(model_type) + "_ID"
-        model_id = get_model_id_by_display_name(
-            model_display_name, tenant_id)
+        model_id = get_model_id_for_config(
+            model_type, model_display_name, tenant_id)
 
         handle_model_config(tenant_id, user_id, config_key,
                             model_id, tenant_config_dict)
@@ -182,6 +196,7 @@ def build_models_config(tenant_id: str) -> dict:
 def build_model_config(model_config: dict) -> dict:
     if not model_config:
         return {
+            "id": None,
             "name": "",
             "displayName": "",
             "apiConfig": {
@@ -191,6 +206,7 @@ def build_model_config(model_config: dict) -> dict:
         }
 
     config = {
+        "id": model_config.get("model_id"),
         "name": get_model_name_from_config(model_config) if model_config else "",
         "displayName": model_config.get("display_name", ""),
         "apiConfig": {
@@ -202,9 +218,9 @@ def build_model_config(model_config: dict) -> dict:
     if "embedding" in model_config.get("model_type", ""):
         config["dimension"] = model_config.get("max_tokens", 0)
 
-    # Add STT model specific fields
+    # Add voice model specific fields (STT and TTS)
     model_type = model_config.get("model_type", "")
-    if model_type == "stt":
+    if model_type == "stt" or model_type == "tts":
         config["modelFactory"] = model_config.get("model_factory", "")
         config["modelAppid"] = model_config.get("model_appid", "")
         config["accessToken"] = model_config.get("access_token", "")

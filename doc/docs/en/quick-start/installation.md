@@ -19,10 +19,9 @@
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
-cp .env.example .env # Configure environment variables
 ```
 
-> **💡 Tip**: If there are no special requirements, you can directly use `.env.example` for deployment without making any changes. If you need to configure voice models (STT/TTS), you will need to set the relevant parameters in `.env`. We will work on making this configuration available through the frontend soon—stay tuned.
+> **💡 Tip**: `deploy.sh` automatically copies `.env.example` to `docker/.env` when `docker/.env` does not exist. If you need to configure voice models (STT/TTS), update the related values in `docker/.env` before or after deployment.
 
 ### 2. Deployment Options
 
@@ -32,20 +31,42 @@ Run the following command to start deployment:
 bash deploy.sh
 ```
 
-After executing this command, the system will provide two different versions for you to choose from:
+After running the command, the script opens Bash TUI menus for deployment options. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
 
-**Version Selection:**
-- **Speed version (Lightweight & Fast Deployment, Default)**: Quick startup of core features, suitable for individual users and small teams
-- **Full version (Complete Feature Edition)**: Provides enterprise-level tenant management and resource isolation features, but takes longer to install, suitable for enterprise users
+**Deployment Components:**
+- **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
+- **application (selected by default, optional)**: config, runtime, mcp, northbound, web
+- **data-process (optional)**: data processing service
+- **supabase (optional)**: enables user, tenant, and authentication features
+- **terminal (optional)**: enables the OpenSSH terminal tool
+- **monitoring (optional)**: enables observability components and then prompts for a provider
 
-**Deployment Modes:**
-- **Development mode (default)**: Exposes all service ports for debugging
-- **Infrastructure mode**: Only starts infrastructure services
-- **Production mode**: Only exposes port 3000 for security
+**Port Policy:**
+- **development (default)**: publishes debug and internal service ports for local troubleshooting
+- **production**: publishes only production entry ports
 
-**Optional Components:**
-- **Terminal Tool**: Enables openssh-server for AI agent shell command execution
-- **Regional optimization**: Mainland China users can use optimized image sources
+**Image Source:**
+- **general (default)**: uses standard public registries
+- **mainland**: uses mainland China mirrors
+- **local-latest**: uses local `latest` Nexent images and avoids pulling Nexent application images
+
+You can also pass options directly:
+
+```bash
+# Default component set, development port policy, standard image source
+bash deploy.sh --components infrastructure,application --port-policy development --image-source general
+
+# Enable user/tenant features, data processing, and terminal
+bash deploy.sh --components infrastructure,application,supabase,data-process,terminal
+
+# Use mainland China image sources
+bash deploy.sh --image-source mainland
+
+# Use local latest images
+bash deploy.sh --image-source local-latest
+```
+
+After a successful deployment, non-sensitive choices are saved to `docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 #### ⚠️ Important Notes
 
@@ -102,7 +123,7 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | nexent-minio | S3-compatible object storage |
 | redis | Caching layer |
 
-**Supabase Services (Full Version Only):**
+**Supabase Services (when `supabase` is selected):**
 | Service | Description |
 |---------|-------------|
 | supabase-kong | API Gateway |
@@ -113,6 +134,7 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | Service | Description |
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
+| nexent-monitoring | Optional observability stack |
 
 Internal services communicate using the Docker internal network.
 
@@ -126,9 +148,11 @@ Nexent uses Docker volumes for data persistence:
 | Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
-| Supabase DB (Full) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
+| Supabase DB (when `supabase` is selected) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `.env`).
+
+Uninstall is handled by `docker/uninstall.sh`. It prompts before deleting persistent data by default; you can also pass `--delete-volumes true|false`, `--remove-volumes`, `--keep-volumes`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
 
 ## 🔌 Port Mapping
 
@@ -148,6 +172,106 @@ Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `.env`).
 For complete port mapping details, see our [Dev Container Guide](../deployment/devcontainer.md#port-mapping).
 
 ## 🔧 Advanced Configuration
+
+### Monitoring Configuration
+
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `docker/.env`, then starts the matching observability services from `docker/docker-compose-monitoring.yml`.
+
+```bash
+cd nexent/docker
+bash deploy.sh
+```
+
+If `docker/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+
+Supported providers:
+
+| Provider | Purpose | Default URL |
+|----------|---------|-------------|
+| `otlp` | OpenTelemetry Collector only, useful for forwarding to an external platform | No dashboard |
+| `phoenix` | Local Phoenix trace analysis | `http://localhost:6006` |
+| `langfuse` | Local Langfuse observability stack | `http://localhost:3001` |
+| `langsmith` | Forwarding to hosted LangSmith | `https://smith.langchain.com/` |
+| `grafana` | Local Grafana + Tempo | `http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
+| `zipkin` | Local Zipkin | `http://localhost:9411` |
+
+To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
+
+```bash
+cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
+```
+
+Common variables:
+
+| Variable | Description |
+|----------|-------------|
+| `MONITORING_PROVIDER` | Default monitoring provider; updated when you choose a provider in the deployment script |
+| `OTEL_COLLECTOR_HTTP_PORT` / `OTEL_COLLECTOR_GRPC_PORT` | Published OTLP HTTP/gRPC ports |
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
+| `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
+| `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
+
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `docker/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `docker/.env`:
+
+```bash
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+MONITORING_DASHBOARD_URL=
+```
+
+> **Production note**: Replace default passwords, secrets, and the Langfuse `ENCRYPTION_KEY`. Restrict dashboard and Collector access with a reverse proxy or firewall.
+
+### OAuth Login Configuration
+
+OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `OAUTH_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL.
+
+```bash
+bash deploy.sh --components infrastructure,application,supabase
+```
+
+For Docker, configure OAuth in `docker/.env`:
+
+```bash
+# Web entry URL. The full callback path is generated as:
+# {OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=<provider>
+OAUTH_CALLBACK_BASE_URL=http://localhost:3000
+
+# GitHub OAuth
+GITHUB_OAUTH_CLIENT_ID=
+GITHUB_OAUTH_CLIENT_SECRET=
+
+# GDE OAuth
+GDE_URL=
+GDE_OAUTH_CLIENT_ID=
+GDE_OAUTH_CLIENT_SECRET=
+
+# Link App OAuth
+LINK_APP_URL=
+LINK_APP_OAUTH_CLIENT_ID=
+LINK_APP_OAUTH_CLIENT_SECRET=
+
+# WeChat OAuth
+ENABLE_WECHAT_OAUTH=false
+WECHAT_OAUTH_APP_ID=
+WECHAT_OAUTH_APP_SECRET=
+
+# TLS verification when contacting OAuth providers
+OAUTH_SSL_VERIFY=true
+OAUTH_CA_BUNDLE=
+```
+
+Provider enablement rules:
+
+| Provider | Required variables | Callback URL |
+|----------|--------------------|--------------|
+| GitHub | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=github` |
+| GDE | `GDE_URL`, `GDE_OAUTH_CLIENT_ID`, `GDE_OAUTH_CLIENT_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=gde` |
+| Link App | `LINK_APP_URL`, `LINK_APP_OAUTH_CLIENT_ID`, `LINK_APP_OAUTH_CLIENT_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=link_app` |
+| WeChat | `ENABLE_WECHAT_OAUTH=true`, `WECHAT_OAUTH_APP_ID`, `WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
+
+For local Docker, a GitHub callback example is `http://localhost:3000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain such as `https://nexent.example.com/api/user/oauth/callback?provider=github` and register the exact same URL in the OAuth provider console.
 
 ### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
 

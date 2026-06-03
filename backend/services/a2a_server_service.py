@@ -647,7 +647,7 @@ class A2AServerService:
                 return self.adapter.build_a2a_task_response(
                     task_id=task_id,
                     status="TASK_STATE_COMPLETED",
-                    parts=[{"type": "text", "text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else None,
+                    parts=[{"text": accumulated_text, "mediaType": "text/plain"}] if accumulated_text else None,
                     context_id=context_id,
                     timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
@@ -879,7 +879,7 @@ class A2AServerService:
             message = result.get("message", "")
             if message:
                 task_obj["artifacts"] = [{
-                    "parts": [{"type": "text", "text": str(message)}],
+                    "parts": [{"text": str(message)}],
                     "lastChunk": True
                 }]
 

@@ -14,84 +14,124 @@ Navigate to the `k8s/helm` directory and run the deployment script:
 
 ```bash
 cd k8s/helm
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `apply` | Clean helm state and deploy all K8s resources |
-| `clean` | Clean helm state only (fixes stuck releases) |
-| `delete` | Delete resources but **PRESERVE** data (PVC/PV) |
-| `delete-all` | Delete ALL resources including data |
+| `./deploy.sh` | Deploy all K8s resources |
+| `./uninstall.sh` | Uninstall the Helm release; prompts before deleting namespace or local data |
+| `./uninstall.sh clean` | Clean Helm state only (fixes stuck releases) |
+| `./uninstall.sh delete` | Uninstall the Helm release and delete the namespace |
+| `./uninstall.sh delete-all` | Uninstall the Helm release, delete the namespace, and delete local hostPath data |
 
 ### Usage Examples
 
 ```bash
 # Interactive deployment (will prompt for all options)
-./deploy-helm.sh apply
+./deploy.sh
 
-# Deploy with mainland China image sources
-./deploy-helm.sh apply --is-mainland Y
+# Non-interactive deployment with the default component set
+./deploy.sh --components infrastructure,application --port-policy development --image-source general
 
-# Deploy with general image sources
-./deploy-helm.sh apply --is-mainland N
+# Enable Supabase, data processing, and terminal
+./deploy.sh --components infrastructure,application,supabase,data-process,terminal
 
-# Deploy full version with Supabase
-./deploy-helm.sh apply --deployment-version full
+# Use mainland China image sources
+./deploy.sh --image-source mainland
 
-# Non-interactive deployment with all options
-./deploy-helm.sh apply --is-mainland N --deployment-version speed
+# Use local latest Nexent images
+./deploy.sh --image-source local-latest
 
 # Clean helm state (fixes stuck releases)
-./deploy-helm.sh clean
+./uninstall.sh clean
 
 # Uninstall but preserve data
-./deploy-helm.sh delete
+./uninstall.sh
 
-# Complete uninstall including all data
-./deploy-helm.sh delete-all
+# Uninstall and keep local hostPath data without prompting
+./uninstall.sh --keep-local-data --keep-namespace
+
+# Delete namespace after uninstall
+./uninstall.sh --delete-namespace true
+
+# Delete local hostPath data after uninstall
+./uninstall.sh --delete-local-data true
+
+# Complete uninstall including namespace and local hostPath data
+./uninstall.sh delete-all
+
+# Complete uninstall but preserve local hostPath data
+./uninstall.sh delete-all --keep-local-data
 ```
 
-## Command Line Options
+## Deploy Options
 
 | Option | Description | Values |
 |--------|-------------|--------|
-| `--is-mainland` | Server network location | `Y` (mainland China) or `N` (general) |
+| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `data-process`, `supabase`, `terminal`, `monitoring` |
+| `--port-policy` | Host exposure policy | `development` or `production` |
+| `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
+| `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
+| `--monitoring-provider` | Provider when `monitoring` is selected | `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
+| `--use-local-config` | Reuse saved local deployment config | Flag |
+| `--reconfigure` | Ignore saved local config and run full configuration | Flag |
+| `--config` | Deployment config path | YAML file |
+| `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
-| `--deployment-version` | Deployment version | `speed` (default, no Supabase) or `full` (includes Supabase) |
+| `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
 
-## Deployment Versions
+## Uninstall Options
 
-### Speed Version (Default)
+| Option | Description | Values |
+|--------|-------------|--------|
+| `--delete-data` | Compatibility option for Helm-managed PV/PVC cleanup behavior | `true` or `false` |
+| `--delete-volumes` | Alias for `--delete-data` | `true` or `false` |
+| `--remove-volumes` | Alias for `--delete-data true` | Flag |
+| `--keep-volumes` | Alias for `--delete-data false` | Flag |
+| `--delete-local-data` | Delete local hostPath data under `/var/lib/nexent-data` after Helm uninstall | `true` or `false` |
+| `--remove-local-data` | Alias for `--delete-local-data true` | Flag |
+| `--keep-local-data` | Alias for `--delete-local-data false` | Flag |
+| `--delete-namespace` | Delete the Kubernetes namespace after Helm uninstall | `true` or `false` |
+| `--remove-namespace` | Alias for `--delete-namespace true` | Flag |
+| `--keep-namespace` | Alias for `--delete-namespace false` | Flag |
+| `--namespace` | Kubernetes namespace | Namespace name; default `nexent` |
+| `--release` | Helm release name | Release name; default `nexent` |
 
-Lightweight deployment with essential features:
+## Deployment Components
 
-- Backend services (config, runtime, mcp, northbound)
-- Web frontend
-- Data process service
-- Infrastructure: Elasticsearch, PostgreSQL, Redis, MinIO
-- MCP Docker container
-- Terminal tool (OpenSSH, optional)
+The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` is selected by default but can be disabled.
 
-### Full Version
+| Component | Services |
+|-----------|----------|
+| `infrastructure` | Elasticsearch, PostgreSQL, Redis, MinIO |
+| `application` | config, runtime, mcp, northbound, web |
+| `data-process` | nexent-data-process |
+| `supabase` | Supabase Kong, GoTrue Auth, Supabase PostgreSQL, related initialization |
+| `terminal` | OpenSSH terminal tool |
+| `monitoring` | Optional monitoring chart; selecting it prompts for provider unless `--monitoring-provider` is passed |
 
-Full-featured deployment with all capabilities:
+`application` does not include `data-process`. User and tenant features are enabled by selecting `supabase`; there is no separate user/tenant switch.
 
-- All Speed version components
-- Supabase authentication (Kong API Gateway, GoTrue Auth, PostgreSQL)
+## Port Policy
+
+| Policy | Kubernetes behavior |
+|--------|---------------------|
+| `development` | Uses NodePort for Web and selected debug/internal services |
+| `production` | Keeps internal services as ClusterIP and exposes the Web entrypoint |
 
 ## Deployment Workflow
 
 The `apply` command performs the following steps:
 
-1. **Select deployment version** - Choose between speed or full deployment
-2. **Select image source** - Choose mainland China or general image sources
-3. **Update image tags** - Configure values.yaml with selected image repositories
+1. **Select deployment components** - TUI multi-select or `--components`
+2. **Select port policy and image source** - TUI/config/CLI arguments
+3. **Render generated values** - Runtime-only Helm values for components, ports, and images
 4. **Generate MinIO credentials** - Create access key and secret key for object storage
-5. **Generate Supabase secrets** - Create JWT and other secrets (full version only)
-6. **Configure Terminal tool** - Optionally enable OpenSSH server for AI shell commands
+5. **Generate Supabase secrets** - Only when the `supabase` component is selected
+6. **Configure Terminal tool** - Only when the `terminal` component is selected
 7. **Clean stale PersistentVolumes** - Remove any released PVs before deployment
 8. **Deploy Helm chart** - Install/upgrade the release with all resources
 9. **Initialize Elasticsearch** - Wait for ES pod and create API key
@@ -99,12 +139,15 @@ The `apply` command performs the following steps:
 11. **Create super admin user** - Initialize admin account (full version only)
 12. **Pull MCP image** - Download MCP Docker image to local host
 
-## Image Sources
+## Image Sources And Local Config
 
-The deployment script automatically selects image sources based on your network location:
+Image source is independent from components and ports:
 
-- **Mainland China** (`--is-mainland Y`): Uses `.env.mainland` with optimized regional mirrors
-- **General** (`--is-mainland N`): Uses `.env.general` with standard Docker Hub registries
+- `general`: uses standard public registry images and `--version`.
+- `mainland`: uses mainland China registry mirror images and `--version`.
+- `local-latest`: uses local `latest` Nexent images and sets local-friendly pull policy.
+
+After successful deployment, non-sensitive deployment choices are saved to `k8s/helm/deploy.options`. The next interactive run can reuse that config or reconfigure from scratch. Generated Helm values are runtime files and are ignored by git.
 
 ## Accessing the Application
 
@@ -114,22 +157,29 @@ After successful deployment:
 |---------|-----------------|
 | Web Application | http://localhost:30000 |
 | SSH Terminal | localhost:30022 (if enabled) |
+| Langfuse | http://localhost:30001 |
+| Grafana | http://localhost:30002 |
+| Phoenix | http://localhost:30006 |
+| Zipkin | http://localhost:30011 |
 
 ## Data Persistence
 
-### Preserved Data (with `delete`)
+### Preserved Data
 
-The following PersistentVolumes preserve data when using `delete`:
+By default, `./uninstall.sh` removes the Helm release and preserves local hostPath data. It prompts before deleting the namespace or hostPath contents. In non-interactive environments, both are preserved unless explicitly requested.
+
+The following local hostPath-backed PersistentVolumes can preserve data:
 
 - `nexent-elasticsearch-pv` - Search index data
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
 - `nexent-minio-pv` - Object storage data
 - `nexent-supabase-db-pv` - Supabase database (full version only)
+- Monitoring PVs such as Phoenix, Grafana, Tempo, and Langfuse data when monitoring is enabled
 
-### Deleted Data (with `delete-all`)
+### Deleted Data
 
-Using `delete-all` removes all PVCs, PVs, and the namespace, permanently deleting all data.
+Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent hostPath data under `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local hostPath data by default; add `--keep-local-data` to preserve local volume contents.
 
 ## Services
 
@@ -166,6 +216,56 @@ Using `delete-all` removes all PVCs, PVs, and the namespace, permanently deletin
 | Service | Description | Enabled By |
 |---------|-------------|------------|
 | nexent-openssh-server | SSH terminal for AI agents | `--set services.openssh.enabled=true` |
+| nexent-monitoring | OpenTelemetry Collector and optional observability backend | `--set nexent-monitoring.enabled=true` |
+
+### Monitoring
+
+The Helm chart includes an optional monitoring stack that mirrors the Docker
+monitoring deployment. The collector is always installed when
+`nexent-monitoring.enabled=true`; the backend stack is selected by
+`global.monitoring.provider`.
+
+Supported providers:
+
+- `otlp` / `collector` - Collector only, debug exporter
+- `phoenix` - Collector + local Phoenix
+- `grafana` - Collector + Tempo + Grafana
+- `zipkin` - Collector + local Zipkin
+- `langfuse` - Collector + self-hosted Langfuse stack
+- `langsmith` - Collector forwarding to hosted LangSmith
+
+Example:
+
+```bash
+helm upgrade --install nexent nexent \
+  --set nexent-monitoring.enabled=true \
+  --set global.monitoring.enabled=true \
+  --set global.monitoring.provider=grafana \
+  --set 'global.monitoring.dashboardUrl=http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+```
+
+For LangSmith, also provide an API key:
+
+```bash
+helm upgrade --install nexent nexent \
+  --set nexent-monitoring.enabled=true \
+  --set global.monitoring.enabled=true \
+  --set global.monitoring.provider=langsmith \
+  --set global.monitoring.langsmithApiKey=lsv2_xxx
+```
+
+The monitoring subchart passes `global.monitoring.langsmithApiKey`,
+`global.monitoring.langsmithProject`, and the LangSmith OTLP trace endpoint to
+the Collector. If needed, override them directly with
+`nexent-monitoring.collector.env.*`.
+
+The backend receives OTLP settings through the shared `nexent-config`
+ConfigMap, with `OTEL_EXPORTER_OTLP_ENDPOINT` defaulting to
+`http://nexent-otel-collector:4318`. The frontend monitoring entry uses
+`global.monitoring.dashboardUrl`; leave it empty to hide the entry.
+Monitoring UI Services default to NodePort and can be overridden with
+`nexent-monitoring.<provider>.service.type` and
+`nexent-monitoring.<provider>.service.nodePort`.
 
 ## Configuration
 
@@ -230,8 +330,8 @@ helm upgrade --install nexent nexent \
 If you see "Release does not exist" errors:
 
 ```bash
-./deploy-helm.sh clean
-./deploy-helm.sh apply
+./uninstall.sh clean
+./deploy.sh
 ```
 
 ### Pods Not Starting

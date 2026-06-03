@@ -177,6 +177,8 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default" DEFAULT 'tenant_id',
   "model_appid" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
   "access_token" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
+  "concurrency_limit" INTEGER DEFAULT NULL,
+  "timeout_seconds" INTEGER DEFAULT 120,
   CONSTRAINT "nexent_models_t_pk" PRIMARY KEY ("model_id")
 );
 ALTER TABLE "model_record_t" OWNER TO "root";
@@ -202,6 +204,8 @@ COMMENT ON COLUMN "model_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON COLUMN "model_record_t"."tenant_id" IS 'Tenant ID for filtering';
 COMMENT ON COLUMN "model_record_t"."model_appid" IS 'Application ID for model authentication.';
 COMMENT ON COLUMN "model_record_t"."access_token" IS 'Access token for model authentication.';
+COMMENT ON COLUMN "model_record_t"."concurrency_limit" IS 'Maximum concurrent requests for this model. Default is NULL (unlimited).';
+COMMENT ON COLUMN "model_record_t"."timeout_seconds" IS 'Request timeout in seconds for this model. Default is 120 seconds.';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
 
 INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable');
@@ -242,8 +246,8 @@ COMMENT ON COLUMN "knowledge_record_t"."ingroup_permission" IS 'In-group permiss
 COMMENT ON COLUMN "knowledge_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
-COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit field';
-COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'User who last updated the record, audit field';
+COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'User who created the record, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."summary_frequency" IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
 COMMENT ON COLUMN "knowledge_record_t"."last_summary_time" IS 'Timestamp of last summary generation';
 COMMENT ON COLUMN "knowledge_record_t"."last_doc_update_time" IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
@@ -320,6 +324,8 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     model_id INTEGER,
     business_logic_model_name VARCHAR(100),
     business_logic_model_id INTEGER,
+    prompt_template_id INTEGER,
+    prompt_template_name VARCHAR(100),
     max_steps INTEGER,
     duty_prompt TEXT,
     constraint_prompt TEXT,
@@ -370,6 +376,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_name IS '[DEPRECATED] Name of t
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_id IS 'Model ID, foreign key reference to model_record_t.model_id';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_logic_model_name IS 'Model name used for business logic prompt generation';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_logic_model_id IS 'Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.prompt_template_id IS 'Prompt template ID used for business logic prompt generation';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.prompt_template_name IS 'Prompt template name used for business logic prompt generation';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.max_steps IS 'Maximum number of steps';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.duty_prompt IS 'Duty prompt';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.constraint_prompt IS 'Constraint prompt';
@@ -394,6 +402,97 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
 ON nexent.ag_tenant_agent_t (tenant_id, is_new)
 WHERE delete_flag = 'N';
+
+CREATE TABLE IF NOT EXISTS nexent.ag_prompt_template_t (
+    template_id SERIAL PRIMARY KEY,
+    template_name VARCHAR(100) NOT NULL,
+    description VARCHAR(500),
+    template_type VARCHAR(50) NOT NULL DEFAULT 'agent_generate',
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    template_content_zh JSONB NOT NULL,
+    template_content_en JSONB,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.ag_prompt_template_t OWNER TO "root";
+
+CREATE OR REPLACE FUNCTION update_ag_prompt_template_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_ag_prompt_template_update_time_trigger
+BEFORE UPDATE ON nexent.ag_prompt_template_t
+FOR EACH ROW
+EXECUTE FUNCTION update_ag_prompt_template_update_time();
+
+COMMENT ON TABLE nexent.ag_prompt_template_t IS 'Prompt template table for user-defined business logic generation prompts';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_id IS 'Prompt template ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_name IS 'Prompt template name';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.description IS 'Prompt template description';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_type IS 'Prompt template type';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.user_id IS 'User ID';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_content_zh IS 'Chinese prompt template content';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.template_content_en IS 'English prompt template content';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.ag_prompt_template_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_prompt_template_user_name_active
+ON nexent.ag_prompt_template_t (tenant_id, user_id, template_name)
+WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_ag_prompt_template_t_user
+ON nexent.ag_prompt_template_t (tenant_id, user_id, template_type)
+WHERE delete_flag = 'N';
+
+INSERT INTO nexent.ag_prompt_template_t (
+    template_id,
+    template_name,
+    description,
+    template_type,
+    tenant_id,
+    user_id,
+    template_content_zh,
+    template_content_en,
+    created_by,
+    updated_by,
+    delete_flag
+)
+VALUES (
+    0,
+    'system_default',
+    'System default prompt template',
+    'agent_generate',
+    'tenant_id',
+    'user_id',
+    '{}'::jsonb,
+    '{}'::jsonb,
+    'user_id',
+    'user_id',
+    'N'
+)
+ON CONFLICT (template_id) DO UPDATE SET
+    template_name = EXCLUDED.template_name,
+    description = EXCLUDED.description,
+    template_type = EXCLUDED.template_type,
+    tenant_id = EXCLUDED.tenant_id,
+    user_id = EXCLUDED.user_id,
+    template_content_zh = EXCLUDED.template_content_zh,
+    template_content_en = EXCLUDED.template_content_en,
+    updated_by = EXCLUDED.updated_by,
+    delete_flag = 'N';
 
 
 -- Create the ag_tool_instance_t table in the nexent schema
@@ -506,6 +605,14 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
     authorization_token VARCHAR(500) DEFAULT NULL,
+    custom_headers JSON DEFAULT NULL,
+    source VARCHAR(30),
+    registry_json JSONB,
+    config_json JSON,
+    enabled BOOLEAN DEFAULT TRUE,
+    tags TEXT[],
+    description TEXT,
+    container_port INTEGER,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -525,11 +632,19 @@ COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
 COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
+COMMENT ON COLUMN nexent.mcp_record_t.custom_headers IS 'Custom HTTP headers as JSON object for MCP server requests';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.updated_by IS 'Last updater ID, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.delete_flag IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
+COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry/community';
+COMMENT ON COLUMN nexent.mcp_record_t.registry_json IS 'Full MCP registry server.json snapshot';
+COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
+COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
+COMMENT ON COLUMN nexent.mcp_record_t.tags IS 'Tags';
+COMMENT ON COLUMN nexent.mcp_record_t.description IS 'Description';
+COMMENT ON COLUMN nexent.mcp_record_t.container_port IS 'Host port bound for containerized MCP service';
 
 -- Create a function to update the update_time column
 CREATE OR REPLACE FUNCTION update_mcp_record_update_time()
@@ -551,6 +666,19 @@ EXECUTE FUNCTION update_mcp_record_update_time();
 
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_mcp_record_update_time_trigger ON nexent.mcp_record_t IS 'Trigger to call update_mcp_record_update_time function before each update on mcp_record_t table';
+
+-- Add indexes for common management queries
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_delete
+    ON nexent.mcp_record_t (tenant_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_name
+    ON nexent.mcp_record_t (tenant_id, mcp_name, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_server
+    ON nexent.mcp_record_t (tenant_id, mcp_server, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tags_gin
+    ON nexent.mcp_record_t USING GIN (tags);
 
 -- Create user tenant relationship table
 CREATE TABLE IF NOT EXISTS nexent.user_tenant_t (
@@ -667,47 +795,6 @@ BEFORE UPDATE ON "nexent"."memory_user_config_t"
 FOR EACH ROW
 EXECUTE FUNCTION "update_memory_user_config_update_time"();
 
--- Create partner mapping id table
-CREATE TABLE IF NOT EXISTS "nexent"."partner_mapping_id_t" (
-  "mapping_id" serial PRIMARY KEY NOT NULL,
-  "external_id" varchar(100) COLLATE "pg_catalog"."default",
-  "internal_id" int4,
-  "mapping_type" varchar(30) COLLATE "pg_catalog"."default",
-  "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
-  "user_id" varchar(100) COLLATE "pg_catalog"."default",
-  "create_time" timestamp(6) DEFAULT CURRENT_TIMESTAMP,
-  "update_time" timestamp(6) DEFAULT CURRENT_TIMESTAMP,
-  "created_by" varchar(100) COLLATE "pg_catalog"."default",
-  "updated_by" varchar(100) COLLATE "pg_catalog"."default",
-  "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying
-);
-
-ALTER TABLE "nexent"."partner_mapping_id_t" OWNER TO "root";
-
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."mapping_id" IS 'ID';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."external_id" IS 'The external id given by the outer partner';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."internal_id" IS 'The internal id of the other database table';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."mapping_type" IS 'Type of the external - internal mapping, value set: CONVERSATION';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."tenant_id" IS 'Tenant ID';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."user_id" IS 'User ID';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."create_time" IS 'Creation time';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."update_time" IS 'Update time';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."created_by" IS 'Creator';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."updated_by" IS 'Updater';
-COMMENT ON COLUMN "nexent"."partner_mapping_id_t"."delete_flag" IS 'Whether it is deleted. Optional values: Y/N';
-
-CREATE OR REPLACE FUNCTION "update_partner_mapping_update_time"()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.update_time = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER "update_partner_mapping_update_time_trigger"
-BEFORE UPDATE ON "nexent"."partner_mapping_id_t"
-FOR EACH ROW
-EXECUTE FUNCTION "update_partner_mapping_update_time"();
 
 -- 1. Create tenant_invitation_code_t table for invitation codes
 CREATE TABLE IF NOT EXISTS nexent.tenant_invitation_code_t (
@@ -1068,6 +1155,171 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who 
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';
 
+-- Create the user_token_info_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.user_token_info_t (
+    token_id SERIAL4 PRIMARY KEY NOT NULL,
+    access_key VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "user_token_info_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.user_token_info_t IS 'User token (AK/SK) information table';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.user_token_info_t.token_id IS 'Token ID, unique primary key';
+COMMENT ON COLUMN nexent.user_token_info_t.access_key IS 'Access Key (AK)';
+COMMENT ON COLUMN nexent.user_token_info_t.user_id IS 'User ID who owns this token';
+COMMENT ON COLUMN nexent.user_token_info_t.create_time IS 'Creation time, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.update_time IS 'Update time, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.created_by IS 'Creator ID, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.updated_by IS 'Last updater ID, audit field';
+COMMENT ON COLUMN nexent.user_token_info_t.delete_flag IS 'Soft delete flag, Y means deleted';
+
+
+-- Create the user_token_usage_log_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.user_token_usage_log_t (
+    token_usage_id SERIAL4 PRIMARY KEY NOT NULL,
+    token_id INT4 NOT NULL,
+    call_function_name VARCHAR(100),
+    related_id INT4,
+    meta_data JSONB,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "user_token_usage_log_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.user_token_usage_log_t IS 'User token usage log table';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.user_token_usage_log_t.token_usage_id IS 'Token usage log ID, unique primary key';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.token_id IS 'Foreign key to user_token_info_t.token_id';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.call_function_name IS 'API function name being called';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.related_id IS 'Related resource ID (e.g., conversation_id)';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.meta_data IS 'Additional metadata for this usage log entry, stored as JSON';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.create_time IS 'Creation time, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.update_time IS 'Update time, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.created_by IS 'Creator ID, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.updated_by IS 'Last updater ID, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag, Y means deleted';
+
+-- Create the ag_skill_info_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
+    skill_id SERIAL4 PRIMARY KEY NOT NULL,
+    skill_name VARCHAR(100) NOT NULL,
+    skill_description VARCHAR(1000),
+    skill_tags JSON,
+    skill_content TEXT,
+    config_schemas JSON,
+    config_values JSON,
+    source VARCHAR(30) DEFAULT 'official',
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_skill_info_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_skill_info_t IS 'Skill information table for managing custom skills';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_id IS 'Skill ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_name IS 'Skill name, globally unique';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_description IS 'Skill description text';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_tags IS 'Skill tags stored as JSON array';
+COMMENT ON COLUMN nexent.ag_skill_info_t.skill_content IS 'Skill content or prompt text';
+COMMENT ON COLUMN nexent.ag_skill_info_t.config_schemas IS 'Parameter metadata from config/schema.yaml';
+COMMENT ON COLUMN nexent.ag_skill_info_t.config_values IS 'Runtime parameter values from config/config.yaml';
+COMMENT ON COLUMN nexent.ag_skill_info_t.source IS 'Skill source: official, custom, or partner';
+COMMENT ON COLUMN nexent.ag_skill_info_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_skill_info_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_skill_info_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_skill_info_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_skill_info_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Create the ag_skill_tools_rel_t table in the nexent schema
+CREATE TABLE IF NOT EXISTS nexent.ag_skill_tools_rel_t (
+    rel_id SERIAL4 PRIMARY KEY NOT NULL,
+    skill_id INTEGER,
+    tool_id INTEGER,
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE "ag_skill_tools_rel_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_skill_tools_rel_t IS 'Skill-tool relationship table for many-to-many mapping';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.rel_id IS 'Relationship ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.skill_id IS 'Foreign key to ag_skill_info_t.skill_id';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.tool_id IS 'Tool ID from ag_tool_info_t';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_skill_tools_rel_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Create the ag_skill_instance_t table in the nexent schema
+-- Stores skill instance configuration per agent version
+-- Note: skill_description and skill_content fields removed, now retrieved from ag_skill_info_t
+CREATE TABLE IF NOT EXISTS nexent.ag_skill_instance_t (
+    skill_instance_id SERIAL4 NOT NULL,
+    skill_id INTEGER NOT NULL,
+    agent_id INTEGER NOT NULL,
+    user_id VARCHAR(100),
+    tenant_id VARCHAR(100),
+    enabled BOOLEAN DEFAULT TRUE,
+    version_no INTEGER DEFAULT 0 NOT NULL,
+    config_values JSON,
+    config_schemas JSON,
+    created_by VARCHAR(100),
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    CONSTRAINT ag_skill_instance_t_pkey PRIMARY KEY (skill_instance_id, version_no)
+);
+
+ALTER TABLE "ag_skill_instance_t" OWNER TO "root";
+
+-- Add comment to the table
+COMMENT ON TABLE nexent.ag_skill_instance_t IS 'Skill instance configuration table - stores per-agent skill settings';
+
+-- Add comments to the columns
+COMMENT ON COLUMN nexent.ag_skill_instance_t.skill_instance_id IS 'Skill instance ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.skill_id IS 'Foreign key to ag_skill_info_t.skill_id';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.agent_id IS 'Agent ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.user_id IS 'User ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.enabled IS 'Whether this skill is enabled for the agent';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.config_values IS 'Per-agent runtime parameter values from config/config.yaml';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.config_schemas IS 'Per-agent parameter schema overrides from config/schema.yaml';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.create_time IS 'Creation timestamp';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
 -- Create the ag_outer_api_services table for OpenAPI services (MCP conversion)
 -- This table stores one record per MCP service instead of per tool
 CREATE TABLE IF NOT EXISTS nexent.ag_outer_api_services (
@@ -1131,113 +1383,130 @@ CREATE INDEX IF NOT EXISTS idx_ag_outer_api_services_mcp_service_name
 ON nexent.ag_outer_api_services (mcp_service_name)
 WHERE delete_flag = 'N';
 
--- =============================================================================
--- A2A Protocol Tables (v2.0.2)
--- =============================================================================
-
--- Table: ag_a2a_nacos_config_t
--- Purpose: Store Nacos server configuration for external A2A agent discovery
-CREATE TABLE IF NOT EXISTS "ag_a2a_nacos_config_t" (
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_nacos_config_t (
     id BIGSERIAL PRIMARY KEY,
     config_id VARCHAR(64) UNIQUE NOT NULL,
+
     nacos_addr VARCHAR(512) NOT NULL,
     nacos_username VARCHAR(100),
     nacos_password VARCHAR(256),
+
     namespace_id VARCHAR(100) DEFAULT 'public',
+
     name VARCHAR(100) NOT NULL,
     description TEXT,
+
     tenant_id VARCHAR(100) NOT NULL,
     created_by VARCHAR(100) NOT NULL,
     updated_by VARCHAR(100),
+
     is_active BOOLEAN DEFAULT TRUE,
     last_scan_at TIMESTAMP(6),
+
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
 
-ALTER TABLE "ag_a2a_nacos_config_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_nacos_config_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_nacos_config_t" IS 'Nacos configuration for external A2A agent discovery';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".id IS 'Primary key, auto-increment';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".config_id IS 'Unique config identifier for API reference';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".nacos_addr IS 'Nacos server address, e.g., http://nacos-server:8848';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".nacos_username IS 'Nacos username for authentication';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".nacos_password IS 'Nacos password, encrypted at rest';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".namespace_id IS 'Nacos namespace for service discovery, default is public';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".name IS 'Display name for this Nacos config';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".description IS 'Description of this Nacos configuration';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".created_by IS 'User who created this config';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".updated_by IS 'User who last updated this record';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".is_active IS 'Whether this Nacos config is active';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".last_scan_at IS 'Last time a scan was performed using this config';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".create_time IS 'Record creation timestamp';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".update_time IS 'Record last update timestamp';
-COMMENT ON COLUMN "ag_a2a_nacos_config_t".delete_flag IS 'Soft delete flag: Y/N';
+COMMENT ON TABLE nexent.ag_a2a_nacos_config_t IS 'Nacos configuration for external A2A agent discovery. Stores connection info and discovery scope.';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.id IS 'Primary key, auto-increment'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.config_id IS 'Unique config identifier for API reference';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.nacos_addr IS 'Nacos server address, e.g., http://nacos-server:8848';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.nacos_username IS 'Nacos username for authentication';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.nacos_password IS 'Nacos password, encrypted at rest';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.namespace_id IS 'Nacos namespace for service discovery, default is public';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.name IS 'Display name for this Nacos config, e.g., Production Nacos';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.description IS 'Description of this Nacos configuration';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.tenant_id IS 'Tenant ID for multi-tenancy isolation'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.created_by IS 'User who created this config';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.updated_by IS 'User who last updated this record'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.is_active IS 'Whether this Nacos config is active';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.last_scan_at IS 'Last time a scan was performed using this config';
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.create_time IS 'Record creation timestamp'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.update_time IS 'Record last update timestamp'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_nacos_config_t.delete_flag IS 'Soft delete flag: Y/N';  -- NOSONAR
 
--- Table: ag_a2a_external_agent_t
--- Purpose: Cache external A2A agents discovered from URL or Nacos
-CREATE TABLE IF NOT EXISTS "ag_a2a_external_agent_t" (
+
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_t (
     id BIGSERIAL PRIMARY KEY,
+
     name VARCHAR(255) NOT NULL,
     description TEXT,
     version VARCHAR(50),
+
     agent_url VARCHAR(512) NOT NULL,
+
     protocol_type VARCHAR(20) DEFAULT 'JSONRPC',
+
     streaming BOOLEAN DEFAULT FALSE,
+
     supported_interfaces JSONB,
+
+    -- Source information
     source_type VARCHAR(20) NOT NULL,
-    base_url VARCHAR(512),
+
+    -- For URL mode:
     source_url VARCHAR(512),
+
+    -- For Nacos mode:
     nacos_config_id VARCHAR(64),
     nacos_agent_name VARCHAR(255),
+
+    -- Base URL for infrastructure health checks
+    base_url VARCHAR(512),
+
+    -- Tenant isolation
     tenant_id VARCHAR(100) NOT NULL,
     created_by VARCHAR(100) NOT NULL,
     updated_by VARCHAR(100),
+
     raw_card JSONB,
+
     cached_at TIMESTAMP(6),
     cache_expires_at TIMESTAMP(6),
+
     is_available BOOLEAN DEFAULT TRUE,
     last_check_at TIMESTAMP(6),
     last_check_result VARCHAR(50),
+
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
 
-ALTER TABLE "ag_a2a_external_agent_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_external_agent_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_external_agent_t" IS 'External A2A agents discovered from URL or Nacos';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".id IS 'Primary key, auto-increment';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".name IS 'Agent name from Agent Card';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".description IS 'Agent description from Agent Card';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".version IS 'Agent version from Agent Card';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".agent_url IS 'Primary A2A endpoint URL';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".protocol_type IS 'Protocol type: JSONRPC, HTTP+JSON, or GRPC';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".streaming IS 'Whether this agent supports SSE streaming';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".supported_interfaces IS 'All supported interfaces array from Agent Card';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".source_type IS 'Discovery source: url or nacos';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".source_url IS 'Direct URL to agent card';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".nacos_config_id IS 'Reference to Nacos config used for discovery';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".nacos_agent_name IS 'Original name used for Nacos query';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".created_by IS 'User who discovered this agent';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".updated_by IS 'User who last updated this record';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".raw_card IS 'Full original Agent Card JSON from discovery';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".cached_at IS 'Timestamp when Agent Card was cached';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".cache_expires_at IS 'Timestamp when cache expires';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".is_available IS 'Whether this agent is currently reachable';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".last_check_at IS 'Last health check timestamp';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".last_check_result IS 'Last health check result: OK, ERROR, TIMEOUT';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".create_time IS 'Record creation timestamp';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".update_time IS 'Record last update timestamp';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".delete_flag IS 'Soft delete flag: Y/N';
-COMMENT ON COLUMN "ag_a2a_external_agent_t".base_url IS 'Base URL for health checks (service root address)';
+COMMENT ON TABLE nexent.ag_a2a_external_agent_t IS 'External A2A agents discovered from URL or Nacos. Caches Agent Cards for A2A Client role.';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.id IS 'Primary key, auto-increment. Used as unique identifier for internal references.';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.name IS 'Agent name from Agent Card';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.description IS 'Agent description from Agent Card';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.version IS 'Agent version from Agent Card, e.g., 1.2.0';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.agent_url IS 'Primary A2A endpoint URL (http-json-rpc by default, extracted from supportedInterfaces)';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.protocol_type IS 'Protocol type for calling this agent: JSONRPC, HTTP+JSON, or GRPC';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.streaming IS 'Whether this agent supports SSE streaming (from capabilities.streaming)';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.supported_interfaces IS 'All supported interfaces array from Agent Card. Format: [{protocolBinding, url, protocolVersion}, ...]';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.source_type IS 'Discovery source: url or nacos';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.source_url IS 'Direct URL to agent card (for url source type)';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.nacos_config_id IS 'Reference to Nacos config used for discovery (for nacos source type)';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.nacos_agent_name IS 'Original name used for Nacos query';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.tenant_id IS 'Tenant ID for multi-tenancy isolation';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.created_by IS 'User who discovered this agent';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.updated_by IS 'User who last updated this record';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.raw_card IS 'Full original Agent Card JSON from discovery';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.cached_at IS 'Timestamp when Agent Card was cached';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.cache_expires_at IS 'Timestamp when cache expires';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.is_available IS 'Whether this agent is currently reachable';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.last_check_at IS 'Last health check timestamp';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.last_check_result IS 'Last health check result: OK, ERROR, TIMEOUT';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.create_time IS 'Record creation timestamp';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.update_time IS 'Record last update timestamp';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.delete_flag IS 'Soft delete flag: Y/N'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_t.base_url IS 'Base URL for health checks (service root address)';
 
--- Table: ag_a2a_external_agent_relation_t
--- Purpose: Relation between local agent and external A2A agent
-CREATE TABLE IF NOT EXISTS "ag_a2a_external_agent_relation_t" (
+
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_external_agent_relation_t (
     id BIGSERIAL PRIMARY KEY,
     local_agent_id INTEGER NOT NULL,
     external_agent_id BIGINT NOT NULL,
@@ -1251,23 +1520,21 @@ CREATE TABLE IF NOT EXISTS "ag_a2a_external_agent_relation_t" (
     CONSTRAINT uq_local_external_agent UNIQUE (local_agent_id, external_agent_id)
 );
 
-ALTER TABLE "ag_a2a_external_agent_relation_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_external_agent_relation_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_external_agent_relation_t" IS 'Relation between local agent and external A2A agent';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".id IS 'Primary key, auto-increment';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".local_agent_id IS 'Local parent agent ID (FK to ag_tenant_agent_t)';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".external_agent_id IS 'External A2A agent ID (FK to ag_a2a_external_agent_t.id)';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".is_enabled IS 'Whether this relation is active';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".created_by IS 'User who created this relation';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".updated_by IS 'User who last updated this record';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".create_time IS 'Record creation timestamp';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".update_time IS 'Record last update timestamp';
-COMMENT ON COLUMN "ag_a2a_external_agent_relation_t".delete_flag IS 'Soft delete flag: Y/N';
+COMMENT ON TABLE nexent.ag_a2a_external_agent_relation_t IS 'Relation between local agent and external A2A agent. Enables local agents to call external A2A agents as sub-agents.';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.id IS 'Primary key, auto-increment';  -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.local_agent_id IS 'Local parent agent ID (FK to ag_tenant_agent_t)';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.external_agent_id IS 'External A2A agent ID (FK to ag_a2a_external_agent_t.id)';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.tenant_id IS 'Tenant ID for multi-tenancy isolation'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.is_enabled IS 'Whether this relation is active';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.created_by IS 'User who created this relation';
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.updated_by IS 'User who last updated this record'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.create_time IS 'Record creation timestamp'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.update_time IS 'Record last update timestamp'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_external_agent_relation_t.delete_flag IS 'Soft delete flag: Y/N';  -- NOSONAR
 
--- Table: ag_a2a_server_agent_t
--- Purpose: Local agents registered as A2A Server endpoints
-CREATE TABLE IF NOT EXISTS "ag_a2a_server_agent_t" (
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_server_agent_t (
     id BIGSERIAL PRIMARY KEY,
     agent_id INTEGER NOT NULL,
     user_id VARCHAR(100) NOT NULL,
@@ -1292,120 +1559,115 @@ CREATE TABLE IF NOT EXISTS "ag_a2a_server_agent_t" (
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
 
-ALTER TABLE "ag_a2a_server_agent_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_server_agent_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_server_agent_t" IS 'Local agents registered as A2A Server endpoints';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".id IS 'Primary key, auto-increment';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".agent_id IS 'Local agent ID (FK to ag_tenant_agent_t)';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".user_id IS 'Owner user ID';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".tenant_id IS 'Tenant ID for multi-tenancy isolation';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".created_by IS 'User who created this A2A Server agent';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".updated_by IS 'User who last updated this A2A Server agent';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".endpoint_id IS 'Generated endpoint ID for A2A routing';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".name IS 'Agent name exposed in Agent Card';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".description IS 'Agent description exposed in Agent Card';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".version IS 'Agent version exposed in Agent Card';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".agent_url IS 'Primary A2A endpoint URL';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".streaming IS 'Whether this agent supports SSE streaming';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".supported_interfaces IS 'All supported interfaces: [{protocolBinding, url, protocolVersion}, ...]';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".card_overrides IS 'User customizations for Agent Card';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".is_enabled IS 'Whether A2A Server is enabled for this agent';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".raw_card IS 'Generated Agent Card JSON (for debugging)';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".published_at IS 'Timestamp when A2A Server was last enabled';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".unpublished_at IS 'Timestamp when A2A Server was disabled';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".response_format IS 'Response format: task or message';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".create_time IS 'Record creation timestamp';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".update_time IS 'Record last update timestamp';
-COMMENT ON COLUMN "ag_a2a_server_agent_t".delete_flag IS 'Soft delete flag: Y/N';
+COMMENT ON TABLE nexent.ag_a2a_server_agent_t IS 'Local agents registered as A2A Server endpoints. Exposes Agent Cards for external A2A callers.';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.id IS 'Primary key, auto-increment';  -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.agent_id IS 'Local agent ID (FK to ag_tenant_agent_t)';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.user_id IS 'Owner user ID';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.tenant_id IS 'Tenant ID for multi-tenancy isolation'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.created_by IS 'User who created this A2A Server agent';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.updated_by IS 'User who last updated this A2A Server agent'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.endpoint_id IS 'Generated endpoint ID, format: a2a_{agent_id[:8]}_{hash[:8]}';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.name IS 'Agent name exposed in Agent Card (from agent or override)';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.description IS 'Agent description exposed in Agent Card';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.version IS 'Agent version exposed in Agent Card';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.agent_url IS 'Primary A2A endpoint URL (http-json-rpc by default)';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.streaming IS 'Whether this agent supports SSE streaming';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.supported_interfaces IS 'All supported interfaces: [{protocolBinding, url, protocolVersion}, ...]';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.card_overrides IS 'User customizations for Agent Card (partial override)';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.is_enabled IS 'Whether A2A Server is enabled for this agent';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.raw_card IS 'Generated Agent Card JSON (for debugging)';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.published_at IS 'Timestamp when A2A Server was last enabled';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.unpublished_at IS 'Timestamp when A2A Server was disabled';
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.create_time IS 'Record creation timestamp'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.update_time IS 'Record last update timestamp'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.delete_flag IS 'Soft delete flag: Y/N'; -- NOSONAR
+COMMENT ON COLUMN nexent.ag_a2a_server_agent_t.response_format IS 'Response format: ''task'' for full Task response, ''message'' for simple Message response';
 
--- Table: ag_a2a_task_t
--- Purpose: A2A tasks for tracking requests (Server side)
-CREATE TABLE IF NOT EXISTS "ag_a2a_task_t" (
-    id VARCHAR(64) PRIMARY KEY,
-    context_id VARCHAR(64),
+
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_task_t (
+    id VARCHAR(64) PRIMARY KEY,                      -- taskId
+    context_id VARCHAR(64),                          -- contextId
     endpoint_id VARCHAR(64) NOT NULL,
     caller_user_id VARCHAR(100),
     caller_tenant_id VARCHAR(100),
     raw_request JSONB,
     task_state VARCHAR(50) NOT NULL DEFAULT 'TASK_STATE_SUBMITTED',
-    state_timestamp TIMESTAMP(6),
-    result_data JSONB,
+    state_timestamp TIMESTAMP(6),                    -- State update timestamp
+    result_data JSONB,                              -- Final result (renamed from result to avoid SQL function conflict)
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP(6)
 );
 
-ALTER TABLE "ag_a2a_task_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_task_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_task_t" IS 'A2A tasks for tracking requests';
-COMMENT ON COLUMN "ag_a2a_task_t".id IS 'Task ID from A2A protocol, primary key';
-COMMENT ON COLUMN "ag_a2a_task_t".context_id IS 'Context ID for grouping related A2A tasks';
-COMMENT ON COLUMN "ag_a2a_task_t".endpoint_id IS 'Endpoint ID (FK to ag_a2a_server_agent_t.endpoint_id)';
-COMMENT ON COLUMN "ag_a2a_task_t".caller_user_id IS 'User ID of the caller (for audit)';
-COMMENT ON COLUMN "ag_a2a_task_t".caller_tenant_id IS 'Tenant ID of the caller (for audit)';
-COMMENT ON COLUMN "ag_a2a_task_t".raw_request IS 'Original A2A request payload';
-COMMENT ON COLUMN "ag_a2a_task_t".task_state IS 'Task state: TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, etc.';
-COMMENT ON COLUMN "ag_a2a_task_t".state_timestamp IS 'Task state last update timestamp';
-COMMENT ON COLUMN "ag_a2a_task_t".result_data IS 'Task final result data';
-COMMENT ON COLUMN "ag_a2a_task_t".create_time IS 'Task creation timestamp';
-COMMENT ON COLUMN "ag_a2a_task_t".update_time IS 'Task last update timestamp';
-COMMENT ON COLUMN "ag_a2a_task_t".completed_at IS 'Task completion timestamp';
+COMMENT ON TABLE nexent.ag_a2a_task_t IS 'A2A tasks for tracking requests. Task is the unit of work, not all requests need to create a task.';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.id IS 'Task ID from A2A protocol, primary key';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.context_id IS 'Context ID for grouping related A2A tasks';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.endpoint_id IS 'Endpoint ID (FK to ag_a2a_server_agent_t.endpoint_id)';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.caller_user_id IS 'User ID of the caller (for audit)';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.caller_tenant_id IS 'Tenant ID of the caller (for audit)';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.raw_request IS 'Original A2A request payload';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.task_state IS 'Task state: TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED, TASK_STATE_INPUT_REQUIRED, TASK_STATE_REJECTED, TASK_STATE_AUTH_REQUIRED';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.state_timestamp IS 'Task state last update timestamp';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.result_data IS 'Task final result data';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.create_time IS 'Task creation timestamp';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.update_time IS 'Task last update timestamp';
+COMMENT ON COLUMN nexent.ag_a2a_task_t.completed_at IS 'Task completion timestamp';
 
--- Table: ag_a2a_message_t
--- Purpose: A2A messages within tasks (Task history)
-CREATE TABLE IF NOT EXISTS "ag_a2a_message_t" (
-    message_id VARCHAR(64) PRIMARY KEY,
-    task_id VARCHAR(64),
-    message_index INTEGER NOT NULL,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('ROLE_UNSPECIFIED', 'ROLE_USER', 'ROLE_AGENT')),
-    parts JSONB NOT NULL,
-    meta_data JSONB,
-    extensions JSONB,
-    reference_task_ids JSONB,
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_message_t (
+    message_id VARCHAR(64) PRIMARY KEY,              -- messageId (A2A spec naming)
+    task_id VARCHAR(64),                            -- taskId (associated task), can be NULL for simple requests
+    message_index INTEGER NOT NULL,                  -- Sequence index
+    role VARCHAR(20) NOT NULL CHECK (role IN ('ROLE_UNSPECIFIED', 'ROLE_USER', 'ROLE_AGENT')),  -- Following A2A spec: ROLE_UNSPECIFIED, ROLE_USER, ROLE_AGENT
+    parts JSONB NOT NULL,                            -- Part array
+    meta_data JSONB,                                  -- Optional metadata
+    extensions JSONB,                               -- Extension URI list
+    reference_task_ids JSONB,                        -- Referenced task IDs array
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(task_id, message_index)
 );
 
-ALTER TABLE "ag_a2a_message_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_message_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_message_t" IS 'A2A messages within tasks. Stores conversation history for multi-turn interactions.';
-COMMENT ON COLUMN "ag_a2a_message_t".message_id IS 'Message ID, primary key (A2A spec: messageId)';
-COMMENT ON COLUMN "ag_a2a_message_t".task_id IS 'Task ID this message belongs to (FK to ag_a2a_task_t.id), can be NULL for simple requests without Task';
-COMMENT ON COLUMN "ag_a2a_message_t".message_index IS 'Order of message in the conversation';
-COMMENT ON COLUMN "ag_a2a_message_t".role IS 'Message sender role: ROLE_UNSPECIFIED, ROLE_USER, or ROLE_AGENT';
-COMMENT ON COLUMN "ag_a2a_message_t".parts IS 'Message parts following A2A Part structure';
-COMMENT ON COLUMN "ag_a2a_message_t".meta_data IS 'Optional message metadata';
-COMMENT ON COLUMN "ag_a2a_message_t".extensions IS 'Extension URI list';
-COMMENT ON COLUMN "ag_a2a_message_t".reference_task_ids IS 'Referenced task IDs array for multi-turn scenarios';
-COMMENT ON COLUMN "ag_a2a_message_t".create_time IS 'Message creation timestamp';
+COMMENT ON TABLE nexent.ag_a2a_message_t IS 'A2A messages within tasks. Stores conversation history for multi-turn interactions.';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.message_id IS 'Message ID, primary key (A2A spec: messageId)';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.task_id IS 'Task ID this message belongs to (FK to ag_a2a_task_t.id), can be NULL for simple requests without Task';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.message_index IS 'Order of message in the conversation';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.role IS 'Message sender role: ROLE_UNSPECIFIED, ROLE_USER, or ROLE_AGENT';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.parts IS 'Message parts following A2A Part structure: [{"type": "text", "text": "..."}]';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.meta_data IS 'Optional message metadata';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.extensions IS 'Extension URI list';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.reference_task_ids IS 'Referenced task IDs array for multi-turn scenarios';
+COMMENT ON COLUMN nexent.ag_a2a_message_t.create_time IS 'Message creation timestamp';
 
--- Table: ag_a2a_artifact_t
--- Purpose: A2A artifacts (task outputs)
-CREATE TABLE IF NOT EXISTS "ag_a2a_artifact_t" (
-    id VARCHAR(64) PRIMARY KEY,
-    artifact_id VARCHAR(64) NOT NULL,
-    task_id VARCHAR(64) NOT NULL,
-    name VARCHAR(255),
-    description TEXT,
-    parts JSONB NOT NULL,
-    meta_data JSONB,
-    extensions JSONB,
+CREATE TABLE IF NOT EXISTS nexent.ag_a2a_artifact_t (
+    id VARCHAR(64) PRIMARY KEY,                      -- Internal primary key
+    artifact_id VARCHAR(64) NOT NULL,                 -- artifactId (A2A spec naming)
+    task_id VARCHAR(64) NOT NULL,                    -- taskId (associated task, required)
+    name VARCHAR(255),                               -- Human-readable name
+    description TEXT,                               -- Description
+    parts JSONB NOT NULL,                           -- Part array (following A2A spec)
+    meta_data JSONB,                                -- Metadata
+    extensions JSONB,                                -- Extension URI list
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(task_id, artifact_id)
 );
 
-ALTER TABLE "ag_a2a_artifact_t" OWNER TO "root";
+ALTER TABLE nexent.ag_a2a_artifact_t OWNER TO "root";
 
-COMMENT ON TABLE "ag_a2a_artifact_t" IS 'A2A artifacts. Stores the output/artifacts produced by a task.';
-COMMENT ON COLUMN "ag_a2a_artifact_t".id IS 'Internal primary key';
-COMMENT ON COLUMN "ag_a2a_artifact_t".artifact_id IS 'Artifact ID (A2A spec: artifactId)';
-COMMENT ON COLUMN "ag_a2a_artifact_t".task_id IS 'Task ID this artifact belongs to (FK to ag_a2a_task_t.id)';
-COMMENT ON COLUMN "ag_a2a_artifact_t".name IS 'Human-readable artifact name';
-COMMENT ON COLUMN "ag_a2a_artifact_t".description IS 'Artifact description';
-COMMENT ON COLUMN "ag_a2a_artifact_t".parts IS 'Artifact parts following A2A Part structure';
-COMMENT ON COLUMN "ag_a2a_artifact_t".meta_data IS 'Artifact metadata';
-COMMENT ON COLUMN "ag_a2a_artifact_t".extensions IS 'Extension URI list';
-COMMENT ON COLUMN "ag_a2a_artifact_t".create_time IS 'Artifact creation timestamp';
+COMMENT ON TABLE nexent.ag_a2a_artifact_t IS 'A2A artifacts. Stores the output/artifacts produced by a task.';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.id IS 'Internal primary key';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.artifact_id IS 'Artifact ID (A2A spec: artifactId)';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.task_id IS 'Task ID this artifact belongs to (FK to ag_a2a_task_t.id), required - no standalone artifacts';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.name IS 'Human-readable artifact name';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.description IS 'Artifact description';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.parts IS 'Artifact parts following A2A Part structure: [{"type": "text", "text": "..."}]';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.meta_data IS 'Artifact metadata';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.extensions IS 'Extension URI list';
+COMMENT ON COLUMN nexent.ag_a2a_artifact_t.create_time IS 'Artifact creation timestamp';
 
 -- Create the model_monitoring_record_t table for LLM performance metrics
 CREATE TABLE IF NOT EXISTS nexent.model_monitoring_record_t (
@@ -1525,3 +1787,78 @@ COMMENT ON COLUMN nexent.user_oauth_account_t.delete_flag IS 'Whether it is dele
 -- Create index for user_id queries
 CREATE INDEX IF NOT EXISTS idx_user_oauth_account_t_user_id
 ON nexent.user_oauth_account_t (user_id);
+
+-- mcp_community_record_t: Community MCP market table
+CREATE TABLE IF NOT EXISTS nexent.mcp_community_record_t (
+    community_id SERIAL PRIMARY KEY NOT NULL,
+    tenant_id VARCHAR(100),
+    user_id VARCHAR(100),
+    mcp_name VARCHAR(100) NOT NULL,
+    mcp_server VARCHAR(500) NOT NULL,
+    source VARCHAR(30) DEFAULT 'community',
+    version VARCHAR(50),
+    registry_json JSONB,
+    transport_type VARCHAR(30),
+    config_json JSON,
+    tags TEXT[],
+    description TEXT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.mcp_community_record_t OWNER TO root;
+
+COMMENT ON TABLE nexent.mcp_community_record_t IS 'Community MCP market records, publishable from tenant MCP services';
+COMMENT ON COLUMN nexent.mcp_community_record_t.community_id IS 'Community record ID, unique primary key';
+COMMENT ON COLUMN nexent.mcp_community_record_t.tenant_id IS 'Publisher tenant ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.user_id IS 'Publisher user ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.mcp_name IS 'MCP name';
+COMMENT ON COLUMN nexent.mcp_community_record_t.mcp_server IS 'MCP server URL';
+COMMENT ON COLUMN nexent.mcp_community_record_t.source IS 'Source type, fixed to community for this table';
+COMMENT ON COLUMN nexent.mcp_community_record_t.version IS 'MCP version';
+COMMENT ON COLUMN nexent.mcp_community_record_t.registry_json IS 'Full MCP server metadata JSON for discovery and quick import';
+COMMENT ON COLUMN nexent.mcp_community_record_t.transport_type IS 'Transport type: url/container';
+COMMENT ON COLUMN nexent.mcp_community_record_t.config_json IS 'Public-shareable MCP configuration JSON';
+COMMENT ON COLUMN nexent.mcp_community_record_t.tags IS 'Tags';
+COMMENT ON COLUMN nexent.mcp_community_record_t.description IS 'Description';
+COMMENT ON COLUMN nexent.mcp_community_record_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.mcp_community_record_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.mcp_community_record_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.updated_by IS 'Updater ID';
+COMMENT ON COLUMN nexent.mcp_community_record_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_tenant_delete
+    ON nexent.mcp_community_record_t (tenant_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_name_delete
+    ON nexent.mcp_community_record_t (mcp_name, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_transport_delete
+    ON nexent.mcp_community_record_t (transport_type, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_user_delete
+    ON nexent.mcp_community_record_t (user_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_tags_gin
+    ON nexent.mcp_community_record_t USING GIN (tags);
+
+CREATE OR REPLACE FUNCTION update_mcp_community_record_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_mcp_community_record_update_time() IS 'Auto-update update_time for mcp_community_record_t';
+
+DROP TRIGGER IF EXISTS update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t;
+CREATE TRIGGER update_mcp_community_record_update_time_trigger
+BEFORE UPDATE ON nexent.mcp_community_record_t
+FOR EACH ROW
+EXECUTE FUNCTION update_mcp_community_record_update_time();
+
+COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t IS 'Trigger to maintain update_time';

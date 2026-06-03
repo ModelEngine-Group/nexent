@@ -1,12 +1,17 @@
+import json
 import logging
 from http import HTTPStatus
 from typing import Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest
+from consts.exceptions import SkillDuplicateError
+from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
+
 from services.agent_service import (
     get_agent_info_impl,
     get_creating_sub_agent_info_impl,
@@ -22,6 +27,8 @@ from services.agent_service import (
     get_agent_call_relationship_impl,
     clear_agent_new_mark_impl,
     get_agent_by_name_impl,
+    export_agent_with_skills_impl,
+    import_agent_with_skills_impl,
 )
 from services.agent_version_service import (
     publish_version_impl,
@@ -38,9 +45,6 @@ from services.agent_version_service import (
 )
 from utils.auth_utils import get_current_user_info, get_current_user_id
 
-# Import monitoring utilities
-from utils.monitoring import monitoring_manager
-
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
@@ -48,7 +52,6 @@ logger = logging.getLogger("agent_app")
 
 # Define API route
 @agent_runtime_router.post("/run")
-@monitoring_manager.monitor_endpoint("agent.run", exclude_params=["authorization"])
 async def agent_run_api(agent_request: AgentRequest, http_request: Request, authorization: str = Header(None)):
     """
     Agent execution API endpoint
@@ -61,8 +64,11 @@ async def agent_run_api(agent_request: AgentRequest, http_request: Request, auth
         )
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
+        # Only expose actual error in debug mode for better diagnosis
+        # Keep generic message in normal mode for user experience
+        error_detail = str(e) if agent_request.is_debug else "Agent run error."
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent run error.")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_detail)
 
 
 @agent_runtime_router.get("/stop/{conversation_id}")
@@ -85,12 +91,14 @@ async def search_agent_info_api(
     """
     Search agent info by agent_id and version_no
     version_no defaults to 0 (current/draft version)
+    Returns permission field indicating whether the user can edit this agent.
     """
     try:
-        _, auth_tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id = get_current_user_id(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
-        return await get_agent_info_impl(agent_id, effective_tenant_id, version_no)
+        agent_info = await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
+        return apply_agent_detail_prompt_visibility(auth_tenant_id, agent_info)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(
@@ -157,7 +165,8 @@ async def delete_agent_api(
     Delete an agent
     """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
@@ -171,11 +180,24 @@ async def delete_agent_api(
 @agent_config_router.post("/export")
 async def export_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
     """
-    export an agent
+    export an agent.
+
+    Returns a ZIP file if the agent has skill instances, otherwise returns plain JSON.
+    The response Content-Type and body differ based on the agent's skill configuration.
     """
     try:
-        agent_info_str = await export_agent_impl(request.agent_id, authorization)
-        return ConversationResponse(code=0, message="success", data=agent_info_str)
+        result = await export_agent_with_skills_impl(request.agent_id, authorization)
+        if isinstance(result, dict) and result.get("_zip"):
+            return Response(
+                content=result["data"],
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f"attachment; filename=\"{result.get('filename', 'agent_export.zip')}\""
+                }
+            )
+        if isinstance(result, str):
+            result = json.loads(result)
+        return ConversationResponse(code=0, message="success", data=result)
     except Exception as e:
         logger.error(f"Agent export error: {str(e)}")
         raise HTTPException(
@@ -185,15 +207,32 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
 @agent_config_router.post("/import")
 async def import_agent_api(request: AgentImportRequest, authorization: Optional[str] = Header(None)):
     """
-    import an agent
+    import an agent.
+
+    Accepts both plain JSON (agent without skills) and JSON with embedded skill ZIPs
+    (agent with skills). The skills field, if present, should contain base64-encoded
+    ZIP packages for each skill.
     """
     try:
-        await import_agent_impl(
-            request.agent_info,
-            authorization,
-            force_import=request.force_import
-        )
+        if request.skills:
+            await import_agent_with_skills_impl(
+                request.agent_info,
+                request.skills,
+                authorization,
+                force_import=request.force_import
+            )
+        else:
+            await import_agent_impl(
+                request.agent_info,
+                authorization,
+                force_import=request.force_import
+            )
         return {}
+    except SkillDuplicateError as exc:
+        raise HTTPException(status_code=409, detail={
+            "type": "skill_duplicate",
+            "duplicate_skills": exc.duplicate_names
+        })
     except Exception as e:
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
@@ -256,10 +295,18 @@ async def list_all_agent_info_api(
     list all agent info
     """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
-        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
-        effective_tenant_id = tenant_id or auth_tenant_id
-        return await list_all_agent_info_impl(tenant_id=effective_tenant_id, user_id=user_id)
+        user_id, tenant_id, _ = get_current_user_info(
+            authorization, request)
+
+        agent_list = await list_all_agent_info_impl(
+            tenant_id=tenant_id, user_id=user_id
+        )
+        if tenant_id != ASSET_OWNER_TENANT_ID:
+            asset_agent_list = await list_all_agent_info_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+            )
+            return agent_list + asset_agent_list
+        return agent_list
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
@@ -308,7 +355,8 @@ async def publish_version_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Publish version error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Publish version error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Publish version error.")
 
 
 @agent_config_router.post("/{agent_id}/versions/compare")
@@ -333,7 +381,8 @@ async def compare_versions_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Compare versions error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Compare versions error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Compare versions error.")
 
 
 @agent_config_router.get("/{agent_id}/versions", response_model=VersionListResponse)
@@ -344,14 +393,14 @@ async def get_version_list_api(
     authorization: Optional[str] = Header(None),
     request: Request = None
 ):
-    """
+    """versions = session.query(AgentVersion)
     Get version list for an agent
     """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        _, auth_tenant_id, _ = get_current_user_info(
+            authorization, request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
-        logger.info(f"Get version list for agent_id: {agent_id}, tenant_id: {effective_tenant_id}")
         result = get_version_list_impl(
             agent_id=agent_id,
             tenant_id=effective_tenant_id,
@@ -360,7 +409,8 @@ async def get_version_list_api(
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
     except Exception as e:
         logger.error(f"Get version list error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version list error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version list error.")
 
 
 @agent_config_router.get("/{agent_id}/versions/{version_no}", response_model=VersionDetailResponse)
@@ -384,7 +434,9 @@ async def get_version_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Get version detail error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version detail error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version detail error.")
+
 
 @agent_config_router.get("/{agent_id}/versions/{version_no}/detail", response_model=VersionDetailResponse)
 async def get_version_detail_api(
@@ -407,7 +459,8 @@ async def get_version_detail_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Get version detail error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version detail error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version detail error.")
 
 
 @agent_config_router.post("/{agent_id}/versions/{version_no}/rollback")
@@ -434,7 +487,8 @@ async def rollback_version_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Rollback version error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Rollback version error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Rollback version error.")
 
 
 @agent_config_router.patch("/{agent_id}/versions/{version_no}/status")
@@ -461,7 +515,8 @@ async def update_version_status_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Update version status error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Update version status error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Update version status error.")
 
 
 @agent_config_router.put("/{agent_id}/versions/{version_no}")
@@ -489,7 +544,8 @@ async def update_version_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Update version error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Update version error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Update version error.")
 
 
 @agent_config_router.delete("/{agent_id}/versions/{version_no}")
@@ -514,7 +570,8 @@ async def delete_version_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"Delete version error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Delete version error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Delete version error.")
 
 
 @agent_config_router.get("/{agent_id}/current_version", response_model=CurrentVersionResponse)
@@ -536,7 +593,8 @@ async def get_current_version_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Get current version error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get current version error.")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get current version error.")
 
 
 @agent_config_router.get("/published_list")
@@ -549,10 +607,17 @@ async def list_published_agents_api(
     """
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, request)
-        return await list_published_agents_impl(tenant_id=tenant_id, user_id=user_id)
+        agent_list = await list_published_agents_impl(
+            tenant_id=tenant_id, user_id=user_id
+        )
+        if tenant_id != ASSET_OWNER_TENANT_ID:
+            asset_agent_list = await list_published_agents_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+            )
+            return agent_list + asset_agent_list
+        return agent_list
     except Exception as e:
         logger.error(f"Published agents list error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-

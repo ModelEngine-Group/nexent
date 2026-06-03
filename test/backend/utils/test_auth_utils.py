@@ -628,3 +628,23 @@ class TestGetUserAndTenantByAccessKey:
 
         with pytest.raises(UnauthorizedError, match="No user associated with this access key"):
             au.get_user_and_tenant_by_access_key("nexent-abc123")
+
+
+class TestResolveTenantIdFromUserTenantRecord:
+    """Tests for resolve_tenant_id_from_user_tenant_record."""
+
+    def setup_method(self):
+        au.ASSET_OWNER_ROLE = "ASSET_OWNER"
+        au.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+    def test_returns_explicit_tenant_id(self):
+        record = {"tenant_id": "tenant_explicit", "user_role": "USER"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == "tenant_explicit"
+
+    def test_empty_tenant_asset_owner_role_maps_to_virtual_tenant(self):
+        record = {"tenant_id": "", "user_role": "ASSET_OWNER"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == au.ASSET_OWNER_TENANT_ID
+
+    def test_empty_tenant_other_role_falls_back_to_default(self):
+        record = {"tenant_id": None, "user_role": "USER"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID

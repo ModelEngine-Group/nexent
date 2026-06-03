@@ -799,6 +799,35 @@ class TestCheckFileAccess:
         assert check_file_access("system/config.json", "user123") is False
         assert check_file_access("preview/file.pdf", "user123") is False
 
+    def test_check_file_access_asset_owner_prefix_requires_asset_owner_tenant(self):
+        """Asset-owner attachment paths are restricted to the asset-owner tenant."""
+        from backend.services.file_management_service import check_file_access
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        path = "attachments/asset_owner/user1/doc.pdf"
+        assert check_file_access(path, "user1", ASSET_OWNER_TENANT_ID) is True
+        assert check_file_access(path, "user1", "regular_tenant") is False
+
+
+class TestResolveMinioUploadFolder:
+    """Test cases for resolve_minio_upload_folder asset-owner branch."""
+
+    def test_asset_owner_tenant_uses_dedicated_prefix(self):
+        from backend.services.file_management_service import resolve_minio_upload_folder
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        result = resolve_minio_upload_folder(
+            folder="attachments",
+            user_id="user123",
+            uploader_tenant_id=ASSET_OWNER_TENANT_ID,
+        )
+        assert result == "attachments/asset_owner/user123"
+
+    def test_knowledge_base_unchanged_for_non_asset_owner(self):
+        from backend.services.file_management_service import resolve_minio_upload_folder
+
+        assert resolve_minio_upload_folder("knowledge_base", "user123", "tenant_a") == "knowledge_base"
+
 
 class TestCheckFileAccessBatch:
     """Test cases for check_file_access_batch function"""
@@ -1382,7 +1411,8 @@ class TestGetLlmModel:
             api_base="http://api.example.com",
             api_key="test_api_key",
             max_context_tokens=4096,
-            ssl_verify=True
+            ssl_verify=True,
+            timeout_seconds=None
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})

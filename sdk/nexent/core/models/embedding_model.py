@@ -1,11 +1,16 @@
 import asyncio
+import base64
 import logging
+import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 
 import requests
 
 from ...monitor.monitoring import record_model_call
+
+# Path to test assets directory
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "assets")
 
 
 class BaseEmbedding(ABC):
@@ -21,6 +26,7 @@ class BaseEmbedding(ABC):
         api_key: str = None,
         embedding_dim: int = None,
         ssl_verify: bool = True,
+        model_type: str = None
     ):
         """
         Initialize the embedding model.
@@ -86,6 +92,7 @@ class TextEmbedding(BaseEmbedding):
         api_key: str = None,
         embedding_dim: int = None,
         ssl_verify: bool = True,
+        model_type: str = None
     ):
         super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)
 
@@ -128,6 +135,7 @@ class MultimodalEmbedding(BaseEmbedding):
         api_key: str = None,
         embedding_dim: int = None,
         ssl_verify: bool = True,
+        model_type: str = None
     ):
         super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)
 
@@ -164,6 +172,7 @@ class JinaEmbedding(MultimodalEmbedding):
         model_name: str = "jina-clip-v2",
         embedding_dim: int = 1024,
         ssl_verify: bool = True,
+        model_type: str = "multimodal"
     ):
         """Initialize JinaEmbedding with configuration."""
         self.api_key = api_key
@@ -171,6 +180,11 @@ class JinaEmbedding(MultimodalEmbedding):
         self.model = model_name
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
+        self.model_type = model_type
+        
+        # Create a session with trust_env=False to ignore proxy environment variables
+        self.session = requests.Session()
+        self.session.trust_env = False
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
@@ -189,7 +203,7 @@ class JinaEmbedding(MultimodalEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
+        response = self.session.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
         response.raise_for_status()
         return response.json()
 
@@ -301,11 +315,19 @@ class JinaEmbedding(MultimodalEmbedding):
 
     async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
         try:
-            # Create a simple test input
-            test_input = "Hello, nexent!"
+            # Create multimodal test input with both text and image
+            test_image_path = os.path.join(ASSETS_DIR, "test.png")
+            with open(test_image_path, "rb") as f:
+                image_data = f.read()
+            image_base64 = base64.b64encode(image_data).decode("utf-8")
+
+            test_inputs = [
+                {"text": "Hello, nexent!"},
+                {"image": f"data:image/png;base64,{image_base64}"}
+            ]
 
             # Try to get embedding vectors, setting a timeout
-            embeddings = await asyncio.to_thread(self.get_embeddings, test_input, timeout=timeout)
+            embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
 
             # If embedding vectors are successfully obtained, the connection is normal
             return embeddings
@@ -321,16 +343,141 @@ class JinaEmbedding(MultimodalEmbedding):
             return []
 
 
-class OpenAICompatibleEmbedding(TextEmbedding):
-    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, ssl_verify: bool = True):
-        """Initialize OpenAICompatibleEmbedding with configuration from environment variables or provided parameters."""
+class DashScopeMultimodalEmbedding(MultimodalEmbedding):
+    """DashScope multimodal embedding model (tongyi-embedding-vision)."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        embedding_dim: int = 1024,
+        ssl_verify: bool = True,
+    ):
+        """Initialize DashScopeMultimodalEmbedding with configuration."""
         self.api_key = api_key
         self.api_url = base_url
         self.model = model_name
         self.embedding_dim = embedding_dim
         self.ssl_verify = ssl_verify
 
+        self.session = requests.Session()
+        self.session.trust_env = False
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+    def _prepare_multimodal_input(self, inputs: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Prepare DashScope-compatible multimodal input format."""
+        return {
+            "model": self.model,
+            "input": {"contents": inputs}
+        }
+
+    def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
+        response = self.session.post(
+            self.api_url,
+            headers=self.headers,
+            json=data,
+            timeout=timeout,
+            verify=self.ssl_verify
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_embeddings(
+        self,
+        inputs: Union[str, List[str]],
+        with_metadata: bool = False,
+        timeout: Optional[float] = None,
+        retries: int = 3,
+        retry_timeout_step: float = 5.0,
+    ) -> Union[List[List[float]], Dict[str, Any]]:
+        if isinstance(inputs, str):
+            multimodal_inputs = [{"text": inputs}]
+        else:
+            multimodal_inputs = [{"text": item} for item in inputs]
+        return self.get_multimodal_embeddings(multimodal_inputs, with_metadata, timeout, retries, retry_timeout_step)
+
+    def get_multimodal_embeddings(
+        self,
+        inputs: List[Dict[str, str]],
+        with_metadata: bool = False,
+        timeout: Optional[float] = None,
+        retries: int = 3,
+        retry_timeout_step: float = 5.0,
+    ) -> Union[List[List[float]], Dict[str, Any]]:
+        with record_model_call("multi_embedding", self.model, display_name=self.model):
+            data = self._prepare_multimodal_input(inputs)
+
+            base_timeout = timeout if timeout is not None else retry_timeout_step
+            attempts = retries + 1
+            last_timeout: Optional[requests.exceptions.Timeout] = None
+            for attempt_index in range(attempts):
+                current_timeout = base_timeout + attempt_index * retry_timeout_step
+                try:
+                    response = self._make_request(data, timeout=current_timeout)
+
+                    if with_metadata:
+                        return response
+
+                    embeddings = [item["embedding"] for item in response["output"]["embeddings"]]
+                    return embeddings
+                except requests.exceptions.Timeout as e:
+                    logging.warning(
+                        f"DashScopeMultimodalEmbedding API timed out in {current_timeout}s ({attempt_index + 1}/{attempts})"
+                    )
+                    last_timeout = e
+                    if attempt_index == attempts - 1:
+                        logging.error("DashScopeMultimodalEmbedding API timed out.")
+                        raise
+                    continue
+
+            if last_timeout:
+                raise last_timeout
+            return []
+
+    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
+        try:
+            # DashScope multimodal embedding requires BOTH text and image in contents
+            test_image_path = os.path.join(ASSETS_DIR, "test.png")
+            with open(test_image_path, "rb") as f:
+                image_data = f.read()
+            image_base64 = base64.b64encode(image_data).decode("utf-8")
+
+            test_inputs = [
+                {"text": "Hello, nexent!"},
+                {"image": f"data:image/png;base64,{image_base64}"}
+            ]
+            embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
+            return embeddings
+        except requests.exceptions.Timeout:
+            logging.error(f"DashScopeMultimodalEmbedding connection timed out ({timeout} seconds)")
+            return []
+        except requests.exceptions.ConnectionError:
+            logging.error("DashScopeMultimodalEmbedding connection error")
+            return []
+        except Exception as e:
+            logging.error(f"DashScopeMultimodalEmbedding connection failed: {str(e)}")
+            return []
+
+
+class OpenAICompatibleEmbedding(TextEmbedding):
+    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, model_type: str = "text", ssl_verify: bool = True):
+        """Initialize OpenAICompatibleEmbedding with configuration from environment variables or provided parameters."""
+        self.api_key = api_key
+        self.api_url = base_url
+        self.model = model_name
+        self.embedding_dim = embedding_dim
+        self.ssl_verify = ssl_verify
+        self.model_type=model_type
+
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+
+        # Create a session with trust_env=False to ignore proxy environment variables
+        self.session = requests.Session()
+        self.session.trust_env = False
 
     def _prepare_input(self, inputs: Union[str, List[str]]) -> Dict[str, Any]:
         """Prepare the input data for the API request."""
@@ -349,7 +496,7 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
+        response = self.session.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
         response.raise_for_status()
         return response.json()
 

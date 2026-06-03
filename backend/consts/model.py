@@ -1,8 +1,10 @@
 from enum import Enum
 from typing import Optional, Any, List, Dict
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from nexent.core.agents.agent_model import ToolConfig
+
+from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
 
 class ModelConnectStatusEnum(Enum):
@@ -29,7 +31,7 @@ class ModelConnectStatusEnum(Enum):
 class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
     invite_code: Optional[str] = None
     auto_login: Optional[bool] = True  # Whether to return session after signup
 
@@ -38,6 +40,19 @@ class UserSignInRequest(BaseModel):
     """User login request model"""
     email: EmailStr
     password: str
+
+
+class OAuthCompleteRequest(BaseModel):
+    """Complete a pending OAuth signup."""
+    email: Optional[EmailStr] = None
+    password: str = Field(..., min_length=6)
+    invite_code: str = Field(..., min_length=1)
+
+
+class UpdatePasswordRequest(BaseModel):
+    """Password update request model for changing user password"""
+    old_password: str = Field(..., min_length=1, description="Current password for verification")
+    new_password: str = Field(..., min_length=8, description="New password to set (min 8 characters)")
 
 
 class UserUpdateRequest(BaseModel):
@@ -121,6 +136,8 @@ class ModelRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = None
     access_token: Optional[str] = None
+    timeout_seconds: Optional[int] = None
+    concurrency_limit: Optional[int] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -160,13 +177,34 @@ class STTModelConfig(BaseModel):
     accessToken: Optional[str] = None
 
 
+def _empty_model_config() -> SingleModelConfig:
+    return SingleModelConfig(
+        modelName="",
+        displayName="",
+        apiConfig=ModelApiConfig(apiKey="", modelUrl="")
+    )
+
+
+class TTSModelConfig(BaseModel):
+    """TTS model specific configuration with factory, appid, and access token fields"""
+    modelName: str
+    displayName: str
+    apiConfig: Optional[ModelApiConfig] = None
+    modelFactory: Optional[str] = None
+    modelAppid: Optional[str] = None
+    accessToken: Optional[str] = None
+
+
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
     embedding: SingleModelConfig
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
     vlm: SingleModelConfig
+    vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
+    tts: TTSModelConfig
 
 
 class AppConfig(BaseModel):
@@ -300,6 +338,7 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
+    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):
@@ -312,6 +351,69 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
+    prompt_template_id: Optional[int] = None
+    tool_ids: Optional[List[int]] = Field(
+        None, description="Optional: tool IDs from frontend (takes precedence over database query)")
+    sub_agent_ids: Optional[List[int]] = Field(
+        None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
+    knowledge_base_display_names: Optional[List[str]] = Field(
+        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+    has_selected_resources: bool = Field(
+        True, description="Whether tools or sub-agents are selected; when False, skips generating constraint and few_shots sections")
+
+
+class PromptTemplateContentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    duty_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["duty_system_prompt"]
+    )
+    constraint_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["constraint_system_prompt"]
+    )
+    few_shots_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["few_shots_system_prompt"]
+    )
+    agent_variable_name_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_variable_name_system_prompt"]
+    )
+    agent_display_name_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_system_prompt"]
+    )
+    agent_description_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_description_system_prompt"]
+    )
+    user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["user_prompt"]
+    )
+    agent_name_regenerate_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_system_prompt"]
+    )
+    agent_name_regenerate_user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_user_prompt"]
+    )
+    agent_display_name_regenerate_system_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_system_prompt"]
+    )
+    agent_display_name_regenerate_user_prompt: str = Field(
+        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_user_prompt"]
+    )
+
+
+class PromptTemplateRequest(BaseModel):
+    template_name: str
+    description: Optional[str] = None
+    template_type: str = "agent_generate"
+    template_content_zh: PromptTemplateContentRequest
+    template_content_en: Optional[PromptTemplateContentRequest] = None
+class OptimizePromptSectionRequest(BaseModel):
+    task_description: str
+    agent_id: int
+    model_id: int
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
@@ -335,7 +437,7 @@ class AgentInfoRequest(BaseModel):
     author: Optional[str] = None
     model_name: Optional[str] = None
     model_id: Optional[int] = None
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
@@ -343,6 +445,8 @@ class AgentInfoRequest(BaseModel):
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
+    prompt_template_id: Optional[int] = None
+    prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
@@ -375,6 +479,7 @@ class SkillInstanceInfoRequest(BaseModel):
     agent_id: int
     enabled: bool = True
     version_no: int = 0
+    config_values: Optional[Dict[str, Any]] = None
 
 
 class ToolInstanceSearchRequest(BaseModel):
@@ -432,6 +537,9 @@ class ExportAndImportAgentInfo(BaseModel):
     model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
+    skill_names: Optional[List[str]] = None
+    prompt_template_id: Optional[int] = None
+    prompt_template_name: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -448,9 +556,16 @@ class ExportAndImportDataFormat(BaseModel):
     mcp_info: List[MCPInfo]
 
 
+class SkillZipEntry(BaseModel):
+    """A skill bundled inside an agent export ZIP."""
+    skill_name: str
+    skill_zip_base64: str
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
+    skills: Optional[List[SkillZipEntry]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -505,7 +620,7 @@ class MemoryAgentShareMode(str, Enum):
 class VoiceConnectivityRequest(BaseModel):
     """Request model for voice service connectivity check"""
     model_type: str = Field(...,
-                            description="Type of model to check ('stt')")
+                            description="Type of model to check ('stt' or 'tts')")
 
 
 class VoiceConnectivityResponse(BaseModel):
@@ -565,6 +680,8 @@ class MCPUpdateRequest(BaseModel):
     new_mcp_url: str = Field(..., description="New MCP server URL")
     new_authorization_token: Optional[str] = Field(
         None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
+    custom_headers: Optional[Dict[str, Any]] = Field(
+        None, description="Custom HTTP headers as JSON object")
 
 
 # Tenant Management Data Models
@@ -573,6 +690,22 @@ class TenantCreateRequest(BaseModel):
     """Request model for creating a tenant"""
     tenant_name: str = Field(..., min_length=1,
                              description="Tenant display name")
+    skill_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Skill IDs to install for the new tenant (legacy, use skill_names instead)"
+    )
+    skill_names: Optional[List[str]] = Field(
+        default=None,
+        description="Skill names to install for the new tenant. "
+                    "Each name is used to derive a .zip filename from "
+                    "OFFICIAL_SKILLS_ZIP_PATH and installed via upload."
+    )
+    locale: Optional[str] = Field(
+        default=None,
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
+                    "Determines the source label for auto-installed skills: "
+                    "'zh' → '官方', other locales → 'official'."
+    )
 
 
 class TenantUpdateRequest(BaseModel):
@@ -756,6 +889,8 @@ class ManageTenantModelCreateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models (e.g., Volcano Engine)")
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -776,6 +911,8 @@ class ManageTenantModelUpdateRequest(BaseModel):
     # STT specific fields
     model_appid: Optional[str] = Field(None, description="Application ID for STT models")
     access_token: Optional[str] = Field(None, description="Access token for STT models")
+    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):
@@ -907,7 +1044,8 @@ class SkillCreateRequest(BaseModel):
     tool_names: Optional[List[str]] = []
     tags: Optional[List[str]] = []
     source: Optional[str] = "custom"
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[Dict[str, str]]] = Field(
         default_factory=list,
         description="Additional skill files beyond SKILL.md. "
@@ -930,7 +1068,8 @@ class SkillUpdateRequest(BaseModel):
     tool_names: Optional[List[str]] = None
     tags: Optional[List[str]] = None
     source: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     files: Optional[List[SkillFileData]] = Field(
         default_factory=list,
         description="Updated skill files. Each entry has file_path and content. "
@@ -947,7 +1086,8 @@ class SkillResponse(BaseModel):
     tool_ids: List[int]
     tags: List[str]
     source: str
-    params: Optional[Dict[str, Any]] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
     created_by: Optional[str] = None
     create_time: Optional[str] = None
     updated_by: Optional[str] = None
@@ -960,3 +1100,192 @@ class SkillCreateInteractiveRequest(BaseModel):
     existing_skill: Optional[Dict[str, Any]] = None
     complexity: Optional[str] = "simple"
     language: Optional[str] = "zh"
+
+
+# ---------------------------------------------------------------------------
+# MCP Management Data Models
+# ---------------------------------------------------------------------------
+
+class MCPSourceType(str, Enum):
+    """MCP source type enumeration"""
+    LOCAL = "local"
+    MCP_REGISTRY = "mcp_registry"
+    COMMUNITY = "community"
+
+
+class AddMcpServiceRequest(BaseModel):
+    """Request model for adding an MCP service"""
+    name: str = Field(..., min_length=1, description="MCP service name")
+    server_url: str = Field(..., min_length=1, description="MCP server URL")
+    description: Optional[str] = Field(None, description="MCP service description")
+    source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+    container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
+    registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
+
+    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class AddContainerMcpServiceRequest(BaseModel):
+    """Request model for adding a container-based MCP service"""
+    name: str = Field(..., min_length=1, description="MCP service name")
+    description: Optional[str] = Field(None, description="MCP service description")
+    source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    port: int = Field(..., ge=1, le=65535, description="Host port for the container")
+    mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
+
+    @field_validator("name", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class UpdateMcpServiceRequest(BaseModel):
+    """Request model for updating an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID")
+    name: str = Field(..., min_length=1, description="New MCP service name")
+    description: Optional[str] = Field(None, description="MCP service description")
+    server_url: str = Field(..., min_length=1, description="New MCP server URL")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+
+    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class EnableMcpServiceRequest(BaseModel):
+    """Request model for enabling an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to enable")
+
+
+class DisableMcpServiceRequest(BaseModel):
+    """Request model for disabling an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to disable")
+
+
+class HealthcheckMcpServiceRequest(BaseModel):
+    """Request model for checking MCP service health"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to health check")
+
+
+class ListMcpToolsRequest(BaseModel):
+    """Request model for listing MCP service tools"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID")
+
+
+class PortConflictCheckRequest(BaseModel):
+    """Request model for checking port availability"""
+    port: int = Field(..., ge=1, le=65535, description="Port number to check")
+
+
+class ListMcpServicesQuery(BaseModel):
+    """Query parameters for listing MCP services"""
+    tag: Optional[str] = Field(None, description="Filter by tag")
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def _strip_tag(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class RegistryListQuery(BaseModel):
+    """Query parameters for listing MCP registry services"""
+    search: Optional[str] = Field(None, description="Search keyword")
+    include_deleted: bool = Field(default=False, description="Include deleted records")
+    updated_since: Optional[str] = Field(None, description="Filter by update time")
+    version: Optional[str] = Field(None, description="Filter by version")
+    cursor: Optional[str] = Field(None, description="Pagination cursor")
+    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
+
+    @field_validator("search", "updated_since", "version", "cursor", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityListRequest(BaseModel):
+    """Request model for listing community MCP services"""
+    search: Optional[str] = Field(None, description="Search keyword")
+    tag: Optional[str] = Field(None, description="Filter by tag")
+    transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
+    cursor: Optional[str] = Field(None, description="Pagination cursor")
+    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
+
+    @field_validator("search", "tag", "cursor", "transport_type", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityPublishRequest(BaseModel):
+    """Publish a local MCP to the community; optional fields override the snapshot."""
+
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to publish")
+    name: Optional[str] = Field(None, description="Community display name override")
+    description: Optional[str] = Field(None, description="Description override")
+    version: Optional[str] = Field(None, description="Version override")
+    tags: Optional[List[str]] = Field(None, description="Tags override")
+    mcp_server: Optional[str] = Field(None, max_length=500, description="Remote MCP server URL override (URL / HTTP / SSE transports)")
+    config_json: Optional[Dict[str, Any]] = Field(None, description="Container MCP configuration JSON override")
+
+    @field_validator("name", "description", "version", "mcp_server", mode="before")
+    @classmethod
+    def _strip_publish_optional_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityUpdateRequest(BaseModel):
+    """Request model for updating community MCP service"""
+    community_id: int = Field(..., gt=0, description="Community record ID")
+    name: Optional[str] = Field(default=None, min_length=1, description="New MCP service name")
+    description: Optional[str] = Field(None, description="MCP service description")
+    tags: List[str] = Field(default_factory=list, description="MCP tags")
+    version: Optional[str] = Field(None, description="MCP version")
+    registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    config_json: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Container MCP configuration JSON (omit to leave unchanged)",
+    )
+
+    @field_validator("name", "description", "version", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class DeleteMcpServiceRequest(BaseModel):
+    """Request model for deleting an MCP service"""
+    mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")

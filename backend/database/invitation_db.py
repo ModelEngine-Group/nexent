@@ -300,8 +300,8 @@ def query_invitations_with_pagination(
             TenantInvitationCode.delete_flag == "N"
         )
 
-        # Apply tenant filter if provided
-        if tenant_id:
+        # Apply tenant filter when tenant_id is specified (including ASSET_OWNER virtual tenant)
+        if tenant_id is not None:
             query = query.filter(TenantInvitationCode.tenant_id == tenant_id)
 
         # Apply sorting

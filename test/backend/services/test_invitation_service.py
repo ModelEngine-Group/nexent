@@ -1,20 +1,106 @@
 import sys
+import types
 import pytest
+import importlib.machinery
 from unittest.mock import patch, MagicMock
+
+# Ensure repository root is importable so the `backend.*` namespace resolves.
+from pathlib import Path
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 # Mock external dependencies before importing
 sys.modules['psycopg2'] = MagicMock()
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['supabase'] = MagicMock()
+
+# Stub nexent.storage modules to avoid importing the real SDK package (which has optional deps).
+nexent_module = types.ModuleType("nexent")
+setattr(nexent_module, "__path__", [])
+nexent_storage_module = types.ModuleType("nexent.storage")
+setattr(nexent_storage_module, "__path__", [])
+nexent_storage_factory_module = types.ModuleType("nexent.storage.storage_client_factory")
+nexent_storage_factory_module.create_storage_client_from_config = MagicMock(return_value=MagicMock())
+nexent_minio_config_module = types.ModuleType("nexent.storage.minio_config")
+
+
+class _MockMinIOStorageConfig:
+    def validate(self):
+        return None
+
+
+nexent_minio_config_module.MinIOStorageConfig = _MockMinIOStorageConfig
+sys.modules["nexent"] = nexent_module
+sys.modules["nexent.storage"] = nexent_storage_module
+sys.modules["nexent.storage.storage_client_factory"] = nexent_storage_factory_module
+sys.modules["nexent.storage.minio_config"] = nexent_minio_config_module
+
+# Make parent/child attributes resolvable for patch() dotted lookups.
+setattr(nexent_module, "storage", nexent_storage_module)
+setattr(nexent_storage_module, "storage_client_factory", nexent_storage_factory_module)
+setattr(nexent_storage_module, "minio_config", nexent_minio_config_module)
+
+# Mock mem0 to prevent optional dependency import failures during test collection
+mem0_module = types.ModuleType("mem0")
+setattr(mem0_module, "__path__", [])
+mem0_memory_module = types.ModuleType("mem0.memory")
+mem0_memory_main_module = types.ModuleType("mem0.memory.main")
+mem0_embeddings_module = types.ModuleType("mem0.embeddings")
+mem0_embeddings_base_module = types.ModuleType("mem0.embeddings.base")
+
+
+class _MockAsyncMemory:
+    pass
+
+
+mem0_memory_main_module.AsyncMemory = _MockAsyncMemory
+
+
+class _MockEmbeddingBase:
+    pass
+
+
+mem0_embeddings_base_module.EmbeddingBase = _MockEmbeddingBase
+sys.modules["mem0"] = mem0_module
+sys.modules["mem0.memory"] = mem0_memory_module
+sys.modules["mem0.memory.main"] = mem0_memory_main_module
+sys.modules["mem0.embeddings"] = mem0_embeddings_module
+sys.modules["mem0.embeddings.base"] = mem0_embeddings_base_module
+
+# Stub database modules used by invitation_service to avoid loading real SQLAlchemy client
+_db_client_stub = types.ModuleType("database.client")
+_db_client_stub.get_db_session = MagicMock()
+_db_client_stub.as_dict = MagicMock()
+_db_client_stub.MinioClient = MagicMock()
+sys.modules["database.client"] = _db_client_stub
+sys.modules["database.invitation_db"] = MagicMock()
+sys.modules["database.user_tenant_db"] = MagicMock()
+sys.modules["database.group_db"] = MagicMock()
+sys.modules["database.role_permission_db"] = MagicMock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+nexent_storage_factory_module.create_storage_client_from_config.return_value = storage_client_mock
+_db_client_stub.MinioClient.return_value = minio_client_mock
 
+_services_pkg = types.ModuleType("services")
+_services_pkg.__path__ = []
+sys.modules["services"] = _services_pkg
+sys.modules["services.group_service"] = MagicMock()
+_asset_owner_visibility_stub = types.ModuleType("services.asset_owner_visibility")
+_asset_owner_visibility_stub.require_asset_owner_enabled = lambda: None
+sys.modules["services.asset_owner_visibility"] = _asset_owner_visibility_stub
+setattr(_services_pkg, "asset_owner_visibility", _asset_owner_visibility_stub)
+setattr(_services_pkg, "group_service", sys.modules["services.group_service"])
+
+from consts.const import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
 from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from backend.services.invitation_service import (
     create_invitation_code,
@@ -1293,3 +1379,164 @@ def test_update_invitation_code_status_same_day_not_expired(
     # Should return False because status didn't change (today is not expired)
     assert result is False
     mock_modify_invitation.assert_not_called()
+
+
+@patch("backend.services.invitation_service.ENABLE_ASSET_OWNER_ROLE", True)
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("backend.services.invitation_service._generate_unique_invitation_code")
+@patch("backend.services.invitation_service.add_invitation")
+@patch("backend.services.invitation_service.query_invitation_by_id")
+@patch("backend.services.invitation_service.update_invitation_code_status")
+@patch("backend.services.invitation_service.query_invitation_by_code")
+def test_create_asset_owner_invite_success(
+    mock_query_invitation_by_code,
+    mock_update_status,
+    mock_query_invitation,
+    mock_add_invitation,
+    mock_generate_code,
+    mock_get_user_info,
+    mock_user_info,
+):
+    """SU can create ASSET_OWNER_INVITE with virtual tenant and empty groups."""
+    mock_user_info["user_role"] = "SU"
+    mock_get_user_info.return_value = mock_user_info
+    mock_generate_code.return_value = "AO1234"
+    mock_add_invitation.return_value = 99
+    mock_query_invitation.return_value = {"status": "IN_USE"}
+    mock_query_invitation_by_code.return_value = None
+
+    result = create_invitation_code(
+        tenant_id="ignored_tenant",
+        code_type=ASSET_OWNER_INVITE_CODE_TYPE,
+        user_id="su_user",
+    )
+
+    assert result["code_type"] == ASSET_OWNER_INVITE_CODE_TYPE
+    assert result["group_ids"] == []
+    mock_add_invitation.assert_called_once_with(
+        tenant_id=ASSET_OWNER_TENANT_ID,
+        invitation_code="AO1234",
+        code_type=ASSET_OWNER_INVITE_CODE_TYPE,
+        group_ids=[],
+        capacity=1,
+        expiry_date=None,
+        status="IN_USE",
+        created_by="su_user",
+    )
+
+
+@patch("backend.services.invitation_service.ENABLE_ASSET_OWNER_ROLE", True)
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+def test_create_asset_owner_invite_admin_forbidden(mock_get_user_info, mock_user_info):
+    """ADMIN cannot create ASSET_OWNER_INVITE codes."""
+    mock_user_info["user_role"] = "ADMIN"
+    mock_get_user_info.return_value = mock_user_info
+
+    with pytest.raises(UnauthorizedError, match="not authorized to create ADMIN_INVITE codes"):
+        create_invitation_code(
+            tenant_id="test_tenant",
+            code_type=ASSET_OWNER_INVITE_CODE_TYPE,
+            user_id="admin_user",
+        )
+
+
+@patch("backend.services.invitation_service.ENABLE_ASSET_OWNER_ROLE", False)
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+def test_create_asset_owner_invite_feature_disabled(mock_get_user_info, mock_user_info):
+    """Creating ASSET_OWNER_INVITE when feature is disabled raises UnauthorizedError."""
+    mock_user_info["user_role"] = "SU"
+    mock_get_user_info.return_value = mock_user_info
+
+    with pytest.raises(UnauthorizedError, match="ASSET_OWNER feature is not enabled"):
+        create_invitation_code(
+            tenant_id="test_tenant",
+            code_type=ASSET_OWNER_INVITE_CODE_TYPE,
+            user_id="su_user",
+        )
+
+
+@patch("backend.services.invitation_service.query_invitation_by_id")
+@patch("backend.services.invitation_service.modify_invitation")
+@patch("backend.services.invitation_service.update_invitation_code_status")
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+def test_update_asset_owner_invite_su_success(
+    mock_get_user_info,
+    mock_update_status,
+    mock_modify_invitation,
+    mock_query_invitation_by_id,
+    mock_user_info,
+):
+    """SU can update ASSET_OWNER_INVITE invitation codes."""
+    mock_user_info["user_role"] = "SU"
+    mock_get_user_info.return_value = mock_user_info
+    mock_query_invitation_by_id.return_value = {
+        "invitation_id": 10,
+        "code_type": ASSET_OWNER_INVITE_CODE_TYPE,
+    }
+    mock_modify_invitation.return_value = True
+
+    assert update_invitation_code(10, {"capacity": 2}, "su_user") is True
+    mock_modify_invitation.assert_called_once()
+
+
+@patch("backend.services.invitation_service.query_invitation_by_id")
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+def test_update_asset_owner_invite_admin_forbidden(
+    mock_get_user_info,
+    mock_query_invitation_by_id,
+    mock_user_info,
+):
+    """ADMIN cannot update ASSET_OWNER_INVITE invitation codes."""
+    mock_user_info["user_role"] = "ADMIN"
+    mock_get_user_info.return_value = mock_user_info
+    mock_query_invitation_by_id.return_value = {
+        "invitation_id": 10,
+        "code_type": ASSET_OWNER_INVITE_CODE_TYPE,
+    }
+
+    with pytest.raises(UnauthorizedError, match="not authorized to update invitation codes"):
+        update_invitation_code(10, {"capacity": 2}, "admin_user")
+
+
+@patch("backend.services.invitation_service.query_invitations_with_pagination")
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+def test_get_invitations_list_asset_owner_tenant_su_success(
+    mock_get_user_info,
+    mock_query_invitations,
+    mock_user_info,
+):
+    """SU can list invitations for the asset-owner virtual tenant."""
+    mock_user_info["user_role"] = "SU"
+    mock_get_user_info.return_value = mock_user_info
+    mock_query_invitations.return_value = {"items": [], "total": 0}
+
+    result = get_invitations_list(
+        tenant_id=ASSET_OWNER_TENANT_ID,
+        page=1,
+        page_size=10,
+        user_id="su_user",
+    )
+
+    assert result["total"] == 0
+    mock_query_invitations.assert_called_once()
+
+
+@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+def test_get_invitations_list_asset_owner_tenant_admin_forbidden(
+    mock_get_user_info,
+    mock_user_info,
+):
+    """ADMIN cannot list asset-owner tenant invitations."""
+    mock_user_info["user_role"] = "ADMIN"
+    mock_get_user_info.return_value = mock_user_info
+
+    with pytest.raises(
+        UnauthorizedError,
+        match="not authorized to view asset owner invitations",
+    ):
+        get_invitations_list(
+            tenant_id=ASSET_OWNER_TENANT_ID,
+            page=1,
+            page_size=10,
+            user_id="admin_user",
+        )

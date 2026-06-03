@@ -1,11 +1,56 @@
 import json
+import importlib.machinery
+import types
 import unittest
+import json
+import sys
 from unittest.mock import patch, MagicMock
+
+# Mock nexent module hierarchy BEFORE any backend imports that depend on it
+nexent_mock = MagicMock()
+nexent_core_mock = MagicMock()
+nexent_core_agents_mock = MagicMock()
+nexent_storage_mock = MagicMock()
+nexent_storage_storage_client_factory_mock = MagicMock()
+nexent_storage_minio_config_mock = MagicMock()
+nexent_vector_database_mock = MagicMock()
+nexent_memory_mock = MagicMock()
+nexent_monitor_mock = MagicMock()
+
+sys.modules['nexent'] = nexent_mock
+sys.modules['nexent.core'] = nexent_core_mock
+sys.modules['nexent.core.agents'] = nexent_core_agents_mock
+sys.modules['nexent.storage'] = nexent_storage_mock
+sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
+sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
+sys.modules['nexent.vector_database'] = nexent_vector_database_mock
+sys.modules['nexent.memory'] = nexent_memory_mock
+sys.modules['nexent.monitor'] = nexent_monitor_mock
+
+# Mock external dependencies
+sys.modules['boto3'] = MagicMock()
+sys.modules['elasticsearch'] = MagicMock()
+sys.modules['sqlalchemy'] = MagicMock()
+sys.modules['sqlalchemy.create_engine'] = MagicMock()
+sys.modules['sqlalchemy.orm'] = MagicMock()
+sys.modules['sqlalchemy.dialects'] = MagicMock()
+sys.modules['sqlalchemy.dialects.postgresql'] = MagicMock()
+sys.modules['sqlalchemy.sql'] = MagicMock()
+
+
+# DO NOT mock consts - import real ones
+# The backend path is already in sys.path via sys.path.insert above
+
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 
 # Mock boto3 and minio client before importing the module under test
 import sys
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Mock ElasticSearch before importing other modules
 elasticsearch_mock = MagicMock()
@@ -32,20 +77,131 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 from jinja2 import StrictUndefined
 
+# Mock database submodules BEFORE importing prompt_service
+sys.modules['database'] = MagicMock()
+sys.modules['database.agent_db'] = MagicMock()
+sys.modules['database.tool_db'] = MagicMock()
+sys.modules['database.model_management_db'] = MagicMock()
+sys.modules['database.knowledge_db'] = MagicMock()
+sys.modules['database.client'] = MagicMock()
+sys.modules['database.db_models'] = MagicMock()
+
+# Mock utils
+sys.modules['utils'] = MagicMock()
+sys.modules['utils.llm_utils'] = MagicMock()
+sys.modules['utils.prompt_template_utils'] = MagicMock()
+
+# Mock services
+sys.modules['services'] = MagicMock()
+sys.modules['services.agent_service'] = MagicMock()
+sys.modules['services.prompt_template_service'] = MagicMock()
+
 from backend.services.prompt_service import (
     generate_and_save_system_prompt_impl,
     gen_system_prompt_streamable,
     generate_system_prompt,
-    join_info_for_generate_system_prompt
+    join_info_for_generate_system_prompt,
+    join_info_for_optimize_prompt_section,
+    optimize_prompt_section_impl,
 )
 
 
 class TestPromptService(unittest.TestCase):
 
     def setUp(self):
-        # Reset all mocks before each test
-        minio_client_mock.reset_mock()
         self.test_model_id = 1
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.get_prompt_optimize_prompt_template')
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_optimize_prompt_section_impl_success(
+        self,
+        mock_search_agent_info,
+        mock_query_tools,
+        mock_get_prompt_template,
+        mock_call_llm,
+    ):
+        mock_query_tools.return_value = [
+            {"name": "tool1", "description": "Tool 1", "inputs": "{}", "output_type": "text"}
+        ]
+        mock_search_agent_info.return_value = {"name": "assistant1", "description": "Assistant 1"}
+        mock_get_prompt_template.return_value = {
+            "OPTIMIZE_SYSTEM_PROMPT": "Optimize section",
+            "OPTIMIZE_USER_PROMPT": "Section {{ section_type }} {{ current_content }} {{ feedback }}"
+        }
+        mock_call_llm.return_value = "Optimized content"
+
+        result = optimize_prompt_section_impl(
+            agent_id=1,
+            model_id=2,
+            task_description="Build an agent",
+            tenant_id="tenant-1",
+            language="en",
+            section_type="duty",
+            section_title="Agent Role",
+            current_content="Original duty",
+            feedback="Make it more specific",
+            tool_ids=[10],
+            sub_agent_ids=[20],
+            knowledge_base_display_names=["kb-a"],
+        )
+
+        self.assertEqual(result["section_type"], "duty")
+        self.assertEqual(result["original_content"], "Original duty")
+        self.assertEqual(result["optimized_content"], "Optimized content")
+        mock_query_tools.assert_called_once_with([10])
+        mock_search_agent_info.assert_called_once_with(agent_id=20, tenant_id="tenant-1")
+        mock_call_llm.assert_called_once()
+
+    def test_optimize_prompt_section_impl_requires_feedback(self):
+        with self.assertRaises(AppException) as context:
+            optimize_prompt_section_impl(
+                agent_id=1,
+                model_id=2,
+                task_description="Build an agent",
+                tenant_id="tenant-1",
+                language="en",
+                section_type="duty",
+                section_title="Agent Role",
+                current_content="Original duty",
+                feedback="",
+            )
+
+        self.assertEqual(
+            context.exception.error_code,
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD
+        )
+
+    @patch('backend.services.prompt_service.Template')
+    def test_join_info_for_optimize_prompt_section(self, mock_template):
+        mock_template_instance = MagicMock()
+        mock_template.return_value = mock_template_instance
+        mock_template_instance.render.return_value = "Rendered optimize content"
+
+        result = join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template"},
+            section_type="constraint",
+            section_title="Usage Requirements",
+            task_description="Task description",
+            current_content="Original content",
+            feedback="Be clearer",
+            tool_info_list=[
+                {"name": "tool1", "description": "Tool 1", "inputs": "{}", "output_type": "text"}
+            ],
+            sub_agent_info_list=[
+                {"name": "assistant1", "description": "Assistant 1"}
+            ],
+            language="en",
+            knowledge_base_display_names=["kb-a", "kb-b"],
+        )
+
+        self.assertEqual(result, "Rendered optimize content")
+        template_vars = mock_template_instance.render.call_args[0][0]
+        self.assertEqual(template_vars["section_type"], "constraint")
+        self.assertEqual(template_vars["current_content"], "Original content")
+        self.assertEqual(template_vars["feedback"], "Be clearer")
+        self.assertEqual(template_vars["knowledge_base_names"], '"kb-a", "kb-b"')
 
     @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.query_tools_by_ids')
@@ -172,9 +328,12 @@ class TestPromptService(unittest.TestCase):
             "Test task",
             enabled_tools,  # tool_info_list from helper
             "tenant456",
+            "user123",
             self.test_model_id,
             "zh",
-            None  # knowledge_base_display_names
+            None,
+            None,
+            True,  # has_selected_resources
         )
 
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
@@ -567,9 +726,11 @@ class TestPromptService(unittest.TestCase):
             user_id="user123",
             tenant_id="tenant456",
             language="zh",
+            prompt_template_id=None,
             tool_ids=None,
             sub_agent_ids=None,
             knowledge_base_display_names=None,
+            has_selected_resources=True,
         )
 
         # Verify output format - should be SSE format
@@ -580,19 +741,21 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt(self, mock_get_prompt_template, mock_join_info, mock_call_llm):
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
+    def test_generate_system_prompt(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
 
         mock_join_info.return_value = "Joined template content"
 
@@ -644,6 +807,7 @@ class TestPromptService(unittest.TestCase):
             mock_task_description,
             mock_tools,
             mock_tenant_id,
+            "test_user",
             self.test_model_id,
             mock_language
         ):
@@ -651,7 +815,12 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         # Verify template loading
-        mock_get_prompt_template.assert_called_once_with(mock_language)
+        mock_resolve_prompt_template.assert_called_once_with(
+            tenant_id=mock_tenant_id,
+            user_id="test_user",
+            language=mock_language,
+            prompt_template_id=None,
+        )
 
         # Verify template joining - now includes knowledge_base_display_names parameter
         mock_join_info.assert_called_once_with(
@@ -660,7 +829,8 @@ class TestPromptService(unittest.TestCase):
             task_description=mock_task_description,
             tool_info_list=mock_tools,
             language=mock_language,
-            knowledge_base_display_names=None
+            knowledge_base_display_names=None,
+            has_selected_resources=True,
         )
 
         # Verify LLM calls - should be called 6 times for each prompt type
@@ -697,19 +867,21 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
-    def test_generate_system_prompt_with_exception(self, mock_get_prompt_template, mock_join_info, mock_call_llm):
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
+    def test_generate_system_prompt_with_exception(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception for one prompt type
@@ -741,6 +913,7 @@ class TestPromptService(unittest.TestCase):
                 mock_task_description,
                 mock_tools,
                 mock_tenant_id,
+                "test_user",
                 self.test_model_id,
                 mock_language
             ):
@@ -752,7 +925,7 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.Template')
     def test_join_info_for_generate_system_prompt(self, mock_template):
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = [
             {"name": "agent1", "description": "Agent 1 desc"},
             {"name": "agent2", "description": "Agent 2 desc"}
@@ -777,7 +950,7 @@ class TestPromptService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "Rendered content")
         mock_template.assert_called_once_with(
-            mock_prompt_for_generate["USER_PROMPT"], undefined=StrictUndefined)
+            mock_prompt_for_generate["user_prompt"], undefined=StrictUndefined)
         mock_template_instance.render.assert_called_once()
         # Check template variables
         template_vars = mock_template_instance.render.call_args[0][0]
@@ -867,7 +1040,6 @@ class TestPromptService(unittest.TestCase):
 
         # Assert - should yield error in SSE format
         self.assertEqual(len(result_list), 1)
-        import json
         parsed = json.loads(result_list[0].replace("data: ", "").replace("\n\n", ""))
         self.assertFalse(parsed['success'])
         self.assertEqual(parsed['error']['code'], str(ErrorCode.MODEL_NOT_FOUND.value))
@@ -893,7 +1065,6 @@ class TestPromptService(unittest.TestCase):
 
         # Assert - should yield error in SSE format with default error code
         self.assertEqual(len(result_list), 1)
-        import json
         parsed = json.loads(result_list[0].replace("data: ", "").replace("\n\n", ""))
         self.assertFalse(parsed['success'])
         # Should use default error code for non-AppException
@@ -994,25 +1165,28 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     def test_generate_system_prompt_error_before_streaming(
         self,
-        mock_get_prompt_template,
+        mock_get_model,
+        mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
     ):
         """Test generate_system_prompt handles error that occurs before streaming (line 307-311)"""
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception immediately
@@ -1034,6 +1208,7 @@ class TestPromptService(unittest.TestCase):
                 "Test task",
                 [{"name": "tool1"}],
                 "tenant123",
+                "test_user",
                 self.test_model_id,
                 "zh"
             ):
@@ -1043,25 +1218,28 @@ class TestPromptService(unittest.TestCase):
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
     @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.get_prompt_generate_prompt_template')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     def test_generate_system_prompt_error_during_streaming(
         self,
-        mock_get_prompt_template,
+        mock_get_model,
+        mock_resolve_prompt_template,
         mock_join_info,
         mock_call_llm,
     ):
         """Test generate_system_prompt handles error that occurs during streaming (line 330-331)"""
         # Setup
+        mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
         mock_prompt_config = {
-            "USER_PROMPT": "Test user prompt template",
-            "DUTY_SYSTEM_PROMPT": "Generate duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Generate constraint prompt",
-            "FEW_SHOTS_SYSTEM_PROMPT": "Generate few shots prompt",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": "Generate agent var name",
-            "AGENT_DISPLAY_NAME_SYSTEM_PROMPT": "Generate agent display name",
-            "AGENT_DESCRIPTION_SYSTEM_PROMPT": "Generate agent description"
+            "user_prompt": "Test user prompt template",
+            "duty_system_prompt": "Generate duty prompt",
+            "constraint_system_prompt": "Generate constraint prompt",
+            "few_shots_system_prompt": "Generate few shots prompt",
+            "agent_variable_name_system_prompt": "Generate agent var name",
+            "agent_display_name_system_prompt": "Generate agent display name",
+            "agent_description_system_prompt": "Generate agent description"
         }
-        mock_get_prompt_template.return_value = mock_prompt_config
+        mock_resolve_prompt_template.return_value = mock_prompt_config
         mock_join_info.return_value = "Joined template content"
 
         # Track which call we're on
@@ -1092,6 +1270,7 @@ class TestPromptService(unittest.TestCase):
                 "Test task",
                 [{"name": "tool1"}],
                 "tenant123",
+                "test_user",
                 self.test_model_id,
                 "zh"
             ):
@@ -1146,7 +1325,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_english(self, mock_template):
         """Test join_info_for_generate_system_prompt with English language"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = [
             {"name": "agent1", "description": "Agent 1 desc"}
         ]
@@ -1176,7 +1355,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_empty_tools_and_agents(self, mock_template):
         """Test join_info_for_generate_system_prompt with empty tools and sub-agents"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = []
         mock_task_description = "Test task"
         mock_tools = []
@@ -1197,7 +1376,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_with_knowledge_base_names(self, mock_template):
         """Test join_info_for_generate_system_prompt with knowledge_base_display_names"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = []
         mock_task_description = "Test task"
         mock_tools = [
@@ -1226,7 +1405,7 @@ class TestPromptService(unittest.TestCase):
     def test_join_info_for_generate_system_prompt_without_knowledge_base_names(self, mock_template):
         """Test join_info_for_generate_system_prompt without knowledge_base_display_names"""
         # Setup
-        mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
+        mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
         mock_sub_agents = []
         mock_task_description = "Test task"
         mock_tools = [
@@ -1507,7 +1686,512 @@ class TestPromptService(unittest.TestCase):
         # Assert
         self.assertEqual(len(result_list), 2)
         # Verify success format
-        import json
         parsed = json.loads(result_list[0].replace("data: ", "").replace("\n\n", ""))
         self.assertTrue(parsed['success'])
 
+    # ==================== Coverage gap tests ====================
+
+    def test_optimize_prompt_section_impl_invalid_section_type(self):
+        """Test that invalid section_type raises AppException"""
+        with self.assertRaises(AppException) as context:
+            optimize_prompt_section_impl(
+                agent_id=1,
+                model_id=2,
+                task_description="Build an agent",
+                tenant_id="tenant-1",
+                language="en",
+                section_type="invalid_type",
+                section_title="Some Title",
+                current_content="Original content",
+                feedback="Some feedback",
+            )
+        self.assertEqual(context.exception.error_code, ErrorCode.COMMON_PARAMETER_INVALID)
+
+    def test_optimize_prompt_section_impl_missing_current_content(self):
+        """Test that missing current_content raises AppException"""
+        with self.assertRaises(AppException) as context:
+            optimize_prompt_section_impl(
+                agent_id=1,
+                model_id=2,
+                task_description="Build an agent",
+                tenant_id="tenant-1",
+                language="en",
+                section_type="duty",
+                section_title="Agent Role",
+                current_content="",
+                feedback="Some feedback",
+            )
+        self.assertEqual(context.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
+
+    def test_optimize_prompt_section_impl_empty_result(self):
+        """Test that empty LLM result raises AppException"""
+        with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
+            with patch('backend.services.prompt_service.get_prompt_optimize_prompt_template') as mock_template:
+                mock_template.return_value = {
+                    "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
+                    "OPTIMIZE_USER_PROMPT": "User prompt",
+                }
+                mock_call_llm.return_value = ""
+
+                with self.assertRaises(AppException) as context:
+                    optimize_prompt_section_impl(
+                        agent_id=1,
+                        model_id=2,
+                        task_description="Build an agent",
+                        tenant_id="tenant-1",
+                        language="en",
+                        section_type="duty",
+                        section_title="Agent Role",
+                        current_content="Original content",
+                        feedback="Make it better",
+                    )
+                self.assertEqual(
+                    context.exception.error_code,
+                    ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+                )
+
+    def test_optimize_prompt_section_impl_uses_default_title(self):
+        """Test that section_title defaults when not provided"""
+        with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
+            with patch('backend.services.prompt_service.get_prompt_optimize_prompt_template') as mock_template:
+                with patch('backend.services.prompt_service.join_info_for_optimize_prompt_section') as mock_join:
+                    mock_template.return_value = {
+                        "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
+                        "OPTIMIZE_USER_PROMPT": "User prompt",
+                    }
+                    mock_call_llm.return_value = "Optimized"
+                    mock_join.return_value = "joined"
+
+                    result = optimize_prompt_section_impl(
+                        agent_id=1,
+                        model_id=2,
+                        task_description="Build an agent",
+                        tenant_id="tenant-1",
+                        language="zh",
+                        section_type="duty",
+                        section_title=None,
+                        current_content="Original content",
+                        feedback="Make it better",
+                    )
+                    self.assertEqual(result["section_title"], "智能体角色")
+
+    @patch('backend.services.prompt_service.Template')
+    def test_join_info_for_optimize_prompt_section_english(self, mock_template):
+        """Test join_info_for_optimize_prompt_section with English language"""
+        mock_instance = MagicMock()
+        mock_template.return_value = mock_instance
+        mock_instance.render.return_value = "Rendered"
+
+        result = join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template {{ section_title }}"},
+            section_type="constraint",
+            section_title="Requirements",
+            task_description="Task",
+            current_content="Content",
+            feedback="Feedback",
+            tool_info_list=[{"name": "t1", "description": "d", "inputs": "i", "output_type": "o"}],
+            sub_agent_info_list=[{"name": "a1", "description": "desc"}],
+            language="en",
+            knowledge_base_display_names=["kb1"],
+        )
+
+        self.assertEqual(result, "Rendered")
+        render_args = mock_instance.render.call_args[0][0]
+        self.assertEqual(render_args["section_type"], "constraint")
+        self.assertEqual(render_args["knowledge_base_names"], '"kb1"')
+
+    @patch('backend.services.prompt_service.Template')
+    def test_join_info_for_optimize_prompt_section_without_kb(self, mock_template):
+        """Test join_info_for_optimize_prompt_section without knowledge base"""
+        mock_instance = MagicMock()
+        mock_template.return_value = mock_instance
+        mock_instance.render.return_value = "Rendered"
+
+        result = join_info_for_optimize_prompt_section(
+            prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template"},
+            section_type="duty",
+            section_title="Role",
+            task_description="Task",
+            current_content="Content",
+            feedback="Feedback",
+            tool_info_list=[],
+            sub_agent_info_list=[],
+            language="zh",
+            knowledge_base_display_names=None,
+        )
+
+        render_args = mock_instance.render.call_args[0][0]
+        self.assertEqual(render_args["knowledge_base_names"], "")
+
+    def test_default_prompt_section_title_zh(self):
+        """Test _default_prompt_section_title with Chinese language"""
+        from backend.services.prompt_service import _default_prompt_section_title
+        self.assertEqual(_default_prompt_section_title("duty", "zh"), "智能体角色")
+        self.assertEqual(_default_prompt_section_title("constraint", "zh"), "使用要求")
+        self.assertEqual(_default_prompt_section_title("few_shots", "zh"), "示例")
+
+    def test_default_prompt_section_title_en(self):
+        """Test _default_prompt_section_title with English language"""
+        from backend.services.prompt_service import _default_prompt_section_title
+        self.assertEqual(_default_prompt_section_title("duty", "en"), "Agent Role")
+        self.assertEqual(_default_prompt_section_title("constraint", "en"), "Usage Requirements")
+        self.assertEqual(_default_prompt_section_title("few_shots", "en"), "Few Shots")
+
+    def test_default_prompt_section_title_unknown_lang(self):
+        """Test _default_prompt_section_title falls back to ZH for unknown language"""
+        from backend.services.prompt_service import _default_prompt_section_title
+        self.assertEqual(_default_prompt_section_title("duty", "xx"), "智能体角色")
+        self.assertEqual(_default_prompt_section_title("unknown_type", "en"), "unknown_type")
+
+    @patch('backend.services.prompt_service.query_tools_by_ids')
+    @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
+    def test_resolve_prompt_generation_tools_empty_ids(self, mock_get_ids, mock_query_tools):
+        """Test _resolve_prompt_generation_tools with empty tool_ids uses DB fallback"""
+        from backend.services.prompt_service import _resolve_prompt_generation_tools
+        mock_get_ids.return_value = [1, 2]
+        mock_query_tools.return_value = [{"name": "tool1"}]
+
+        result = _resolve_prompt_generation_tools(agent_id=123, tenant_id="tenant-x", tool_ids=[])
+
+        mock_get_ids.assert_called_once()
+        mock_query_tools.assert_called_once_with([1, 2])
+
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_resolve_prompt_generation_sub_agents_empty_ids(self, mock_search):
+        """Test _resolve_prompt_generation_sub_agents with empty sub_agent_ids uses DB fallback"""
+        from backend.services.prompt_service import _resolve_prompt_generation_sub_agents
+        mock_search.return_value = {"name": "sub1"}
+
+        result = _resolve_prompt_generation_sub_agents(agent_id=123, tenant_id="tenant-x", sub_agent_ids=[])
+
+        mock_search.assert_not_called()
+
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_resolve_prompt_generation_sub_agents_with_ids(self, mock_search):
+        """Test _resolve_prompt_generation_sub_agents with sub_agent_ids queries DB"""
+        from backend.services.prompt_service import _resolve_prompt_generation_sub_agents
+        mock_search.return_value = {"name": "sub1"}
+
+        result = _resolve_prompt_generation_sub_agents(agent_id=123, tenant_id="tenant-x", sub_agent_ids=[10, 20])
+
+        self.assertEqual(mock_search.call_count, 2)
+        self.assertEqual(len(result), 2)
+
+    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    def test_resolve_prompt_generation_sub_agents_exception_handling(self, mock_search):
+        """Test _resolve_prompt_generation_sub_agents handles exception gracefully"""
+        from backend.services.prompt_service import _resolve_prompt_generation_sub_agents
+        mock_search.side_effect = [Exception("DB error"), {"name": "sub2"}]
+
+        result = _resolve_prompt_generation_sub_agents(agent_id=123, tenant_id="tenant-x", sub_agent_ids=[10, 20])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "sub2")
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_json_decode_error(self, mock_query, mock_get_map):
+        """Test get_knowledge_base_display_names handles JSON decode error gracefully"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+        tool_info_list = [{"tool_id": 1, "name": "knowledge_base_search"}]
+        mock_query.return_value = {"params": {"index_names": "not valid json ["}}
+        mock_get_map.return_value = {}
+
+        result = get_knowledge_base_display_names(tool_info_list=tool_info_list, agent_id=123, tenant_id="tenant-abc")
+
+        self.assertIsNone(result)
+
+    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
+    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    def test_get_knowledge_base_display_names_empty_result_map(self, mock_query, mock_get_map):
+        """Test get_knowledge_base_display_names when knowledge_name_map returns empty, uses index_name as fallback"""
+        from backend.services.prompt_service import get_knowledge_base_display_names
+        tool_info_list = [{"tool_id": 1, "name": "knowledge_base_search"}]
+        mock_query.return_value = {"params": {"index_names": ["index-1"]}}
+        mock_get_map.return_value = {}
+
+        result = get_knowledge_base_display_names(tool_info_list=tool_info_list, agent_id=123, tenant_id="tenant-abc")
+
+        self.assertEqual(result, ["index-1"])
+
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_empty_tool_ids_fallback(self, mock_enabled_tools):
+        """Test generate_and_save_system_prompt_impl uses DB fallback when tool_ids is empty"""
+        mock_enabled_tools.return_value = [{"name": "db_tool"}]
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty content", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                result = list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                ))
+
+                mock_enabled_tools.assert_called_once()
+
+    @patch('backend.services.prompt_service.get_knowledge_base_display_names')
+    def test_generate_and_save_system_prompt_impl_frontend_provided_kb_names(self, mock_get_kb):
+        """Test generate_and_save_system_prompt_impl uses frontend KB names when provided"""
+        mock_get_kb.return_value = ["frontend-kb"]
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty content", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                result = list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[1],
+                    sub_agent_ids=[],
+                    knowledge_base_display_names=["my-kb"],
+                ))
+
+                mock_get_kb.assert_not_called()
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
+    def test_generate_system_prompt_no_selected_resources(self, mock_get_model, mock_resolve, mock_join, mock_call_llm):
+        """Test generate_system_prompt with has_selected_resources=False skips constraint/few_shots"""
+        mock_get_model.return_value = None
+        mock_resolve.return_value = {
+            "user_prompt": "Test",
+            "duty_system_prompt": "duty",
+            "constraint_system_prompt": "constraint",
+            "few_shots_system_prompt": "few shots",
+            "agent_variable_name_system_prompt": "var name",
+            "agent_display_name_system_prompt": "display name",
+            "agent_description_system_prompt": "description",
+        }
+        mock_join.return_value = "joined"
+
+        def mock_llm(model_id, content, sys_prompt, callback, tenant_id):
+            if callback:
+                callback("content")
+            if "var_name" in sys_prompt.lower():
+                return "test_agent"
+            elif "display_name" in sys_prompt.lower():
+                return "Test Agent"
+            elif "description" in sys_prompt.lower():
+                return "desc"
+            return "content"
+
+        mock_call_llm.side_effect = mock_llm
+
+        result_list = list(generate_system_prompt(
+            [{"name": "a1"}],
+            "task",
+            [],
+            "tenant",
+            "user",
+            self.test_model_id,
+            "zh",
+            has_selected_resources=False,
+        ))
+
+        final_results = [r for r in result_list if r.get("is_complete")]
+        constraint_items = [r for r in final_results if r["type"] == "constraint"]
+        fewshots_items = [r for r in final_results if r["type"] == "few_shots"]
+        self.assertEqual(len(constraint_items), 1)
+        self.assertEqual(constraint_items[0]["content"], "")
+        self.assertEqual(len(fewshots_items), 1)
+        self.assertEqual(fewshots_items[0]["content"], "")
+
+    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
+    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
+    @patch('backend.services.prompt_service.get_model_by_model_id')
+    def test_generate_system_prompt_with_concurrency_limit(self, mock_get_model, mock_resolve, mock_join, mock_call_llm):
+        """Test generate_system_prompt with concurrency_limit < 6 uses semaphore"""
+        mock_get_model.return_value = {"concurrency_limit": 2}
+        mock_resolve.return_value = {
+            "user_prompt": "Test",
+            "duty_system_prompt": "duty",
+            "constraint_system_prompt": "constraint",
+            "few_shots_system_prompt": "few shots",
+            "agent_variable_name_system_prompt": "var name",
+            "agent_display_name_system_prompt": "display name",
+            "agent_description_system_prompt": "description",
+        }
+        mock_join.return_value = "joined"
+
+        def mock_llm(model_id, content, sys_prompt, callback, tenant_id):
+            if callback:
+                callback("content")
+            if "var_name" in sys_prompt.lower():
+                return "test_agent"
+            elif "display_name" in sys_prompt.lower():
+                return "Test Agent"
+            elif "description" in sys_prompt.lower():
+                return             "desc"
+            return "content"
+
+        mock_call_llm.side_effect = mock_llm
+
+        result_list = list(generate_system_prompt(
+            [],
+            "task",
+            [],
+            "tenant",
+            "user",
+            self.test_model_id,
+            "zh",
+        ))
+
+        self.assertGreater(len(result_list), 0)
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_no_resources(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to False when both tool and sub-agent lists are empty.
+
+        This covers the fix for the regression where adding the prompt template feature inadvertently
+        bypassed the conditional generation of constraint/few_shots sections.
+        """
+        mock_enabled_tools.return_value = []
+        mock_enabled_sub_agents.return_value = []
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty content", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=True,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    False,
+                    "has_selected_resources should be False when both tool and sub-agent lists are empty",
+                )
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_has_tools(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to True when tools are present."""
+        mock_enabled_tools.return_value = [{"name": "db_tool"}]
+        mock_enabled_sub_agents.return_value = []
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty", "is_complete": True}
+                    yield {"type": "constraint", "content": "constraints", "is_complete": True}
+                    yield {"type": "few_shots", "content": "examples", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=False,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    True,
+                    "has_selected_resources should be True when tools are present",
+                )
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_has_sub_agents(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to True when sub-agents are present."""
+        mock_enabled_tools.return_value = []
+        mock_enabled_sub_agents.return_value = [{"name": "sub_agent"}]
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty", "is_complete": True}
+                    yield {"type": "constraint", "content": "constraints", "is_complete": True}
+                    yield {"type": "few_shots", "content": "examples", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=False,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    True,
+                    "has_selected_resources should be True when sub-agents are present",
+                )

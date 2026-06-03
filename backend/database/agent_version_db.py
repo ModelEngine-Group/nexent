@@ -1,9 +1,10 @@
 import logging
 from typing import List, Optional, Tuple
-from sqlalchemy import select, insert, update, delete, func
+from sqlalchemy import or_, select, insert, update, delete, func
 
 from database.client import get_db_session, as_dict
 from database.db_models import AgentInfo, ToolInstance, AgentRelation, AgentVersion, SkillInstance
+from consts.const import ASSET_OWNER_TENANT_ID
 
 logger = logging.getLogger("agent_version_db")
 
@@ -28,7 +29,6 @@ def search_version_by_version_no(
     with get_db_session() as session:
         version = session.query(AgentVersion).filter(
             AgentVersion.agent_id == agent_id,
-            AgentVersion.tenant_id == tenant_id,
             AgentVersion.version_no == version_no,
             AgentVersion.delete_flag == 'N',
         ).first()
@@ -77,7 +77,10 @@ def query_current_version_no(
     with get_db_session() as session:
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
             AgentInfo.version_no == 0,
             AgentInfo.delete_flag == 'N',
         ).first()
@@ -96,10 +99,16 @@ def query_agent_snapshot(
         # Query agent info snapshot
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag == 'N',
         ).first()
+
+        if agent is not None:
+            tenant_id = agent.tenant_id
 
         # Query tool instances snapshot
         tools = session.query(ToolInstance).filter(

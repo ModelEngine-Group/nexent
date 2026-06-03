@@ -17,7 +17,7 @@ import { Settings, AlertTriangle } from "lucide-react";
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
-  currentAgentId?: number | undefined;
+  currentAgentId?: number;
 }
 
 // Tool types that require knowledge base selection
@@ -34,9 +34,15 @@ const TOOLS_REQUIRING_EMBEDDING = [
   "knowledge_base_search",
 ];
 
-// Tool types that require VLM model
-const TOOLS_REQUIRING_VLM = [
+// Tool types that require the image understanding model
+const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = [
   "analyze_image",
+];
+
+// Tool types that require the video understanding model
+const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = [
+  "analyze_audio",
+  "analyze_video",
 ];
 
 function getToolKbType(
@@ -53,9 +59,18 @@ function getToolKbType(
 /**
  * Check if a tool requires VLM model but VLM is not available
  */
-function isToolDisabledDueToVlm(toolName: string, vlmAvailable: boolean): boolean {
-  if (!TOOLS_REQUIRING_VLM.includes(toolName)) return false;
-  return !vlmAvailable;
+function isToolDisabledDueToVlm(
+  toolName: string,
+  imageUnderstandingAvailable: boolean,
+  videoUnderstandingAvailable: boolean
+): boolean {
+  if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(toolName)) {
+    return !imageUnderstandingAvailable;
+  }
+  if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(toolName)) {
+    return !videoUnderstandingAvailable;
+  }
+  return false;
 }
 
 /**
@@ -73,21 +88,13 @@ function isToolDisabledDueToEmbedding(toolName: string, embeddingAvailable: bool
 export default function ToolManagement({
   toolGroups,
   isCreatingMode,
-  currentAgentId,
+  currentAgentId
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
 
-  // Get current agent permission from store
-  const currentAgentPermission = useAgentConfigStore(
-    (state) => state.currentAgentPermission
-  );
-
-  // Check if current agent is read-only (only when agent is selected and permission is READ_ONLY)
-  const isReadOnly = !isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY";
-
-  const editable = (currentAgentId || isCreatingMode) && !isReadOnly;
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
@@ -102,7 +109,11 @@ export default function ToolManagement({
   // Use tool list hook for data management
   const { availableTools } = useToolList();
 
-  const { isVlmAvailable, isEmbeddingAvailable } = useConfig();
+  const {
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
+    isEmbeddingAvailable,
+  } = useConfig();
 
   // Prefetch knowledge bases for KB tools
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
@@ -304,7 +315,7 @@ export default function ToolManagement({
           <span
             style={{
               display: "block",
-              maxWidth: "70px",
+              maxWidth: "100px",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -362,13 +373,15 @@ export default function ToolManagement({
                           const isSelected = originalSelectedToolIdsSet.has(
                             tool.id
                           );
-                          const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
+                          const isDisabledDueToVlm = isToolDisabledDueToVlm(
+                            tool.name,
+                            isImageUnderstandingAvailable,
+                            isVideoUnderstandingAvailable
+                          );
                           const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
-                          const tooltipTitle = isReadOnly
-                            ? t("agent.noEditPermission")
-                            : isDisabledDueToVlm
+                          const tooltipTitle = isDisabledDueToVlm
                             ? t("toolPool.vlmDisabledTooltip")
                             : isDisabledDueToEmbedding
                             ? t("toolPool.embeddingDisabledTooltip")
@@ -380,9 +393,9 @@ export default function ToolManagement({
                                 isSelected
                                   ? "bg-blue-100 border-blue-400 shadow-md"
                                   : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                              } ${editable && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                              } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
                               onClick={
-                                editable && !isDisabled
+                                !isReadOnly && !isDisabled
                                   ? () => handleToolClick(tool.id)
                                   : undefined
                               }
@@ -428,9 +441,9 @@ export default function ToolManagement({
                               </div>
                               <Settings
                                 size={16}
-                                className={`${editable && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
+                                className={`${!isReadOnly && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
                                 onClick={
-                                  editable && !isDisabled
+                                  !isReadOnly && !isDisabled
                                     ? (e) => {
                                         e.stopPropagation();
                                         handleToolSettingsClick(tool);
@@ -467,13 +480,15 @@ export default function ToolManagement({
             >
               {group.tools.map((tool) => {
                 const isSelected = originalSelectedToolIdsSet.has(tool.id);
-                const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
+                const isDisabledDueToVlm = isToolDisabledDueToVlm(
+                  tool.name,
+                  isImageUnderstandingAvailable,
+                  isVideoUnderstandingAvailable
+                );
                 const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
-                const tooltipTitle = isReadOnly
-                  ? t("agent.noEditPermission")
-                  : isDisabledDueToVlm
+                const tooltipTitle = isDisabledDueToVlm
                   ? t("toolPool.vlmDisabledTooltip")
                   : isDisabledDueToEmbedding
                   ? t("toolPool.embeddingDisabledTooltip")
@@ -485,9 +500,9 @@ export default function ToolManagement({
                         isSelected
                           ? "bg-blue-100 border-blue-400 shadow-md"
                           : "border-gray-200 hover:border-blue-300 hover:shadow-md"
-                      } ${editable && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                      } ${!isReadOnly && !isDisabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}
                     onClick={
-                      editable && !isDisabled ? () => handleToolClick(tool.id) : undefined
+                      !isReadOnly && !isDisabled ? () => handleToolClick(tool.id) : undefined
                     }
                   >
                     <div className="flex items-center gap-2">
@@ -531,9 +546,9 @@ export default function ToolManagement({
                     </div>
                     <Settings
                       size={16}
-                      className={`${editable && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
+                      className={`${!isReadOnly && !isDisabled ? "cursor-pointer text-gray-500 hover:text-gray-700" : "cursor-not-allowed text-gray-400"} transition-colors`}
                       onClick={
-                        editable && !isDisabled
+                        !isReadOnly && !isDisabled
                           ? (e) => {
                               e.stopPropagation();
                               handleToolSettingsClick(tool);
@@ -575,8 +590,8 @@ export default function ToolManagement({
             height: "100%",
           }}
           tabBarStyle={{
-            minWidth: "80px",
-            maxWidth: "100px",
+            minWidth: "120px",
+            maxWidth: "120px",
             padding: "4px 0",
             margin: 0,
           }}

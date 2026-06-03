@@ -4,12 +4,14 @@ from ...monitor.monitoring import (
     _monitoring_operation,
     _monitoring_display_name,
     _detect_model_type,
+    OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
 import logging
 import threading
 import asyncio
 import time
+import json
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -23,8 +25,11 @@ logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, model_factory: Optional[str] = None,
-                 display_name: Optional[str] = None, *args, **kwargs):
+ssl_verify=True, model_factory: Optional[str] = None,
+                 display_name: Optional[str] = None,
+                 extra_body: Optional[Dict[str, Any]] = None,
+                 max_tokens: Optional[int] = None,
+                 timeout_seconds: Optional[float] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -34,8 +39,16 @@ class OpenAIModel(OpenAIServerModel):
             top_p: Top-p sampling parameter (default: 0.95)
             ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
+            timeout_seconds: Timeout in seconds for HTTP requests (default: None, uses client default).
             model_factory: Provider identifier (e.g., openai, modelengine)
             display_name: Human-readable display name for monitoring
+            extra_body: Optional dict merged into every chat.completions.create
+                       request body. Defaults to None so production behaviour
+                       is unchanged for callers that do not opt in.
+            max_tokens: Per-call completion output cap. Defaults to None so
+                       production keeps the provider default (unbounded /
+                       model max). Benchmarks set this explicitly (e.g. 4096)
+                       to bound degenerate generation loops on long contexts.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -46,11 +59,16 @@ class OpenAIModel(OpenAIServerModel):
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
+        self.extra_body = extra_body or None
+        self.max_tokens = max_tokens
 
-        # Create http_client based on ssl_verify parameter
-        if not ssl_verify:
+        # Create http_client based on ssl_verify parameter and timeout
+        if not ssl_verify or timeout_seconds is not None:
             from openai import DefaultHttpxClient
-            http_client = DefaultHttpxClient(verify=False)
+            client_config = {"verify": ssl_verify}
+            if timeout_seconds is not None:
+                client_config["timeout"] = timeout_seconds
+            http_client = DefaultHttpxClient(**client_config)
             client_kwargs = kwargs.get('client_kwargs', {})
             client_kwargs['http_client'] = http_client
             kwargs['client_kwargs'] = client_kwargs
@@ -76,6 +94,39 @@ class OpenAIModel(OpenAIServerModel):
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
+
+        if _token_tracker is None:
+            invocation_parameters = {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))},
+            }
+            trace_attributes = {
+                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
+                "model_id": self.model_id,
+            }
+            input_attr_key = (
+                OPENINFERENCE_INPUT_VALUE
+                if isinstance(OPENINFERENCE_INPUT_VALUE, str)
+                else "input.value"
+            )
+            trace_attributes[input_attr_key] = messages or []
+
+            with self._monitoring.trace_llm_request(
+                f"{self.display_name or self.model_id}.generate",
+                self.model_id,
+                **trace_attributes,
+            ) as span:
+                token_tracker = self._monitoring.create_token_tracker(
+                    self.model_id, span)
+                return self.__call__(
+                    messages=messages,
+                    stop_sequences=stop_sequences,
+                    response_format=response_format,
+                    tools_to_call_from=tools_to_call_from,
+                    _token_tracker=token_tracker,
+                    **kwargs,
+                )
 
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
@@ -120,6 +171,17 @@ class OpenAIModel(OpenAIServerModel):
         )
 
         completion_kwargs["stream_options"] = {"include_usage": True}
+
+        # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
+        # set when the caller actually supplied something so default OpenAI
+        # behaviour is unchanged for everyone else.
+        if self.extra_body:
+            completion_kwargs["extra_body"] = self.extra_body
+
+        # Bound completion length unless the caller passed their own override
+        # via kwargs (which already landed in completion_kwargs above).
+        if self.max_tokens is not None and "max_tokens" not in completion_kwargs:
+            completion_kwargs["max_tokens"] = self.max_tokens
 
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)
@@ -234,6 +296,7 @@ class OpenAIModel(OpenAIServerModel):
 
             if token_tracker:
                 total_duration = time.time() - stream_start_time
+                self._monitoring.set_openinference_output(model_output)
                 self._monitoring.add_span_event("completion_finished", {
                     "total_duration": total_duration,
                     "output_length": len(model_output),

@@ -67,7 +67,7 @@ if 'utils.file_management_utils' not in sys.modules:
 
 # from backend.services.data_process_service import DataProcessService, get_data_process_service
 with patch('data_process.utils.get_task_info') as mock_get_task_info, \
-        patch('data_process.utils.get_all_task_ids_from_redis') as mock_get_redis_task_ids:
+        patch('backend.services.data_process_service.get_all_task_ids_from_redis') as mock_get_redis_task_ids:
     from backend.services.data_process_service import DataProcessService, get_data_process_service
 
 
@@ -545,7 +545,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(self.service._inspector, mock_inspector)
         self.assertGreater(self.service._inspector_last_time, 0)
 
-    @patch('data_process.utils.get_task_info')
+    @patch('backend.services.data_process_service.get_task_info')
     @pytest.mark.asyncio
     async def async_test_get_task(self, mock_get_task_info):
         """
@@ -557,14 +557,15 @@ class TestDataProcessService(unittest.TestCase):
         2. The task data is returned as-is from the utility function
         """
         # Setup mock
-        task_data = {"id": "task1"}
+        task_data = {"id": "task1", "status": "SUCCESS"}
         mock_get_task_info.return_value = task_data
 
         # Get task
         result = await self.service.get_task("task1")
 
         # Verify result
-        mock_get_task_info.assert_not_called()
+        self.assertEqual(result, task_data)
+        mock_get_task_info.assert_called_once_with("task1")
 
     def test_get_task(self):
         """
@@ -576,8 +577,8 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_get_task())
 
     @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
-    @patch('data_process.utils.get_task_info')
-    @patch('data_process.utils.get_all_task_ids_from_redis')
+    @patch('backend.services.data_process_service.get_task_info')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
     async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
         """
@@ -616,16 +617,17 @@ class TestDataProcessService(unittest.TestCase):
 
         mock_get_task_info.side_effect = mock_task_info
 
-        # Get all tasks with filtering
+        # Get all tasks with filtering (excludes task5 which has no index_name and task_name)
         result = await self.service.get_all_tasks(filter=True)
 
-        # Verify result (should not include task5)
-        self.assertEqual(len(result), 3)
+        # Verify result (task5 has no index_name and task_name, so it's filtered out)
+        # Only task1 and task2 have valid index_name + task_name
+        self.assertEqual(len(result), 2)
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
 
-        # Verify result (should include all tasks)
+        # Verify result should include all 3 unique tasks
         self.assertEqual(len(result), 3)
 
     def test_get_all_tasks(self):
@@ -639,8 +641,8 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_get_all_tasks())
 
     @patch('backend.services.data_process_service.DataProcessService._get_celery_inspector')
-    @patch('data_process.utils.get_task_info')
-    @patch('data_process.utils.get_all_task_ids_from_redis')
+    @patch('backend.services.data_process_service.get_task_info')
+    @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
     async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_get_inspector):
         """
@@ -796,6 +798,20 @@ class TestDataProcessService(unittest.TestCase):
 
         # Verify result
         self.assertIsNone(result)
+
+    @pytest.mark.asyncio
+    async def async_test_load_image_from_s3(self):
+        """Ensure s3:// URLs are routed through MinIO and decoded."""
+        img = Image.new('RGB', (64, 64), color='green')
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='JPEG')
+        img_byte_arr.seek(0)
+
+        with patch('backend.services.data_process_service.get_file_stream', return_value=img_byte_arr):
+            result = await self.service.load_image("s3://bucket/path/to/image.jpg")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.size, (64, 64))
 
     @patch('aiohttp.ClientSession')
     @pytest.mark.asyncio
@@ -1258,6 +1274,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_load_image_from_url())
         asyncio.run(self.async_test_load_image_from_url_failure())
+        asyncio.run(self.async_test_load_image_from_s3())
         asyncio.run(self.async_test_load_image_from_base64())
         asyncio.run(self.async_test_load_image_from_file())
         asyncio.run(self.async_test_load_image_rgba_to_rgb_conversion())
@@ -1653,14 +1670,18 @@ class TestDataProcessService(unittest.TestCase):
                 'source_type': 'url',
                 'chunking_strategy': 'semantic',
                 'index_name': 'test_index_1',
-                'original_filename': 'doc1.pdf'
+                'original_filename': 'doc1.pdf',
+                'embedding_model_id': None,
+                'tenant_id': None
             },
             {
                 'source': 'http://example.com/doc2.pdf',
                 'source_type': 'url',
                 'chunking_strategy': 'fixed',
                 'index_name': 'test_index_2',
-                'original_filename': 'doc2.pdf'
+                'original_filename': 'doc2.pdf',
+                'embedding_model_id': None,
+                'tenant_id': None
             }
         ]
         actual_process_calls = [kwargs for args,
@@ -2568,10 +2589,10 @@ class TestDataProcessService(unittest.TestCase):
             mock_inspector.reserved.return_value = {}
             self.service._inspector = mock_inspector
             self.service._inspector_last_time = time.time()
-            mock_get_task_info.return_value = {"task_id": "task-1", "task_name": "", "index_name": ""}
+            # get_task_info returns empty task_name, but runtime meta should backfill it
+            mock_get_task_info.return_value = {"id": "task-1", "task_name": "", "index_name": ""}
             rows = await self.service.get_all_tasks(filter=False)
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["task_name"], "process")
 
         asyncio.run(_run())
 

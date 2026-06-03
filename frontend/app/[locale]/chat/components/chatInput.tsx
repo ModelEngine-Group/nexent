@@ -96,9 +96,23 @@ const getFileIcon = (file: File) => {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
+  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
+    return <FileTextFilled size={iconSize} color="#16a085" />;
+  }
+
+  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
+    return <FileTextFilled size={iconSize} color="#8e44ad" />;
+  }
+
   // Default file icon
   return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
 };
+
+const isSupportedMediaFile = (extension: string, fileType: string) =>
+  fileType.startsWith("audio/") ||
+  fileType.startsWith("video/") ||
+  chatConfig.audioExtensions.includes(extension) ||
+  chatConfig.videoExtensions.includes(extension);
 
 // File limit constants from config
 const MAX_FILE_COUNT = chatConfig.maxFileCount;
@@ -617,8 +631,9 @@ export function ChatInput({
         chatConfig.supportedTextExtensions.includes(extension) ||
         file.type === "text/csv" ||
         file.type === "text/plain";
+      const isMedia = isSupportedMediaFile(extension, file.type);
 
-      if (isImage || isDocument || isSupportedTextFile) {
+      if (isImage || isDocument || isSupportedTextFile || isMedia) {
         // Create a preview URL for images
         const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
 
@@ -899,7 +914,7 @@ export function ChatInput({
                 id="file-upload-regular"
                 className="hidden"
                 onChange={handleFileUpload}
-                accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
                 multiple
               />
             </Button>
@@ -1026,8 +1041,9 @@ export function ChatInput({
       chatConfig.supportedTextExtensions.includes(extension) ||
       fileType === "text/csv" ||
       fileType === "text/plain";
+    const isMedia = isSupportedMediaFile(extension, fileType);
 
-    return !(isImage || isDocument || isSupportedTextFile);
+    return !(isImage || isDocument || isSupportedTextFile || isMedia);
   });
 
   // Regular mode, keep the original rendering logic

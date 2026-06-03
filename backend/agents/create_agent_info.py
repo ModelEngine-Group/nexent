@@ -1,4 +1,4 @@
-import threading
+﻿import threading
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -21,7 +21,7 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
-from services.image_service import get_vlm_model
+from services.image_service import get_video_understanding_model, get_vlm_model
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
@@ -31,11 +31,35 @@ from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE
+from utils.context_utils import build_context_components
+from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+def _build_internal_s3_url(file: dict) -> str:
+    """Build a valid S3 URL for internal tools from uploaded file metadata."""
+    if not isinstance(file, dict):
+        return ""
+
+    object_name = str(file.get("object_name") or "").strip().lstrip("/")
+    if object_name:
+        bucket = MINIO_DEFAULT_BUCKET or "nexent"
+        return f"s3://{bucket}/{object_name}"
+
+    url = str(file.get("url") or "").strip()
+    if not url or url.startswith("blob:") or url.startswith("s3:/blob:"):
+        return ""
+
+    if url.startswith("s3://"):
+        return url
+
+    if url.startswith("s3:/"):
+        return "s3://" + url.replace("s3:/", "", 1).lstrip("/")
+
+    return "s3:/" + url
 
 
 def _get_skills_for_template(
@@ -247,7 +271,9 @@ async def create_model_config_list(tenant_id):
                             ),
                         url=record["base_url"],
                         ssl_verify=record.get("ssl_verify", True),
-                        model_factory=record.get("model_factory")))
+                        model_factory=record.get("model_factory"),
+                        timeout_seconds=record.get("timeout_seconds"),
+                        concurrency_limit=record.get("concurrency_limit")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -258,7 +284,9 @@ async def create_model_config_list(tenant_id):
                         "model_name") else "",
                     url=main_model_config.get("base_url", ""),
                     ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory")))
+                    model_factory=main_model_config.get("model_factory"),
+                    timeout_seconds=main_model_config.get("timeout_seconds"),
+                    concurrency_limit=main_model_config.get("concurrency_limit")))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -266,7 +294,9 @@ async def create_model_config_list(tenant_id):
                         "model_name") else "",
                     url=main_model_config.get("base_url", ""),
                     ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory")))
+                    model_factory=main_model_config.get("model_factory"),
+                    timeout_seconds=main_model_config.get("timeout_seconds"),
+                    concurrency_limit=main_model_config.get("concurrency_limit")))
 
     return model_list
 
@@ -383,6 +413,9 @@ async def create_agent_config(
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
+    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
@@ -395,10 +428,29 @@ async def create_agent_config(
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
         "knowledge_base_summary": knowledge_base_summary,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "time": time_str,
         "user_id": user_id,
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
+
+    context_components = build_context_components(
+        duty=duty_prompt,
+        constraint=constraint_prompt,
+        few_shots=few_shots_prompt,
+        app_name=app_name,
+        app_description=app_description,
+        time_str=time_str,
+        user_id=user_id,
+        language=language,
+        is_manager=is_manager,
+        tools=render_kwargs["tools"],
+        skills=skills,
+        managed_agents=render_kwargs["managed_agents"],
+        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        memory_list=memory_list,
+        memory_search_query=last_user_query,
+        knowledge_base_summary=knowledge_base_summary,
+    )
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_max_tokens = 10000
@@ -425,12 +477,13 @@ async def create_agent_config(
             agent_id=agent_id
         ),
         tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
-        max_steps=agent_info.get("max_steps", 10),
+        max_steps=agent_info.get("max_steps", 15),
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
-        context_manager_config=cm_config
+        context_manager_config=cm_config,
+        context_components=context_components,
     )
     return agent_config
 
@@ -469,6 +522,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             rerank = param_dict.get("rerank", False)
             rerank_model_name = param_dict.get("rerank_model_name", "")
             rerank_model = None
+            is_multimodal = bool(tool_config.params.pop("multimodal", False))
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(
                     tenant_id=tenant_id, model_name=rerank_model_name
@@ -526,7 +580,14 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             }
         elif tool_config.class_name == "AnalyzeImageTool":
             tool_config.metadata = {
+                # get_vlm_model reads the first multimodal slot, now shown as image understanding.
                 "vlm_model": get_vlm_model(tenant_id=tenant_id),
+                "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
+            tool_config.metadata = {
+                "vlm_model": get_video_understanding_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
@@ -630,10 +691,12 @@ async def join_minio_file_description_to_query(
     # Collect files from current message first (higher priority)
     if minio_files and isinstance(minio_files, list):
         for file in minio_files:
-            if isinstance(file, dict) and file.get("url") and file.get("name"):
-                url = file["url"]
-                if url not in seen_urls:
-                    seen_urls.add(url)
+            if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
+                s3_url = _build_internal_s3_url(file)
+                if not s3_url:
+                    continue
+                if s3_url not in seen_urls:
+                    seen_urls.add(s3_url)
                     all_files.append(file)
 
     # Collect files from historical messages (lower priority, already-deduped)
@@ -641,10 +704,12 @@ async def join_minio_file_description_to_query(
         for msg in history:
             if isinstance(msg, dict) and msg.get("minio_files"):
                 for file in msg["minio_files"]:
-                    if isinstance(file, dict) and file.get("url") and file.get("name"):
-                        url = file["url"]
-                        if url not in seen_urls:
-                            seen_urls.add(url)
+                    if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
+                        s3_url = _build_internal_s3_url(file)
+                        if not s3_url:
+                            continue
+                        if s3_url not in seen_urls:
+                            seen_urls.add(s3_url)
                             all_files.append(file)
 
     # Enforce file count limit (keep most recent files by truncating from the end)
@@ -660,7 +725,7 @@ async def join_minio_file_description_to_query(
         fixed_overhead = len(prefix) + len(suffix)
 
         for i, file in enumerate(all_files):
-            s3_url = f"s3:/{file['url']}"
+            s3_url = _build_internal_s3_url(file)
             presigned_url = file.get("presigned_url", "")
 
             # Build description with both URLs
@@ -712,8 +777,10 @@ def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files
         if i >= max_files:
             file_lines.append(f"  - ... (and {len(minio_files) - max_files} more files)")
             break
-        if isinstance(file, dict) and file.get("url") and file.get("name"):
-            s3_url = f"s3:/{file['url']}"
+        if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
+            s3_url = _build_internal_s3_url(file)
+            if not s3_url:
+                continue
             presigned_url = file.get("presigned_url", "")
             if presigned_url:
                 file_lines.append(
@@ -835,7 +902,7 @@ async def create_agent_run_info(
     # Filter MCP servers and tools, and build mcp_host with authorization
     used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
 
-    # Build mcp_host list with authorization tokens
+    # Build mcp_host list with authorization tokens and custom headers
     mcp_host = []
     for url in used_mcp_urls:
         # Find the MCP record for this URL
@@ -850,10 +917,15 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }
-            # Add authorization if present
+            headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:
-                mcp_config["authorization"] = auth_token
+                headers["Authorization"] = auth_token
+            custom_headers = mcp_record.get("custom_headers")
+            if custom_headers and isinstance(custom_headers, dict):
+                headers.update(custom_headers)
+            if headers:
+                mcp_config["headers"] = headers
             mcp_host.append(mcp_config)
         else:
             # Fallback to string format if record not found

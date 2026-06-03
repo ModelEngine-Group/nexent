@@ -40,6 +40,7 @@ const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
   EXPIRES_AT: "nexent_token_expires_at",
+  OAUTH_PENDING: "nexent_oauth_pending",
 };
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -51,6 +52,12 @@ function buildCookieOptions(httpOnly) {
     sameSite: "lax",
     path: "/",
   };
+}
+
+function appendSetCookies(res, cookies) {
+  const existing = res.getHeader("Set-Cookie") || [];
+  const existingCookies = Array.isArray(existing) ? existing : [existing];
+  res.setHeader("Set-Cookie", [...existingCookies, ...cookies].filter(Boolean));
 }
 
 function setAuthCookies(res, session) {
@@ -92,7 +99,7 @@ function setAuthCookies(res, session) {
   }
 
   if (cookies.length > 0) {
-    res.setHeader("Set-Cookie", cookies);
+    appendSetCookies(res, cookies);
   }
 }
 
@@ -102,7 +109,32 @@ function clearAuthCookies(res) {
     cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", { ...expired, httpOnly: true }),
     cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", { ...expired, httpOnly: true }),
     cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
+    cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", { ...expired, httpOnly: true }),
   ]);
+}
+
+function setPendingOAuthCookie(res, pendingToken) {
+  appendSetCookies(res, [
+    cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, pendingToken, {
+      ...buildCookieOptions(true),
+      maxAge: 10 * 60,
+    }),
+  ]);
+}
+
+function clearPendingOAuthCookie(res) {
+  appendSetCookies(res, [
+    cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
+      maxAge: 0,
+      path: "/",
+      httpOnly: true,
+    }),
+  ]);
+}
+
+function getPreferredLocale(cookies) {
+  const locale = cookies.NEXT_LOCALE;
+  return locale === "en" || locale === "zh" ? locale : "zh";
 }
 
 function parseCookies(req) {
@@ -120,6 +152,8 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/revoke",
   "/api/user/oauth/callback",
   "/api/user/oauth/link",
+  "/api/user/oauth/pending",
+  "/api/user/oauth/complete",
 ]);
 
 function collectRequestBody(req) {
@@ -134,12 +168,19 @@ function collectRequestBody(req) {
 /**
  * For the refresh_token endpoint, inject the refresh_token from cookie
  * into the request body so the backend can process it normally.
+ * If no refresh_token cookie exists, return 401 immediately.
  */
-function prepareAuthRequestBody(pathname, body, cookies) {
-  if (pathname === "/api/user/refresh_token" && cookies[COOKIE_NAMES.REFRESH_TOKEN]) {
+function prepareAuthRequestBody(pathname, body, cookies, res) {
+  if (pathname === "/api/user/refresh_token") {
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+    if (!refreshToken) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
+      return null;
+    }
     try {
       const parsed = body.length > 0 ? JSON.parse(body.toString()) : {};
-      parsed.refresh_token = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+      parsed.refresh_token = refreshToken;
       return Buffer.from(JSON.stringify(parsed));
     } catch {
       return body;
@@ -154,13 +195,26 @@ function forwardAuthRequest(req, res, targetUrl) {
   const cookies = parseCookies(req);
 
   collectRequestBody(req).then((rawBody) => {
-    const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies);
+    const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+
+    // If body is null, prepareAuthRequestBody already sent the error response
+    if (body === null) {
+      return;
+    }
 
     const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
     // Inject access_token from cookie as Authorization header for the backend
     if (cookies[COOKIE_NAMES.ACCESS_TOKEN] && !forwardHeaders["authorization"]) {
       forwardHeaders["authorization"] = `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`;
+    }
+
+    if (
+      cookies[COOKIE_NAMES.OAUTH_PENDING] &&
+      (req.parsedPathname === "/api/user/oauth/pending" ||
+        req.parsedPathname === "/api/user/oauth/complete")
+    ) {
+      forwardHeaders["x-oauth-pending-token"] = cookies[COOKIE_NAMES.OAUTH_PENDING];
     }
 
     // Update content-length if body was modified
@@ -193,6 +247,17 @@ function forwardAuthRequest(req, res, targetUrl) {
 
             if (isLogout || isRevoke) {
               clearAuthCookies(res);
+            } else if (
+              req.parsedPathname === "/api/user/oauth/callback" &&
+              data.data &&
+              data.data.requires_account_completion &&
+              data.data.pending_token
+            ) {
+              setPendingOAuthCookie(res, data.data.pending_token);
+              const locale = getPreferredLocale(cookies);
+              res.writeHead(302, { Location: `/${locale}/oauth/complete` });
+              res.end();
+              return;
             } else if (data.data && data.data.session) {
               const session = data.data.session;
               setAuthCookies(res, session);
@@ -202,6 +267,10 @@ function forwardAuthRequest(req, res, targetUrl) {
                 res.writeHead(302, { Location: "/" });
                 res.end();
                 return;
+              }
+
+              if (req.parsedPathname === "/api/user/oauth/complete") {
+                clearPendingOAuthCookie(res);
               }
 
               const sanitized = { ...data };
@@ -304,10 +373,17 @@ app.prepare().then(() => {
           pathname.startsWith("/api/conversation/") ||
           pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
-          pathname.startsWith("/api/file/preprocess") ||
-          pathname.startsWith("/api/skills/create");
-        const target = isRuntime ? RUNTIME_HTTP_BACKEND : HTTP_BACKEND;
-        proxy.web(req, res, { target, changeOrigin: true });
+          pathname.startsWith("/api/file/preprocess");
+        if (isRuntime) {
+          proxy.web(req, res, { target: RUNTIME_HTTP_BACKEND, changeOrigin: true });
+        } else if (
+          pathname === "/api/skills/create" ||
+          pathname.startsWith("/api/skills/stop/")
+        ) {
+          proxy.web(req, res, { target: RUNTIME_HTTP_BACKEND, changeOrigin: true });
+        } else {
+          proxy.web(req, res, { target: HTTP_BACKEND, changeOrigin: true });
+        }
       }
     } else {
       // Let Next.js handle the request

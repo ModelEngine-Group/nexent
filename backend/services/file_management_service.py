@@ -10,6 +10,8 @@ import httpx
 from fastapi import UploadFile
 
 from consts.const import (
+    ASSET_OWNER_ATTACHMENTS_PREFIX,
+    ASSET_OWNER_TENANT_ID,
     DATA_PROCESS_SERVICE,
     FILE_PREVIEW_SIZE_LIMIT,
     MAX_CONCURRENT_UPLOADS,
@@ -51,13 +53,54 @@ _conversion_locks_guard = asyncio.Lock()
 logger = logging.getLogger("file_management_service")
 
 
-def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
+def resolve_minio_upload_folder(
+    folder: Optional[str],
+    user_id: Optional[str] = None,
+    uploader_tenant_id: Optional[str] = None,
+) -> str:
+    """Map caller context to the MinIO object prefix used for uploads.
+
+    Resolution order (first match wins):
+    1. Asset-owner tenant → ``attachments/asset_owner/{user_id}``
+    2. ``folder == "knowledge_base"`` → shared ``knowledge_base`` prefix
+    3. Otherwise → per-user ``attachments/{user_id}`` when ``user_id`` is set
+    4. Legacy fallback → ``folder`` if provided, else ``attachments``
+
+    Access control for reads is enforced separately; this function only
+    chooses the storage prefix.
+
+    Args:
+        folder: Requested folder hint (e.g. ``"knowledge_base"`` or a legacy path).
+        user_id: Uploader user ID; required for user-scoped attachment paths.
+        uploader_tenant_id: Uploader tenant ID; asset-owner tenants use a dedicated prefix.
+
+    Returns:
+        Resolved MinIO folder prefix (no leading or trailing slash).
+    """
+    if uploader_tenant_id == ASSET_OWNER_TENANT_ID:
+        return f"{ASSET_OWNER_ATTACHMENTS_PREFIX}/{user_id}"
+
+    if folder == "knowledge_base":
+        return "knowledge_base"
+
+    if user_id:
+        return f"attachments/{user_id}"
+
+    return folder or "attachments"
+
+
+def check_file_access(
+    object_name: str,
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> bool:
     """
     Check if user has permission to access the file.
 
     Access rules:
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
+    - images_in_attachments/*: All authenticated users can access
     - preview/*: Accessible if the original file is accessible
 
     Args:
@@ -70,8 +113,16 @@ def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
     if not user_id:
         return False
 
+    if object_name.startswith(ASSET_OWNER_ATTACHMENTS_PREFIX):
+        return caller_tenant_id == ASSET_OWNER_TENANT_ID
+
     if object_name.startswith("knowledge_base/"):
         # Knowledge base files: all authenticated users can access
+        return True
+
+    if object_name.startswith("images_in_attachments/"):
+        # Extracted image files used by knowledge-base image chunks.
+        # Keep them readable for authenticated users to avoid broken image citations.
         return True
 
     # Check if file is in user's attachments folder
@@ -89,21 +140,33 @@ def check_file_access(object_name: str, user_id: Optional[str]) -> bool:
     return False
 
 
-def check_file_access_batch(object_names: List[str], user_id: Optional[str]) -> Dict[str, bool]:
+def check_file_access_batch(
+    object_names: List[str],
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> Dict[str, bool]:
     """
     Batch check file access permissions.
 
     Args:
         object_names: List of file object names
         user_id: Current user ID
+        caller_tenant_id: Caller's tenant ID for ASSET_OWNER path checks
 
     Returns:
         Dict mapping object_name to access permission (True/False)
     """
-    return {obj_name: check_file_access(obj_name, user_id) for obj_name in object_names}
+    return {
+        obj_name: check_file_access(obj_name, user_id, caller_tenant_id)
+        for obj_name in object_names
+    }
 
 
-def validate_s3_url_access(object_name: str, user_id: Optional[str]) -> None:
+def validate_s3_url_access(
+    object_name: str,
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> None:
     """
     Validate if user has permission to access the S3 URL.
 
@@ -117,12 +180,18 @@ def validate_s3_url_access(object_name: str, user_id: Optional[str]) -> None:
     if not user_id:
         raise PermissionError("User authentication required to access files")
 
-    if not check_file_access(object_name, user_id):
-        logger.warning(f"[validate_s3_url_access] Access denied: object_name={object_name}, user_id={user_id}")
-        raise PermissionError(f"Access denied: You don't have permission to access this file ({object_name})")
+    if not check_file_access(object_name, user_id, caller_tenant_id):
+        logger.warning(
+            f"[validate_s3_url_access] Access denied: object_name={object_name}, user_id={user_id}")
+        raise PermissionError(
+            f"Access denied: You don't have permission to access this file ({object_name})")
 
 
-def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
+def validate_urls_access(
+    urls: List[str],
+    user_id: Optional[str],
+    caller_tenant_id: Optional[str] = None,
+) -> None:
     """
     Validate if user has permission to access the given URLs.
 
@@ -147,19 +216,27 @@ def validate_urls_access(urls: List[str], user_id: Optional[str]) -> None:
         if url.startswith("s3://"):
             try:
                 _, object_name = parse_s3_url(url)
-                validate_s3_url_access(object_name, user_id)
+                validate_s3_url_access(object_name, user_id, caller_tenant_id)
             except ValueError as e:
-                logger.warning(f"[validate_urls_access] Failed to parse S3 URL: {url}, error: {e}")
+                logger.warning(
+                    f"[validate_urls_access] Failed to parse S3 URL: {url}, error: {e}")
                 raise PermissionError(f"Invalid S3 URL format: {url}")
         elif url.startswith("/") and not url.startswith("//"):
             # Handle /bucket/key format (absolute path style)
             parts = url.strip("/").split("/", 1)
             if len(parts) == 2:
                 bucket, object_name = parts
-                validate_s3_url_access(object_name, user_id)
+                validate_s3_url_access(object_name, user_id, caller_tenant_id)
 
 
-async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None, user_id: Optional[str] = None) -> tuple:
+async def upload_files_impl(
+    destination: str,
+    file: List[UploadFile],
+    folder: str = None,
+    index_name: Optional[str] = None,
+    user_id: Optional[str] = None,
+    uploader_tenant_id: Optional[str] = None,
+) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
 
@@ -169,6 +246,7 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
         folder: Folder name for MinIO uploads
         index_name: Knowledge base index for conflict resolution
         user_id: User ID for attachment path isolation
+        uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
 
     Returns:
         tuple: (errors, uploaded_file_paths, uploaded_filenames)
@@ -195,19 +273,8 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
                     errors.append(f"Failed to save file: {f.filename}")
 
     elif destination == "minio":
-        # Determine actual folder path based on file type
-        # knowledge_base: accessible by all authenticated users
-        # other folders (attachments): user-isolated path (attachments/{user_id}/...)
-        if folder == "knowledge_base":
-            actual_folder = "knowledge_base"
-        else:
-            # User isolation for personal attachments
-            if user_id:
-                actual_folder = f"attachments/{user_id}"
-            else:
-                # Fallback to old behavior if no user_id provided
-                actual_folder = folder or "attachments"
-
+        actual_folder = resolve_minio_upload_folder(
+            folder, user_id, uploader_tenant_id)
         minio_results = await upload_to_minio(files=file, folder=actual_folder)
         for result in minio_results:
             if result.get("success"):
@@ -261,18 +328,26 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
     return errors, uploaded_file_paths, uploaded_filenames
 
 
-async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optional[str] = None) -> List[dict]:
+async def upload_to_minio(
+    files: List[UploadFile],
+    folder: str,
+    user_id: Optional[str] = None,
+    uploader_tenant_id: Optional[str] = None,
+) -> List[dict]:
     """
     Helper function to upload files to MinIO and return results.
 
     Args:
         files: List of files to upload
-        folder: Storage folder path (will be prefixed with user_id if user_id is provided for attachments)
-        user_id: User ID for attachment path isolation
+        folder: Storage folder path or resolved MinIO prefix
+        user_id: User ID for attachment path isolation when folder is generic
+        uploader_tenant_id: Uploader tenant ID for ASSET_OWNER attachment prefix
 
     Returns:
         List of upload results
     """
+    actual_folder = resolve_minio_upload_folder(
+        folder, user_id, uploader_tenant_id)
     results = []
     for f in files:
         try:
@@ -281,17 +356,6 @@ async def upload_to_minio(files: List[UploadFile], folder: str, user_id: Optiona
 
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
-
-            # Determine actual folder path
-            # knowledge_base: no user isolation
-            # other folders: append user_id to path for isolation
-            if folder == "knowledge_base":
-                actual_folder = "knowledge_base"
-            else:
-                if user_id:
-                    actual_folder = f"attachments/{user_id}"
-                else:
-                    actual_folder = folder or "attachments"
 
             # Upload file
             result = upload_fileobj(
@@ -352,6 +416,8 @@ def get_llm_model(tenant_id: str):
     # Get the tenant config
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    timeout_seconds = main_model_config.get(
+        "timeout_seconds") if main_model_config else None
     long_text_to_text_model = OpenAILongContextModel(
         observer=MessageObserver(),
         model_id=get_model_name_from_config(main_model_config),
@@ -359,6 +425,7 @@ def get_llm_model(tenant_id: str):
         api_key=main_model_config.get("api_key"),
         max_context_tokens=main_model_config.get("max_tokens"),
         ssl_verify=main_model_config.get("ssl_verify", True),
+        timeout_seconds=timeout_seconds,
     )
     return long_text_to_text_model
 
@@ -390,7 +457,8 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     # Office documents - convert to PDF with caching
     elif content_type in OFFICE_MIME_TYPES:
-        name_without_ext = object_name.rsplit('.', 1)[0] if '.' in object_name else object_name
+        name_without_ext = object_name.rsplit(
+            '.', 1)[0] if '.' in object_name else object_name
         hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
         pdf_object_name = f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
         temp_pdf_object_name = f"preview/converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
@@ -404,7 +472,8 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     # Unsupported file type
     else:
-        raise UnsupportedFileTypeException(f"Unsupported file type for preview: {content_type}")
+        raise UnsupportedFileTypeException(
+            f"Unsupported file type for preview: {content_type}")
 
 
 def get_preview_stream(actual_object_name: str, start: Optional[int] = None, end: Optional[int] = None):
@@ -428,7 +497,8 @@ def get_preview_stream(actual_object_name: str, start: Optional[int] = None, end
         stream = get_file_range(actual_object_name, start, end)
 
     if stream is None:
-        raise NotFoundException("File not found or failed to read from storage")
+        raise NotFoundException(
+            "File not found or failed to read from storage")
     return stream
 
 
@@ -442,7 +512,8 @@ def _is_pdf_cache_valid(pdf_object_name: str) -> bool:
     # Verify the cached file is readable by fetching a small range
     stream = get_file_range(pdf_object_name, 0, 0)
     if stream is None:
-        logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
+        logger.warning(
+            f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
         delete_file(pdf_object_name)
         return False
 
@@ -451,7 +522,8 @@ def _is_pdf_cache_valid(pdf_object_name: str) -> bool:
         try:
             close_fn()
         except Exception as e:
-            logger.warning(f"Failed to close cache probe stream for {pdf_object_name}: {str(e)}")
+            logger.warning(
+                f"Failed to close cache probe stream for {pdf_object_name}: {str(e)}")
 
     return True
 
@@ -504,7 +576,8 @@ async def _convert_office_to_cached_pdf(
                     )
 
                 # Atomic move from temp to final location, then clean up temp
-                copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
+                copy_result = copy_file(
+                    source_object=temp_pdf_object_name, dest_object=pdf_object_name)
                 if not copy_result.get('success'):
                     logger.error(
                         "Failed to finalize converted PDF cache: object=%s, temp=%s, dest=%s, error=%s",
@@ -513,7 +586,8 @@ async def _convert_office_to_cached_pdf(
                         pdf_object_name,
                         copy_result.get('error', 'Unknown error'),
                     )
-                    raise RuntimeError("Failed to finalize converted PDF cache")
+                    raise RuntimeError(
+                        "Failed to finalize converted PDF cache")
                 delete_file(temp_pdf_object_name)
 
             except Exception as e:
@@ -522,7 +596,8 @@ async def _convert_office_to_cached_pdf(
                 logger.error(f"Office conversion failed: {str(e)}")
                 if isinstance(e, OfficeConversionException):
                     raise
-                raise OfficeConversionException("Office file conversion failed") from e
+                raise OfficeConversionException(
+                    "Office file conversion failed") from e
     finally:
         # Clean up the file lock (prevents memory leak for many unique files)
         async with _conversion_locks_guard:

@@ -183,7 +183,7 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             # Update group IDs
             if query.get("group_ids") is not None:
                 record.group_ids = query["group_ids"]
-
+            
             # Update timestamp and user
             if query.get("user_id"):
                 record.updated_by = query["user_id"]
@@ -259,7 +259,7 @@ def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, An
             if 'tenant_id' in query and query['tenant_id'] is not None:
                 db_query = db_query.filter(
                     KnowledgeRecord.tenant_id == query['tenant_id'])
-
+            
             result = db_query.first()
 
             if result:
@@ -404,14 +404,25 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
     """
     try:
         with get_db_session() as session:
+            # First try resolving by user-facing knowledge_name.
             result = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.knowledge_name == knowledge_name,
                 KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
             ).first()
-
             if result:
                 return result.index_name
+
+            # Backward/forward compatibility: if caller already passes internal index_name,
+            # accept it directly by resolving on index_name as well.
+            index_result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if index_result:
+                return index_result.index_name
+
             raise ValueError(
                 f"Knowledge base '{knowledge_name}' not found for the current tenant"
             )

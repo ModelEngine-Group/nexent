@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, desc, func, insert, select, update
@@ -6,6 +7,8 @@ from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
+
+logger = logging.getLogger("database.model_management_db")
 
 
 def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str) -> bool:
@@ -170,7 +173,7 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
         return result_list
 
 
-def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+def get_model_by_display_name(display_name: str, tenant_id: str, model_type: str = None) -> Optional[Dict[str, Any]]:
     """
     Get a model record by display name
 
@@ -179,6 +182,11 @@ def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dic
         tenant_id:
     """
     filters = {'display_name': display_name}
+    
+    if model_type in ["multiEmbedding", "multi_embedding"]:
+        filters['model_type'] = "multi_embedding"
+    elif model_type == "embedding":
+        filters['model_type'] = "embedding"
 
     records = get_model_records(filters, tenant_id)
     if not records:
@@ -203,7 +211,7 @@ def get_models_by_display_name(display_name: str, tenant_id: str) -> List[Dict[s
     return get_model_records(filters, tenant_id)
 
 
-def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[int]:
+def get_model_id_by_display_name(display_name: str, tenant_id: str, model_type: str = None) -> Optional[int]:
     """
     Get a model ID by display name
 
@@ -214,7 +222,7 @@ def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[
     Returns:
         Optional[int]: Model ID
     """
-    model = get_model_by_display_name(display_name, tenant_id)
+    model = get_model_by_display_name(display_name, tenant_id, model_type)
     return model["model_id"] if model else None
 
 

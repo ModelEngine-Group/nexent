@@ -97,7 +97,7 @@ export default function McpContainerLogsModal({
       width={800}
       footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
     >
-      <Spin spinning={loading} tip={t("mcpConfig.containerLogs.loading")}>
+      <Spin spinning={loading} description={t("mcpConfig.containerLogs.loading")}>
         <pre
           ref={logsRef}
           className="bg-gray-100 p-4 rounded max-h-[500px] overflow-auto whitespace-pre-wrap text-xs font-mono"

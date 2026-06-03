@@ -9,6 +9,7 @@
 - [搜索工具](./search-tools)：本地/DataMate/Dify 知识库检索与 Exa/Tavily/Linkup 公网搜索。
 - [多模态工具](./multimodal-tools)：文本文件与图片的下载、解析、模型分析。
 - [终端工具](./terminal-tool)：持久化 SSH 会话，远程执行命令。
+- [SQL 工具](./sql-tools)：连接 MySQL、PostgreSQL、SQL Server 执行 SQL 查询。
 - [技能（Skills）](../skills)：Nexent内置工具组合或自定义能力包，支持 NL 生成与版本管理。
 
 ## ⚙️ 配置入口

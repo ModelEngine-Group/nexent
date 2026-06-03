@@ -126,6 +126,47 @@ class OpenAIVLModel(OpenAIModel):
 
         return messages
 
+    def prepare_media_message(
+            self,
+            media_input: Union[str, BinaryIO],
+            media_type: str,
+            content_type: str,
+            system_prompt: str) -> List[Dict[str, Any]]:
+        """
+        Prepare an OpenAI-compatible multimodal message for audio or video inputs.
+
+        Args:
+            media_input: Media file path or file stream object.
+            media_type: Either "audio" or "video".
+            content_type: MIME type for the data URL.
+            system_prompt: System prompt.
+
+        Returns:
+            List[Dict[str, Any]]: Prepared message list.
+        """
+        if media_type not in ("audio", "video"):
+            raise ValueError(f"Unsupported media type: {media_type}")
+
+        base64_media = self.encode_image(media_input)
+        media_url_key = f"{media_type}_url"
+        media_config: Dict[str, Any] = {"url": f"data:{content_type};base64,{base64_media}"}
+        if media_type == "video":
+            media_config.update({"detail": "high", "max_frames": 16, "fps": 1})
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": media_url_key,
+                        media_url_key: media_config
+                    },
+                    {"type": "text", "text": system_prompt}
+                ]
+            }
+        ]
+        return messages
+
     def analyze_image(self, image_input: Union[str, BinaryIO],
             system_prompt: str = "Please describe this picture concisely and carefully, within 200 words.", stream: bool = True,
             **kwargs) -> ChatMessage:
@@ -143,4 +184,24 @@ class OpenAIVLModel(OpenAIModel):
         """
         messages = self.prepare_image_message(image_input, system_prompt)
         # Call __call__ explicitly so instance-level mocks work in tests.
+        return self.__call__(messages=messages, **kwargs)
+
+    def analyze_audio(
+            self,
+            audio_input: Union[str, BinaryIO],
+            system_prompt: str = "Please analyze this audio carefully.",
+            content_type: str = "audio/mpeg",
+            **kwargs) -> ChatMessage:
+        """Analyze audio content using the configured multimodal model."""
+        messages = self.prepare_media_message(audio_input, "audio", content_type, system_prompt)
+        return self.__call__(messages=messages, **kwargs)
+
+    def analyze_video(
+            self,
+            video_input: Union[str, BinaryIO],
+            system_prompt: str = "Please analyze this video carefully.",
+            content_type: str = "video/mp4",
+            **kwargs) -> ChatMessage:
+        """Analyze video content using the configured multimodal model."""
+        messages = self.prepare_media_message(video_input, "video", content_type, system_prompt)
         return self.__call__(messages=messages, **kwargs)
