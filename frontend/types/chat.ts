@@ -74,7 +74,7 @@ metrics: TokenMetrics | null
 
 export interface ChatAgentSelectorProps {
   selectedAgentId: string | null;
-  onAgentSelect: (agentId: string | null) => void;
+  onAgentSelect: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
 }
@@ -204,9 +204,11 @@ export interface ChatStreamMainProps {
   currentConversationId?: number;
   shouldScrollToBottom?: boolean;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
   onCitationHover?: () => void;
   onScroll?: () => void;
+  agentGreeting?: string | null;
+  agentExampleQuestions?: string[];
 }
 
 // Card item type for task window

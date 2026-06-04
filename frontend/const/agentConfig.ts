@@ -53,6 +53,8 @@ export const GENERATE_PROMPT_STREAM_TYPES = {
   AGENT_VAR_NAME: "agent_var_name",
   AGENT_DESCRIPTION: "agent_description",
   AGENT_DISPLAY_NAME: "agent_display_name",
+  GREETING_MESSAGE: "greeting_message",
+  EXAMPLE_QUESTIONS: "example_questions",
 } as const;
 
 export const TOOL_PARAM_TYPES = {
