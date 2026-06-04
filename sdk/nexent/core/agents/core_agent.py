@@ -224,6 +224,15 @@ class CoreAgent(CodeAgent):
         self.stop_event = threading.Event()
         self._history_step_count = 0  # For ContextManager, record boundary for compression
         self.context_manager: ContextManager = None
+        self._ephemeral_system_messages: Optional[List[ChatMessage]] = None
+        """Per-run system messages injected before the current user query.
+
+        Set via ``set_ephemeral_messages()`` before ``run()`` and automatically
+        prepended to ``input_messages`` in ``_step_stream()`` right before the
+        last USER message (the current query). These messages are NOT stored in
+        ``memory.steps`` and therefore do not persist into conversation history
+        or compression. Cleared via ``clear_ephemeral_messages()``.
+        """
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -231,6 +240,18 @@ class CoreAgent(CodeAgent):
         # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
         # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
         self.code_block_tags = ["", ""]
+
+    def set_ephemeral_messages(self, messages: List[ChatMessage]) -> None:
+        """Set per-run system messages injected before the current user query.
+
+        These are prepended to ``input_messages`` in ``_step_stream()`` right
+        before the last USER message and are NOT stored in ``memory.steps``.
+        """
+        self._ephemeral_system_messages = messages
+
+    def clear_ephemeral_messages(self) -> None:
+        """Clear ephemeral system messages after the run completes."""
+        self._ephemeral_system_messages = None
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -314,6 +335,22 @@ Additional Args:
             input_messages = self.context_manager.compress_if_needed(
                 self.model, self.memory, input_messages, self._history_step_count
             )
+
+        # Inject ephemeral system messages before the last USER message
+        # (the current query), maximizing prompt cache prefix reuse: the
+        # system prompt and all history messages stay at the same positions.
+        if self._ephemeral_system_messages:
+            insert_at = len(input_messages)
+            for i in range(len(input_messages) - 1, -1, -1):
+                if input_messages[i].role == "user":
+                    insert_at = i
+                    break
+            input_messages = (
+                input_messages[:insert_at]
+                + self._ephemeral_system_messages
+                + input_messages[insert_at:]
+            )
+
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
