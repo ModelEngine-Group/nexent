@@ -135,8 +135,10 @@ interface ChatInputProps {
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
   latestMetrics?: TokenMetrics | null;
+  agentGreeting?: string | null;
+  agentExampleQuestions?: string[];
 }
 
 export function ChatInput({
@@ -156,6 +158,8 @@ export function ChatInput({
   selectedAgentId = null,
   onAgentSelect,
   latestMetrics = null,
+  agentGreeting = null,
+  agentExampleQuestions = [],
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -1065,17 +1069,23 @@ export function ChatInput({
       {/* Chat input part */}
       {isInitialMode ? (
         <div className="flex flex-col items-center justify-center h-full w-full max-w-5xl mx-auto mt-[-80px]">
-          <div className="flex flex-col items-center mb-4">
-            <div className="flex items-center mb-6">
-              <div className="h-16 w-16 rounded-full overflow-hidden mr-4">
-                <img
-                  src={avatarUrl}
-                  alt={appConfig.appName}
-                  className="h-full w-full object-cover"
-                />
+          <div className="flex flex-col items-center mb-6">
+            <div className="h-16 w-16 rounded-full overflow-hidden mb-4 ring-2 ring-offset-2 ring-slate-100">
+              <img
+                src={avatarUrl}
+                alt={appConfig.appName}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            {agentGreeting ? (
+              <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl px-6 py-5 max-w-2xl shadow-sm border border-slate-100 mb-4">
+                <p className="text-lg text-gray-800 leading-relaxed text-center">
+                  {agentGreeting}
+                </p>
               </div>
+            ) : (
               <h1
-                className="text-4xl font-bold bg-clip-text text-transparent"
+                className="text-4xl font-bold bg-clip-text text-transparent mb-2"
                 style={{
                   backgroundImage: (() => {
                     const colors = extractColorsFromUri(
@@ -1089,11 +1099,27 @@ export function ChatInput({
               >
                 {t("chatInput.helloIm", { appName: appConfig.appName })}
               </h1>
-            </div>
-            <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              {appConfig.appDescription || t("chatInput.introMessage")}
-            </p>
+            )}
+            {!agentGreeting && (
+              <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                {appConfig.appDescription || t("chatInput.introMessage")}
+              </p>
+            )}
           </div>
+          {agentExampleQuestions.length > 0 && (
+            <div className="flex flex-col gap-2 max-w-3xl mb-4 w-full">
+              {agentExampleQuestions.map((question, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => onInputChange(question)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-sm text-gray-700 shadow-sm transition-all text-left flex items-center gap-2"
+                >
+                  <span className="text-muted-foreground font-medium">{idx + 1}.</span>
+                  <span>{question}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div
             ref={dropAreaRef}
             className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"

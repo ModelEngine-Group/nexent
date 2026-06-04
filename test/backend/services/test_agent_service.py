@@ -333,6 +333,10 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
         request.related_agent_ids = None
     if not hasattr(request, "enabled_tool_ids"):
         request.enabled_tool_ids = None
+    if not hasattr(request, "example_questions"):
+        request.example_questions = None
+    if not hasattr(request, "greeting_message"):
+        request.greeting_message = None
     return request
 
 
@@ -745,6 +749,7 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
     request.display_name = "Test Display Name"
     request.enabled_tool_ids = None
     request.related_agent_ids = None
+    request.example_questions = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
@@ -9055,6 +9060,8 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     mock_query_skills.return_value = []
     mock_create_skill.side_effect = Exception("Skill update failed")
@@ -9323,6 +9330,8 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Make query_sub_agents_id_list raise exception during circular check
     mock_query_sub.side_effect = Exception("Query error")
@@ -9372,6 +9381,8 @@ async def test_update_agent_info_impl_related_external_agents(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Mock current relations (empty)
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent', return_value=[]):
@@ -9422,6 +9433,8 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Mock current relations has the ID
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent',
@@ -9473,6 +9486,8 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Mock current relations includes the same ID - add should raise ValueError (already exists)
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent',
@@ -9585,6 +9600,8 @@ async def test_update_agent_info_impl_skill_unselected(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     result = await update_agent_info_impl(mock_request, authorization="Bearer token")
 
@@ -9933,8 +9950,33 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent',
                      side_effect=Exception("DB error")):
         with pytest.raises(ValueError, match="Failed to update related external agents"):
             await update_agent_info_impl(mock_request, authorization="Bearer token")
+
+
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_example_questions_exceed_limit(mock_get_current_user_info):
+    """Test update_agent_info_impl raises AppException when example_questions exceeds 6 items."""
+    from consts.error_code import ErrorCode
+    from consts.exceptions import AppException
+
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.model_id = None
+    request.example_questions = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"]
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    with pytest.raises(AppException) as exc_info:
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID

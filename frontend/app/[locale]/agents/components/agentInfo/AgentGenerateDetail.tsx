@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -17,6 +17,7 @@ import {
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 import {
   AgentConfigUpdate,
@@ -682,11 +683,12 @@ export default function AgentGenerateDetail({}) {
             }}
             className="agent-config-tabs flex flex-col h-full w-full"
           >
-            <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
+            <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
               <TabsTrigger value="agent-info">{t("agent.info.title")}</TabsTrigger>
               <TabsTrigger value="duty">{t("systemPrompt.card.duty.title")}</TabsTrigger>
               <TabsTrigger value="constraint">{t("systemPrompt.card.constraint.title")}</TabsTrigger>
               <TabsTrigger value="few-shots">{t("systemPrompt.card.fewShots.title")}</TabsTrigger>
+              <TabsTrigger value="greeting">{t("agent.greeting.tabTitle")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="agent-info" className="flex-1 min-h-0 overflow-y-auto">
@@ -958,6 +960,70 @@ export default function AgentGenerateDetail({}) {
                 t("systemPrompt.card.fewShots.title"),
                 (value) => updateAgentConfig({ few_shots_prompt: value })
               )}
+            </TabsContent>
+
+            <TabsContent value="greeting" className="flex-1 min-h-0 overflow-y-auto">
+              <div className="overflow-y-auto overflow-x-hidden h-full px-3 pb-3">
+                <div className="mb-4">
+                  <div className="flex items-center mb-2">
+                    <h4 className="text-md font-medium text-gray-700">{t("agent.greeting.messageTitle")}</h4>
+                  </div>
+                  <Textarea
+                    value={editedAgent.greeting_message || ""}
+                    onChange={(e) => updateAgentConfig({ greeting_message: e.target.value })}
+                    disabled={!editable || isGenerating}
+                    placeholder={t("agent.greeting.messagePlaceholder")}
+                    className="w-full min-h-[80px]"
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <div className="flex items-center mb-2">
+                    <h4 className="text-md font-medium text-gray-700">{t("agent.greeting.questionsTitle")}</h4>
+                  </div>
+                  {(editedAgent.example_questions || []).length > 0 && (
+                    <div className="space-y-2">
+                      {(editedAgent.example_questions || []).map((q: string, idx: number) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <Input
+                            value={q}
+                            onChange={(e) => {
+                              const newQuestions = [...(editedAgent.example_questions || [])];
+                              newQuestions[idx] = e.target.value;
+                              updateAgentConfig({ example_questions: newQuestions });
+                            }}
+                            disabled={!editable || isGenerating}
+                            className="flex-1"
+                          />
+                          <Button
+                            size="small"
+                            disabled={!editable || isGenerating}
+                            onClick={() => {
+                              const newQuestions = (editedAgent.example_questions || []).filter((_: string, i: number) => i !== idx);
+                              updateAgentConfig({ example_questions: newQuestions });
+                            }}
+                          >
+                            {t("agent.greeting.removeQuestion")}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(editedAgent.example_questions || []).length < 6 && editable && !isGenerating && (
+                    <Button
+                      size="small"
+                      type="dashed"
+                      onClick={() => {
+                        const newQuestions = [...(editedAgent.example_questions || []), ""];
+                        updateAgentConfig({ example_questions: newQuestions });
+                      }}
+                      className="mt-2"
+                    >
+                      {t("agent.greeting.addQuestion")}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
         </Col>

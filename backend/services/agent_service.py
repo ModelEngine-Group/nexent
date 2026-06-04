@@ -22,7 +22,8 @@ from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
-from consts.exceptions import MemoryPreparationException, SkillDuplicateError
+from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
+from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from consts.model import (
     AgentInfoRequest,
@@ -1110,6 +1111,10 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
 
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
     user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    if request.example_questions is not None and len(request.example_questions) > 6:
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "example_questions cannot exceed 6 items")
+
     prompt_template_id, prompt_template_name = get_prompt_template_summary(
         template_id=request.prompt_template_id,
         tenant_id=tenant_id,
@@ -1139,6 +1144,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
+                "greeting_message": request.greeting_message,
+                "example_questions": request.example_questions,
                 "enabled": request.enabled if request.enabled is not None else True,
                 "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids,
                 "ingroup_permission": request.ingroup_permission

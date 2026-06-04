@@ -10,6 +10,7 @@ Main features include:
 4. Health check interface
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -28,7 +29,7 @@ from nexent.vector_database.datamate_core import DataMateCore
 
 from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ, ASSET_OWNER_TENANT_ID
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
-from database.attachment_db import delete_file, get_file_stream
+from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
     create_knowledge_record,
     delete_knowledge_record,
@@ -636,6 +637,7 @@ class ElasticSearchService:
             group_ids: Optional[List[int]] = None,
             embedding_model_name: Optional[str] = None,
             is_multimodal: Optional[bool] = None,
+            preserve_source_file: Optional[bool] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -655,6 +657,8 @@ class ElasticSearchService:
             group_ids: List of group IDs (optional)
             embedding_model_name: Specific embedding model name to use (optional).
                                    If provided, will use this model instead of tenant default.
+            preserve_source_file: Whether to preserve uploaded source documents after
+                                   vectorization (optional; defaults to True when omitted).
 
         For backward compatibility, legacy callers can still use create_index() directly
         with an explicit index_name.
@@ -694,6 +698,8 @@ class ElasticSearchService:
                 knowledge_data["ingroup_permission"] = ingroup_permission
             if group_ids is not None:
                 knowledge_data["group_ids"] = group_ids
+            if preserve_source_file is not None:
+                knowledge_data["preserve_source_file"] = preserve_source_file
 
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
@@ -1091,6 +1097,7 @@ class ElasticSearchService:
                         # Auto-summary settings
                         "summary_frequency": record.get("summary_frequency"),
                         "last_summary_time": record.get("last_summary_time"),
+                        "preserve_source_file": record.get("preserve_source_file", True),
                         "stats": index_stats,
                     })
 
@@ -1488,6 +1495,11 @@ class ElasticSearchService:
                     # chunk_count is already set from ES aggregation (doc_count)
                     file_data['chunk_count'] = file_data.get('chunk_count', 0)
 
+            for file_data in files:
+                file_data["source_available"] = (
+                    ElasticSearchService._compute_source_available(file_data)
+                )
+
             total_duration = time.time() - total_start_time
             logger.info(f"[list_files:complete] index={index_name}, total_files={len(files)}, "
                        f"total_duration={total_duration:.3f}s")
@@ -1497,6 +1509,100 @@ class ElasticSearchService:
         except Exception as e:
             raise Exception(
                 f"Error getting file list for index {index_name}: {str(e)}")
+
+    DOCUMENT_DELETE_SCOPES = ("source_only", "full")
+
+    @staticmethod
+    def _preview_pdf_cache_object_name(object_name: str) -> str:
+        """Object key for Office-to-PDF preview cache (matches file_management_service)."""
+        name_without_ext = (
+            object_name.rsplit(".", 1)[0] if "." in object_name else object_name
+        )
+        hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
+        return f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
+
+    @staticmethod
+    def _compute_source_available(file_data: Dict[str, Any]) -> bool:
+        path_or_url = file_data.get("path_or_url") or ""
+        status = file_data.get("status", "")
+        if status != "COMPLETED":
+            return True
+        if path_or_url.startswith("knowledge_base/"):
+            return file_exists(path_or_url)
+        return True
+
+    @staticmethod
+    def delete_source_file(path_or_url: str) -> Dict[str, Any]:
+        """Remove MinIO source (and preview cache); does not touch Elasticsearch."""
+        minio_result = delete_file(path_or_url)
+        deleted_minio = bool(minio_result.get("success"))
+
+        if path_or_url.startswith("knowledge_base/"):
+            preview_key = ElasticSearchService._preview_pdf_cache_object_name(
+                path_or_url
+            )
+            try:
+                if file_exists(preview_key):
+                    delete_file(preview_key)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete preview cache for '%s': %s",
+                    path_or_url,
+                    exc,
+                )
+
+        return {"deleted_minio": deleted_minio}
+
+    @staticmethod
+    async def _assert_source_only_deletable(
+            index_name: str, path_or_url: str
+    ) -> None:
+        celery_task_files = await get_all_files_status(index_name)
+        status_info = celery_task_files.get(path_or_url)
+        if not status_info or not isinstance(status_info, dict):
+            return
+        state = status_info.get("state") or ""
+        if state and state != "COMPLETED":
+            raise ValueError(
+                f"Cannot delete source file while document is in state '{state}'. "
+                "Wait until processing completes or use scope=full to remove the document."
+            )
+
+    @staticmethod
+    async def delete_document_by_scope(
+            index_name: str,
+            path_or_url: str,
+            scope: str,
+            vdb_core: VectorDatabaseCore,
+    ) -> Dict[str, Any]:
+        if scope not in ElasticSearchService.DOCUMENT_DELETE_SCOPES:
+            raise ValueError(
+                f"Invalid scope '{scope}'. "
+                f"Must be one of: {ElasticSearchService.DOCUMENT_DELETE_SCOPES}"
+            )
+
+        if scope == "source_only":
+            await ElasticSearchService._assert_source_only_deletable(
+                index_name, path_or_url
+            )
+            minio_part = ElasticSearchService.delete_source_file(path_or_url)
+            return {
+                "status": "success",
+                "scope": scope,
+                "deleted_es_count": 0,
+                "deleted_minio": minio_part.get("deleted_minio", False),
+                "source_available": False,
+                "message": (
+                    "Source file deleted; index chunks and vectors preserved."
+                ),
+            }
+
+        result = ElasticSearchService.delete_documents(
+            index_name, path_or_url, vdb_core
+        )
+        result["scope"] = scope
+        result["source_available"] = False
+        return result
 
     @staticmethod
     def delete_documents(

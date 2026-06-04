@@ -30,6 +30,10 @@ export interface AgentGenerationCache {
   agentDisplayName: string;
   /** Generated agent description */
   agentDescription: string;
+  /** Generated greeting message */
+  greetingMessage: string;
+  /** Generated example questions */
+  exampleQuestions: string;
 }
 
 /**
@@ -46,6 +50,8 @@ const DEFAULT_CACHE: AgentGenerationCache = {
   agentName: "",
   agentDisplayName: "",
   agentDescription: "",
+  greetingMessage: "",
+  exampleQuestions: "",
 };
 
 /**
@@ -173,7 +179,7 @@ export function setAgentGenerationStatus(
 export function saveGeneratedField<
   K extends keyof Pick<
     AgentGenerationCache,
-    'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription'
+    'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription' | 'greetingMessage' | 'exampleQuestions'
   >
 >(
   agentId: number,
