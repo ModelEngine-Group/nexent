@@ -80,7 +80,7 @@ from services.prompt_template_service import (
     get_prompt_template_summary,
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
-from services.conversation_management_service import save_conversation_assistant, save_conversation_user
+from services.conversation_management_service import save_conversation_assistant, save_conversation_user, save_skill_files_to_conversation
 from services.memory_config_service import build_memory_context
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
@@ -133,6 +133,29 @@ def _extract_skill_file_upload_payloads(content: str) -> list[dict]:
         if payload.get("absolute_path"):
             payloads.append(payload)
     return payloads
+
+
+def _transform_skill_files_to_standard_format(upload_results: list[dict]) -> list[dict]:
+    """
+    Transform skill file upload results to match the frontend attachment format.
+
+    Skill upload format:
+        {file_name, absolute_path, object_name, preview_url, url, presigned_url, mime_type, file_size, status}
+    Frontend format:
+        {object_name, name, type, size, url, presigned_url, description}
+    """
+    frontend_files = []
+    for result in upload_results:
+        frontend_files.append({
+            "object_name": result.get("object_name", ""),
+            "name": result.get("file_name", result.get("name", "")),
+            "type": "file",
+            "size": result.get("file_size", result.get("size", 0)),
+            "url": result.get("url", ""),
+            "presigned_url": result.get("presigned_url", result.get("preview_url", "")),
+            "description": "",
+        })
+    return frontend_files
 
 
 async def _process_skill_file_uploads(
@@ -838,6 +861,7 @@ async def _stream_agent_chunks(
                     len(skill_file_uploads), skill_file_uploads
                 )
                 if skill_file_uploads:
+                    # Keep original format for real-time SSE display
                     skill_files_payload = json.dumps(
                         {"skill_file_uploads": skill_file_uploads},
                         ensure_ascii=False,
@@ -847,6 +871,21 @@ async def _stream_agent_chunks(
                     except RuntimeError:
                         # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                         pass
+                    # Persist skill file uploads to the conversation history so they
+                    # appear in subsequent GET /conversation/{id} calls.
+                    # Transform to frontend attachment format (object_name, name, type, size, etc.)
+                    try:
+                        frontend_files = _transform_skill_files_to_standard_format(skill_file_uploads)
+                        save_skill_files_to_conversation(
+                            conversation_id=agent_request.conversation_id,
+                            skill_file_uploads=frontend_files,
+                            user_id=user_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[skill-file] failed to persist skill file uploads to conversation=%s",
+                            agent_request.conversation_id,
+                        )
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
