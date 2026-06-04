@@ -92,6 +92,7 @@ sys.modules['services.memory_config_service'] = memory_config_service_mock
 sys.modules['services.agent_version_service'] = agent_version_service_mock
 sys.modules['services.skill_service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
+sys.modules['services.file_management_service'] = MagicMock()
 sys.modules['services.skill_service'] = MagicMock()
 setattr(services_module, 'skill_service', sys.modules['services.skill_service'])
 
