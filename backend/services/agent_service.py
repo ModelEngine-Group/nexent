@@ -69,6 +69,7 @@ from database.tool_db import (
 from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
+from services.file_management_service import is_allowed_skill_upload_path
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -151,6 +152,13 @@ async def _process_skill_file_uploads(
         )
         mime_type = str(payload.get("mime_type") or payload.get("content_type") or "application/octet-stream")
         if not absolute_path:
+            continue
+
+        if not is_allowed_skill_upload_path(absolute_path):
+            logger.warning(
+                "[skill-file] rejected unsafe path absolute_path=%s",
+                absolute_path,
+            )
             continue
 
         if not file_name:

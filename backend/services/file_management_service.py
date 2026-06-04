@@ -52,6 +52,27 @@ _conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
 
+ALLOWED_SKILL_UPLOAD_ROOT = Path("/mnt/nexent").resolve()
+
+
+def is_allowed_skill_upload_path(file_path: str) -> bool:
+    """Return True when a local file path is under the allowed skill upload root."""
+    if not file_path:
+        return False
+
+    try:
+        candidate_path = Path(file_path).resolve()
+    except Exception:
+        return False
+
+    try:
+        candidate_path.relative_to(ALLOWED_SKILL_UPLOAD_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
+
 
 def resolve_minio_upload_folder(
     folder: Optional[str],
