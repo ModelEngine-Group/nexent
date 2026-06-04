@@ -25,6 +25,7 @@ dependencies = [
     "langchain>=0.3.26",
     "scikit-learn>=1.0.0",
     "numpy>=1.24.0",
+    "python-docx>=1.1.0",
 ]
 
 [project.optional-dependencies]
