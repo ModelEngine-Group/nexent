@@ -6,10 +6,20 @@ import json
 import sys
 from unittest.mock import patch, MagicMock
 
+class MockToolConfig:
+    def __init__(self, *args, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def model_dump(self, **kwargs):
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+
 # Mock nexent module hierarchy BEFORE any backend imports that depend on it
 nexent_mock = MagicMock()
 nexent_core_mock = MagicMock()
 nexent_core_agents_mock = MagicMock()
+nexent_agent_model_mock = MagicMock()
+nexent_agent_model_mock.ToolConfig = MockToolConfig
 nexent_storage_mock = MagicMock()
 nexent_storage_storage_client_factory_mock = MagicMock()
 nexent_storage_minio_config_mock = MagicMock()
@@ -20,6 +30,7 @@ nexent_monitor_mock = MagicMock()
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 sys.modules['nexent.core.agents'] = nexent_core_agents_mock
+sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
 sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
