@@ -402,6 +402,9 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     maybe = _unbound_run(getattr(tasks, "aggregate_store_chunks", None))
     if maybe is not None:
         tasks.aggregate_store_chunks = _CeleryTaskShim(maybe)
+    maybe = _unbound_run(getattr(tasks, "cleanup_source", None))
+    if maybe is not None:
+        tasks.cleanup_source = _CeleryTaskShim(maybe)
     return tasks, fake_ray
 
 
@@ -1018,6 +1021,7 @@ def test_submit_process_forward_chain_returns_empty_when_apply_async_none(monkey
     import backend.data_process.tasks as tasks_module
     tasks_module.process = tasks.process
     tasks_module.forward = tasks.forward
+    tasks_module.cleanup_source = tasks.cleanup_source
     out = tasks.submit_process_forward_chain(
         source="/a.txt", source_type="local", chunking_strategy="basic", index_name="idx")
     assert out == ""
@@ -1147,6 +1151,7 @@ def test_submit_process_forward_chain_returns_chain_id(monkeypatch):
     import backend.data_process.tasks as tasks_module
     tasks_module.process = tasks.process
     tasks_module.forward = tasks.forward
+    tasks_module.cleanup_source = tasks.cleanup_source
     chain_id = tasks.submit_process_forward_chain(
         source="/a.txt", source_type="local", chunking_strategy="basic", index_name="idx")
     assert chain_id == "123"
