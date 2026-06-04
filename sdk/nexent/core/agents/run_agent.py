@@ -88,6 +88,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
             if getattr(agent_run_info, 'context_manager', None) is not None:
                 agent.context_manager = agent_run_info.context_manager
+                # Sync reload tool to the swapped store (otherwise it still
+                # points to the internal store created by create_single_agent).
+                if 'reload_original_context_messages' in agent.tools:
+                    agent.tools['reload_original_context_messages']._offload_store = \
+                        agent.context_manager.offload_store
 
             nexent.add_history_to_agent(agent_run_info.history)
             nexent.agent_run_with_observer(
@@ -109,6 +114,9 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
                 if getattr(agent_run_info, 'context_manager', None) is not None:
                     agent.context_manager = agent_run_info.context_manager
+                    if 'reload_original_context_messages' in agent.tools:
+                        agent.tools['reload_original_context_messages']._offload_store = \
+                            agent.context_manager.offload_store
 
                 nexent.add_history_to_agent(agent_run_info.history)
                 nexent.agent_run_with_observer(

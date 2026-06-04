@@ -403,6 +403,23 @@ extra_body=model_config.extra_body,
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
+            # Build ContextManager before agent so the reload tool can be
+            # included in tool_list and properly sandboxed by the Python executor.
+            ctx_config = getattr(agent_config, 'context_manager_config', None)
+            ctx_manager = None
+            if ctx_config:
+                ctx_manager = ContextManager(
+                    config=ctx_config,
+                    max_steps=agent_config.max_steps,
+                )
+                if ctx_config.enable_reload:
+                    from ..tools import ReloadOriginalContextTool
+                    tool_list.append(
+                        ReloadOriginalContextTool(
+                            offload_store=ctx_manager.offload_store,
+                        )
+                    )
+
             # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
@@ -419,20 +436,9 @@ extra_body=model_config.extra_body,
             )
             agent.stop_event = self.stop_event
 
-            # Mount context manager if config provided
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config:
-                agent.context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps,
-                )
-                # Inject reload tool if offload+reload is enabled
-                if ctx_config.enable_reload:
-                    from ..tools import ReloadOriginalContextTool
-                    reload_tool = ReloadOriginalContextTool(
-                        offload_store=agent.context_manager.offload_store,
-                    )
-                    agent.tools[reload_tool.name] = reload_tool
+            # Mount context manager and register components
+            if ctx_manager is not None:
+                agent.context_manager = ctx_manager
                 context_components = getattr(agent_config, 'context_components', None)
                 if context_components:
                     for component in context_components:
