@@ -1,12 +1,28 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
-import { useTranslation } from 'react-i18next';
-import dynamic from 'next/dynamic';
-import { Drawer, Spin, Button, Table } from 'antd';
-import { Download, Maximize2, Minimize2, Minus, Plus, RotateCw, X } from 'lucide-react';
-import { FilePreviewProps } from '@/types/chat';
-import { DetectedFileType, ImageBaseMode } from '@/types/file';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
+import { useTranslation } from "react-i18next";
+import dynamic from "next/dynamic";
+import { Drawer, Modal, Spin, Button, Table } from "antd";
+import {
+  Download,
+  Maximize2,
+  Minimize2,
+  Minus,
+  Plus,
+  RotateCw,
+  X,
+} from "lucide-react";
+import { FilePreviewProps } from "@/types/chat";
+import { DetectedFileType, ImageBaseMode } from "@/types/file";
 import {
   CHUNK_SIZE,
   TEXT_RENDER_BLOCK_SIZE,
@@ -26,40 +42,63 @@ import {
   clamp,
   ignoreAbortError,
   getPageWrapperStyle,
-} from '@/lib/filePreviewUtils';
-import { storageService } from '@/services/storageService';
-import { MarkdownRenderer, extractMarkdownHeadings, type MarkdownHeading } from '@/components/ui/markdownRenderer';
-import { formatFileSize } from '@/lib/utils';
-import log from '@/lib/logger';
+  fetchPreviewBlob,
+  PreviewAccessError,
+  getPreviewAccessReasonFromStatus,
+  type PreviewAccessReason,
+} from "@/lib/filePreviewUtils";
+import { storageService } from "@/services/storageService";
+import {
+  MarkdownRenderer,
+  extractMarkdownHeadings,
+  type MarkdownHeading,
+} from "@/components/ui/markdownRenderer";
+import { formatFileSize } from "@/lib/utils";
+import log from "@/lib/logger";
 
-const PdfViewer = dynamic(() => import('@/components/ui/PdfViewer').then(mod => ({ default: mod.PdfViewer })), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-full">
-      <Spin size="large" />
-    </div>
-  ),
-});
+const PdfViewer = dynamic(
+  () =>
+    import("@/components/ui/PdfViewer").then((mod) => ({
+      default: mod.PdfViewer,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full">
+        <Spin size="large" />
+      </div>
+    ),
+  }
+);
 
 export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
-  const { open, onClose } = props;
-  const { t } = useTranslation('common');
-  const isLocalSource = props.source === 'local';
+  const { open, onClose, previewContext } = props;
+  const { t } = useTranslation("common");
+  const isLocalSource = props.source === "local";
   const localFile = isLocalSource ? props.file : null;
-  const objectName = !isLocalSource ? props.objectName : '';
-  const fileName = isLocalSource && localFile
-    ? localFile.name
-    : ('fileName' in props ? props.fileName : '');
-  const providedFileType = isLocalSource && localFile
-    ? localFile.type
-    : ('fileType' in props ? props.fileType : undefined);
-  const fileSize = isLocalSource && localFile
-    ? localFile.size
-    : ('fileSize' in props ? props.fileSize : undefined);
+  const objectName = !isLocalSource ? props.objectName : "";
+  const fileName =
+    isLocalSource && localFile
+      ? localFile.name
+      : "fileName" in props
+        ? props.fileName
+        : "";
+  const providedFileType =
+    isLocalSource && localFile
+      ? localFile.type
+      : "fileType" in props
+        ? props.fileType
+        : undefined;
+  const fileSize =
+    isLocalSource && localFile
+      ? localFile.size
+      : "fileSize" in props
+        ? props.fileSize
+        : undefined;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [textContent, setTextContent] = useState<string>('');
-  const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [textContent, setTextContent] = useState<string>("");
+  const [previewUrl, setPreviewUrl] = useState<string>("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [showMarkdownToc, setShowMarkdownToc] = useState(false);
 
@@ -73,9 +112,15 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [imageLoadError, setImageLoadError] = useState(false);
-  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 });
-  const [imageViewportSize, setImageViewportSize] = useState({ width: 0, height: 0 });
-  const [imageBaseMode, setImageBaseMode] = useState<ImageBaseMode>('fit');
+  const [imageNaturalSize, setImageNaturalSize] = useState({
+    width: 0,
+    height: 0,
+  });
+  const [imageViewportSize, setImageViewportSize] = useState({
+    width: 0,
+    height: 0,
+  });
+  const [imageBaseMode, setImageBaseMode] = useState<ImageBaseMode>("fit");
   const imageViewportResizeObserverRef = useRef<ResizeObserver | null>(null);
   const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const [isImageDragging, setIsImageDragging] = useState(false);
@@ -101,9 +146,9 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   const byteOffsetRef = useRef(0);
   const totalBytesRef = useRef<number | null>(null);
-  const remainderRef = useRef('');
+  const remainderRef = useRef("");
   const isFetchingRef = useRef(false);
-  const previewUrlRef = useRef('');
+  const previewUrlRef = useRef("");
   const textDecoderRef = useRef<TextDecoder | null>(null);
   const decoderEncodingRef = useRef<string | null>(null);
   const decoderHasExplicitCharsetRef = useRef(false);
@@ -111,71 +156,99 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
   const textFetchSessionRef = useRef(0);
-  const csvDelimiterRef = useRef<string>(',');
+  const csvDelimiterRef = useRef<string>(",");
+
+  const handleKnowledgePreviewAccessError = useCallback(
+    (reason: PreviewAccessReason) => {
+      if (previewContext !== "knowledgeBase") {
+        return false;
+      }
+      const key =
+        reason === "forbidden"
+          ? "filePreview.knowledge.accessDenied"
+          : "filePreview.knowledge.noStoredCopy";
+      Modal.info({
+        title: t(`${key}.title`),
+        content: t(`${key}.content`),
+        okText: t("common.confirm"),
+        centered: true,
+      });
+      onClose();
+      return true;
+    },
+    [previewContext, t, onClose]
+  );
 
   const resetTextPreviewState = useCallback(() => {
-    setTextContent('');
+    setTextContent("");
     setTxtLines([]);
     setCsvRows([]);
     setLoadingMore(false);
 
     byteOffsetRef.current = 0;
     totalBytesRef.current = null;
-    remainderRef.current = '';
+    remainderRef.current = "";
     isFetchingRef.current = false;
     textDecoderRef.current = null;
     decoderEncodingRef.current = null;
     decoderHasExplicitCharsetRef.current = false;
     decoderAllowGbFallbackRef.current = false;
-    csvDelimiterRef.current = ',';
+    csvDelimiterRef.current = ",";
 
     observerRef.current?.disconnect();
     observerRef.current = null;
   }, []);
 
   const getDetectedFileType = useCallback((): DetectedFileType => {
-    const mime = providedFileType?.toLowerCase() || '';
+    const mime = providedFileType?.toLowerCase() || "";
 
-    if (mime === 'application/pdf') return 'pdf';
-    
-    if (mime === 'application/msword' || 
-        mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-        mime === 'application/vnd.ms-excel' || 
-        mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-        mime === 'application/vnd.ms-powerpoint' || 
-        mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
-      return isLocalSource ? 'office' : 'pdf';
+    if (mime === "application/pdf") return "pdf";
+
+    if (
+      mime === "application/msword" ||
+      mime ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      mime === "application/vnd.ms-excel" ||
+      mime ===
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      mime === "application/vnd.ms-powerpoint" ||
+      mime ===
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ) {
+      return isLocalSource ? "office" : "pdf";
     }
-    
-    if (mime.startsWith('image/')) return 'image';
-    
-    if (mime === 'text/markdown') return 'markdown';
 
-    if (mime === 'text/csv') return 'csv';
+    if (mime.startsWith("image/")) return "image";
 
-    if (mime === 'text/html') return 'html';
+    if (mime === "text/markdown") return "markdown";
 
-    if (mime === 'text/plain') return 'text';
+    if (mime === "text/csv") return "csv";
 
-    const extension = fileName.split('.').pop()?.toLowerCase() || '';
-    
-    if (extension === 'pdf') return 'pdf';
-    if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(extension)) {
-      return isLocalSource ? 'office' : 'pdf';
+    if (mime === "text/html") return "html";
+
+    if (mime === "text/plain") return "text";
+
+    const extension = fileName.split(".").pop()?.toLowerCase() || "";
+
+    if (extension === "pdf") return "pdf";
+    if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) {
+      return isLocalSource ? "office" : "pdf";
     }
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension)) return 'image';
-    if (['md', 'markdown'].includes(extension)) return 'markdown';
-    if (extension === 'csv') return 'csv';
-    if (['html', 'htm'].includes(extension)) return 'html';
-    if (['txt', 'log', 'json', 'xml', 'yaml', 'yml'].includes(extension)) return 'text';
+    if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension))
+      return "image";
+    if (["md", "markdown"].includes(extension)) return "markdown";
+    if (extension === "csv") return "csv";
+    if (["html", "htm"].includes(extension)) return "html";
+    if (["txt", "log", "json", "xml", "yaml", "yml"].includes(extension))
+      return "text";
 
-    return 'unknown';
+    return "unknown";
   }, [providedFileType, fileName, isLocalSource]);
 
   const detectedFileType = getDetectedFileType();
 
   const markdownHeadings = useMemo<MarkdownHeading[]>(() => {
-    if (detectedFileType !== 'markdown' || !textContent) {
+    if (detectedFileType !== "markdown" || !textContent) {
       return [];
     }
     return extractMarkdownHeadings(textContent);
@@ -188,16 +261,21 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     }
     return blocks;
   }, [txtLines]);
-  
+
   const isEmptyFile = fileSize === 0;
   const isTooLargeToPreview = !!(fileSize && fileSize > 100 * 1024 * 1024);
 
   const normalizedImageRotation = ((imageRotation % 360) + 360) % 360;
   const imageFitScale = useMemo(
-    () => computeRotateFitScale(normalizedImageRotation, imageNaturalSize, imageViewportSize),
-    [imageNaturalSize, imageViewportSize, normalizedImageRotation],
+    () =>
+      computeRotateFitScale(
+        normalizedImageRotation,
+        imageNaturalSize,
+        imageViewportSize
+      ),
+    [imageNaturalSize, imageViewportSize, normalizedImageRotation]
   );
-  const imageBaseScale = imageBaseMode === 'fit' ? imageFitScale : 1;
+  const imageBaseScale = imageBaseMode === "fit" ? imageFitScale : 1;
   const effectiveImageScale = imageScale * imageBaseScale;
   const imageScaleMin = imageBaseScale > 0 ? 0.25 / imageBaseScale : 0.25;
   const imageScaleMax = imageBaseScale > 0 ? 6 / imageBaseScale : 6;
@@ -207,26 +285,38 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     if (naturalWidth <= 0 || naturalHeight <= 0) {
       return { width: 0, height: 0 };
     }
-    const isQuarterTurn = normalizedImageRotation === 90 || normalizedImageRotation === 270;
-    const displayWidth = (isQuarterTurn ? naturalHeight : naturalWidth) * effectiveImageScale;
-    const displayHeight = (isQuarterTurn ? naturalWidth : naturalHeight) * effectiveImageScale;
+    const isQuarterTurn =
+      normalizedImageRotation === 90 || normalizedImageRotation === 270;
+    const displayWidth =
+      (isQuarterTurn ? naturalHeight : naturalWidth) * effectiveImageScale;
+    const displayHeight =
+      (isQuarterTurn ? naturalWidth : naturalHeight) * effectiveImageScale;
     return { width: displayWidth, height: displayHeight };
   }, [imageNaturalSize, normalizedImageRotation, effectiveImageScale]);
 
-  const clampImagePan = useCallback((pan: { x: number; y: number }) => {
-    const { width: viewportWidth, height: viewportHeight } = imageViewportSize;
-    const { width: displayWidth, height: displayHeight } = imageDisplaySize;
-    if (viewportWidth <= 0 || viewportHeight <= 0 || displayWidth <= 0 || displayHeight <= 0) {
-      return { x: 0, y: 0 };
-    }
+  const clampImagePan = useCallback(
+    (pan: { x: number; y: number }) => {
+      const { width: viewportWidth, height: viewportHeight } =
+        imageViewportSize;
+      const { width: displayWidth, height: displayHeight } = imageDisplaySize;
+      if (
+        viewportWidth <= 0 ||
+        viewportHeight <= 0 ||
+        displayWidth <= 0 ||
+        displayHeight <= 0
+      ) {
+        return { x: 0, y: 0 };
+      }
 
-    const maxPanX = Math.max(0, (displayWidth - viewportWidth) / 2);
-    const maxPanY = Math.max(0, (displayHeight - viewportHeight) / 2);
-    return {
-      x: clamp(pan.x, -maxPanX, maxPanX),
-      y: clamp(pan.y, -maxPanY, maxPanY),
-    };
-  }, [imageDisplaySize, imageViewportSize]);
+      const maxPanX = Math.max(0, (displayWidth - viewportWidth) / 2);
+      const maxPanY = Math.max(0, (displayHeight - viewportHeight) / 2);
+      return {
+        x: clamp(pan.x, -maxPanX, maxPanX),
+        y: clamp(pan.y, -maxPanY, maxPanY),
+      };
+    },
+    [imageDisplaySize, imageViewportSize]
+  );
 
   useEffect(() => {
     imagePanRef.current = imagePan;
@@ -241,13 +331,21 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     if (imageNaturalSize.width === 0 || imageNaturalSize.height === 0) return;
     if (imageViewportSize.width === 0 || imageViewportSize.height === 0) return;
     const normalizedRotation = ((imageRotation % 360) + 360) % 360;
-    const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
-    const rotatedWidth = isQuarterTurn ? imageNaturalSize.height : imageNaturalSize.width;
-    const rotatedHeight = isQuarterTurn ? imageNaturalSize.width : imageNaturalSize.height;
-    if (rotatedWidth > imageViewportSize.width || rotatedHeight > imageViewportSize.height) {
-      setImageBaseMode('fit');
+    const isQuarterTurn =
+      normalizedRotation === 90 || normalizedRotation === 270;
+    const rotatedWidth = isQuarterTurn
+      ? imageNaturalSize.height
+      : imageNaturalSize.width;
+    const rotatedHeight = isQuarterTurn
+      ? imageNaturalSize.width
+      : imageNaturalSize.height;
+    if (
+      rotatedWidth > imageViewportSize.width ||
+      rotatedHeight > imageViewportSize.height
+    ) {
+      setImageBaseMode("fit");
     } else {
-      setImageBaseMode('actual');
+      setImageBaseMode("actual");
     }
   }, [open, imageNaturalSize, imageViewportSize, imageRotation]);
 
@@ -277,109 +375,128 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     setIsImageDragging(false);
   }, []);
 
-  const applyImageScale = useCallback((nextScale: number, anchorX = 0, anchorY = 0) => {
-    const currentScale = imageScaleRef.current;
-    if (nextScale === currentScale) {
-      return;
-    }
-    const scaleRatio = nextScale / currentScale;
-    const currentPan = imagePanRef.current;
-    const nextPan = clampImagePan({
-      x: anchorX - scaleRatio * (anchorX - currentPan.x),
-      y: anchorY - scaleRatio * (anchorY - currentPan.y),
-    });
-    imagePanRef.current = nextPan;
-    setImagePan(nextPan);
-    imageScaleRef.current = nextScale;
-    setImageScale(nextScale);
-  }, [clampImagePan]);
+  const applyImageScale = useCallback(
+    (nextScale: number, anchorX = 0, anchorY = 0) => {
+      const currentScale = imageScaleRef.current;
+      if (nextScale === currentScale) {
+        return;
+      }
+      const scaleRatio = nextScale / currentScale;
+      const currentPan = imagePanRef.current;
+      const nextPan = clampImagePan({
+        x: anchorX - scaleRatio * (anchorX - currentPan.x),
+        y: anchorY - scaleRatio * (anchorY - currentPan.y),
+      });
+      imagePanRef.current = nextPan;
+      setImagePan(nextPan);
+      imageScaleRef.current = nextScale;
+      setImageScale(nextScale);
+    },
+    [clampImagePan]
+  );
 
-  const handleImageWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (imageLoadError) {
-      return;
-    }
+  const handleImageWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (imageLoadError) {
+        return;
+      }
 
-    event.preventDefault();
+      event.preventDefault();
 
-    const currentScale = imageScaleRef.current;
-    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
-    const nextScale = clamp(currentScale * zoomFactor, imageScaleMin, imageScaleMax);
-    if (nextScale === currentScale) {
-      return;
-    }
+      const currentScale = imageScaleRef.current;
+      const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+      const nextScale = clamp(
+        currentScale * zoomFactor,
+        imageScaleMin,
+        imageScaleMax
+      );
+      if (nextScale === currentScale) {
+        return;
+      }
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const cursorX = event.clientX - rect.left - rect.width / 2;
-    const cursorY = event.clientY - rect.top - rect.height / 2;
-    applyImageScale(nextScale, cursorX, cursorY);
-  }, [applyImageScale, imageLoadError, imageScaleMin, imageScaleMax]);
+      const rect = event.currentTarget.getBoundingClientRect();
+      const cursorX = event.clientX - rect.left - rect.width / 2;
+      const cursorY = event.clientY - rect.top - rect.height / 2;
+      applyImageScale(nextScale, cursorX, cursorY);
+    },
+    [applyImageScale, imageLoadError, imageScaleMin, imageScaleMax]
+  );
 
-  const handleImagePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (imageLoadError || event.button !== 0) {
-      return;
-    }
+  const handleImagePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (imageLoadError || event.button !== 0) {
+        return;
+      }
 
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setIsImageDragging(true);
-    dragStateRef.current = {
-      isDragging: true,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startPanX: imagePanRef.current.x,
-      startPanY: imagePanRef.current.y,
-    };
-  }, [imageLoadError]);
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setIsImageDragging(true);
+      dragStateRef.current = {
+        isDragging: true,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startPanX: imagePanRef.current.x,
+        startPanY: imagePanRef.current.y,
+      };
+    },
+    [imageLoadError]
+  );
 
-  const handleImagePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const dragState = dragStateRef.current;
-    if (!dragState.isDragging || dragState.pointerId !== event.pointerId) {
-      return;
-    }
+  const handleImagePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const dragState = dragStateRef.current;
+      if (!dragState.isDragging || dragState.pointerId !== event.pointerId) {
+        return;
+      }
 
-    event.preventDefault();
-    const nextPan = {
-      x: dragState.startPanX + (event.clientX - dragState.startX),
-      y: dragState.startPanY + (event.clientY - dragState.startY),
-    };
-    const clamped = clampImagePan(nextPan);
-    imagePanRef.current = clamped;
-    setImagePan(clamped);
-  }, [clampImagePan]);
+      event.preventDefault();
+      const nextPan = {
+        x: dragState.startPanX + (event.clientX - dragState.startX),
+        y: dragState.startPanY + (event.clientY - dragState.startY),
+      };
+      const clamped = clampImagePan(nextPan);
+      imagePanRef.current = clamped;
+      setImagePan(clamped);
+    },
+    [clampImagePan]
+  );
 
-  const handleImagePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const dragState = dragStateRef.current;
-    if (dragState.pointerId !== event.pointerId) {
-      return;
-    }
+  const handleImagePointerEnd = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const dragState = dragStateRef.current;
+      if (dragState.pointerId !== event.pointerId) {
+        return;
+      }
 
-    dragStateRef.current = {
-      isDragging: false,
-      pointerId: null,
-      startX: 0,
-      startY: 0,
-      startPanX: 0,
-      startPanY: 0,
-    };
-    setIsImageDragging(false);
-  }, []);
+      dragStateRef.current = {
+        isDragging: false,
+        pointerId: null,
+        startX: 0,
+        startY: 0,
+        startPanX: 0,
+        startPanY: 0,
+      };
+      setIsImageDragging(false);
+    },
+    []
+  );
 
   const handleImageDoubleClick = useCallback(() => {
-    if (imageScale !== 1 || imageBaseMode !== 'fit') {
-      setImageBaseMode('fit');
+    if (imageScale !== 1 || imageBaseMode !== "fit") {
+      setImageBaseMode("fit");
       setImageScale(1);
       imageScaleRef.current = 1;
     } else {
-      setImageBaseMode('actual');
+      setImageBaseMode("actual");
     }
   }, [imageBaseMode, imageScale]);
 
   const toggleImageBaseMode = useCallback(() => {
-    if (imageBaseMode === 'fit') {
-      setImageBaseMode('actual');
+    if (imageBaseMode === "fit") {
+      setImageBaseMode("actual");
     } else {
-      setImageBaseMode('fit');
+      setImageBaseMode("fit");
     }
     setImageScale(1);
     imageScaleRef.current = 1;
@@ -390,110 +507,170 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     const clamped = clampImagePan(imagePanRef.current);
     imagePanRef.current = clamped;
     setImagePan(clamped);
-  }, [clampImagePan, effectiveImageScale, normalizedImageRotation, imageViewportSize]);
+  }, [
+    clampImagePan,
+    effectiveImageScale,
+    normalizedImageRotation,
+    imageViewportSize,
+  ]);
 
-  const fetchTextChunk = useCallback(async (url: string, isFirst = false, sessionId?: number): Promise<void> => {
-    const activeSessionId = sessionId ?? textFetchSessionRef.current;
-    if (!url) {
-      if (isFirst) setLoading(false);
-      else setLoadingMore(false);
-      return;
-    }
-    if (isFetchingRef.current) return;
-    if (totalBytesRef.current !== null && byteOffsetRef.current >= totalBytesRef.current) return;
-
-    isFetchingRef.current = true;
-    if (!isFirst) setLoadingMore(true);
-
-    try {
-      const start = byteOffsetRef.current;
-      const end   = start + CHUNK_SIZE - 1;
-      const resp = await fetch(url, {
-        headers: { Range: `bytes=${start}-${end}` },
-        cache: 'no-store',
-      });
-      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
-      if (handlePreviewChunkBoundaryResponse(
-        resp.status,
-        isFirst,
-        setServerTooLarge,
-        setLoading,
-        setLoadingMore,
-        observerRef,
-        isFetchingRef,
-      )) {
+  const fetchTextChunk = useCallback(
+    async (
+      url: string,
+      isFirst = false,
+      sessionId?: number,
+      signal?: AbortSignal
+    ): Promise<void> => {
+      const activeSessionId = sessionId ?? textFetchSessionRef.current;
+      if (!url) {
+        if (isFirst) setLoading(false);
+        else setLoadingMore(false);
         return;
       }
-      if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status}`);
-
-      const contentRange = resp.headers.get('Content-Range');
-      const buf = await resp.arrayBuffer();
-      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
-      const hasMore = updateChunkRangeState(contentRange, buf.byteLength, byteOffsetRef, totalBytesRef);
-      ensurePreviewTextDecoder(
-        resp.headers.get('Content-Type'),
-        textDecoderRef,
-        decoderEncodingRef,
-        decoderHasExplicitCharsetRef,
-        decoderAllowGbFallbackRef,
-      );
-      const raw = decodePreviewChunk(
-        buf,
-        hasMore,
-        textDecoderRef,
-        decoderEncodingRef,
-        decoderAllowGbFallbackRef,
-      );
-      const { remainder, safeText } = splitPreviewSafeText(
-        raw,
-        remainderRef.current,
-        hasMore,
-        detectedFileType,
-      );
-      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) return;
-      remainderRef.current = remainder;
-      appendTextPreviewContent({
-        detectedFileType,
-        safeText,
-        byteOffset: byteOffsetRef.current,
-        currentChunkLength: buf.byteLength,
-        csvDelimiterRef,
-        setTxtLines,
-        setCsvRows,
-        setTextContent,
-      });
-      if (!hasMore) observerRef.current?.disconnect();
-    } finally {
-      if (shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)) {
+      if (isFetchingRef.current) return;
+      if (
+        totalBytesRef.current !== null &&
+        byteOffsetRef.current >= totalBytesRef.current
+      )
         return;
-      }
-      isFetchingRef.current = false;
-      if (isFirst) setLoading(false);
-      else setLoadingMore(false);
-    }
-  }, [detectedFileType]);
 
-  const setupSentinelObserver = useCallback((node: HTMLDivElement | null) => {
-    observerRef.current?.disconnect();
-    observerRef.current = null;
-    if (!isValidContainerElement(node)) return;
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        if (!isLocalSource && previewUrlRef.current && (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)) {
-          fetchTextChunk(previewUrlRef.current).catch(err =>
-            log.error('Failed to fetch next text chunk:', err)
-          );
+      isFetchingRef.current = true;
+      if (!isFirst) setLoadingMore(true);
+
+      try {
+        const start = byteOffsetRef.current;
+        const end = start + CHUNK_SIZE - 1;
+        const resp = await fetch(url, {
+          headers: { Range: `bytes=${start}-${end}` },
+          cache: "no-store",
+          credentials: "include",
+          signal,
+        });
+        if (
+          shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)
+        )
+          return;
+        if (
+          handlePreviewChunkBoundaryResponse(
+            resp.status,
+            isFirst,
+            setServerTooLarge,
+            setLoading,
+            setLoadingMore,
+            observerRef,
+            isFetchingRef
+          )
+        ) {
+          return;
         }
+        const accessReason = getPreviewAccessReasonFromStatus(resp.status);
+        if (accessReason) {
+          if (handleKnowledgePreviewAccessError(accessReason)) {
+            return;
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        if (!resp.ok && resp.status !== 206)
+          throw new Error(`HTTP ${resp.status}`);
+
+        const contentRange = resp.headers.get("Content-Range");
+        const buf = await resp.arrayBuffer();
+        if (
+          shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)
+        )
+          return;
+        const hasMore = updateChunkRangeState(
+          contentRange,
+          buf.byteLength,
+          byteOffsetRef,
+          totalBytesRef
+        );
+        ensurePreviewTextDecoder(
+          resp.headers.get("Content-Type"),
+          textDecoderRef,
+          decoderEncodingRef,
+          decoderHasExplicitCharsetRef,
+          decoderAllowGbFallbackRef
+        );
+        const raw = decodePreviewChunk(
+          buf,
+          hasMore,
+          textDecoderRef,
+          decoderEncodingRef,
+          decoderAllowGbFallbackRef
+        );
+        const { remainder, safeText } = splitPreviewSafeText(
+          raw,
+          remainderRef.current,
+          hasMore,
+          detectedFileType
+        );
+        if (
+          shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)
+        )
+          return;
+        remainderRef.current = remainder;
+        appendTextPreviewContent({
+          detectedFileType,
+          safeText,
+          byteOffset: byteOffsetRef.current,
+          currentChunkLength: buf.byteLength,
+          csvDelimiterRef,
+          setTxtLines,
+          setCsvRows,
+          setTextContent,
+        });
+        if (!hasMore) observerRef.current?.disconnect();
+      } finally {
+        if (
+          shouldStopFetchingChunk(activeSessionId, textFetchSessionRef.current)
+        ) {
+          return;
+        }
+        isFetchingRef.current = false;
+        if (isFirst) setLoading(false);
+        else setLoadingMore(false);
       }
-    }, { threshold: 0.1 });
-    observer.observe(node);
-    observerRef.current = observer;
-  }, [fetchTextChunk, isLocalSource]);
+    },
+    [detectedFileType, handleKnowledgePreviewAccessError]
+  );
+
+  const setupSentinelObserver = useCallback(
+    (node: HTMLDivElement | null) => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      if (!isValidContainerElement(node)) return;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting) {
+            if (
+              !isLocalSource &&
+              previewUrlRef.current &&
+              (totalBytesRef.current === null ||
+                byteOffsetRef.current < totalBytesRef.current)
+            ) {
+              fetchTextChunk(previewUrlRef.current).catch((err) =>
+                log.error("Failed to fetch next text chunk:", err)
+              );
+            }
+          }
+        },
+        { threshold: 0.1 }
+      );
+      observer.observe(node);
+      observerRef.current = observer;
+    },
+    [fetchTextChunk, isLocalSource]
+  );
 
   useEffect(() => {
     if (!open || (!isLocalSource && !objectName)) {
       return;
     }
+
+    let cancelled = false;
+    const abortController = new AbortController();
+    const { signal } = abortController;
 
     const loadPreview = async () => {
       setLoading(true);
@@ -501,7 +678,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
       try {
         if (isEmptyFile) {
-          setPreviewUrl('');
+          setPreviewUrl("");
           setLoading(false);
           return;
         }
@@ -511,17 +688,20 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         if (isLocalSource && localFile) {
           resetTextPreviewState();
           const previousPreviewUrl = previewUrlRef.current;
-          if (previousPreviewUrl.startsWith('blob:')) {
+          if (previousPreviewUrl.startsWith("blob:")) {
             URL.revokeObjectURL(previousPreviewUrl);
           }
-          previewUrlRef.current = '';
+          previewUrlRef.current = "";
 
-          if (isTooLargeToPreview && ['text', 'markdown', 'csv', 'html'].includes(detectedFileType)) {
+          if (
+            isTooLargeToPreview &&
+            ["text", "markdown", "csv", "html"].includes(detectedFileType)
+          ) {
             setLoading(false);
             return;
           }
-          
-          if (detectedFileType === 'image' || detectedFileType === 'pdf') {
+
+          if (detectedFileType === "image" || detectedFileType === "pdf") {
             localPreviewUrl = URL.createObjectURL(localFile);
             setPreviewUrl(localPreviewUrl);
             previewUrlRef.current = localPreviewUrl;
@@ -529,10 +709,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             return;
           }
 
-          if (detectedFileType === 'text') {
+          if (detectedFileType === "text") {
             const text = await decodeLocalTextFile(localFile);
-            const newLines = text.split('\n');
-            if (newLines.at(-1) === '') {
+            const newLines = text.split("\n");
+            if (newLines.at(-1) === "") {
               newLines.pop();
             }
             setTxtLines(newLines);
@@ -540,24 +720,26 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             return;
           }
 
-          if (detectedFileType === 'markdown') {
+          if (detectedFileType === "markdown") {
             setTextContent(await decodeLocalTextFile(localFile));
             setLoading(false);
             return;
           }
 
-          if (detectedFileType === 'html') {
+          if (detectedFileType === "html") {
             const html = await decodeLocalTextFile(localFile);
             setTextContent(html);
             setLoading(false);
             return;
           }
 
-          if (detectedFileType === 'csv') {
+          if (detectedFileType === "csv") {
             const text = await decodeLocalTextFile(localFile);
             const delimiter = detectCsvDelimiter(text);
             csvDelimiterRef.current = delimiter;
-            const newLines = text.split('\n').filter(line => line.trim().length > 0);
+            const newLines = text
+              .split("\n")
+              .filter((line) => line.trim().length > 0);
             setCsvRows(newLines.map((line) => parseCsvLine(line, delimiter)));
             setLoading(false);
             return;
@@ -569,34 +751,87 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
         const url = storageService.getPreviewUrl(objectName, fileName);
 
-          if (['markdown', 'csv', 'text', 'html'].includes(detectedFileType)) {
-            textFetchSessionRef.current += 1;
-            const sessionId = textFetchSessionRef.current;
-            resetTextPreviewState();
-            setPreviewUrl(url);
-            previewUrlRef.current = url;
-            await fetchTextChunk(url, true, sessionId);
+        if (["markdown", "csv", "text", "html"].includes(detectedFileType)) {
+          if (cancelled) return;
+          textFetchSessionRef.current += 1;
+          const sessionId = textFetchSessionRef.current;
+          resetTextPreviewState();
+          setPreviewUrl(url);
+          previewUrlRef.current = url;
+          await fetchTextChunk(url, true, sessionId, signal);
+          return;
+        }
+
+        if (detectedFileType === "pdf" || detectedFileType === "image") {
+          if (cancelled) return;
+          if (isTooLargeToPreview) {
+            setLoading(false);
             return;
           }
+          const previousPreviewUrl = previewUrlRef.current;
+          if (previousPreviewUrl.startsWith("blob:")) {
+            URL.revokeObjectURL(previousPreviewUrl);
+          }
+          previewUrlRef.current = "";
+
+          const blob = await fetchPreviewBlob(url, signal);
+          if (cancelled) return;
+
+          const blobUrl = URL.createObjectURL(blob);
+          previewUrlRef.current = blobUrl;
+          setPreviewUrl(blobUrl);
+          setLoading(false);
+          return;
+        }
 
         setPreviewUrl(url);
         previewUrlRef.current = url;
-
         setLoading(false);
       } catch (err) {
-        log.error('Failed to load preview:', err);
-        setError(err instanceof Error ? err.message : t('filePreview.previewFailed'));
+        if (ignoreAbortError(err) || cancelled) {
+          return;
+        }
+        if (
+          err instanceof PreviewAccessError &&
+          handleKnowledgePreviewAccessError(err.reason)
+        ) {
+          setLoading(false);
+          return;
+        }
+        log.error("Failed to load preview:", err);
+        setError(
+          err instanceof Error ? err.message : t("filePreview.previewFailed")
+        );
         setLoading(false);
       }
     };
 
     void loadPreview();
-  }, [open, objectName, fileName, detectedFileType, t, fetchTextChunk, resetTextPreviewState, isEmptyFile, isLocalSource, localFile]);
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      textFetchSessionRef.current += 1;
+    };
+  }, [
+    open,
+    objectName,
+    fileName,
+    detectedFileType,
+    t,
+    fetchTextChunk,
+    resetTextPreviewState,
+    isEmptyFile,
+    isLocalSource,
+    localFile,
+    handleKnowledgePreviewAccessError,
+    isTooLargeToPreview,
+  ]);
 
   useEffect(() => {
     return () => {
       const currentPreviewUrl = previewUrlRef.current;
-      if (currentPreviewUrl.startsWith('blob:')) {
+      if (currentPreviewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(currentPreviewUrl);
       }
     };
@@ -610,13 +845,13 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       setImageRotation(0);
       setImageNaturalSize({ width: 0, height: 0 });
       setImageViewportSize({ width: 0, height: 0 });
-      setImageBaseMode('fit');
+      setImageBaseMode("fit");
       handleImagePanReset();
-      setTextContent('');
+      setTextContent("");
       setTxtLines([]);
       setCsvRows([]);
       setCsvTableHeight(400);
-      setPreviewUrl('');
+      setPreviewUrl("");
       setError(null);
       setImageLoadError(false);
       setLoadingMore(false);
@@ -624,7 +859,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       textFetchSessionRef.current += 1;
       byteOffsetRef.current = 0;
       totalBytesRef.current = null;
-      remainderRef.current = '';
+      remainderRef.current = "";
       isFetchingRef.current = false;
       textDecoderRef.current = null;
       decoderEncodingRef.current = null;
@@ -634,10 +869,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       observerRef.current = null;
       imageViewportResizeObserverRef.current?.disconnect();
       imageViewportResizeObserverRef.current = null;
-      if (previousPreviewUrl.startsWith('blob:')) {
+      if (previousPreviewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(previousPreviewUrl);
       }
-      previewUrlRef.current = '';
+      previewUrlRef.current = "";
     }
   }, [open]);
 
@@ -652,20 +887,20 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     if (!open) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === "Escape") {
         onClose();
       }
     };
 
-    globalThis.addEventListener('keydown', handleKeyDown);
-    return () => globalThis.removeEventListener('keydown', handleKeyDown);
+    globalThis.addEventListener("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
   const handleDownload = async () => {
     try {
       if (isLocalSource && localFile) {
         const url = URL.createObjectURL(localFile);
-        const link = document.createElement('a');
+        const link = document.createElement("a");
         link.href = url;
         link.download = fileName;
         link.click();
@@ -675,7 +910,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
       await storageService.downloadFile(objectName, fileName);
     } catch (err) {
-      log.error('Failed to download file:', err);
+      log.error("Failed to download file:", err);
     }
   };
 
@@ -690,19 +925,22 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
     if (
       isFetchingRef.current ||
-      (totalBytesRef.current !== null && byteOffsetRef.current >= totalBytesRef.current)
+      (totalBytesRef.current !== null &&
+        byteOffsetRef.current >= totalBytesRef.current)
     ) {
       return;
     }
 
-    fetchTextChunk(previewUrlRef.current).catch(err =>
-      log.error('Failed to fetch next text chunk:', err)
+    fetchTextChunk(previewUrlRef.current).catch((err) =>
+      log.error("Failed to fetch next text chunk:", err)
     );
   }, [fetchTextChunk, isLocalSource]);
 
   const handleMarkdownHeadingClick = useCallback((headingId: string) => {
     const container = markdownContainerRef.current;
-    const target = container?.querySelector<HTMLElement>(`#${CSS.escape(headingId)}`) ?? null;
+    const target =
+      container?.querySelector<HTMLElement>(`#${CSS.escape(headingId)}`) ??
+      null;
 
     if (!container || !target) {
       return;
@@ -710,9 +948,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
     const containerRect = container.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
-    const nextScrollTop = container.scrollTop + targetRect.top - containerRect.top;
+    const nextScrollTop =
+      container.scrollTop + targetRect.top - containerRect.top;
 
-    container.scrollTo({ top: Math.max(nextScrollTop, 0), behavior: 'smooth' });
+    container.scrollTo({ top: Math.max(nextScrollTop, 0), behavior: "smooth" });
 
     if (globalThis.innerWidth < 768) {
       setShowMarkdownToc(false);
@@ -723,7 +962,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     <div className="flex items-center justify-center h-full">
       <div className="text-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-        <p className="text-sm text-gray-600">{t('filePreview.loading')}</p>
+        <p className="text-sm text-gray-600">{t("filePreview.loading")}</p>
       </div>
     </div>
   );
@@ -731,7 +970,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const renderCenteredErrorState = () => (
     <div className="flex items-center justify-center h-full">
       <div className="text-center max-w-md px-4">
-        <p className="text-red-500 text-sm">{t('filePreview.previewFailed')}</p>
+        <p className="text-red-500 text-sm">{t("filePreview.previewFailed")}</p>
       </div>
     </div>
   );
@@ -739,10 +978,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const renderError = () => renderCenteredErrorState();
 
   const renderPdfViewer = () => (
-    <PdfViewer
-      url={previewUrl}
-      fileName={fileName}
-    />
+    <PdfViewer url={previewUrl} fileName={fileName} />
   );
 
   const renderImageViewer = () => (
@@ -765,14 +1001,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             <div
               className="absolute inset-0 flex items-center justify-center"
               style={{
-                perspective: '1000px',
+                perspective: "1000px",
               }}
             >
               <div
                 style={{
                   transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${effectiveImageScale}) rotate(${imageRotation}deg)`,
-                  willChange: 'transform',
-                  transition: isImageDragging ? 'none' : 'transform 0.2s ease-in-out',
+                  willChange: "transform",
+                  transition: isImageDragging
+                    ? "none"
+                    : "transform 0.2s ease-in-out",
                 }}
               >
                 <img
@@ -782,7 +1020,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
                   draggable={false}
                   onLoad={(e) => {
                     const img = e.currentTarget;
-                    setImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+                    setImageNaturalSize({
+                      width: img.naturalWidth,
+                      height: img.naturalHeight,
+                    });
                   }}
                   onError={() => setImageLoadError(true)}
                 />
@@ -797,12 +1038,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
             <button
               onClick={() => {
-                const nextScale = clamp(imageScaleRef.current - 0.25, imageScaleMin, imageScaleMax);
+                const nextScale = clamp(
+                  imageScaleRef.current - 0.25,
+                  imageScaleMin,
+                  imageScaleMax
+                );
                 applyImageScale(nextScale, 0, 0);
               }}
               disabled={effectiveImageScale <= 0.25}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
-              title={t('filePreview.zoomOut')}
+              title={t("filePreview.zoomOut")}
             >
               <Minus size={16} />
             </button>
@@ -813,12 +1058,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
             <button
               onClick={() => {
-                const nextScale = clamp(imageScaleRef.current + 0.25, imageScaleMin, imageScaleMax);
+                const nextScale = clamp(
+                  imageScaleRef.current + 0.25,
+                  imageScaleMin,
+                  imageScaleMax
+                );
                 applyImageScale(nextScale, 0, 0);
               }}
               disabled={effectiveImageScale >= 6}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-30 text-gray-600"
-              title={t('filePreview.zoomIn')}
+              title={t("filePreview.zoomIn")}
             >
               <Plus size={16} />
             </button>
@@ -829,21 +1078,25 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
               onClick={toggleImageBaseMode}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
               title={
-                imageBaseMode === 'fit'
-                  ? t('filePreview.image.actualSize')
-                  : t('filePreview.image.fitPage')
+                imageBaseMode === "fit"
+                  ? t("filePreview.image.actualSize")
+                  : t("filePreview.image.fitPage")
               }
             >
-              {imageBaseMode === 'fit' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+              {imageBaseMode === "fit" ? (
+                <Maximize2 size={16} />
+              ) : (
+                <Minimize2 size={16} />
+              )}
             </button>
 
             <button
               onClick={() => {
-                setImageRotation(prev => prev + 90);
+                setImageRotation((prev) => prev + 90);
                 handleImagePanReset();
               }}
               className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600"
-              title={t('filePreview.rotate')}
+              title={t("filePreview.rotate")}
             >
               <RotateCw size={16} />
             </button>
@@ -856,10 +1109,12 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const renderMarkdownViewer = () => (
     <div className="flex h-full min-h-0 bg-white">
       {markdownHeadings.length > 0 && (
-        <aside className={`${showMarkdownToc ? 'flex' : 'hidden'} md:flex w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-gray-50/70`}>
+        <aside
+          className={`${showMarkdownToc ? "flex" : "hidden"} md:flex w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-gray-50/70`}
+        >
           <div className="flex items-center justify-between border-b border-gray-200 px-3 py-3">
             <span className="text-sm font-medium text-gray-700">
-              {t('filePreview.markdownOutline', { defaultValue: '目录' })}
+              {t("filePreview.markdownOutline", { defaultValue: "目录" })}
             </span>
             <Button
               type="text"
@@ -892,13 +1147,20 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       <div className="flex min-w-0 flex-1 flex-col">
         {markdownHeadings.length > 0 && (
           <div className="border-b border-gray-200 px-4 py-2 md:hidden">
-            <Button type="default" size="small" onClick={() => setShowMarkdownToc(prev => !prev)}>
-              {t('filePreview.markdownOutline', { defaultValue: '目录' })}
+            <Button
+              type="default"
+              size="small"
+              onClick={() => setShowMarkdownToc((prev) => !prev)}
+            >
+              {t("filePreview.markdownOutline", { defaultValue: "目录" })}
             </Button>
           </div>
         )}
-        <div ref={markdownContainerRef} className="flex-1 overflow-auto px-6 pb-6 pt-0">
-          <MarkdownRenderer 
+        <div
+          ref={markdownContainerRef}
+          className="flex-1 overflow-auto px-6 pb-6 pt-0"
+        >
+          <MarkdownRenderer
             content={textContent}
             enableMultimodal={true}
             resolveS3Media={false}
@@ -922,9 +1184,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           const el = e.currentTarget;
           if (
             !isLocalSource &&
-            el.scrollTop + el.clientHeight >= el.scrollHeight - el.clientHeight * 0.5 &&
+            el.scrollTop + el.clientHeight >=
+              el.scrollHeight - el.clientHeight * 0.5 &&
             !isFetchingRef.current &&
-            (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)
+            (totalBytesRef.current === null ||
+              byteOffsetRef.current < totalBytesRef.current)
           ) {
             fetchNextTextChunk();
           }
@@ -954,14 +1218,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     const columns = headerRow.map((col, i) => ({
       key: String(i),
       dataIndex: String(i),
-      title: col || `${t('filePreview.csv.column')} ${i + 1}`,
+      title: col || `${t("filePreview.csv.column")} ${i + 1}`,
       ellipsis: true,
       width: 160,
     }));
 
     const dataSource = dataRows.map((row, rowIdx) => {
       const record: Record<string, string> = { _key: String(rowIdx) };
-      headerRow.forEach((_, i) => { record[String(i)] = row[i] ?? ''; });
+      headerRow.forEach((_, i) => {
+        record[String(i)] = row[i] ?? "";
+      });
       return record;
     });
 
@@ -994,12 +1260,14 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
             const el = e.currentTarget as HTMLElement;
             if (
               !isLocalSource &&
-              el.scrollTop + el.clientHeight >= el.scrollHeight - CSV_ROW_HEIGHT * 30 &&
+              el.scrollTop + el.clientHeight >=
+                el.scrollHeight - CSV_ROW_HEIGHT * 30 &&
               !isFetchingRef.current &&
-              (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)
+              (totalBytesRef.current === null ||
+                byteOffsetRef.current < totalBytesRef.current)
             ) {
-              fetchTextChunk(previewUrlRef.current).catch(err =>
-                log.error('Failed to fetch next CSV chunk:', err)
+              fetchTextChunk(previewUrlRef.current).catch((err) =>
+                log.error("Failed to fetch next CSV chunk:", err)
               );
             }
           }}
@@ -1007,7 +1275,9 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         {loadingMore && (
           <div className="flex items-center justify-center py-3 border-t border-gray-100">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500 mr-2" />
-            <span className="text-sm text-gray-500">{t('filePreview.loading')}</span>
+            <span className="text-sm text-gray-500">
+              {t("filePreview.loading")}
+            </span>
           </div>
         )}
         <div ref={setupSentinelObserver} className="h-1" />
@@ -1023,9 +1293,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           const el = e.currentTarget;
           if (
             !isLocalSource &&
-            el.scrollTop + el.clientHeight >= el.scrollHeight - el.clientHeight * 0.5 &&
+            el.scrollTop + el.clientHeight >=
+              el.scrollHeight - el.clientHeight * 0.5 &&
             !isFetchingRef.current &&
-            (totalBytesRef.current === null || byteOffsetRef.current < totalBytesRef.current)
+            (totalBytesRef.current === null ||
+              byteOffsetRef.current < totalBytesRef.current)
           ) {
             fetchNextTextChunk();
           }
@@ -1037,11 +1309,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
               key={index}
               className="m-0 whitespace-pre-wrap break-words"
               style={{
-                contentVisibility: 'auto',
+                contentVisibility: "auto",
                 containIntrinsicSize: `${Math.max(block.length, 1) * 24}px`,
               }}
             >
-              {block.join('\n') || '\u00A0'}
+              {block.join("\n") || "\u00A0"}
             </pre>
           ))}
         </div>
@@ -1056,25 +1328,29 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   const renderTooLarge = () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-gray-500">{t('filePreview.tooLargeToPreview')}</p>
+      <p className="text-gray-500">{t("filePreview.tooLargeToPreview")}</p>
     </div>
   );
 
   const renderEmptyFile = () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-gray-500 text-sm">{t('filePreview.emptyFile')}</p>
+      <p className="text-gray-500 text-sm">{t("filePreview.emptyFile")}</p>
     </div>
   );
 
   const renderUnsupported = () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-gray-500 text-sm">{t('filePreview.unsupportedSingleLine')}</p>
+      <p className="text-gray-500 text-sm">
+        {t("filePreview.unsupportedSingleLine")}
+      </p>
     </div>
   );
 
   const renderUploadToPreview = () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-gray-500 text-sm">{t('filePreview.uploadToPreview')}</p>
+      <p className="text-gray-500 text-sm">
+        {t("filePreview.uploadToPreview")}
+      </p>
     </div>
   );
 
@@ -1085,19 +1361,19 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     if (error) return renderError();
 
     switch (detectedFileType) {
-      case 'pdf':
+      case "pdf":
         return renderPdfViewer();
-      case 'image':
+      case "image":
         return renderImageViewer();
-      case 'markdown':
+      case "markdown":
         return renderMarkdownViewer();
-      case 'csv':
+      case "csv":
         return renderCsvViewer();
-      case 'text':
+      case "text":
         return renderTextViewer();
-      case 'html':
+      case "html":
         return renderHtmlViewer();
-      case 'office':
+      case "office":
         return renderUploadToPreview();
       default:
         return renderUnsupported();
@@ -1111,8 +1387,14 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       placement="right"
       size="65%"
       styles={{
-        body: { padding: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' },
-        header: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb' },
+        body: {
+          padding: 0,
+          height: "100%",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+        },
+        header: { padding: "12px 16px", borderBottom: "1px solid #e5e7eb" },
       }}
       closeIcon={<X size={20} />}
       title={
@@ -1133,14 +1415,12 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           icon={<Download size={14} />}
           onClick={handleDownload}
         >
-          {t('filePreview.download')}
+          {t("filePreview.download")}
         </Button>
       }
     >
       <div className="flex h-full flex-col">
-        <div className="flex-1 min-h-0 overflow-hidden">
-        {renderContent()}
-        </div>
+        <div className="flex-1 min-h-0 overflow-hidden">{renderContent()}</div>
       </div>
     </Drawer>
   );

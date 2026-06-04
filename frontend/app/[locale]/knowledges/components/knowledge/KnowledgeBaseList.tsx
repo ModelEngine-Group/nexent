@@ -639,6 +639,13 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                   </span>
                                 ))}
                             </Can>
+                            {kb.preserve_source_file === false && (
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                              >
+                                {t("knowledgeBase.tag.noPreserveSourceFile")}
+                              </span>
+                            )}
                           </>
                         )}
                       </div>

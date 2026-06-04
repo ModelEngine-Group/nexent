@@ -15,6 +15,8 @@ _PRIMARY_KEY_DOC = "Primary key, auto-increment"
 _TENANT_ID_DOC = "Tenant ID for multi-tenancy isolation"
 
 # Base class for tables without audit fields
+
+
 class SimpleTableBase(DeclarativeBase):
     pass
 
@@ -297,13 +299,16 @@ class AgentInfo(TableBase):
 
     agent_id = Column(Integer, Sequence(
         "ag_tenant_agent_t_agent_id_seq", schema=SCHEMA), nullable=False, primary_key=True, autoincrement=True, doc="ID")
-    version_no = Column(Integer, default=0, nullable=False, primary_key=True, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    version_no = Column(Integer, default=0, nullable=False, primary_key=True,
+                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     name = Column(String(100), doc="Agent name")
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")
-    model_name = Column(String(100), doc="[DEPRECATED] Name of the model used, use model_id instead")
-    model_id = Column(Integer, doc="Model ID, foreign key reference to model_record_t.model_id")
+    model_name = Column(
+        String(100), doc="[DEPRECATED] Name of the model used, use model_id instead")
+    model_id = Column(
+        Integer, doc="Model ID, foreign key reference to model_record_t.model_id")
     max_steps = Column(Integer, doc="Maximum number of steps")
     duty_prompt = Column(Text, doc="Duty prompt content")
     constraint_prompt = Column(Text, doc="Constraint prompt content")
@@ -315,10 +320,14 @@ class AgentInfo(TableBase):
         Boolean, doc="Whether to provide the running summary to the manager agent")
     business_description = Column(
         Text, doc="Manually entered by the user to describe the entire business process")
-    business_logic_model_name = Column(String(100), doc="Model name used for business logic prompt generation")
-    business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
-    prompt_template_id = Column(Integer, doc="Prompt template ID used for business logic prompt generation")
-    prompt_template_name = Column(String(100), doc="Prompt template name used for business logic prompt generation")
+    business_logic_model_name = Column(
+        String(100), doc="Model name used for business logic prompt generation")
+    business_logic_model_id = Column(
+        Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
+    prompt_template_id = Column(
+        Integer, doc="Prompt template ID used for business logic prompt generation")
+    prompt_template_name = Column(String(
+        100), doc="Prompt template name used for business logic prompt generation")
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
@@ -354,12 +363,15 @@ class PromptTemplate(TableBase):
 
     template_id = Column(Integer, Sequence(
         "ag_prompt_template_t_template_id_seq", schema=SCHEMA), primary_key=True, nullable=False, autoincrement=True, doc="Prompt template ID")
-    template_name = Column(String(100), nullable=False, doc="Prompt template name")
+    template_name = Column(String(100), nullable=False,
+                           doc="Prompt template name")
     description = Column(String(500), doc="Prompt template description")
-    template_type = Column(String(50), nullable=False, default="agent_generate", doc="Prompt template type")
+    template_type = Column(String(50), nullable=False,
+                           default="agent_generate", doc="Prompt template type")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
     user_id = Column(String(100), nullable=False, doc="User ID")
-    template_content_zh = Column(JSONB, nullable=False, doc="Chinese prompt template content")
+    template_content_zh = Column(
+        JSONB, nullable=False, doc="Chinese prompt template content")
     template_content_en = Column(JSONB, doc="English prompt template content")
 
 
@@ -383,7 +395,8 @@ class ToolInstance(TableBase):
     user_id = Column(String(100), doc="User ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, doc="Enabled")
-    version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    version_no = Column(Integer, default=0, primary_key=True, nullable=False,
+                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
 class KnowledgeRecord(TableBase):
@@ -399,18 +412,25 @@ class KnowledgeRecord(TableBase):
     knowledge_name = Column(String(100), doc="User-facing knowledge base name")
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
-    embedding_model_name = Column(String(200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
-    embedding_model_id = Column(Integer, doc="Embedding model ID, foreign key reference to model_record_t.model_id")
+    embedding_model_name = Column(String(
+        200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
+    embedding_model_id = Column(
+        Integer, doc="Embedding model ID, foreign key reference to model_record_t.model_id")
     tenant_id = Column(String(100), doc="Tenant ID")
     group_ids = Column(String, doc="Knowledge base group IDs list")
     ingroup_permission = Column(
         String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
     summary_frequency = Column(String(10), nullable=True,
-        doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
+                               doc="Auto-summary frequency: '3h', '5h', '1d', '1w', or NULL (disabled)")
     last_summary_time = Column(TIMESTAMP(timezone=False), nullable=True,
-        doc="Timestamp of last summary generation")
+                               doc="Timestamp of last summary generation")
     last_doc_update_time = Column(TIMESTAMP(timezone=False), nullable=True,
-        doc="Timestamp of last document add/delete operation")
+                                  doc="Timestamp of last document add/delete operation")
+    preserve_source_file = Column(
+        Boolean,
+        default=True,
+        doc="Whether to preserve uploaded source documents after vectorization",
+    )
 
 
 class TenantConfig(TableBase):
@@ -483,7 +503,8 @@ class McpRecord(TableBase):
         doc="Custom HTTP headers as JSON object for MCP server requests",
         default=None,
     )
-    source = Column(String(30), doc="Source type: local/mcp_registry/community")
+    source = Column(
+        String(30), doc="Source type: local/mcp_registry/community")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
@@ -511,10 +532,12 @@ class McpCommunityRecord(TableBase):
     source = Column(String(30), doc="Source type, fixed to community")
     version = Column(String(50), doc="MCP version")
     registry_json = Column(JSONB, doc="Full MCP metadata JSON")
-    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    transport_type = Column(
+        String(30), doc="Transport type: http/sse/container")
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+
 
 class UserTenant(TableBase):
     """
@@ -527,7 +550,8 @@ class UserTenant(TableBase):
                             primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_role = Column(String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
+    user_role = Column(
+        String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
     user_email = Column(String(255), doc="User email address")
 
 
@@ -538,11 +562,14 @@ class AgentRelation(TableBase):
     __tablename__ = "ag_agent_relation_t"
     __table_args__ = {"schema": SCHEMA}
 
-    relation_id = Column(Integer, Sequence("ag_agent_relation_t_relation_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="Relationship ID, primary key")
-    selected_agent_id = Column(Integer, primary_key=True, doc="Selected agent ID")
+    relation_id = Column(Integer, Sequence("ag_agent_relation_t_relation_id_seq", schema=SCHEMA),
+                         primary_key=True, nullable=False, doc="Relationship ID, primary key")
+    selected_agent_id = Column(
+        Integer, primary_key=True, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
-    version_no = Column(Integer, default=0, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    version_no = Column(Integer, default=0, nullable=False,
+                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
 class PartnerMappingId(TableBase):
@@ -658,13 +685,19 @@ class AgentVersion(TableBase):
                 primary_key=True, nullable=False, doc=_PRIMARY_KEY_DOC)
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
     agent_id = Column(Integer, nullable=False, doc="Agent ID")
-    version_no = Column(Integer, nullable=False, doc="Version number, starts from 1. Does not include 0 (draft)")
-    version_name = Column(String(100), doc="User-defined version name for display")
+    version_no = Column(Integer, nullable=False,
+                        doc="Version number, starts from 1. Does not include 0 (draft)")
+    version_name = Column(
+        String(100), doc="User-defined version name for display")
     release_note = Column(Text, doc="Release notes / publish remarks")
-    source_version_no = Column(Integer, doc="Source version number. If this version is a rollback, record the source version")
-    source_type = Column(String(30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
-    status = Column(String(30), default="RELEASED", doc="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a = Column(Boolean, default=False, doc="Whether this version is published as an A2A Server agent")
+    source_version_no = Column(
+        Integer, doc="Source version number. If this version is a rollback, record the source version")
+    source_type = Column(String(
+        30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
+    status = Column(String(30), default="RELEASED",
+                    doc="Version status: RELEASED / DISABLED / ARCHIVED")
+    is_a2a = Column(Boolean, default=False,
+                    doc="Whether this version is published as an A2A Server agent")
 
 
 class UserTokenInfo(TableBase):
@@ -677,7 +710,8 @@ class UserTokenInfo(TableBase):
     token_id = Column(Integer, Sequence("user_token_info_t_token_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, doc="Token ID, unique primary key")
     access_key = Column(String(100), nullable=False, doc="Access Key (AK)")
-    user_id = Column(String(100), nullable=False, doc="User ID who owns this token")
+    user_id = Column(String(100), nullable=False,
+                     doc="User ID who owns this token")
 
 
 class UserTokenUsageLog(TableBase):
@@ -689,16 +723,21 @@ class UserTokenUsageLog(TableBase):
 
     token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
                             primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")
-    token_id = Column(Integer, nullable=False, doc="Foreign key to user_token_info_t.token_id")
-    call_function_name = Column(String(100), doc="API function name being called")
-    related_id = Column(Integer, doc="Related resource ID (e.g., conversation_id)")
-    meta_data = Column(JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
+    token_id = Column(Integer, nullable=False,
+                      doc="Foreign key to user_token_info_t.token_id")
+    call_function_name = Column(
+        String(100), doc="API function name being called")
+    related_id = Column(
+        Integer, doc="Related resource ID (e.g., conversation_id)")
+    meta_data = Column(
+        JSONB, doc="Additional metadata for this usage log entry, stored as JSON")
 
 
 class UserOAuthAccount(TableBase):
     __tablename__ = "user_oauth_account_t"
     __table_args__ = (
-        UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
+        UniqueConstraint("provider", "provider_user_id",
+                         name="uq_oauth_provider_user"),
         {"schema": SCHEMA},
     )
 
@@ -716,8 +755,10 @@ class UserOAuthAccount(TableBase):
     provider_user_id = Column(
         String(200), nullable=False, doc="User ID from the OAuth provider"
     )
-    provider_email = Column(String(255), doc="Email address from the OAuth provider")
-    provider_username = Column(String(200), doc="Display name from the OAuth provider")
+    provider_email = Column(
+        String(255), doc="Email address from the OAuth provider")
+    provider_username = Column(
+        String(200), doc="Display name from the OAuth provider")
     tenant_id = Column(String(100), doc="Tenant ID at time of linking")
 
 
@@ -730,13 +771,17 @@ class SkillInfo(TableBase):
 
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
-    skill_name = Column(String(100), nullable=False, unique=True, doc="Unique skill name")
-    tenant_id = Column(String(100), nullable=True, doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
+    skill_name = Column(String(100), nullable=False,
+                        unique=True, doc="Unique skill name")
+    tenant_id = Column(String(100), nullable=True,
+                       doc="Tenant ID for multi-tenancy. NULL for pre-existing skills.")
     skill_description = Column(String(1000), doc="Skill description")
     skill_tags = Column(JSON, doc="Skill tags as JSON array")
     skill_content = Column(Text, doc="Skill content in markdown format")
-    config_schemas = Column(JSON, doc="Parameter metadata from config/schema.yaml")
-    config_values = Column(JSON, doc="Runtime parameter values from config/config.yaml")
+    config_schemas = Column(
+        JSON, doc="Parameter metadata from config/schema.yaml")
+    config_values = Column(
+        JSON, doc="Runtime parameter values from config/config.yaml")
     source = Column(String(30), nullable=False, default="official",
                     doc="Skill source: official, custom, etc.")
 
@@ -750,8 +795,10 @@ class SkillToolRelation(TableBase):
 
     rel_id = Column(Integer, Sequence("ag_skill_tools_rel_t_rel_id_seq", schema=SCHEMA),
                     primary_key=True, nullable=False, autoincrement=True, doc="Relation ID")
-    skill_id = Column(Integer, nullable=False, doc="Foreign key to ag_skill_info_t.skill_id")
-    tool_id = Column(Integer, nullable=False, doc="Foreign key to ag_tool_info_t.tool_id")
+    skill_id = Column(Integer, nullable=False,
+                      doc="Foreign key to ag_skill_info_t.skill_id")
+    tool_id = Column(Integer, nullable=False,
+                     doc="Foreign key to ag_tool_info_t.tool_id")
 
 
 class SkillInstance(TableBase):
@@ -770,14 +817,19 @@ class SkillInstance(TableBase):
         nullable=False,
         doc="Skill instance ID"
     )
-    skill_id = Column(Integer, nullable=False, doc="Foreign key to ag_skill_info_t.skill_id")
+    skill_id = Column(Integer, nullable=False,
+                      doc="Foreign key to ag_skill_info_t.skill_id")
     agent_id = Column(Integer, nullable=False, doc="Agent ID")
     user_id = Column(String(100), doc="User ID")
     tenant_id = Column(String(100), doc="Tenant ID")
-    enabled = Column(Boolean, default=True, doc="Whether this skill is enabled for the agent")
-    version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
-    config_values = Column(JSON, doc="Per-agent runtime parameter values (mirrors ag_tool_instance_t.params)")
-    config_schemas = Column(JSON, doc="Per-agent parameter schema overrides from config/schema.yaml")
+    enabled = Column(Boolean, default=True,
+                     doc="Whether this skill is enabled for the agent")
+    version_no = Column(Integer, default=0, primary_key=True, nullable=False,
+                        doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    config_values = Column(
+        JSON, doc="Per-agent runtime parameter values (mirrors ag_tool_instance_t.params)")
+    config_schemas = Column(
+        JSON, doc="Per-agent parameter schema overrides from config/schema.yaml")
 
 
 class OuterApiService(TableBase):
@@ -790,13 +842,16 @@ class OuterApiService(TableBase):
 
     id = Column(BigInteger, Sequence("ag_outer_api_services_id_seq", schema=SCHEMA),
                 primary_key=True, nullable=False, doc="Service ID, unique primary key")
-    mcp_service_name = Column(String(100), nullable=False, doc="MCP service name (unique identifier per tenant)")
+    mcp_service_name = Column(String(100), nullable=False,
+                              doc="MCP service name (unique identifier per tenant)")
     description = Column(Text, doc="Service description from OpenAPI info")
     openapi_json = Column(JSONB, doc="Complete OpenAPI JSON specification")
     server_url = Column(String(500), doc="Base URL of the REST API server")
     headers_template = Column(JSONB, doc="Default headers template as JSON")
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy")
-    is_available = Column(Boolean, default=True, doc="Whether the service is available")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID for multi-tenancy")
+    is_available = Column(Boolean, default=True,
+                          doc="Whether the service is available")
 
 
 # Alias for backward compatibility
@@ -811,27 +866,37 @@ class A2ANacosConfig(TableBase):
     __tablename__ = "ag_a2a_nacos_config_t"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
-    config_id = Column(String(64), unique=True, nullable=False, doc="Unique config identifier for API reference")
+    id = Column(BigInteger, primary_key=True,
+                autoincrement=True, doc=_PRIMARY_KEY_DOC)
+    config_id = Column(String(64), unique=True, nullable=False,
+                       doc="Unique config identifier for API reference")
 
     # Nacos connection
-    nacos_addr = Column(String(512), nullable=False, doc="Nacos server address, e.g., http://nacos-server:8848")
-    nacos_username = Column(String(100), doc="Nacos username for authentication")
-    nacos_password = Column(String(256), doc="Nacos password, encrypted at rest")
+    nacos_addr = Column(String(512), nullable=False,
+                        doc="Nacos server address, e.g., http://nacos-server:8848")
+    nacos_username = Column(
+        String(100), doc="Nacos username for authentication")
+    nacos_password = Column(
+        String(256), doc="Nacos password, encrypted at rest")
 
     # Discovery scope
-    namespace_id = Column(String(100), default="public", doc="Nacos namespace for service discovery")
+    namespace_id = Column(String(100), default="public",
+                          doc="Nacos namespace for service discovery")
 
     # Metadata
-    name = Column(String(100), nullable=False, doc="Display name for this Nacos config")
+    name = Column(String(100), nullable=False,
+                  doc="Display name for this Nacos config")
     description = Column(Text, doc="Description of this Nacos configuration")
 
     # Tenant isolation
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID for multi-tenancy")
 
     # Status
-    is_active = Column(Boolean, default=True, doc="Whether this Nacos config is active")
-    last_scan_at = Column(TIMESTAMP(timezone=False), doc="Last time a scan was performed using this config")
+    is_active = Column(Boolean, default=True,
+                       doc="Whether this Nacos config is active")
+    last_scan_at = Column(TIMESTAMP(timezone=False),
+                          doc="Last time a scan was performed using this config")
 
 
 class A2AExternalAgent(TableBase):
@@ -842,39 +907,49 @@ class A2AExternalAgent(TableBase):
     __tablename__ = "ag_a2a_external_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
+    id = Column(BigInteger, primary_key=True,
+                autoincrement=True, doc=_PRIMARY_KEY_DOC)
 
     # Agent metadata (cached from Agent Card)
-    name = Column(String(255), nullable=False, doc="Agent name from Agent Card")
+    name = Column(String(255), nullable=False,
+                  doc="Agent name from Agent Card")
     description = Column(Text, doc="Agent description from Agent Card")
-    version = Column(String(50), doc="Agent version from Agent Card, e.g., 1.2.0")
+    version = Column(
+        String(50), doc="Agent version from Agent Card, e.g., 1.2.0")
 
     # Primary interface (extracted from supportedInterfaces for quick access)
     # In A2A 1.0, this should store the http-json-rpc URL
-    agent_url = Column(String(512), nullable=False, doc="Primary A2A endpoint URL (http-json-rpc by default)")
+    agent_url = Column(String(512), nullable=False,
+                       doc="Primary A2A endpoint URL (http-json-rpc by default)")
 
     # Protocol type for calling this agent: JSONRPC, HTTP+JSON, GRPC
-    protocol_type = Column(String(20), default=PROTOCOL_JSONRPC, doc="Protocol type for calling this agent")
+    protocol_type = Column(String(20), default=PROTOCOL_JSONRPC,
+                           doc="Protocol type for calling this agent")
 
     # Capabilities
-    streaming = Column(Boolean, default=False, doc="Whether this agent supports SSE streaming")
+    streaming = Column(Boolean, default=False,
+                       doc="Whether this agent supports SSE streaming")
 
     # All supported interfaces (full JSON array from Agent Card)
     # Format: [{protocolBinding, url, protocolVersion}, ...]
     supported_interfaces = Column(JSON, doc="All supported interfaces array")
 
     # Source information
-    source_type = Column(String(20), nullable=False, doc="Discovery source: url or nacos")
+    source_type = Column(String(20), nullable=False,
+                         doc="Discovery source: url or nacos")
 
     # For URL mode
     source_url = Column(String(512), doc="Direct URL to agent card")
 
     # For Nacos mode
-    nacos_config_id = Column(String(64), doc="Reference to Nacos config used for discovery")
-    nacos_agent_name = Column(String(255), doc="Original name used for Nacos query")
+    nacos_config_id = Column(
+        String(64), doc="Reference to Nacos config used for discovery")
+    nacos_agent_name = Column(
+        String(255), doc="Original name used for Nacos query")
 
     # Base URL for infrastructure health checks
-    base_url = Column(String(512), doc="Base URL for health checks (service root address), e.g., http://agent:8080")
+    base_url = Column(String(
+        512), doc="Base URL for health checks (service root address), e.g., http://agent:8080")
 
     # Tenant isolation
     tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
@@ -883,13 +958,18 @@ class A2AExternalAgent(TableBase):
     raw_card = Column(JSON, doc="Full original Agent Card JSON from discovery")
 
     # Cache management
-    cached_at = Column(TIMESTAMP(timezone=False), doc="Timestamp when Agent Card was cached")
-    cache_expires_at = Column(TIMESTAMP(timezone=False), doc="Timestamp when cache expires")
+    cached_at = Column(TIMESTAMP(timezone=False),
+                       doc="Timestamp when Agent Card was cached")
+    cache_expires_at = Column(
+        TIMESTAMP(timezone=False), doc="Timestamp when cache expires")
 
     # Health check status
-    is_available = Column(Boolean, default=True, doc="Whether this agent is currently reachable")
-    last_check_at = Column(TIMESTAMP(timezone=False), doc="Last health check timestamp")
-    last_check_result = Column(String(50), doc="Last health check result: OK, ERROR, TIMEOUT")
+    is_available = Column(Boolean, default=True,
+                          doc="Whether this agent is currently reachable")
+    last_check_at = Column(TIMESTAMP(timezone=False),
+                           doc="Last health check timestamp")
+    last_check_result = Column(
+        String(50), doc="Last health check result: OK, ERROR, TIMEOUT")
 
 
 class A2AExternalAgentRelation(TableBase):
@@ -907,19 +987,23 @@ class A2AExternalAgentRelation(TableBase):
         {"schema": SCHEMA},
     )
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
+    id = Column(BigInteger, primary_key=True,
+                autoincrement=True, doc=_PRIMARY_KEY_DOC)
 
     # Local agent (parent)
-    local_agent_id = Column(Integer, nullable=False, doc="Local parent agent ID")
+    local_agent_id = Column(Integer, nullable=False,
+                            doc="Local parent agent ID")
 
     # External A2A agent (sub-agent) - FK to ag_a2a_external_agent_t.id
-    external_agent_id = Column(BigInteger, nullable=False, doc="External A2A agent ID (FK to ag_a2a_external_agent_t.id)")
+    external_agent_id = Column(
+        BigInteger, nullable=False, doc="External A2A agent ID (FK to ag_a2a_external_agent_t.id)")
 
     # Tenant isolation
     tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 
     # Status
-    is_enabled = Column(Boolean, default=True, doc="Whether this relation is active")
+    is_enabled = Column(Boolean, default=True,
+                        doc="Whether this relation is active")
 
 
 class A2AServerAgent(TableBase):
@@ -930,7 +1014,8 @@ class A2AServerAgent(TableBase):
     __tablename__ = "ag_a2a_server_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True, doc=_PRIMARY_KEY_DOC)
+    id = Column(BigInteger, primary_key=True,
+                autoincrement=True, doc=_PRIMARY_KEY_DOC)
 
     # Link to local agent
     agent_id = Column(Integer, nullable=False, doc="Local agent ID")
@@ -940,35 +1025,44 @@ class A2AServerAgent(TableBase):
     tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
 
     # Generated endpoint ID
-    endpoint_id = Column(String(64), unique=True, nullable=False, doc="Generated endpoint ID")
+    endpoint_id = Column(String(64), unique=True,
+                         nullable=False, doc="Generated endpoint ID")
 
     # Basic info (extracted from local agent, can be overridden)
-    name = Column(String(255), nullable=False, doc="Agent name exposed in Agent Card")
+    name = Column(String(255), nullable=False,
+                  doc="Agent name exposed in Agent Card")
     description = Column(Text, doc="Agent description exposed in Agent Card")
     version = Column(String(50), doc="Agent version exposed in Agent Card")
 
     # Primary endpoint URL (http-json-rpc by default)
-    agent_url = Column(String(512), doc="Primary A2A endpoint URL (http-json-rpc by default)")
+    agent_url = Column(
+        String(512), doc="Primary A2A endpoint URL (http-json-rpc by default)")
 
     # Capabilities
-    streaming = Column(Boolean, default=False, doc="Whether this agent supports SSE streaming")
+    streaming = Column(Boolean, default=False,
+                       doc="Whether this agent supports SSE streaming")
 
     # All supported interfaces (A2A 1.0 compliant)
     # Format: [{protocolBinding, url, protocolVersion}, ...]
-    supported_interfaces = Column(JSON, doc="All supported interfaces: [{protocolBinding, url, protocolVersion}, ...]")
+    supported_interfaces = Column(
+        JSON, doc="All supported interfaces: [{protocolBinding, url, protocolVersion}, ...]")
 
     # Agent Card customization (partial overrides only)
-    card_overrides = Column(JSON, doc="User customizations for Agent Card (partial override)")
+    card_overrides = Column(
+        JSON, doc="User customizations for Agent Card (partial override)")
 
     # A2A Server status
-    is_enabled = Column(Boolean, default=False, doc="Whether A2A Server is enabled for this agent")
+    is_enabled = Column(Boolean, default=False,
+                        doc="Whether A2A Server is enabled for this agent")
 
     # Raw Agent Card (generated from settings, for debugging)
     raw_card = Column(JSON, doc="Generated Agent Card JSON (for debugging)")
 
     # Publishing timestamps
-    published_at = Column(TIMESTAMP(timezone=False), doc="Timestamp when A2A Server was last enabled")
-    unpublished_at = Column(TIMESTAMP(timezone=False), doc="Timestamp when A2A Server was disabled")
+    published_at = Column(TIMESTAMP(timezone=False),
+                          doc="Timestamp when A2A Server was last enabled")
+    unpublished_at = Column(TIMESTAMP(timezone=False),
+                            doc="Timestamp when A2A Server was disabled")
 
 
 class A2ATask(SimpleTableBase):
@@ -981,7 +1075,8 @@ class A2ATask(SimpleTableBase):
 
     # Core identifiers (following A2A spec)
     id = Column(String(64), primary_key=True, doc="Task ID (A2A spec: taskId)")
-    context_id = Column(String(64), doc="Context ID for grouping related tasks")
+    context_id = Column(
+        String(64), doc="Context ID for grouping related tasks")
 
     # Endpoint and caller info
     endpoint_id = Column(String(64), nullable=False, doc="Endpoint ID")
@@ -992,16 +1087,21 @@ class A2ATask(SimpleTableBase):
     raw_request = Column(JSON, doc="Original A2A request payload")
 
     # Task state (following A2A TaskState enum)
-    task_state = Column(String(50), nullable=False, server_default="TASK_STATE_SUBMITTED", doc="Task state: TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED, TASK_STATE_INPUT_REQUIRED, TASK_STATE_REJECTED, TASK_STATE_AUTH_REQUIRED")
-    state_timestamp = Column(TIMESTAMP(timezone=False), doc="Task state last update timestamp")
+    task_state = Column(String(50), nullable=False, server_default="TASK_STATE_SUBMITTED",
+                        doc="Task state: TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED, TASK_STATE_INPUT_REQUIRED, TASK_STATE_REJECTED, TASK_STATE_AUTH_REQUIRED")
+    state_timestamp = Column(TIMESTAMP(timezone=False),
+                             doc="Task state last update timestamp")
 
     # Task result
     result_data = Column(JSON, doc="Task final result data")
 
     # Timestamps
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Task creation timestamp")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), onupdate=func.now(), doc="Task last update timestamp")
-    completed_at = Column(TIMESTAMP(timezone=False), doc="Task completion timestamp")
+    create_time = Column(TIMESTAMP(timezone=False),
+                         server_default=func.now(), doc="Task creation timestamp")
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(
+    ), onupdate=func.now(), doc="Task last update timestamp")
+    completed_at = Column(TIMESTAMP(timezone=False),
+                          doc="Task completion timestamp")
 
 
 class A2AMessage(SimpleTableBase):
@@ -1013,23 +1113,30 @@ class A2AMessage(SimpleTableBase):
     __table_args__ = {"schema": SCHEMA}
 
     # Core identifiers (following A2A spec)
-    message_id = Column(String(64), primary_key=True, doc="Message ID (A2A spec: messageId)")
-    task_id = Column(String(64), nullable=True, doc="Task ID this message belongs to (nullable for standalone/simple requests)")
+    message_id = Column(String(64), primary_key=True,
+                        doc="Message ID (A2A spec: messageId)")
+    task_id = Column(String(64), nullable=True,
+                     doc="Task ID this message belongs to (nullable for standalone/simple requests)")
 
     # Message attributes
-    message_index = Column(Integer, nullable=False, doc="Order of message in the conversation")
-    role = Column(String(20), nullable=False, doc="Message sender role: user or agent")
+    message_index = Column(Integer, nullable=False,
+                           doc="Order of message in the conversation")
+    role = Column(String(20), nullable=False,
+                  doc="Message sender role: user or agent")
 
     # Message content (following A2A Part structure)
-    parts = Column(JSON, nullable=False, doc="Message parts following A2A Part structure")
+    parts = Column(JSON, nullable=False,
+                   doc="Message parts following A2A Part structure")
     meta_data = Column(JSON, doc="Optional metadata")
     extensions = Column(JSON, doc="Extension URI list")
 
     # References to other tasks (optional)
-    reference_task_ids = Column(JSON, doc="Referenced task IDs array for multi-turn scenarios")
+    reference_task_ids = Column(
+        JSON, doc="Referenced task IDs array for multi-turn scenarios")
 
     # Timestamp
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Message creation timestamp")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Message creation timestamp")
 
 
 class A2AArtifact(SimpleTableBase):
@@ -1041,15 +1148,19 @@ class A2AArtifact(SimpleTableBase):
 
     # Core identifiers (following A2A spec)
     id = Column(String(64), primary_key=True, doc="Internal primary key")
-    artifact_id = Column(String(64), nullable=False, doc="Artifact ID (A2A spec: artifactId)")
-    task_id = Column(String(64), nullable=False, doc="Task ID this artifact belongs to")
+    artifact_id = Column(String(64), nullable=False,
+                         doc="Artifact ID (A2A spec: artifactId)")
+    task_id = Column(String(64), nullable=False,
+                     doc="Task ID this artifact belongs to")
 
     # Artifact attributes
     name = Column(String(255), doc="Human-readable artifact name")
     description = Column(Text, doc="Artifact description")
-    parts = Column(JSON, nullable=False, doc="Artifact parts following A2A Part structure")
+    parts = Column(JSON, nullable=False,
+                   doc="Artifact parts following A2A Part structure")
     meta_data = Column(JSON, doc="Artifact metadata")
     extensions = Column(JSON, doc="Extension URI list")
 
     # Timestamp
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Artifact creation timestamp")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Artifact creation timestamp")
