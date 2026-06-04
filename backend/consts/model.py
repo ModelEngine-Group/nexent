@@ -454,6 +454,8 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
     version_no: int = 0
 
 

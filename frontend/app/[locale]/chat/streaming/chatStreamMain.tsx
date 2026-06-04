@@ -39,6 +39,8 @@ export function ChatStreamMain({
   onAgentSelect,
   onCitationHover,
   onScroll,
+  agentGreeting,
+  agentExampleQuestions,
 }: ChatStreamMainProps) {
   const { t } = useTranslation();
   // Animation variants for ChatInput
@@ -357,6 +359,8 @@ export function ChatStreamMain({
                         selectedAgentId={selectedAgentId}
                         onAgentSelect={onAgentSelect}
                         latestMetrics={latestMetrics}
+                        agentGreeting={agentGreeting}
+                        agentExampleQuestions={agentExampleQuestions}
                       />
                     </motion.div>
                   </AnimatePresence>
@@ -455,6 +459,8 @@ export function ChatStreamMain({
               selectedAgentId={selectedAgentId}
               onAgentSelect={onAgentSelect}
               latestMetrics={latestMetrics}
+              agentGreeting={agentGreeting}
+              agentExampleQuestions={agentExampleQuestions}
             />
           </motion.div>
         </AnimatePresence>
