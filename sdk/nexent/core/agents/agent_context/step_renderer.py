@@ -97,15 +97,15 @@ def compress_history_offline(
         input_text = "...[Earlier content truncated]...\n" + input_text[-approx_chars:]
 
     # Build prompt
-    schema_desc = json.dumps(config.effective_summary_json_schema(), ensure_ascii=False, indent=2)
+    schema_desc = json.dumps(config.summary_json_schema, ensure_ascii=False, indent=2)
     if is_incremental:
-        system_prompt = config.effective_incremental_summary_system_prompt()
+        system_prompt = config.incremental_summary_system_prompt
         user_prompt = (
             f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
             f"{input_text}"
         )
     else:
-        system_prompt = config.effective_summary_system_prompt()
+        system_prompt = config.summary_system_prompt
         user_prompt = (
             f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
             f"TURNS TO SUMMARIZE:\n{input_text}"
@@ -268,27 +268,30 @@ class StepRenderer:
         if len(source_text) <= limit:
             return text
 
-        # Offload triggered — archive the original (or raw) content.
-        handle = offload_store.store(source_text)
+        # Build the human/LLM-readable description first, so the same hint
+        # is stored alongside the content (for list_active inventory)
+        # and embedded in the inline marker. Preview is based on *display*
+        # text (``text``) because that is what the LLM already sees.
+        char_count = len(source_text)
+        if text.startswith("Observation:"):
+            first_line = text.split("\n")[0] if "\n" in text else text[:100]
+            description = f"{first_line[:80]} ({char_count} chars)"
+        else:
+            preview = text[:80].replace("\n", " ").strip()
+            description = f"{preview}... ({char_count} chars)"
+
+        # Offload triggered — archive the original (or raw) content together
+        # with its description.
+        handle = offload_store.store(source_text, description=description)
         if handle is None:
             # Content too large even for offload store; fall back to plain truncation.
             return text[:limit] + "\n...[CONTENT_TOO_LARGE_TO_OFFLOAD]"
 
         # Build a self-describing marker so the LLM understands what was offloaded.
-        # Preview is based on *display* text (``text``) because that is what the
-        # LLM already sees in the conversation context.
         if text.startswith("Observation:"):
-            first_line = text.split("\n")[0] if "\n" in text else text[:100]
-            marker = (
-                f"\n...[[OBS_OFFLOAD: {first_line[:80]}, "
-                f"{len(source_text)} chars, handle={handle}]]"
-            )
+            marker = f"\n...[[OBS_OFFLOAD: {description}, handle={handle}]]"
         else:
-            preview = text[:80].replace("\n", " ").strip()
-            marker = (
-                f"\n...[[CONTENT_OFFLOAD: {preview}..., "
-                f"{len(source_text)} chars, handle={handle}]]"
-            )
+            marker = f"\n...[[CONTENT_OFFLOAD: {description}, handle={handle}]]"
 
         return text[:limit] + marker
 
