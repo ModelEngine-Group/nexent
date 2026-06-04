@@ -106,14 +106,14 @@ class LLMSummary:
     ) -> SummaryResult:
         if prompt_type == "incremental":
             system_prompt = (
-                self._config.effective_incremental_summary_system_prompt()
-                or self._config.effective_summary_system_prompt()
+                self._config.incremental_summary_system_prompt
+                or self._config.summary_system_prompt
             )
         else:
-            system_prompt = self._config.effective_summary_system_prompt()
+            system_prompt = self._config.summary_system_prompt
 
         schema_desc = json.dumps(
-            self._config.effective_summary_json_schema(), ensure_ascii=False, indent=2
+            self._config.summary_json_schema, ensure_ascii=False, indent=2
         )
         if prompt_type == "incremental":
             user_prompt = (
