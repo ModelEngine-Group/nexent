@@ -391,7 +391,7 @@
   "agent.debug.compareMode": "Compare mode",
   "agent.debug.promptCompare.title": "Prompt compare",
   "agent.debug.promptCompare.close": "Close",
-  "agent.debug.promptCompare.apply": "Apply",
+  "agent.debug.promptCompare.apply": "Replace with Optimized Content",
   "agent.debug.promptCompare.original": "Original",
   "agent.debug.promptCompare.optimized": "Optimized",
 
@@ -415,6 +415,8 @@
   "systemPrompt.optimize.empty": "No optimized content yet",
   "systemPrompt.optimize.replace": "Replace with Optimized Content",
   "systemPrompt.optimize.error": "Failed to optimize this section",
+  "systemPrompt.optimize.generating": "Generating optimized prompt template...",
+  "systemPrompt.optimize.generatingPlaceholder": "Generating, please wait...",
   "systemPrompt.button.badcase": "Bad Case Optimize",
   "systemPrompt.finetune.title": "Fine-Tune",
   "systemPrompt.finetune.modeLabel": "Adjustment Mode",

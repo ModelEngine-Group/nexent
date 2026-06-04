@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Input, Modal, Space, Typography } from "antd";
+import { App, Button, Input, Modal, Space, Spin, Typography } from "antd";
 
 const { TextArea } = Input;
 const { Paragraph, Text } = Typography;
@@ -42,6 +42,22 @@ export default function DebugOptimizeModal({
 
   const [originalFullPrompt, setOriginalFullPrompt] = useState("");
   const [optimizedFullPrompt, setOptimizedFullPrompt] = useState("");
+  const [displayedContent, setDisplayedContent] = useState("");
+
+  // Section header mapping: English -> Chinese
+  const headerMap: Record<string, string> = {
+    "# Duty": "#智能体角色",
+    "# Constraint": "#使用要求",
+    "# FewShots": "#示例",
+  };
+
+  const mapHeadersToChinese = (text: string) => {
+    let result = text;
+    for (const [en, zh] of Object.entries(headerMap)) {
+      result = result.split(en).join(zh);
+    }
+    return result;
+  };
 
   useEffect(() => {
     if (!open) {
@@ -49,11 +65,13 @@ export default function DebugOptimizeModal({
       setIsOptimizing(false);
       setOriginalFullPrompt("");
       setOptimizedFullPrompt("");
+      setDisplayedContent("");
       return;
     }
 
     setFeedback("");
     setIsOptimizing(false);
+    setDisplayedContent("");
     // Show original prompt immediately when opening the modal.
     setOriginalFullPrompt((prev) => prev || initialOriginalFullPrompt || "");
     // Keep original prompt visible while waiting for new optimized result.
@@ -90,17 +108,18 @@ export default function DebugOptimizeModal({
 
       const data = result?.data;
       const original = data?.original_full_prompt || "";
-      const optimized = data?.optimized_full_prompt || "";
+      const fullText = mapHeadersToChinese(data?.optimized_full_prompt || "");
 
       setOriginalFullPrompt(original);
-      setOptimizedFullPrompt(optimized);
+      setOptimizedFullPrompt(fullText);
+      setDisplayedContent(fullText);
 
       // Ensure modal stays open and does not reset prompts.
       setIsOptimizing(false);
 
       onOptimized({
         originalFullPrompt: original,
-        optimizedFullPrompt: optimized,
+        optimizedFullPrompt: fullText,
       });
     } catch (e: any) {
       message.error(e?.message || t("systemPrompt.optimize.error"));
@@ -126,7 +145,7 @@ export default function DebugOptimizeModal({
           >
             {t("agent.debug.promptCompare.apply", "Apply")}
           </Button>
-          <Button type="primary" onClick={handleOk} loading={isOptimizing}>
+          <Button type="primary" onClick={handleOk}>
             {t("systemPrompt.optimize.submit")}
           </Button>
         </Space>
@@ -180,19 +199,28 @@ export default function DebugOptimizeModal({
                 style={{ whiteSpace: "pre-wrap", minHeight: 520, marginBottom: 0 }}
                 className="font-mono text-sm"
               >
-                {originalFullPrompt || "-"}
+                {mapHeadersToChinese(originalFullPrompt) || "-"}
               </Paragraph>
             </div>
           </div>
           <div>
             <Text strong>{t("agent.debug.promptCompare.optimized", "Optimized")}</Text>
             <div className="mt-2 border border-gray-200 rounded-md p-3">
-              <Paragraph
-                style={{ whiteSpace: "pre-wrap", minHeight: 520, marginBottom: 0 }}
-                className="font-mono text-sm"
-              >
-                {optimizedFullPrompt || ""}
-              </Paragraph>
+              {isOptimizing ? (
+                <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: 520 }}>
+                  <Spin size="medium" />
+                  <span className="text-gray-500 text-sm">
+                    {t("systemPrompt.optimize.generating")}
+                  </span>
+                </div>
+              ) : (
+                <Paragraph
+                  style={{ whiteSpace: "pre-wrap", minHeight: 520, marginBottom: 0 }}
+                  className="font-mono text-sm"
+                >
+                  {displayedContent || t("systemPrompt.optimize.empty")}
+                </Paragraph>
+              )}
             </div>
           </div>
         </div>

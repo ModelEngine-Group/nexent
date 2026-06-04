@@ -393,7 +393,7 @@
   "agent.debug.compareMode": "对比模式",
   "agent.debug.promptCompare.title": "提示词对比",
   "agent.debug.promptCompare.close": "关闭",
-  "agent.debug.promptCompare.apply": "应用",
+  "agent.debug.promptCompare.apply": "一键替换",
   "agent.debug.promptCompare.original": "优化前",
   "agent.debug.promptCompare.optimized": "优化后",
 
@@ -2812,6 +2812,8 @@
   "systemPrompt.optimize.empty": "暂未生成优化内容",
   "systemPrompt.optimize.replace": "一键替换",
   "systemPrompt.optimize.error": "该部分优化失败",
+  "systemPrompt.optimize.generating": "正在生成优化后的 prompt 模板...",
+  "systemPrompt.optimize.generatingPlaceholder": "正在生成中，请稍候...",
 
   "systemPrompt.finetune.modeLabel": "使用要求",
   "systemPrompt.finetune.modeGeneral": "全局优化",
