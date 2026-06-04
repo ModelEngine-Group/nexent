@@ -127,7 +127,6 @@ def check_file_access(
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
     - images_in_attachments/*: All authenticated users can access
-    - preview/*: Accessible if the original file is accessible
 
     Args:
         object_name: File object name in storage
@@ -154,10 +153,6 @@ def check_file_access(
     if object_name.startswith("skill-files/"):
         # Generated documents are private to the uploader and must stay user-scoped.
         return object_name.startswith(f"skill-files/{user_id}/")
-
-    if object_name.startswith("preview/"):
-        # Preview cache objects are derived from accessible source files and should inherit access.
-        return True
 
     # Check if file is in user's attachments folder
     # Pattern: attachments/{user_id}/*

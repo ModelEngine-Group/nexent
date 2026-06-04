@@ -2372,13 +2372,13 @@ class TestHandleMaxStepsReached:
         # Should return error message
         assert "Error in generating final LLM output" in result
 
-        # Verify logger was called with warning
+        # Verify logger was called with error
         agent.logger.log.assert_called()
-        warning_calls = [
+        error_calls = [
             call for call in agent.logger.log.call_args_list
-            if call[1].get("level") and "WARNING" in str(call[1].get("level"))
+            if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
-        assert len(warning_calls) >= 1
+        assert len(error_calls) >= 1
 
     def test_handle_max_steps_reached_creates_memory_step_with_error(self):
         """Test that a memory step with AgentMaxStepsError is created."""
