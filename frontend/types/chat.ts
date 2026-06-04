@@ -139,6 +139,7 @@ type LocalFilePreviewSource = {
 export type FilePreviewProps = {
   open: boolean;
   onClose: () => void;
+  previewContext?: 'knowledgeBase';
 } & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type

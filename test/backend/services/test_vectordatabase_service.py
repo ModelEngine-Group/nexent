@@ -1050,7 +1050,7 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
              "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch",
-             "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
+             "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "preserve_source_file": False},
             {"index_name": "index2", "embedding_model_name": "test-model",
              "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY",
              "tenant_id": "test_tenant"}
@@ -1077,6 +1077,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["group_ids"], [1, 2])
         # index2 has empty group_ids, so it gets the tenant default group [1]
         self.assertEqual(result["indices_info"][1]["group_ids"], [1])
+
+        # Verify preserve_source_file is included in indices_info
+        self.assertFalse(result["indices_info"][0]["preserve_source_file"])
+        self.assertTrue(result["indices_info"][1]["preserve_source_file"])
 
         self.mock_vdb_core.get_user_indices.assert_called_once_with("*")
         self.mock_vdb_core.get_indices_detail.assert_called_once_with(
@@ -2268,6 +2272,78 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index", "test_path")
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
+
+    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    def test_delete_source_file(self, mock_file_exists, mock_delete_file):
+        mock_delete_file.return_value = {"success": True}
+        result = ElasticSearchService.delete_source_file(
+            "knowledge_base/doc.pdf"
+        )
+        self.assertTrue(result["deleted_minio"])
+        mock_delete_file.assert_called()
+
+    @patch(
+        'backend.services.vectordatabase_service.get_all_files_status',
+        new_callable=AsyncMock,
+    )
+    @patch('backend.services.vectordatabase_service.delete_file')
+    def test_delete_document_by_scope_source_only(
+        self, mock_delete_file, mock_get_status
+    ):
+        mock_get_status.return_value = {
+            "knowledge_base/doc.pdf": {"state": "COMPLETED"}
+        }
+        mock_delete_file.return_value = {"success": True}
+
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/doc.pdf",
+                "source_only",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["scope"], "source_only")
+        self.assertEqual(result["deleted_es_count"], 0)
+        self.mock_vdb_core.delete_documents.assert_not_called()
+
+    @patch(
+        'backend.services.vectordatabase_service.get_all_files_status',
+        new_callable=AsyncMock,
+    )
+    def test_delete_document_by_scope_rejects_processing(
+        self, mock_get_status
+    ):
+        mock_get_status.return_value = {
+            "knowledge_base/doc.pdf": {"state": "PROCESSING"}
+        }
+
+        with self.assertRaises(ValueError):
+            asyncio.run(
+                ElasticSearchService.delete_document_by_scope(
+                    "test_index",
+                    "knowledge_base/doc.pdf",
+                    "source_only",
+                    self.mock_vdb_core,
+                )
+            )
+
+    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    def test_compute_source_available_completed_missing_minio(self, _mock_exists):
+        available = ElasticSearchService._compute_source_available({
+            "path_or_url": "knowledge_base/doc.pdf",
+            "status": "COMPLETED",
+        })
+        self.assertFalse(available)
+
+    def test_compute_source_available_processing_defaults_true(self):
+        available = ElasticSearchService._compute_source_available({
+            "path_or_url": "knowledge_base/doc.pdf",
+            "status": "PROCESSING",
+        })
+        self.assertTrue(available)
 
     @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.get_redis_service')
