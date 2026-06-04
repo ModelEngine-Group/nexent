@@ -35,8 +35,8 @@ from utils.prompt_template_utils import (
 from dataclasses import dataclass, field
 from typing import Optional as Opt
 
-from backend.adapters.exception import JiuwenSDKError, NexentCapabilityError
-from backend.adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
+from adapters.exception import JiuwenSDKError, NexentCapabilityError
+from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
 
 
 # Configure logging
@@ -113,14 +113,16 @@ def generate_and_save_system_prompt_impl(agent_id: int,
     # Get knowledge base display names for few-shot examples
     # Priority: frontend-provided > database query
     if knowledge_base_display_names:
-        logger.debug(f"Using frontend-provided knowledge base display names: {knowledge_base_display_names}")
+        logger.debug(
+            f"Using frontend-provided knowledge base display names: {knowledge_base_display_names}")
     else:
         knowledge_base_display_names = get_knowledge_base_display_names(
             tool_info_list=tool_info_list,
             agent_id=agent_id,
             tenant_id=tenant_id
         )
-        logger.debug(f"Using database query for knowledge base display names: {knowledge_base_display_names}")
+        logger.debug(
+            f"Using database query for knowledge base display names: {knowledge_base_display_names}")
 
     # Handle sub-agent IDs
     if sub_agent_ids and len(sub_agent_ids) > 0:
@@ -200,7 +202,8 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                         exclude_agent_id=agent_id,
                         agents_cache=all_agents
                     ):
-                        logger.info(f"Agent name '{agent_name}' already exists, regenerating with LLM")
+                        logger.info(
+                            f"Agent name '{agent_name}' already exists, regenerating with LLM")
                         try:
                             agent_name = _regenerate_agent_name_with_llm(
                                 original_name=agent_name,
@@ -214,10 +217,12 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                 prompt_template_id=prompt_template_id,
                                 user_id=user_id,
                             )
-                            logger.info(f"Regenerated agent name: '{agent_name}'")
+                            logger.info(
+                                f"Regenerated agent name: '{agent_name}'")
                             final_results["agent_var_name"] = agent_name
                         except Exception as e:
-                            logger.error(f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
+                            logger.error(
+                                f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
                             # Fallback: add suffix
                             agent_name = _generate_unique_agent_name_with_suffix(
                                 agent_name,
@@ -243,7 +248,8 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                         exclude_agent_id=agent_id,
                         agents_cache=all_agents
                     ):
-                        logger.info(f"Agent display_name '{agent_display_name}' already exists, regenerating with LLM")
+                        logger.info(
+                            f"Agent display_name '{agent_display_name}' already exists, regenerating with LLM")
                         try:
                             agent_display_name = _regenerate_agent_display_name_with_llm(
                                 original_display_name=agent_display_name,
@@ -257,10 +263,12 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                 prompt_template_id=prompt_template_id,
                                 user_id=user_id,
                             )
-                            logger.info(f"Regenerated agent display_name: '{agent_display_name}'")
+                            logger.info(
+                                f"Regenerated agent display_name: '{agent_display_name}'")
                             final_results["agent_display_name"] = agent_display_name
                         except Exception as e:
-                            logger.error(f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
+                            logger.error(
+                                f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
                             # Fallback: add suffix
                             agent_display_name = _generate_unique_display_name_with_suffix(
                                 agent_display_name,
@@ -292,6 +300,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                       for field in all_fields)
     if not has_content:
         raise Exception("Failed to generate prompt content.")
+
 
 def optimize_prompt_section_impl(
     agent_id: int,
@@ -347,7 +356,8 @@ def optimize_prompt_section_impl(
     prompt_context = join_info_for_optimize_prompt_section(
         prompt_for_optimize=prompt_template,
         section_type=normalized_section_type,
-        section_title=section_title or _default_prompt_section_title(normalized_section_type, language),
+        section_title=section_title or _default_prompt_section_title(
+            normalized_section_type, language),
         task_description=task_description,
         current_content=current_content,
         feedback=feedback,
@@ -406,7 +416,8 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
     # If None or >= 6, no limit (all 6 calls run concurrently)
     # If < 6, use semaphore to limit concurrent calls
     model_config = get_model_by_model_id(model_id, tenant_id)
-    concurrency_limit = model_config.get("concurrency_limit") if model_config else None
+    concurrency_limit = model_config.get(
+        "concurrency_limit") if model_config else None
 
     # Start all generation threads with concurrency control
     threads, error_holder = _start_generation_threads(
@@ -451,7 +462,8 @@ def _resolve_knowledge_base_display_names(
         agent_id=agent_id,
         tenant_id=tenant_id
     )
-    logger.debug(f"Using database query for knowledge base display names: {resolved_names}")
+    logger.debug(
+        f"Using database query for knowledge base display names: {resolved_names}")
     return resolved_names
 
 
@@ -479,8 +491,9 @@ def _resolve_prompt_generation_sub_agents(
         tenant_id=tenant_id, agent_id=agent_id
     )
 
+
 def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
-                                has_selected_resources = True, concurrency_limit: Optional[int] = None):
+                              has_selected_resources=True, concurrency_limit: Optional[int] = None):
     """Start all prompt generation threads with optional concurrency control."""
     # Shared error tracking across threads
     error_holder = {"error": None}
@@ -496,9 +509,11 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         effective_limit = concurrency_limit
 
     # Use semaphore if concurrency is limited
-    semaphore = threading.Semaphore(effective_limit) if effective_limit else None
+    semaphore = threading.Semaphore(
+        effective_limit) if effective_limit else None
     if semaphore:
-        logger.info(f"Using concurrency limit of {effective_limit} for prompt generation (total tasks: {total_tasks})")
+        logger.info(
+            f"Using concurrency limit of {effective_limit} for prompt generation (total tasks: {total_tasks})")
     else:
         logger.info("Using unlimited concurrency for prompt generation")
 
@@ -547,7 +562,8 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
             ("few_shots", prompt_for_generate["few_shots_system_prompt"]),
         ])
     else:
-        logger.info("Skipping constraint and few_shots generation: no tools or sub-agents selected")
+        logger.info(
+            "Skipping constraint and few_shots generation: no tools or sub-agents selected")
         # Mark these sections as already complete with empty content
         stop_flags["constraint"] = True
         stop_flags["few_shots"] = True
@@ -646,13 +662,15 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
     # This is necessary because Jinja2 StrictUndefined raises an error for any
     # undefined variable, even inside an {% if %} block.
     if knowledge_base_display_names:
-        kb_names_str = ", ".join(f'"{name}"' for name in knowledge_base_display_names)
+        kb_names_str = ", ".join(
+            f'"{name}"' for name in knowledge_base_display_names)
     else:
         kb_names_str = ""
     template_context["knowledge_base_names"] = kb_names_str
 
     # Generate content using template
-    content = Template(prompt_for_generate["user_prompt"], undefined=StrictUndefined).render(template_context)
+    content = Template(
+        prompt_for_generate["user_prompt"], undefined=StrictUndefined).render(template_context)
     return content
 
 
@@ -680,7 +698,8 @@ def join_info_for_optimize_prompt_section(
     )
 
     if knowledge_base_display_names:
-        kb_names_str = ", ".join(f'"{name}"' for name in knowledge_base_display_names)
+        kb_names_str = ", ".join(
+            f'"{name}"' for name in knowledge_base_display_names)
     else:
         kb_names_str = ""
 
@@ -732,7 +751,8 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
         List of knowledge base display names if knowledge_base_search tool is configured, None otherwise
     """
     # Check if knowledge_base_search tool is in the list
-    kb_tool_ids = [tool['tool_id'] for tool in tool_info_list if tool.get('name') == 'knowledge_base_search']
+    kb_tool_ids = [tool['tool_id'] for tool in tool_info_list if tool.get(
+        'name') == 'knowledge_base_search']
     if not kb_tool_ids:
         logger.debug("No knowledge_base_search tool found in tool list")
         return None
@@ -755,19 +775,23 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
                     try:
                         all_index_names.extend(json.loads(index_names))
                     except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse index_names JSON: {index_names}")
+                        logger.warning(
+                            f"Failed to parse index_names JSON: {index_names}")
         except Exception as e:
-            logger.warning(f"Failed to get tool instance for tool_id {kb_tool_id}: {e}")
+            logger.warning(
+                f"Failed to get tool instance for tool_id {kb_tool_id}: {e}")
 
     if not all_index_names:
-        logger.debug("No index_names configured for knowledge_base_search tool")
+        logger.debug(
+            "No index_names configured for knowledge_base_search tool")
         return None
 
     # Remove duplicates while preserving order
     unique_index_names = list(dict.fromkeys(all_index_names))
 
     # Convert to display names
-    knowledge_name_map = get_knowledge_name_map_by_index_names(unique_index_names)
+    knowledge_name_map = get_knowledge_name_map_by_index_names(
+        unique_index_names)
 
     # Return list of display names (knowledge_name) for each configured index_name
     display_names = []
@@ -776,7 +800,8 @@ def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, 
         if display_name and display_name not in display_names:
             display_names.append(display_name)
 
-    logger.debug(f"Converted index_names {unique_index_names} to display_names: {display_names}")
+    logger.debug(
+        f"Converted index_names {unique_index_names} to display_names: {display_names}")
     return display_names if display_names else None
 
 
@@ -847,7 +872,8 @@ class PromptOptimizationService:
                 "Auto optimize from debug requires Jiuwen SDK to be enabled."
             )
 
-        agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=self.tenant_id, version_no=0)
+        agent_info = search_agent_info_by_agent_id(
+            agent_id=agent_id, tenant_id=self.tenant_id, version_no=0)
 
         duty = (agent_info.get("duty_prompt") or "").strip()
         constraint = (agent_info.get("constraint_prompt") or "").strip()
@@ -867,8 +893,10 @@ class PromptOptimizationService:
                 "Agent system prompt is empty.",
             )
 
-        user_question = getattr(selected, "user_question", None) or (selected.get("user_question") if isinstance(selected, dict) else "")
-        assistant_answer = getattr(selected, "assistant_answer", None) or (selected.get("assistant_answer") if isinstance(selected, dict) else "")
+        user_question = getattr(selected, "user_question", None) or (
+            selected.get("user_question") if isinstance(selected, dict) else "")
+        assistant_answer = getattr(selected, "assistant_answer", None) or (
+            selected.get("assistant_answer") if isinstance(selected, dict) else "")
 
         bad_case_obj = type("_BadCase", (), {})
         bc = bad_case_obj()
@@ -877,7 +905,8 @@ class PromptOptimizationService:
         bc.label = ""
         bc.reason = feedback
 
-        adapter = JiuwenSDKAdapter(model_id=self.model_id, tenant_id=self.tenant_id)
+        adapter = JiuwenSDKAdapter(
+            model_id=self.model_id, tenant_id=self.tenant_id)
 
         optimized_full_prompt = adapter.optimize_badcase(
             prompt=original_full_prompt,
@@ -913,7 +942,8 @@ class PromptOptimizationService:
     def optimize(self, request: OptimizeRequest) -> OptimizeResult:
         """统一优化入口 — 优先 Jiuwen SDK，失败则降级 nexent 原生"""
         if self.is_jiuwen_mode_available():
-            logger.info(f"[prompt-optimize] mode={request.mode}, using Jiuwen SDK")
+            logger.info(
+                f"[prompt-optimize] mode={request.mode}, using Jiuwen SDK")
             try:
                 return self._optimize_with_jiuwen(request)
             except JiuwenSDKError as e:
@@ -952,13 +982,15 @@ class PromptOptimizationService:
             optimized_full = (
                 request.current_content[: request.start_pos]
                 + result
-                + request.current_content[request.start_pos :]
+                + request.current_content[request.start_pos:]
             )
         elif request.mode == "select":
             if request.start_pos is None or request.end_pos is None:
-                raise JiuwenSDKError("select mode requires start_pos and end_pos")
+                raise JiuwenSDKError(
+                    "select mode requires start_pos and end_pos")
             if not isinstance(request.start_pos, int) or not isinstance(request.end_pos, int):
-                raise JiuwenSDKError("select mode start_pos/end_pos must be int")
+                raise JiuwenSDKError(
+                    "select mode start_pos/end_pos must be int")
             if request.start_pos < 0 or request.end_pos < 0 or request.start_pos >= request.end_pos:
                 raise JiuwenSDKError("select mode start_pos/end_pos invalid")
             if request.end_pos > len(request.current_content):
@@ -966,7 +998,7 @@ class PromptOptimizationService:
             optimized_full = (
                 request.current_content[: request.start_pos]
                 + result
-                + request.current_content[request.end_pos :]
+                + request.current_content[request.end_pos:]
             )
         else:
             optimized_full = result

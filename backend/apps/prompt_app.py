@@ -16,7 +16,7 @@ from services.prompt_service import (
     OptimizeResult,
     PromptOptimizationService,
 )
-from backend.adapters.exception import NexentCapabilityError
+from adapters.exception import NexentCapabilityError
 from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/prompt")
