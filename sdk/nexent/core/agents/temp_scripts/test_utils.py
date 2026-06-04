@@ -196,6 +196,7 @@ def build_agent_run_info(
     user_id: str = "",
     skills: list = None,
     extra_body: Optional[dict] = None,
+    offload_store: Optional[object] = None,
 ) -> AgentRunInfo:
     """
     构造 AgentRunInfo
@@ -243,12 +244,31 @@ def build_agent_run_info(
         extra_body=extra_body,
     )
     
+    # If reload is enabled, include the reload tool in system prompt rendering
+    # so the LLM sees its name / description / inputs natively through the
+    # YAML template's normal tool-rendering loop.
+    display_tools = list(tools)
+    if context_manager_config and context_manager_config.enable_reload:
+        display_tools.append(ToolConfig(
+            class_name="ReloadOriginalContextTool",
+            name="reload_original_context_messages",
+            description=(
+                "Reload the original full content of an offloaded / archived context step. "
+                "Use this when the system notice at the start of the conversation lists "
+                "archived handles that are relevant to the user's question."
+            ),
+            inputs=str({"offload_handle": "str: handle value from the system notice inventory"}),
+            output_type="string",
+            params={},
+            source="local",
+        ))
+
     if duty or constraint or few_shots:
         system_prompt = build_system_prompt(
             duty=duty,
             constraint=constraint,
             few_shots=few_shots,
-            tools=tools,
+            tools=display_tools,
             managed_agents=managed_agents,
             memory_list=[],
             knowledge_base_summary="",
@@ -278,7 +298,7 @@ def build_agent_run_info(
         model_name="main_model",
         prompt_templates=prompt_templates,
         managed_agents=managed_agents,
-        context_manager_config=cm_config
+        context_manager_config=cm_config,
     )
     
 

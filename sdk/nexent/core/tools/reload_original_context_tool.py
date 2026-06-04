@@ -16,16 +16,17 @@ class ReloadOriginalContextTool(Tool):
     """
     name = "reload_original_context_messages"
     description = (
-        "Reload the original full content of a compressed/offloaded context step. "
-        "Use this when you see an [[OFFLOAD:handle=<id>]] marker in the conversation "
-        "and need to review the detailed original content that was removed to save space. "
-        "Pass the handle value from the OFFLOAD marker."
+        "Reload the original full content of an offloaded / archived context step. "
+        "At the start of each conversation turn, a system notice lists available "
+        "archived handles (e.g. 'handle=abc123: description'). "
+        "Use this tool with the handle value from that notice when you need to "
+        "review the detailed original content that was removed to save context space."
     )
 
     inputs = {
         "offload_handle": {
             "type": "string",
-            "description": "The handle value from an [[OFFLOAD:handle=<id>]] marker in the conversation"
+            "description": "The handle value from the system notice inventory (e.g. 'handle=abc123')"
         }
     }
 
