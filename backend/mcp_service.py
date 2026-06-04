@@ -396,6 +396,7 @@ def refresh_single_openapi_service(service_name: str, tenant_id: str) -> Dict[st
     # Re-register with fresh data
     openapi_json = service_data.get("openapi_json")
     server_url = service_data.get("server_url")
+    headers_template = service_data.get("headers_template")
 
     if not openapi_json:
         logger.warning(f"Service '{service_name}' has no OpenAPI JSON")
@@ -405,7 +406,7 @@ def refresh_single_openapi_service(service_name: str, tenant_id: str) -> Dict[st
             "error": "No OpenAPI JSON found"
         }
 
-    success = register_openapi_service(service_name, openapi_json, server_url)
+    success = register_openapi_service(service_name, openapi_json, server_url, headers_template)
     return {
         "status": "refreshed" if success else "error",
         "service_name": service_name,

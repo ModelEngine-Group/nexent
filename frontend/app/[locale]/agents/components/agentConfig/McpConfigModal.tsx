@@ -516,6 +516,7 @@ export default function McpConfigModal({
         setOpenApiJson("");
         setOpenApiServiceName("");
         setOpenApiServerUrl("");
+        setOpenApiHeadersTemplate("");
         await loadOpenapiServices();
         await refreshToolsAndAgents();
       } else {

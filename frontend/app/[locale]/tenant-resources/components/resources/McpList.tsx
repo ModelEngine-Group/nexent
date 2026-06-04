@@ -455,6 +455,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         setOpenApiJson("");
         setOpenApiServiceName("");
         setOpenApiServerUrl("");
+        setOpenApiHeadersTemplate("");
         await loadOpenapiServices();
       } else {
         const errorData = await response.json();
