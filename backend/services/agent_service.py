@@ -834,7 +834,11 @@ async def _stream_agent_chunks(
                         {"skill_file_uploads": skill_file_uploads},
                         ensure_ascii=False,
                     )
-                    yield f"data: {json.dumps({'type': 'skill_files', 'content': skill_files_payload}, ensure_ascii=False)}\n\n"
+                    try:
+                        yield f"data: {json.dumps({'type': 'skill_files', 'content': skill_files_payload}, ensure_ascii=False)}\n\n"
+                    except RuntimeError:
+                        # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
+                        pass
         except Exception:
             logger.exception("Failed to process skill file uploads")
 
