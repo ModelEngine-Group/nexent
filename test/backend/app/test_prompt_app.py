@@ -96,6 +96,7 @@ def test_optimize_prompt_section_api_with_mode(mock_service_cls, mock_get_curren
     )
 
     assert response.status_code == 200
+    call_args = mock_svc_instance.optimize.call_args
     assert call_args[0][0].mode == "insert"
     assert call_args[0][0].start_pos == 10
     assert call_args[0][0].end_pos == 20

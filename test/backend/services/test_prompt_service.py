@@ -2149,26 +2149,11 @@ class TestPromptOptimizationService(unittest.TestCase):
             self.assertFalse(service.is_jiuwen_mode_available())
 
     @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
-    @patch('backend.services.prompt_service.sys.modules', {'openjiuwen': MagicMock()} if False else {})
     def test_is_jiuwen_mode_available_openjiuwen_missing(self):
         """openjiuwen 未安装时 Jiuwen SDK 不可用"""
-        import sys
-        saved = sys.modules.copy()
-
-        # Simulate openjiuwen not installed
-        def fake_import(name, *args, **kwargs):
-            if name == 'openjiuwen':
-                raise ModuleNotFoundError("No module named 'openjiuwen'")
-            return saved.get(name)
-
-        with patch.dict('sys.modules', {'openjiuwen': None}):
-            service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
-            # Mock ENABLE_JIUWEN_SDK to True
-            with patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True):
-                with patch('builtins.__import__', side_effect=fake_import):
-                    # We need to actually trigger the import check
-                    # Patch at the point where the check happens
-                    pass  # skip - import already happened at module load
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        with patch('builtins.__import__', side_effect=ModuleNotFoundError("No module named 'openjiuwen'")):
+            self.assertFalse(service.is_jiuwen_mode_available())
 
     def test_optimize_request_dataclass_fields(self):
         """OptimizeRequest dataclass 所有字段正确"""
