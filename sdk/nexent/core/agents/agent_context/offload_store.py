@@ -226,7 +226,8 @@ class OffloadStore:
             query_tokens = self._tokenize(query)
             if query_tokens:
                 scored = [
-                    (handle, desc, self._score_description(desc, query_tokens))
+                    (handle, desc, self._score_description(
+                        self._store[handle].tokens, query_tokens))
                     for handle, desc in active
                 ]
                 scored.sort(key=lambda x: x[2], reverse=True)

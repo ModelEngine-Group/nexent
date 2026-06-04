@@ -264,6 +264,14 @@ class StepRenderer:
         if text.startswith("Observation:") and hasattr(action, '_raw_observation'):
             source_text = action._raw_observation
 
+        # Skip offload for reloaded content: the output of
+        # ReloadOriginalContextTool already originates from the offload
+        # store — archiving it again creates a duplicate.
+        # The observation is prefixed with "Execution logs:\n" but the
+        # JSON body always contains "offload_handle" near the start.
+        if '"offload_handle"' in source_text[:300]:
+            return text
+
         # If the source (original) content is within limit, no offload needed.
         if len(source_text) <= limit:
             return text
