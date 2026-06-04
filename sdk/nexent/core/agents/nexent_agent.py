@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
+from smolagents.models import ChatMessage, MessageRole
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 
@@ -19,7 +20,7 @@ from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .agent_context import ContextManager, OffloadStore
+from .agent_context import ContextManager
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -421,24 +422,15 @@ extra_body=model_config.extra_body,
             # Mount context manager if config provided
             ctx_config = getattr(agent_config, 'context_manager_config', None)
             if ctx_config:
-                # OffloadStore is independent of ContextManager: use externally
-                # injected instance if available, otherwise create from config.
-                offload_store = getattr(agent_config, 'offload_store', None)
-                if offload_store is None:
-                    offload_store = OffloadStore(
-                        max_entries=ctx_config.max_offload_entries,
-                        max_entry_chars=getattr(ctx_config, 'max_offload_entry_chars', 30000),
-                    )
                 agent.context_manager = ContextManager(
                     config=ctx_config,
                     max_steps=agent_config.max_steps,
-                    offload_store=offload_store,
                 )
                 # Inject reload tool if offload+reload is enabled
                 if ctx_config.enable_reload:
                     from ..tools import ReloadOriginalContextTool
                     reload_tool = ReloadOriginalContextTool(
-                        offload_store=offload_store,
+                        offload_store=agent.context_manager.offload_store,
                     )
                     agent.tools[reload_tool.name] = reload_tool
                 context_components = getattr(agent_config, 'context_components', None)
@@ -478,6 +470,37 @@ extra_body=model_config.extra_body,
                                                           action_output=msg.content, model_output=msg.content))
 
         self.agent._history_step_count = len(self.agent.memory.steps)
+    def _build_reloadable_archives_messages(self, query: str = "") -> List[ChatMessage]:
+        """Build ephemeral ChatMessages listing reloadable offload archives.
+
+        Uses ``OffloadStore.build_reload_inventory()`` and wraps the result
+        in a SYSTEM-role ChatMessage. Returns an empty list when there is nothing
+        to list or reload is disabled.
+
+        When ``query`` is non-empty, entries are scored by keyword overlap
+        with the query so only relevant handles are shown.
+
+        The returned messages are injected as ephemeral system messages on the
+        agent: they are prepended right before the current user query in
+        ``_step_stream`` and do NOT persist in ``memory.steps``, so they never
+        become part of the conversation history or compression.
+        """
+
+        ctx_mgr = getattr(self.agent, "context_manager", None)
+        if ctx_mgr is None:
+            return []
+        store = getattr(ctx_mgr, "offload_store", None)
+        if store is None:
+            return []
+        enable_reload = getattr(ctx_mgr.config, "enable_reload", False)
+        text = store.build_reload_inventory(enable_reload, query=query)
+        if not text:
+            return []
+        return [ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=[{"type": "text", "text": text}],
+        )]
+
     def agent_run_with_observer(self, query: str, reset=True):
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
@@ -492,6 +515,12 @@ extra_body=model_config.extra_body,
         observer = self.agent.observer
         total_output_tokens = 0
         final_answer_for_trace = None
+        # Set ephemeral system messages for reloadable archive inventory.
+        # These are injected right before the current user query in
+        # _step_stream and do NOT persist in memory.steps.
+        ephemeral_msgs = self._build_reloadable_archives_messages(query=query)
+        if ephemeral_msgs:
+            self.agent.set_ephemeral_messages(ephemeral_msgs)
         with monitoring_manager.start_agent_run(metadata):
             with monitoring_manager.trace_agent_step(
                 "agent.run.loop",
@@ -571,6 +600,8 @@ extra_body=model_config.extra_body,
                     raise ValueError(f"Error in interaction: {str(e)}")
 
                 finally:
+                    if ephemeral_msgs:
+                        self.agent.clear_ephemeral_messages()
                     self._log_step_metrics()
 
             if final_answer_for_trace is not None:
