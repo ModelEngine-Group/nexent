@@ -28,7 +28,6 @@ from services.agent_service import (
 from services.prompt_template_service import resolve_prompt_generate_template
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
-    get_prompt_generate_prompt_template,
     get_prompt_optimize_prompt_template,
     get_prompt_template,
 )
