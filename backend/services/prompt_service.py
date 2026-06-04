@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Optional as Opt
 
 from adapters.exception import JiuwenSDKError, NexentCapabilityError
-from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
+from adapters import JiuwenSDKAdapter
 
 
 # Configure logging
@@ -932,12 +932,7 @@ class PromptOptimizationService:
         if not ENABLE_JIUWEN_SDK:
             return False
 
-        try:
-            import openjiuwen  # noqa: F401
-        except ImportError:
-            return False
-
-        return True
+        return JiuwenSDKAdapter is not None
 
     def optimize(self, request: OptimizeRequest) -> OptimizeResult:
         """统一优化入口 — 优先 Jiuwen SDK，失败则降级 nexent 原生"""

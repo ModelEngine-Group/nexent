@@ -247,8 +247,8 @@ def run_async(coro):
 # ----------------------------------------------------------------------
 # Jiuwen SDK lazy import helpers
 # ----------------------------------------------------------------------
-def _lazy_import_jiuwen():
-    """延迟导入 Jiuwen SDK，避免 openjiuwen 未装时模块级 ImportError"""
+def _lazy_import_jiuwen_config():
+    """Lazily import only lightweight Jiuwen config classes."""
     _install_jiuwen_bypasser()
 
     try:
@@ -256,34 +256,13 @@ def _lazy_import_jiuwen():
     except ImportError as e:
         raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
 
-    from openjiuwen.core.foundation.llm import (
+    from openjiuwen.core.foundation.llm.schema.config import (
         ModelRequestConfig,
         ModelClientConfig,
         ProviderType,
     )
-    # Optional: allow adjusting SDK internal client timeout via config if supported.
-    # We keep import local to avoid breaking on SDK version differences.
-    try:
-        from openjiuwen.core.foundation.llm import ModelClientOptions  # type: ignore
-    except Exception:  # pragma: no cover
-        ModelClientOptions = None  # type: ignore
-    from openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder import (
-        FeedbackPromptBuilder,
-    )
-    from openjiuwen.dev_tools.prompt_builder.builder.badcase_prompt_builder import (
-        BadCasePromptBuilder,
-    )
-    from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
 
-    return (
-        ModelRequestConfig,
-        ModelClientConfig,
-        ProviderType,
-        FeedbackPromptBuilder,
-        BadCasePromptBuilder,
-        Case,
-        EvaluatedCase,
-    )
+    return ModelRequestConfig, ModelClientConfig, ProviderType
 
 
 def build_jiuwen_model_configs(model_id: int, tenant_id: str):
@@ -291,7 +270,7 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     from database.model_management_db import get_model_by_model_id
     from utils.config_utils import get_model_name_from_config
 
-    ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _ = _lazy_import_jiuwen()
+    ModelRequestConfig, ModelClientConfig, ProviderType = _lazy_import_jiuwen_config()
 
     model_config = get_model_by_model_id(model_id, tenant_id)
     if not model_config:
@@ -328,40 +307,23 @@ def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     return request_config, client_config
 
 
-def _build_openai_client(
-    client_config: "ModelClientConfig", request_config: "ModelRequestConfig"
-) -> Any:
-    """
-    直接创建 OpenAIModelClient，绕过 FeedbackPromptBuilder 的深导入链。
-    """
+def _lazy_import_jiuwen_builders():
+    """Lazily import prompt builders only when optimization paths need them."""
     _install_jiuwen_bypasser()
-    from openjiuwen.core.foundation.llm.model_clients.openai_model_client import (
-        OpenAIModelClient,
+
+    try:
+        import openjiuwen  # noqa: F401
+    except ImportError as e:
+        raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
+
+    from openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder import (
+        FeedbackPromptBuilder,
+    )
+    from openjiuwen.dev_tools.prompt_builder.builder.badcase_prompt_builder import (
+        BadCasePromptBuilder,
     )
 
-    class _DirectClient:
-        """对 OpenAIModelClient 的薄封装，只暴露 invoke() 方法"""
-
-        def __init__(self, inner: Any):
-            self._inner = inner
-            self._model = request_config.model_name
-
-        async def invoke(self, messages: list[dict]) -> Any:
-            return await self._inner.invoke(
-                model=self._model,
-                messages=messages,
-                temperature=request_config.temperature,
-                top_p=request_config.top_p,
-            )
-
-    client = OpenAIModelClient(
-        model_config=request_config, model_client_config=client_config
-    )
-    return _DirectClient(client)
-
-
-def _build_message(role: str, content: str) -> dict:
-    return {"role": role, "content": content}
+    return FeedbackPromptBuilder, BadCasePromptBuilder
 
 
 def _unwrap_prompt_response(text: str) -> str:
@@ -404,9 +366,16 @@ def _unwrap_prompt_response(text: str) -> str:
     return text
 
 
+def _lazy_import_jiuwen_tune_types():
+    """Lazily import Jiuwen tune types only when badcase flow needs them."""
+    _install_jiuwen_bypasser()
+    from openjiuwen.dev_tools.tune.base import Case, EvaluatedCase
+    return Case, EvaluatedCase
+
+
 def to_jiuwen_evaluated_case(bad_case) -> Any:
     """将 nexent BadCase 转换为 Jiuwen EvaluatedCase"""
-    _, _, _, _, _, Case, EvaluatedCase = _lazy_import_jiuwen()
+    Case, EvaluatedCase = _lazy_import_jiuwen_tune_types()
 
     case = Case(
         inputs={"question": bad_case.question},
@@ -463,8 +432,6 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        lang = normalize_language(language)
-
         logger.info(f"[jiuwen-adapter] mode={mode}, start_pos={start_pos}, end_pos={end_pos}")
 
         request_config, client_config = build_jiuwen_model_configs(
@@ -475,7 +442,7 @@ class JiuwenSDKAdapter:
             f"api_base={client_config.api_base}, model={request_config.model_name}, "
             f"timeout={getattr(client_config, 'timeout', None)}, max_retries={getattr(client_config, 'max_retries', None)}"
         )
-        _, _, _, FeedbackPromptBuilder, _, _, _ = _lazy_import_jiuwen()
+        FeedbackPromptBuilder, _ = _lazy_import_jiuwen_builders()
 
         builder = FeedbackPromptBuilder(
             model_config=request_config,
@@ -490,7 +457,7 @@ class JiuwenSDKAdapter:
                     mode=mode,
                     start_pos=start_pos,
                     end_pos=end_pos,
-                    language=lang,
+                    language=normalize_language(language),
                 )
             )
             if result is None:
@@ -514,7 +481,7 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        _, _, _, _, BadCasePromptBuilder, _, _ = _lazy_import_jiuwen()
+        _, BadCasePromptBuilder = _lazy_import_jiuwen_builders()
 
         request_config, client_config = build_jiuwen_model_configs(
             self.model_id, self.tenant_id
