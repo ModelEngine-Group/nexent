@@ -1,12 +1,13 @@
 import json
 import logging
 import queue
+import sys
 import threading
 from typing import Optional, List
 
 from jinja2 import StrictUndefined, Template
 
-from consts.const import LANGUAGE
+from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
 from consts.error_code import ErrorCode
 from consts.error_message import ErrorMessage
 from consts.exceptions import AppException
@@ -34,8 +35,8 @@ from utils.prompt_template_utils import (
 from dataclasses import dataclass, field
 from typing import Optional as Opt
 
-from adapters.exception import JiuwenSDKError, NexentCapabilityError
-from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
+from backend.adapters.exception import JiuwenSDKError, NexentCapabilityError
+from backend.adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
 
 
 # Configure logging
@@ -899,8 +900,6 @@ class PromptOptimizationService:
 
     def is_jiuwen_mode_available(self) -> bool:
         """判断 Jiuwen SDK 模式是否可用"""
-        from consts.const import ENABLE_JIUWEN_SDK
-
         if not ENABLE_JIUWEN_SDK:
             return False
 
