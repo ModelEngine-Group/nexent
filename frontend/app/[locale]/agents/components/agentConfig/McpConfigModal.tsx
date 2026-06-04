@@ -80,6 +80,7 @@ export default function McpConfigModal({
   const [openApiJson, setOpenApiJson] = useState("");
   const [openApiServiceName, setOpenApiServiceName] = useState("");
   const [openApiServerUrl, setOpenApiServerUrl] = useState("");
+  const [openApiHeadersTemplate, setOpenApiHeadersTemplate] = useState("");
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
@@ -506,6 +507,7 @@ export default function McpConfigModal({
           service_name: openApiServiceName.trim(),
           server_url: openApiServerUrl.trim(),
           openapi_json: parsedJson,
+          headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
         }),
       });
 
@@ -1220,15 +1222,20 @@ export default function McpConfigModal({
                           style={{ flex: 3 }}
                         />
                       </div>
-                      <div>
-                        <Input.TextArea
-                          placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
-                          value={openApiJson}
-                          onChange={(e) => setOpenApiJson(e.target.value)}
-                          rows={6}
-                          disabled={actionsLocked || importingOpenApi}
-                        />
-                      </div>
+                      <Input.TextArea
+                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                        value={openApiHeadersTemplate}
+                        onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
+                        rows={2}
+                        disabled={actionsLocked || importingOpenApi}
+                      />
+                      <Input.TextArea
+                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                        value={openApiJson}
+                        onChange={(e) => setOpenApiJson(e.target.value)}
+                        rows={6}
+                        disabled={actionsLocked || importingOpenApi}
+                      />
                       <div
                         style={{
                           display: "flex",

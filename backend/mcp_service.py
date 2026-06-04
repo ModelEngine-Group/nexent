@@ -188,7 +188,8 @@ def _sanitize_function_name(name: str) -> str:
 def register_openapi_service(
     service_name: str,
     openapi_json: Dict[str, Any],
-    server_url: str
+    server_url: str,
+    headers_template: Dict[str, str],
 ) -> bool:
     """
     Register an OpenAPI service using FastMCP.from_openapi().
@@ -222,7 +223,7 @@ def register_openapi_service(
             openapi_spec["servers"] = [{"url": server_url}]
 
         # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(base_url=server_url, timeout=30.0)
+        client = httpx.AsyncClient(base_url=server_url, timeout=120.0, headers=headers_template)
 
         # Create FastMCP instance from OpenAPI spec
         mcp_server = FastMCP.from_openapi(
@@ -320,13 +321,14 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
         service_name = service.get("mcp_service_name")
         openapi_json = service.get("openapi_json")
         server_url = service.get("server_url")
+        headers_template = service.get("headers_template")
 
         if not openapi_json:
             logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
             skipped_count += 1
             continue
 
-        if register_openapi_service(service_name, openapi_json, server_url):
+        if register_openapi_service(service_name, openapi_json, server_url, headers_template):
             registered_count += 1
         else:
             skipped_count += 1
