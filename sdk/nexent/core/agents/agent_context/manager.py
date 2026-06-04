@@ -66,7 +66,8 @@ class ContextManager:
         self._lock = threading.Lock()
         self._offload_store = offload_store or OffloadStore(
             max_entries=self.config.max_offload_entries,
-            max_entry_chars=getattr(self.config, 'max_offload_entry_chars', 30000),
+            max_entry_chars=self.config.max_offload_entry_chars,
+            max_total_chars=self.config.max_offload_total_chars,
         )
         self._last_uncompressed_token_count: Optional[int] = None
         self._last_compressed_token_count: Optional[int] = None
@@ -154,8 +155,12 @@ class ContextManager:
             # Run detection
             if (self._last_run_start_idx is not None
                     and current_run_start_idx != self._last_run_start_idx):
+                # Only the per-run compression cache is run-scoped and reset here.
+                # The offload store is intentionally NOT cleared: it is now
+                # session-scoped and owned externally (injected via the
+                # ``offload_store`` parameter), so archived content survives across
+                # runs within the same session and can be re-listed + reloaded.
                 self._current_summary_cache = None
-                self._offload_store.clear()
             self._last_run_start_idx = current_run_start_idx
 
             # Note: The memory here always consists of the unmodified, summary-task-step-free
