@@ -976,7 +976,7 @@ export const handleStreamResponse = async (
                       });
                     }
                   } catch (e) {
-                    log.error(t("chatStreamHandler.parseSkillFilesFailed"), e);
+                    log.error(t("chatStreamHandler.streamResponseError"), e);
                   }
                   break;
 
