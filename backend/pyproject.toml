@@ -29,12 +29,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
 ]
 
-[tool.uv]
-# openjiuwen's heavy transitive deps are not needed by backend's prompt_builder module
-exclude-dependencies = [
-    "transformers",
-    "pdfplumber",
-]
+
 
 [project.optional-dependencies]
 data-process = [
