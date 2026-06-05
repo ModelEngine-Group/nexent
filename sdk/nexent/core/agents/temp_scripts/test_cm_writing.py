@@ -78,6 +78,16 @@ async def run_multi_turn(
     if shared_cm is not None:
         print(f"\n[ContextManager 全局统计]")
         print(f"  {shared_cm.get_all_compression_stats()}")
+        store = shared_cm.offload_store
+        print(f"\n[Offload Store]")
+        print(f"  entries={len(store)}  reload_hits={store.reload_hits}  reload_misses={store.reload_misses}")
+        active = store.list_active()
+        if active:
+            print(f"  active handles ({len(active)}):")
+            for h, d in active:
+                print(f"    handle={h[:8]}... desc={d[:80]}...")
+        else:
+            print(f"  (no active entries)")
 
     print(f"\n{'='*60}")
     print(f"多轮对话结束 | 总对话轮数: {len(conversation_history)//2}")
@@ -119,8 +129,11 @@ async def test_writing_opt():
         enabled=True,
         token_threshold=12000,
         keep_recent_pairs=1,
+        enable_reload=True,
+        per_step_render_limit=3200,
+        max_offload_entry_chars=60000,
+        max_observation_length=1000,
     )
-    shared_cm = ContextManager(config=cm_config, max_steps=10)
     queries = [
         "用小猫、小狗、人作为角色，用宇宙、银河、星球作为场景，用远航作为故事背景，写一个情感交织、情节跌宕、来回拉扯的长篇小说。约500字。",
         "扩写到5k字。",
@@ -137,8 +150,6 @@ async def test_writing_opt():
         max_steps=10,
         debug=False,
     )
-    stats = shared_cm.get_all_compression_stats()
-
     return results
 
 if __name__ == "__main__":
