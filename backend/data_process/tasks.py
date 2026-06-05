@@ -8,9 +8,11 @@ import math
 import os
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, List, Tuple
 
 import aiohttp
+import requests
 import re
 import ray
 from celery import Task, chain, states, group, chord
@@ -19,6 +21,7 @@ from celery.result import allow_join_result
 
 from utils.file_management_utils import get_file_size
 from database.attachment_db import get_file_stream
+from database.knowledge_db import get_knowledge_record
 from services.redis_service import get_redis_service
 from .app import app
 from .ray_actors import DataProcessorRayActor
@@ -43,9 +46,11 @@ from consts.const import (
 
 
 logger = logging.getLogger("data_process.tasks")
-ASYNC_SPLIT_RETRY_MAX = max(FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
+ASYNC_SPLIT_RETRY_MAX = max(
+    FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
+
 
 def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int) -> int:
     """
@@ -91,7 +96,8 @@ def _estimate_parallel_parts() -> int:
 def _compute_split_wait_timeout(parts_count: int) -> int:
     base_timeout = DP_REDIS_CHUNKS_WAIT_TIMEOUT_S
     waves = math.ceil(max(1, parts_count) / _estimate_parallel_parts())
-    dynamic_timeout = base_timeout + max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
+    dynamic_timeout = base_timeout + \
+        max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
     return min(MAX_TIMEOUT, max(base_timeout, dynamic_timeout))
 
 
@@ -176,7 +182,6 @@ def _build_balanced_batches(
     )
 
     return batches
-
 
 
 # Thread lock for initializing Ray to prevent race conditions
@@ -327,6 +332,35 @@ def run_async(coro):
         raise
 
 
+def _delete_source_file_via_http_sync(
+    *,
+    base_url: str,
+    index_name: str,
+    path_or_url: str,
+    scope: str,
+    timeout_s: float = 30.0,
+) -> Dict[str, Any]:
+    base = (base_url or "").rstrip("/")
+    if not base:
+        raise RuntimeError("ELASTICSEARCH_SERVICE is not configured")
+    url = f"{base}/indices/{index_name}/documents"
+    params = {"path_or_url": path_or_url, "scope": scope}
+
+    resp = requests.delete(url, params=params, timeout=timeout_s)
+    body_text = getattr(resp, "text", "")
+    parsed = None
+    try:
+        parsed = resp.json()
+    except Exception:
+        parsed = _parse_json_or_none(body_text) if body_text else None
+
+    return {
+        "http_status": getattr(resp, "status_code", None),
+        "response_json": parsed if isinstance(parsed, dict) else None,
+        "response_text": body_text if not isinstance(parsed, dict) else None,
+    }
+
+
 def _build_forward_error(
     message: str,
     index_name: str,
@@ -348,6 +382,206 @@ def _parse_json_or_none(text: str) -> Optional[Dict[str, Any]]:
         return parsed if isinstance(parsed, dict) else None
     except Exception:
         return None
+
+
+@dataclass(frozen=True)
+class _ForwardContext:
+    task_id: str
+    request_id: str
+    start_time: float
+    source: str
+    index_name: str
+    source_type: str
+    original_filename: Optional[str]
+
+
+def _init_forward_context(
+    *,
+    task_id: str,
+    request_id: str,
+    start_time: float,
+    source: str,
+    index_name: str,
+    source_type: str,
+    original_filename: Optional[str],
+) -> _ForwardContext:
+    return _ForwardContext(
+        task_id=task_id,
+        request_id=request_id,
+        start_time=start_time,
+        source=source,
+        index_name=index_name,
+        source_type=source_type,
+        original_filename=original_filename,
+    )
+
+
+def _is_forward_task_cancelled(ctx: _ForwardContext) -> bool:
+    try:
+        redis_service = get_redis_service()
+        return bool(redis_service.is_task_cancelled(ctx.task_id))
+    except Exception as exc:
+        logger.warning(
+            f"[{ctx.request_id}] FORWARD TASK: Failed to check cancellation flag for task {ctx.task_id}: "
+            f"{exc}"
+        )
+        return False
+
+
+def _build_forward_cancelled_result(ctx: _ForwardContext) -> Dict[str, Any]:
+    return {
+        'task_id': ctx.task_id,
+        'source': ctx.source,
+        'index_name': ctx.index_name,
+        'original_filename': ctx.original_filename,
+        'chunks_stored': 0,
+        'storage_time': 0,
+        'es_result': {
+            "success": False,
+            "message": "Indexing cancelled because document was deleted.",
+            "total_indexed": 0,
+            "total_submitted": 0,
+        },
+    }
+
+
+def _load_forward_chunks(
+    self: Task,
+    *,
+    processed_data: Dict[str, Any],
+    original_source: str,
+    original_index_name: str,
+    filename: Optional[str],
+) -> Tuple[Optional[List[Dict[str, Any]]], bool, str, str, Optional[str]]:
+    chunks = processed_data.get('chunks')
+    split_async = bool(processed_data.get('split_async'))
+
+    # If chunks are not in payload, try loading from Redis via the redis_key
+    if (not chunks) and processed_data.get('redis_key'):
+        redis_key = processed_data.get('redis_key')
+        if not REDIS_BACKEND_URL:
+            raise Exception(json.dumps({
+                "message": "REDIS_BACKEND_URL not configured to retrieve chunks",
+                "index_name": original_index_name,
+                "task_name": "forward",
+                "source": original_source,
+                "original_filename": filename
+            }, ensure_ascii=False))
+        try:
+            import redis
+            client = redis.Redis.from_url(
+                REDIS_BACKEND_URL, decode_responses=True)
+            ready_key = f"{redis_key}:ready"
+            if split_async:
+                ready_flag = client.get(ready_key)
+                if not ready_flag:
+                    retry_num = getattr(self.request, 'retries', 0)
+                    logger.info(
+                        f"[{self.request.id}] FORWARD TASK: Async split not ready for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
+                    raise self.retry(
+                        countdown=FORWARD_REDIS_RETRY_DELAY_S,
+                        max_retries=ASYNC_SPLIT_RETRY_MAX,
+                        exc=Exception(json.dumps({
+                            "message": "Async split not ready; will retry",
+                            "index_name": original_index_name,
+                            "task_name": "forward",
+                            "source": original_source,
+                            "original_filename": filename
+                        }, ensure_ascii=False))
+                    )
+            cached = client.get(redis_key)
+            if cached:
+                try:
+                    logger.debug(
+                        f"[{self.request.id}] FORWARD TASK: Retrieved Redis key '{redis_key}', payload_length={len(cached)}")
+                    chunks = json.loads(cached)
+                except json.JSONDecodeError as jde:
+                    # Log raw prefix to help diagnose incorrect writes
+                    raw_preview = cached[:120] if isinstance(
+                        cached, str) else str(type(cached))
+                    logger.error(
+                        f"[{self.request.id}] FORWARD TASK: JSON decode error for key '{redis_key}': {str(jde)}; raw_prefix={raw_preview!r}")
+                    raise
+            else:
+                if split_async:
+                    retry_num = getattr(self.request, 'retries', 0)
+                    logger.info(
+                        f"[{self.request.id}] FORWARD TASK: Async split ready but chunks missing for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
+                    raise self.retry(
+                        countdown=FORWARD_REDIS_RETRY_DELAY_S,
+                        max_retries=ASYNC_SPLIT_RETRY_MAX,
+                        exc=Exception(json.dumps({
+                            "message": "Async split ready but chunks missing; will retry",
+                            "index_name": original_index_name,
+                            "task_name": "forward",
+                            "source": original_source,
+                            "original_filename": filename
+                        }, ensure_ascii=False))
+                    )
+                # No busy-wait: release the worker slot and retry later
+                retry_num = getattr(self.request, 'retries', 0)
+                logger.info(
+                    f"[{self.request.id}] FORWARD TASK: Chunks not yet available for key {redis_key}. Retry {retry_num + 1}/{FORWARD_REDIS_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
+                raise self.retry(
+                    countdown=FORWARD_REDIS_RETRY_DELAY_S,
+                    max_retries=FORWARD_REDIS_RETRY_MAX,
+                    exc=Exception(json.dumps({
+                        "message": "Chunks not ready in Redis; will retry",
+                        "index_name": original_index_name,
+                        "task_name": "forward",
+                        "source": original_source,
+                        "original_filename": filename
+                    }, ensure_ascii=False))
+                )
+        except Retry:
+            raise
+        except Exception as exc:
+            raise Exception(json.dumps({
+                "message": f"Failed to retrieve chunks from Redis: {str(exc)}",
+                "index_name": original_index_name,
+                "task_name": "forward",
+                "source": original_source,
+                "original_filename": filename
+            }, ensure_ascii=False))
+
+    if processed_data.get('source'):
+        original_source = processed_data.get('source')
+    if processed_data.get('index_name'):
+        original_index_name = processed_data.get('index_name')
+    if processed_data.get('original_filename'):
+        filename = processed_data.get('original_filename')
+
+    logger.info(
+        f"[{self.request.id}] FORWARD TASK: Received data for source '{original_source}' with {len(chunks) if chunks else 'None'} chunks")
+
+    if chunks is None:
+        raise Exception(json.dumps({
+            "message": "No chunks received for forwarding",
+            "index_name": original_index_name,
+            "task_name": "forward",
+            "source": original_source,
+            "original_filename": filename
+        }, ensure_ascii=False))
+    if len(chunks) == 0:
+        if split_async and processed_data.get('redis_key'):
+            retry_num = getattr(self.request, 'retries', 0)
+            logger.info(
+                f"[{self.request.id}] FORWARD TASK: Empty chunks while waiting for async split. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
+            raise self.retry(
+                countdown=FORWARD_REDIS_RETRY_DELAY_S,
+                max_retries=ASYNC_SPLIT_RETRY_MAX,
+                exc=Exception(json.dumps({
+                    "message": "Chunks not ready in Redis (empty); will retry",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": filename
+                }, ensure_ascii=False))
+            )
+        logger.warning(
+            f"[{self.request.id}] FORWARD TASK: Empty chunks list received for source {original_source}")
+
+    return chunks, split_async, original_source, original_index_name, filename
 
 
 def _extract_error_code_from_es_response(
@@ -404,7 +638,7 @@ def _send_chunks_to_es(
         try:
             connector = aiohttp.TCPConnector(verify_ssl=False)
             timeout = aiohttp.ClientTimeout(total=600)
-            
+
             request_params: Dict[str, str] = {}
 
             if large_mode:
@@ -423,7 +657,8 @@ def _send_chunks_to_es(
                     parsed_body = _parse_json_or_none(text)
 
                     if status >= 400:
-                        error_code = _extract_error_code_from_es_response(parsed_body, text)
+                        error_code = _extract_error_code_from_es_response(
+                            parsed_body, text)
                         if error_code:
                             raise Exception(json.dumps({
                                 "error_code": error_code
@@ -508,7 +743,8 @@ class GlobalRayActorPoolManager:
         if not self.actors:
             actor = self._create_and_warm_actor()
             if actor is None:
-                raise RuntimeError("Global actor pool is empty and actor warm-up failed")
+                raise RuntimeError(
+                    "Global actor pool is empty and actor warm-up failed")
             self.actors.append(actor)
         idx = self.rr_index % len(self.actors)
         self.rr_index += 1
@@ -552,10 +788,12 @@ def prewarm_ray_actors(target_size: Optional[int] = None) -> int:
     """
     Ensure a global shared pool of warm Ray actors exists for low-latency task execution.
     """
-    desired = RAY_GLOBAL_ACTOR_POOL_SIZE if target_size is None else max(0, int(target_size))
+    desired = RAY_GLOBAL_ACTOR_POOL_SIZE if target_size is None else max(
+        0, int(target_size))
     manager = _get_or_create_global_pool_manager()
     current_after = ray.get(
-        manager.ensure_pool.remote(desired=desired, max_allowed=_estimate_parallel_parts())
+        manager.ensure_pool.remote(
+            desired=desired, max_allowed=_estimate_parallel_parts())
     )
     logger.info(
         f"Global Ray actor pool ready: current={current_after}, desired={desired}"
@@ -577,6 +815,7 @@ def _get_split_actor() -> Any:
     This keeps split path aligned with prewarmed actor pool.
     """
     return get_ray_actor()
+
 
 class LoggingTask(Task):
     """Base task class with enhanced logging"""
@@ -645,7 +884,8 @@ def process_part(
             "chunks_count": len(chunks),
         }
     except Exception as e:
-        logger.error(f"[process_part] Failed to process part for '{filename}': {str(e)}")
+        logger.error(
+            f"[process_part] Failed to process part for '{filename}': {str(e)}")
         return {
             "part_redis_key": part_redis_key,
             "chunks_count": 0,
@@ -1159,7 +1399,8 @@ def process(
             fetch_start = time.perf_counter()
             file_stream = get_file_stream(source)
             if file_stream is None:
-                raise FileNotFoundError(f"Unable to fetch file from URL: {source}")
+                raise FileNotFoundError(
+                    f"Unable to fetch file from URL: {source}")
             file_data = file_stream.read()
             fetch_elapsed = time.perf_counter() - fetch_start
             logger.info(
@@ -1208,7 +1449,8 @@ def process(
                     if cached:
                         cached_chunks = json.loads(cached)
                         if isinstance(cached_chunks, list):
-                            image_metadata_chunk_count = _count_image_metadata_chunks(cached_chunks)
+                            image_metadata_chunk_count = _count_image_metadata_chunks(
+                                cached_chunks)
             except Exception as image_count_exc:
                 logger.warning(
                     f"[{self.request.id}] PROCESS TASK: Failed counting image metadata chunks for async split: {image_count_exc}")
@@ -1232,17 +1474,17 @@ def process(
         self.update_state(
             state=states.SUCCESS,
             meta={
-            'chunks_count': chunk_count,
-            'processing_time': elapsed_time,
-            'source': source,
-            'index_name': index_name,
-            'original_filename': original_filename,
-            'task_name': 'process',
-            'stage': 'text_extracted',
-            'file_size_mb': file_size_mb,
-            'processing_speed_mb_s': file_size_mb / elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
-        }
-    )
+                'chunks_count': chunk_count,
+                'processing_time': elapsed_time,
+                'source': source,
+                'index_name': index_name,
+                'original_filename': original_filename,
+                'task_name': 'process',
+                'stage': 'text_extracted',
+                'file_size_mb': file_size_mb,
+                'processing_speed_mb_s': file_size_mb / elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
+            }
+        )
 
         logger.info(
             f"[{self.request.id}] PROCESS TASK: Processing complete, waiting for forward task")
@@ -1408,165 +1650,34 @@ def forward(
     filename = original_filename
 
     try:
-        # Before doing any heavy work, check whether this task has been
-        # explicitly cancelled (for example, because the user deleted the
-        # document from the knowledge base configuration page).
-        try:
-            redis_service = get_redis_service()
-            if redis_service.is_task_cancelled(task_id):
-                logger.info(
-                    f"[{self.request.id}] FORWARD TASK: Detected cancellation flag for task {task_id}; "
-                    f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
-                )
-                # Treat this as a graceful early exit. We still return a
-                # structured payload so callers can consider the task done.
-                return {
-                    'task_id': task_id,
-                    'source': source,
-                    'index_name': index_name,
-                    'original_filename': original_filename,
-                    'chunks_stored': 0,
-                    'storage_time': 0,
-                    'es_result': {
-                        "success": False,
-                        "message": "Indexing cancelled because document was deleted.",
-                        "total_indexed": 0,
-                        "total_submitted": 0,
-                    },
-                }
-        except Exception as cancel_check_exc:
-            logger.warning(
-                f"[{self.request.id}] FORWARD TASK: Failed to check cancellation flag for task {task_id}: "
-                f"{cancel_check_exc}"
-            )
+        ctx = _init_forward_context(
+            task_id=task_id,
+            request_id=str(self.request.id),
+            start_time=start_time,
+            source=source,
+            index_name=index_name,
+            source_type=source_type,
+            original_filename=original_filename,
+        )
 
-        chunks = processed_data.get('chunks')
-        split_async = bool(processed_data.get('split_async'))
-        # If chunks are not in payload, try loading from Redis via the redis_key
-        if (not chunks) and processed_data.get('redis_key'):
-            redis_key = processed_data.get('redis_key')
-            if not REDIS_BACKEND_URL:
-                raise Exception(json.dumps({
-                    "message": "REDIS_BACKEND_URL not configured to retrieve chunks",
-                    "index_name": original_index_name,
-                    "task_name": "forward",
-                    "source": original_source,
-                    "original_filename": filename
-                }, ensure_ascii=False))
-            try:
-                import redis
-                client = redis.Redis.from_url(
-                    REDIS_BACKEND_URL, decode_responses=True)
-                ready_key = f"{redis_key}:ready"
-                if split_async:
-                    ready_flag = client.get(ready_key)
-                    if not ready_flag:
-                        retry_num = getattr(self.request, 'retries', 0)
-                        logger.info(
-                            f"[{self.request.id}] FORWARD TASK: Async split not ready for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
-                        raise self.retry(
-                            countdown=FORWARD_REDIS_RETRY_DELAY_S,
-                            max_retries=ASYNC_SPLIT_RETRY_MAX,
-                            exc=Exception(json.dumps({
-                                "message": "Async split not ready; will retry",
-                                "index_name": original_index_name,
-                                "task_name": "forward",
-                                "source": original_source,
-                                "original_filename": filename
-                            }, ensure_ascii=False))
-                        )
-                cached = client.get(redis_key)
-                if cached:
-                    try:
-                        logger.debug(
-                            f"[{self.request.id}] FORWARD TASK: Retrieved Redis key '{redis_key}', payload_length={len(cached)}")
-                        chunks = json.loads(cached)
-                    except json.JSONDecodeError as jde:
-                        # Log raw prefix to help diagnose incorrect writes
-                        raw_preview = cached[:120] if isinstance(
-                            cached, str) else str(type(cached))
-                        logger.error(
-                            f"[{self.request.id}] FORWARD TASK: JSON decode error for key '{redis_key}': {str(jde)}; raw_prefix={raw_preview!r}")
-                        raise
-                else:
-                    if split_async:
-                        retry_num = getattr(self.request, 'retries', 0)
-                        logger.info(
-                            f"[{self.request.id}] FORWARD TASK: Async split ready but chunks missing for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
-                        raise self.retry(
-                            countdown=FORWARD_REDIS_RETRY_DELAY_S,
-                            max_retries=ASYNC_SPLIT_RETRY_MAX,
-                            exc=Exception(json.dumps({
-                                "message": "Async split ready but chunks missing; will retry",
-                                "index_name": original_index_name,
-                                "task_name": "forward",
-                                "source": original_source,
-                                "original_filename": filename
-                            }, ensure_ascii=False))
-                        )
-                    # No busy-wait: release the worker slot and retry later
-                    retry_num = getattr(self.request, 'retries', 0)
-                    logger.info(
-                        f"[{self.request.id}] FORWARD TASK: Chunks not yet available for key {redis_key}. Retry {retry_num + 1}/{FORWARD_REDIS_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
-                    raise self.retry(
-                        countdown=FORWARD_REDIS_RETRY_DELAY_S,
-                        max_retries=FORWARD_REDIS_RETRY_MAX,
-                        exc=Exception(json.dumps({
-                            "message": "Chunks not ready in Redis; will retry",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": filename
-                        }, ensure_ascii=False))
-                    )
-            except Retry:
-                raise
-            except Exception as exc:
-                raise Exception(json.dumps({
-                    "message": f"Failed to retrieve chunks from Redis: {str(exc)}",
-                    "index_name": original_index_name,
-                    "task_name": "forward",
-                    "source": original_source,
-                    "original_filename": filename
-                }, ensure_ascii=False))
-        if processed_data.get('source'):
-            original_source = processed_data.get('source')
-        if processed_data.get('index_name'):
-            original_index_name = processed_data.get('index_name')
-        if processed_data.get('original_filename'):
-            filename = processed_data.get('original_filename')
-        logger.info(
-            f"[{self.request.id}] FORWARD TASK: Received data for source '{original_source}' with {len(chunks) if chunks else 'None'} chunks")
+        # Before doing any heavy work, check whether this task has been explicitly cancelled.
+        if _is_forward_task_cancelled(ctx):
+            logger.info(
+                f"[{self.request.id}] FORWARD TASK: Detected cancellation flag for task {task_id}; "
+                f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
+            )
+            return _build_forward_cancelled_result(ctx)
+
+        chunks, split_async, original_source, original_index_name, filename = _load_forward_chunks(
+            self,
+            processed_data=processed_data,
+            original_source=original_source,
+            original_index_name=original_index_name,
+            filename=filename,
+        )
 
         # Calculate total chunks for progress tracking
         total_chunks = len(chunks) if chunks else 0
-
-        if chunks is None:
-            raise Exception(json.dumps({
-                "message": "No chunks received for forwarding",
-                "index_name": original_index_name,
-                "task_name": "forward",
-                "source": original_source,
-                "original_filename": original_filename
-            }, ensure_ascii=False))
-        if len(chunks) == 0:
-            if split_async and processed_data.get('redis_key'):
-                retry_num = getattr(self.request, 'retries', 0)
-                logger.info(
-                    f"[{self.request.id}] FORWARD TASK: Empty chunks while waiting for async split. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
-                raise self.retry(
-                    countdown=FORWARD_REDIS_RETRY_DELAY_S,
-                    max_retries=ASYNC_SPLIT_RETRY_MAX,
-                    exc=Exception(json.dumps({
-                        "message": "Chunks not ready in Redis (empty); will retry",
-                        "index_name": original_index_name,
-                        "task_name": "forward",
-                        "source": original_source,
-                        "original_filename": filename
-                    }, ensure_ascii=False))
-                )
-            logger.warning(
-                f"[{self.request.id}] FORWARD TASK: Empty chunks list received for source {original_source}")
         formatted_chunks = []
         # Compute once per file to avoid repeated IO/MinIO calls inside loop
         file_size = get_file_size(source_type, original_source) if isinstance(
@@ -1757,6 +1868,7 @@ def forward(
 
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Successfully stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
+
         return {
             'task_id': task_id,
             'source': original_source,
@@ -1839,6 +1951,149 @@ def forward(
         raise
 
 
+@app.task(
+    bind=True,
+    base=LoggingTask,
+    name="data_process.tasks.cleanup_source",
+    queue="forward_q",
+)
+def cleanup_source(self, forward_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Conditionally delete the MinIO source file after successful indexing.
+
+    If the knowledge base is configured with preserve_source_file=false, call:
+    DELETE /indices/{index_name}/documents?path_or_url=...&scope=source_only
+    """
+    index_name = (forward_result or {}).get("index_name")
+    source = (forward_result or {}).get("source")
+
+    cleanup_info: Dict[str, Any] = {
+        "attempted": False,
+        "skipped_reason": None,
+        "success": None,
+        "http_status": None,
+        "response": None,
+        "error": None,
+    }
+
+    if not index_name or not source:
+        cleanup_info["skipped_reason"] = "missing_index_name_or_source"
+        forward_result = dict(forward_result or {})
+        forward_result["source_cleanup"] = cleanup_info
+        return forward_result
+
+    try:
+        record = get_knowledge_record({"index_name": index_name}) or {}
+        preserve_source_file = record.get("preserve_source_file", True)
+    except Exception as exc:
+        logger.warning(
+            "[%s] CLEANUP TASK: Failed to load knowledge config for index '%s': %s",
+            getattr(self.request, "id", "unknown"),
+            index_name,
+            exc,
+        )
+        cleanup_info["skipped_reason"] = "knowledge_record_lookup_failed"
+        forward_result = dict(forward_result or {})
+        forward_result["source_cleanup"] = cleanup_info
+        return forward_result
+
+    if preserve_source_file:
+        cleanup_info["skipped_reason"] = "preserve_source_file_true"
+        forward_result = dict(forward_result or {})
+        forward_result["source_cleanup"] = cleanup_info
+        return forward_result
+
+    cleanup_info["attempted"] = True
+    try:
+        resp = _delete_source_file_via_http_sync(
+            base_url=ELASTICSEARCH_SERVICE,
+            index_name=index_name,
+            path_or_url=source,
+            scope="source_only",
+        )
+        cleanup_info["http_status"] = resp.get("http_status")
+        cleanup_info["response"] = (
+            resp.get("response_json")
+            if resp.get("response_json") is not None
+            else resp.get("response_text")
+        )
+
+        ok = False
+        if isinstance(resp.get("response_json"), dict):
+            ok = bool(resp["response_json"].get("status") == "success")
+        elif resp.get("http_status") and 200 <= int(resp["http_status"]) < 300:
+            ok = True
+
+        cleanup_info["success"] = ok
+        if not ok:
+            logger.warning(
+                "[%s] CLEANUP TASK: Source-only delete did not succeed. index='%s' source='%s' http_status=%s",
+                getattr(self.request, "id", "unknown"),
+                index_name,
+                source,
+                cleanup_info["http_status"],
+            )
+    except Exception as exc:
+        cleanup_info["success"] = False
+        cleanup_info["error"] = str(exc)
+        logger.warning(
+            "[%s] CLEANUP TASK: Source-only delete failed. index='%s' source='%s' error=%s",
+            getattr(self.request, "id", "unknown"),
+            index_name,
+            source,
+            exc,
+        )
+
+    forward_result = dict(forward_result or {})
+    forward_result["source_cleanup"] = cleanup_info
+    return forward_result
+
+
+def submit_process_forward_chain(
+        *,
+        source: str,
+        source_type: str,
+        chunking_strategy: str,
+        index_name: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        authorization: Optional[str] = None,
+        embedding_model_id: Optional[int] = None,
+        tenant_id: Optional[str] = None,
+) -> str:
+    """
+    Build and enqueue a Celery chain: process -> forward.
+
+    Returns:
+        Celery chain task ID, or empty string if enqueue failed.
+    """
+    task_chain = chain(
+        process.s(
+            source=source,
+            source_type=source_type,
+            chunking_strategy=chunking_strategy,
+            index_name=index_name,
+            original_filename=original_filename,
+            embedding_model_id=embedding_model_id,
+            tenant_id=tenant_id
+        ).set(queue='process_q'),
+        forward.s(
+            index_name=index_name,
+            source=source,
+            source_type=source_type,
+            original_filename=original_filename,
+            authorization=authorization
+        ).set(queue='forward_q'),
+        cleanup_source.s().set(queue='forward_q'),
+    )
+
+    result = task_chain.apply_async()
+    if result is None or not hasattr(result, 'id') or result.id is None:
+        logger.error(
+            "Celery chain apply_async() did not return a valid result or result.id")
+        return ""
+    return result.id
+
+
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_and_forward')
 def process_and_forward(
         self,
@@ -1872,35 +2127,19 @@ def process_and_forward(
     logger.info(
         f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}, model_id={embedding_model_id}")
 
-    # Create a task chain
-    task_chain = chain(
-        process.s(
-            source=source,
-            source_type=source_type,
-            chunking_strategy=chunking_strategy,
-            index_name=index_name,
-            original_filename=original_filename,
-            embedding_model_id=embedding_model_id,
-            tenant_id=tenant_id
-        ).set(queue='process_q'),
-        forward.s(
-            index_name=index_name,
-            source=source,
-            source_type=source_type,
-            original_filename=original_filename,
-            authorization=authorization
-        ).set(queue='forward_q')
+    chain_id = submit_process_forward_chain(
+        source=source,
+        source_type=source_type,
+        chunking_strategy=chunking_strategy,
+        index_name=index_name,
+        original_filename=original_filename,
+        authorization=authorization,
+        embedding_model_id=embedding_model_id,
+        tenant_id=tenant_id,
     )
-
-    # Execute the chain
-    result = task_chain.apply_async()
-    if result is None or not hasattr(result, 'id') or result.id is None:
-        logger.error(
-            "Celery chain apply_async() did not return a valid result or result.id")
-        return ""
-    logger.info(f"Created task chain ID: {result.id}")
-
-    return result.id
+    if chain_id:
+        logger.info(f"Created task chain ID: {chain_id}")
+    return chain_id
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_sync')

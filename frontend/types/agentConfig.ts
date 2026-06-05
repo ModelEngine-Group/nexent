@@ -26,6 +26,8 @@ export type AgentConfigUpdate = Partial<Pick<
   | "prompt_template_name"
   | "group_ids"
   | "ingroup_permission"
+  | "greeting_message"
+  | "example_questions"
 >>;
 
 // ========== Core Interfaces ==========
@@ -67,6 +69,8 @@ export interface Agent {
   prompts_hidden?: boolean;
   current_version_no?: number;
   is_a2a_server?: boolean;
+  greeting_message?: string;
+  example_questions?: string[];
 }
 
 export interface Tool {

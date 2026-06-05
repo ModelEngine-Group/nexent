@@ -201,6 +201,8 @@ export const fetchPublishedAgentList = async () => {
       is_new: agent.is_new || false,
       permission: agent.permission,
       published_version_no: agent.published_version_no,
+      greeting_message: agent.greeting_message,
+      example_questions: agent.example_questions || [],
     }));
 
     return {
@@ -418,6 +420,8 @@ export interface UpdateAgentInfoPayload {
   related_agent_ids?: number[];
   related_external_agent_ids?: number[];
   ingroup_permission?: string;
+  greeting_message?: string;
+  example_questions?: string[];
 }
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
@@ -806,6 +810,8 @@ export const searchAgentInfo = async (
           })
         : [],
       skills: data.skills || [],
+      greeting_message: data.greeting_message || "",
+      example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
     };
 

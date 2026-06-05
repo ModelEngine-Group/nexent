@@ -11,6 +11,7 @@ from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
 from consts.error_code import ErrorCode
 from consts.error_message import ErrorMessage
 from consts.exceptions import AppException
+from consts.model import AgentInfoRequest
 from database.agent_db import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, \
     query_sub_agents_id_list
 from database.model_management_db import get_model_by_model_id
@@ -23,13 +24,14 @@ from services.agent_service import (
     _regenerate_agent_name_with_llm,
     _regenerate_agent_display_name_with_llm,
     _generate_unique_agent_name_with_suffix,
-    _generate_unique_display_name_with_suffix
+    _generate_unique_display_name_with_suffix,
+    update_agent,
 )
 from services.prompt_template_service import resolve_prompt_generate_template
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
-    get_prompt_generate_prompt_template,
     get_prompt_optimize_prompt_template,
+    get_prompt_template,
 )
 
 from dataclasses import dataclass, field
@@ -164,7 +166,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
 
     # 1. Real-time streaming push
     final_results = {"duty": "", "constraint": "", "few_shots": "", "agent_var_name": "", "agent_display_name": "",
-                     "agent_description": ""}
+                     "agent_description": "", "greeting_message": "", "example_questions": ""}
 
     # Get all existing agent names and display names for duplicate checking (only if not in create mode)
     all_agents = query_all_agent_info_by_tenant_id(tenant_id)
@@ -309,6 +311,67 @@ def generate_and_save_system_prompt_impl(agent_id: int,
     if not has_content:
         raise Exception("Failed to generate prompt content.")
 
+    # 3. Generate greeting message and example questions
+    try:
+        greeting_template = get_prompt_template('greeting_generate', language)
+        greeting_system_prompt = greeting_template.get("GREETING_SYSTEM_PROMPT", "")
+        greeting_user_prompt_template = greeting_template.get("USER_PROMPT", "")
+
+        greeting_user_prompt = Template(greeting_user_prompt_template, undefined=StrictUndefined).render({
+            "display_name": final_results.get("agent_display_name", ""),
+            "duty_description": final_results.get("duty", ""),
+            "business_description": task_description,
+            "few_shots": final_results.get("few_shots", ""),
+        })
+
+        greeting_result = call_llm_for_system_prompt(
+            model_id=model_id,
+            user_prompt=greeting_user_prompt,
+            system_prompt=greeting_system_prompt,
+            tenant_id=tenant_id,
+        )
+
+        parsed = None
+        try:
+            json_start = greeting_result.find("{")
+            json_end = greeting_result.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                parsed = json.loads(greeting_result[json_start:json_end])
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse greeting JSON from LLM output: {greeting_result}")
+
+        if parsed and "greeting_message" in parsed and "example_questions" in parsed:
+            greeting_message = parsed["greeting_message"]
+            example_questions = parsed["example_questions"]
+            if isinstance(example_questions, list) and len(example_questions) > 6:
+                example_questions = example_questions[:6]
+        else:
+            greeting_message = greeting_result.strip() if greeting_result else ""
+            example_questions = []
+
+        yield {
+            "type": "greeting_message",
+            "content": greeting_message,
+            "is_complete": True
+        }
+        yield {
+            "type": "example_questions",
+            "content": json.dumps(example_questions, ensure_ascii=False),
+            "is_complete": True
+        }
+
+        final_results["greeting_message"] = greeting_message
+        final_results["example_questions"] = json.dumps(example_questions, ensure_ascii=False)
+
+        # Update agent with greeting (skip in create mode)
+        if agent_id != 0:
+            update_agent(agent_id, AgentInfoRequest(
+                agent_id=agent_id,
+                greeting_message=greeting_message,
+                example_questions=example_questions,
+            ), user_id)
+    except Exception as e:
+        logger.warning(f"Greeting generation failed: {str(e)}, skipping greeting")
 
 def optimize_prompt_section_impl(
     agent_id: int,

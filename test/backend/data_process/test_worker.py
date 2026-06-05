@@ -185,7 +185,12 @@ def setup_mocks_for_worker(mocker, initialized=False):
             get_model_by_model_id=lambda model_id, tenant_id=None: None
         )
         setattr(sys.modules["database"], "model_management_db", sys.modules["database.model_management_db"])
-    
+    if "database.knowledge_db" not in sys.modules:
+        sys.modules["database.knowledge_db"] = types.SimpleNamespace(
+            get_knowledge_record=lambda query=None: {},
+        )
+        setattr(sys.modules["database"], "knowledge_db", sys.modules["database.knowledge_db"])
+
     # Stub utils modules (required by utils.file_management_utils)
     if "utils.auth_utils" not in sys.modules:
         sys.modules["utils.auth_utils"] = types.SimpleNamespace(
@@ -213,6 +218,19 @@ def setup_mocks_for_worker(mocker, initialized=False):
         sys.modules["httpx"] = types.SimpleNamespace()
     if "requests" not in sys.modules:
         sys.modules["requests"] = types.SimpleNamespace()
+    if "redis" not in sys.modules:
+        sys.modules["redis"] = types.SimpleNamespace(
+            Redis=types.SimpleNamespace(
+                from_url=lambda *args, **kwargs: types.SimpleNamespace(
+                    get=lambda *a, **k: None,
+                    set=lambda *a, **k: True,
+                    expire=lambda *a, **k: True,
+                    delete=lambda *a, **k: True,
+                    ping=lambda: True,
+                )
+            ),
+            from_url=lambda *args, **kwargs: types.SimpleNamespace(ping=lambda: True),
+        )
     if "fastapi" not in sys.modules:
         fastapi_mod = types.ModuleType("fastapi")
         fastapi_mod.UploadFile = type("UploadFile", (), {})
@@ -223,7 +241,27 @@ def setup_mocks_for_worker(mocker, initialized=False):
         file_utils_mod = types.ModuleType("utils.file_management_utils")
         file_utils_mod.get_file_size = lambda *args, **kwargs: 0
         sys.modules["utils.file_management_utils"] = file_utils_mod
-    
+
+    # Stub services.redis_service (required by tasks.py via package __init__)
+    if "services.redis_service" not in sys.modules:
+        redis_service_mod = types.ModuleType("services.redis_service")
+
+        class _StubRedisService:
+            def save_error_info(self, *args, **kwargs):
+                return True
+
+            def is_task_cancelled(self, *args, **kwargs):
+                return False
+
+            def save_progress_info(self, *args, **kwargs):
+                return True
+
+            def increment_progress_info(self, *args, **kwargs):
+                return True
+
+        redis_service_mod.get_redis_service = lambda: _StubRedisService()
+        sys.modules["services.redis_service"] = redis_service_mod
+
     # Stub ray_actors (required by tasks.py)
     if "backend.data_process.ray_actors" not in sys.modules:
         ray_actors_mod = types.ModuleType("backend.data_process.ray_actors")
