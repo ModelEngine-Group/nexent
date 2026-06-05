@@ -52,7 +52,7 @@ dependencies = [
     "psycopg2-binary>=2.9.9",
     "pymssql>=2.2.11",
     "openpyxl>=3.1.5",
-    "orjson==3.10",
+    "orjson==3.11.9",
     "pypdf==6.9.1",
     "python-pptx==1.0.2",
     "ijson==3.5.0",
