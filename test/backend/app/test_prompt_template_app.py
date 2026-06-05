@@ -5,6 +5,7 @@ import types
 from http import HTTPStatus
 
 import pytest
+from pydantic import BaseModel
 
 
 BACKEND_PATH = os.path.abspath(
@@ -37,8 +38,15 @@ def prompt_template_app_module(monkeypatch):
         setattr(service_module, name, lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "services.prompt_template_service", service_module)
 
+    class PromptTemplateRequest(BaseModel):
+        template_name: str
+        description: str
+        template_type: str
+        template_content_zh: dict
+        template_content_en: dict
+
     consts_model_module = types.ModuleType("consts.model")
-    consts_model_module.PromptTemplateRequest = type("PromptTemplateRequest", (), {})
+    consts_model_module.PromptTemplateRequest = PromptTemplateRequest
     monkeypatch.setitem(sys.modules, "consts.model", consts_model_module)
 
     auth_module = types.ModuleType("utils.auth_utils")
