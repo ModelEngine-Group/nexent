@@ -38,6 +38,10 @@ from loader import (
     PreviousSummaryCache,
     SummaryTaskStep,
     TaskStep,
+    PreviousCompressResult,
+    CurrentCompressResult,
+    pair_fingerprint,
+    action_fingerprint,
 )
 from stubs import _SystemPromptStep as SystemPromptStep
 
@@ -76,16 +80,15 @@ class TestM1FirstCall:
 class TestM2G2NoCacheRawReturn:
 
     def test_g2_shortcut_no_cache_returns_raw_messages(self):
-        """effective <= threshold but no cache, should use _build_messages to assemble raw steps."""
+        """effective <= threshold but no cache, should use build_messages to assemble raw steps."""
         cm = make_cm(enabled=True, threshold=10)
         t, a = make_pair("x", "y", 0)
         memory = AgentMemory(steps=[t, a], system_prompt=None)
         original = make_original_messages(memory)
 
-        with patch.object(cm, '_estimate_tokens', return_value=50):
-            with patch.object(cm, '_effective_tokens', return_value=5):
-                model = make_model()
-                result = cm.compress_if_needed(model, memory, original, current_run_start_idx=2)
+        with patch.object(cm, '_effective_tokens', return_value=5):
+            model = make_model()
+            result = cm.compress_if_needed(model, memory, original, current_run_start_idx=2)
 
         model.assert_not_called()
         assert isinstance(result, list)
@@ -117,7 +120,7 @@ class TestM3PairsToCompressEmpty:
 class TestM4PrevLLMReturnsNone:
 
     def test_prev_llm_returns_none_raw_steps_shown(self):
-        """When _compress_previous_with_cache returns None, prev_summary_step=None,
+        """When _prev_compressor.compress returns summary_text=None, prev_summary_step=None,
         raw prev steps appear in result, no crash.
         """
         cm = make_cm(enabled=True, threshold=1, keep_recent_pairs=1)
@@ -126,7 +129,7 @@ class TestM4PrevLLMReturnsNone:
         memory = AgentMemory(steps=[t0, a0, t1, a1], system_prompt=None)
         original = make_original_messages(memory)
 
-        with patch.object(cm, '_compress_previous_with_cache', return_value=None):
+        with patch.object(cm._prev_compressor, 'compress', return_value=PreviousCompressResult(summary_text=None)):
             model = make_model()
             result = cm.compress_if_needed(model, memory, original, current_run_start_idx=4)
 
@@ -153,7 +156,7 @@ class TestM5PrevCacheInMainPath:
             system_prompt=SystemPromptStep(system_prompt="sys"),
         )
 
-        fp = cm._pair_fingerprint(t.task, a.action_output)
+        fp = pair_fingerprint(t.task, a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache("prev_cached_summary", 1, fp)
 
         def mock_effective_prev(steps):
@@ -195,7 +198,7 @@ class TestM6ActionsToCompressEmpty:
 class TestM7CurrLLMReturnsNone:
 
     def test_curr_llm_returns_none_raw_curr_shown(self):
-        """When _compress_current_with_cache returns None, curr_kept_steps=list(curr_steps), no crash."""
+        """When _curr_compressor.compress returns summary_text=None, curr_kept_steps=list(curr_steps), no crash."""
         cm = make_cm(enabled=True, threshold=1, keep_recent_steps=1)
         curr_t = TaskStep(task="current_task")
         curr_a0 = ActionStep(step_number=0, model_output="output0 " + "Y" * 50, action_output="r0")
@@ -203,7 +206,7 @@ class TestM7CurrLLMReturnsNone:
         memory = AgentMemory(steps=[curr_t, curr_a0, curr_a1], system_prompt=None)
         original = make_original_messages(memory)
 
-        with patch.object(cm, '_compress_current_with_cache', return_value=None):
+        with patch.object(cm._curr_compressor, 'compress', return_value=CurrentCompressResult(summary_text=None)):
             model = make_model()
             result = cm.compress_if_needed(model, memory, original, current_run_start_idx=0)
 
@@ -233,7 +236,7 @@ class TestM8CurrCacheInMainPath:
             system_prompt=SystemPromptStep(system_prompt="sys"),
         )
 
-        fp = ContextManager._action_fingerprint(curr_a)
+        fp = action_fingerprint(curr_a)
         cm._current_summary_cache = CurrentSummaryCache("curr_cached_summary", 1, fp)
 
         def mock_effective_prev(steps):
@@ -300,7 +303,7 @@ class TestM10KeepRecentPairsBoundary:
 class TestM11BothLLMFail:
 
     def test_both_llm_calls_return_none_still_returns_list(self):
-        """When both compression calls return None, result is still valid list, no exception."""
+        """When both compression calls return summary_text=None, result is still valid list, no exception."""
         cm = make_cm(enabled=True, threshold=1, keep_recent_pairs=1, keep_recent_steps=1)
 
         t0, a0 = make_pair("prev " + "X" * 50, "pa " + "Y" * 50, 0)
@@ -314,8 +317,8 @@ class TestM11BothLLMFail:
         )
         original = make_original_messages(memory)
 
-        with patch.object(cm, '_compress_previous_with_cache', return_value=None):
-            with patch.object(cm, '_compress_current_with_cache', return_value=None):
+        with patch.object(cm._prev_compressor, 'compress', return_value=PreviousCompressResult(summary_text=None)):
+            with patch.object(cm._curr_compressor, 'compress', return_value=CurrentCompressResult(summary_text=None)):
                 result = cm.compress_if_needed(None, memory, original, current_run_start_idx=4)
 
         assert isinstance(result, list)
@@ -325,7 +328,7 @@ class TestM11BothLLMFail:
 class TestM12NoSystemPrompt:
 
     def test_no_system_prompt_no_system_message_in_result(self):
-        """memory.system_prompt=None, _build_messages should not produce system role message."""
+        """memory.system_prompt=None, build_messages should not produce system role message."""
         from stubs import _MessageRole
         cm = make_cm(enabled=True, threshold=1, keep_recent_pairs=1)
         t, a = make_pair("task " + "X" * 50, "action " + "Y" * 50, 0)

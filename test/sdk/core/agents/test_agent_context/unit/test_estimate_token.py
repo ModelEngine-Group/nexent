@@ -1,24 +1,24 @@
 """
 unit/test_estimate_token.py
-Verify ContextManager._estimate_tokens(memory) and
-ContextManager._msg_token_count(flat_messages) result consistency.
+Verify estimate_tokens(memory) and msg_token_count(flat_messages) result consistency.
 """
 
 import pytest
 
 from factories import make_cm, make_memory_with_steps, make_original_messages, make_pair
 from loader import AgentMemory, PreviousSummaryCache
+from loader import estimate_tokens, estimate_tokens_for_steps, msg_token_count
 from stubs import _SystemPromptStep
 
 
 class TestEstimateTokenConsistency:
-    """_estimate_tokens and _msg_token_count(flat) must return the same value."""
+    """estimate_tokens and msg_token_count(flat) must return the same value."""
 
     def test_msg_token_count_equal_estimate_token_for_memory(self):
         cm = make_cm(enabled=True, threshold=10)
         memory = make_memory_with_steps(3)
         original = make_original_messages(memory)
-        assert cm._estimate_tokens(memory) == cm._msg_token_count(original)
+        assert estimate_tokens(memory, cm.config.chars_per_token) == msg_token_count(original, cm.config.chars_per_token)
 
 
 class TestEffectiveTokens:
@@ -28,7 +28,7 @@ class TestEffectiveTokens:
         cm = make_cm()
         t, a = make_pair("task", "action")
         steps = [t, a]
-        raw = cm._estimate_tokens_for_steps(steps)
+        raw = estimate_tokens_for_steps(steps, cm.config.chars_per_token)
         effective = cm._effective_prev_tokens(steps)
         assert effective == raw
 
@@ -37,10 +37,11 @@ class TestEffectiveTokens:
         cm = make_cm()
         t, a = make_pair("X" * 200, "Y" * 200, 1)
         pairs = [(t, a)]
-        fp = cm._pair_fingerprint(t.task, a.model_output)
+        from loader import pair_fingerprint
+        fp = pair_fingerprint(t.task, a.model_output)
         cm._previous_summary_cache = PreviousSummaryCache("short summary", 1, fp)
         steps = [t, a]
-        raw = cm._estimate_tokens_for_steps(steps)
+        raw = estimate_tokens_for_steps(steps, cm.config.chars_per_token)
         effective = cm._effective_prev_tokens(steps)
         assert effective < raw
 

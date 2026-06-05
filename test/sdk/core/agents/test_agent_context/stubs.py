@@ -59,6 +59,7 @@ class _ActionStep(_MemoryStep):
     action_output: Optional[Any]  = None
     observations:  Optional[str]  = None
     tool_calls:    Optional[list] = None
+    invoked_tools: Optional[list] = None
     error:         Optional[str]  = None
     token_usage:   Optional[Any]  = None
 
@@ -135,6 +136,9 @@ def register_smolagents_mocks() -> ModuleType:
     Idempotent: subsequent calls return the already-registered module.
     Returns the top-level mock module.
     """
+    if "smolagents" in sys.modules:
+        return sys.modules["smolagents"]
+
     mock = build_smolagents_mock()
     sys.modules.update({
         "smolagents":        mock,
