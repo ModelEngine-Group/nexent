@@ -8,6 +8,19 @@ from fastapi.testclient import TestClient
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, backend_dir)
 
+prompt_service_stub = type(sys)("services.prompt_service")
+prompt_service_stub.gen_system_prompt_streamable = MagicMock()
+prompt_service_stub.OptimizeRequest = type("OptimizeRequest", (), {"__init__": lambda self, **kwargs: self.__dict__.update(kwargs)})
+prompt_service_stub.OptimizeResult = type("OptimizeResult", (), {})
+prompt_service_stub.PromptOptimizationService = MagicMock()
+sys.modules["services.prompt_service"] = prompt_service_stub
+sys.modules["backend.services.prompt_service"] = prompt_service_stub
+
+auth_utils_stub = type(sys)("utils.auth_utils")
+auth_utils_stub.get_current_user_info = MagicMock()
+sys.modules["utils.auth_utils"] = auth_utils_stub
+sys.modules["backend.utils.auth_utils"] = auth_utils_stub
+
 from apps.prompt_app import router
 
 
@@ -108,7 +121,7 @@ def test_optimize_prompt_section_api_nexent_capability_error(mock_service_cls, m
     """Test /prompt/optimize returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
 
-    from backend.adapters.exception import NexentCapabilityError
+    from adapters.exception import NexentCapabilityError
     mock_svc_instance = MagicMock()
     mock_svc_instance.optimize.side_effect = NexentCapabilityError(
         "nexent 原生模式只支持 general 模式，当前请求 mode=insert 不支持"
@@ -188,7 +201,7 @@ def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get
     """Test /prompt/optimize/badcase returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
 
-    from backend.adapters.exception import NexentCapabilityError
+    from adapters.exception import NexentCapabilityError
     mock_svc_instance = MagicMock()
     mock_svc_instance.optimize_badcase.side_effect = NexentCapabilityError(
         "nexent 原生模式不支持 badcase 优化"

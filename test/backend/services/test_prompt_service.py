@@ -4,28 +4,46 @@ import types
 import unittest
 import json
 import sys
+import atexit
 from unittest.mock import patch, MagicMock
 
-# Mock nexent module hierarchy BEFORE any backend imports that depend on it
-nexent_mock = MagicMock()
-nexent_core_mock = MagicMock()
-nexent_core_agents_mock = MagicMock()
-nexent_storage_mock = MagicMock()
-nexent_storage_storage_client_factory_mock = MagicMock()
-nexent_storage_minio_config_mock = MagicMock()
-nexent_vector_database_mock = MagicMock()
-nexent_memory_mock = MagicMock()
-nexent_monitor_mock = MagicMock()
 
-sys.modules['nexent'] = nexent_mock
-sys.modules['nexent.core'] = nexent_core_mock
-sys.modules['nexent.core.agents'] = nexent_core_agents_mock
-sys.modules['nexent.storage'] = nexent_storage_mock
-sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
-sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
-sys.modules['nexent.vector_database'] = nexent_vector_database_mock
-sys.modules['nexent.memory'] = nexent_memory_mock
-sys.modules['nexent.monitor'] = nexent_monitor_mock
+_MODULE_PATCH_SENTINEL = object()
+_MODULE_PATCH_NAMES = [
+    'boto3',
+    'elasticsearch',
+    'sqlalchemy',
+    'sqlalchemy.create_engine',
+    'sqlalchemy.orm',
+    'sqlalchemy.dialects',
+    'sqlalchemy.dialects.postgresql',
+    'sqlalchemy.sql',
+    'database.agent_db',
+    'database.tool_db',
+    'database.model_management_db',
+    'database.knowledge_db',
+    'database.client',
+    'database.db_models',
+    'utils.llm_utils',
+    'utils.prompt_template_utils',
+    'services.agent_service',
+    'services.prompt_template_service',
+]
+_MODULE_PATCH_ORIGINALS = {
+    name: sys.modules.get(name, _MODULE_PATCH_SENTINEL)
+    for name in _MODULE_PATCH_NAMES
+}
+
+
+def _restore_patched_modules() -> None:
+    for name, original in _MODULE_PATCH_ORIGINALS.items():
+        if original is _MODULE_PATCH_SENTINEL:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
+
+atexit.register(_restore_patched_modules)
 
 # Mock external dependencies
 sys.modules['boto3'] = MagicMock()
@@ -61,39 +79,29 @@ sys.modules['elasticsearch'] = elasticsearch_mock
 # This prevents real AWS/MinIO/Elasticsearch calls during import
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
 
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 minio_client_mock._ensure_bucket_exists = MagicMock()
 minio_client_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
-patch('database.client.MinioClient', return_value=minio_client_mock).start()
-patch('backend.database.client.minio_client', minio_client_mock).start()
-patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=MagicMock()).start()
-patch('nexent.vector_database.elasticsearch_core.Elasticsearch', return_value=MagicMock()).start()
-patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-
-from jinja2 import StrictUndefined
 
 # Mock database submodules BEFORE importing prompt_service
-sys.modules['database'] = MagicMock()
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.knowledge_db'] = MagicMock()
-sys.modules['database.client'] = MagicMock()
+mock_database_client = MagicMock()
+mock_database_client.MinioClient.return_value = minio_client_mock
+mock_database_client.minio_client = minio_client_mock
+sys.modules['database.client'] = mock_database_client
+sys.modules['backend.database.client'] = mock_database_client
 sys.modules['database.db_models'] = MagicMock()
 
+from jinja2 import StrictUndefined
+
 # Mock utils
-sys.modules['utils'] = MagicMock()
 sys.modules['utils.llm_utils'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 
 # Mock services
-sys.modules['services'] = MagicMock()
 sys.modules['services.agent_service'] = MagicMock()
 sys.modules['services.prompt_template_service'] = MagicMock()
 
@@ -2096,7 +2104,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_insert_mode_raises(self):
         """nexent 模式: mode=insert 应该抛出 NexentCapabilityError"""
-        from backend.adapters.exception import NexentCapabilityError
+        from adapters.exception import NexentCapabilityError
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         req = OptimizeRequest(
@@ -2112,7 +2120,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_select_mode_raises(self):
         """nexent 模式: mode=select 应该抛出 NexentCapabilityError"""
-        from backend.adapters.exception import NexentCapabilityError
+        from adapters.exception import NexentCapabilityError
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         req = OptimizeRequest(
@@ -2127,7 +2135,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
     def test_optimize_badcase_nexent_raises(self):
         """nexent 模式: badcase 优化应该抛出 NexentCapabilityError"""
-        from backend.adapters.exception import NexentCapabilityError
+        from adapters.exception import NexentCapabilityError
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         with self.assertRaises(NexentCapabilityError) as ctx:

@@ -36,7 +36,15 @@ from dataclasses import dataclass, field
 from typing import Optional as Opt
 
 from adapters.exception import JiuwenSDKError, NexentCapabilityError
-from adapters import JiuwenSDKAdapter
+
+
+def _get_jiuwen_adapter_class():
+    """Import Jiuwen adapter only when optimization paths need it."""
+    try:
+        from adapters import JiuwenSDKAdapter
+    except ModuleNotFoundError:
+        return None
+    return JiuwenSDKAdapter
 
 
 # Configure logging
@@ -905,7 +913,11 @@ class PromptOptimizationService:
         bc.label = ""
         bc.reason = feedback
 
-        adapter = JiuwenSDKAdapter(
+        adapter_cls = _get_jiuwen_adapter_class()
+        if adapter_cls is None:
+            raise JiuwenSDKError("Jiuwen SDK adapter is unavailable")
+
+        adapter = adapter_cls(
             model_id=self.model_id, tenant_id=self.tenant_id)
 
         optimized_full_prompt = adapter.optimize_badcase(
@@ -932,7 +944,7 @@ class PromptOptimizationService:
         if not ENABLE_JIUWEN_SDK:
             return False
 
-        return JiuwenSDKAdapter is not None
+        return _get_jiuwen_adapter_class() is not None
 
     def optimize(self, request: OptimizeRequest) -> OptimizeResult:
         """统一优化入口 — 优先 Jiuwen SDK，失败则降级 nexent 原生"""
@@ -954,7 +966,11 @@ class PromptOptimizationService:
             f"end_pos={request.end_pos}, prompt_len={len(request.current_content)}, "
             f"feedback_len={len(request.feedback)}"
         )
-        adapter = JiuwenSDKAdapter(
+        adapter_cls = _get_jiuwen_adapter_class()
+        if adapter_cls is None:
+            raise JiuwenSDKError("Jiuwen SDK adapter is unavailable")
+
+        adapter = adapter_cls(
             model_id=self.model_id,
             tenant_id=self.tenant_id,
         )
@@ -1070,7 +1086,11 @@ class PromptOptimizationService:
         self, current_content: str, bad_cases: list, section_type: str, section_title: str
     ) -> OptimizeResult:
         """Jiuwen SDK 坏案例优化"""
-        adapter = JiuwenSDKAdapter(
+        adapter_cls = _get_jiuwen_adapter_class()
+        if adapter_cls is None:
+            raise JiuwenSDKError("Jiuwen SDK adapter is unavailable")
+
+        adapter = adapter_cls(
             model_id=self.model_id,
             tenant_id=self.tenant_id,
         )
