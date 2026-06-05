@@ -160,12 +160,14 @@ async def import_openapi_service_api(
         server_url: Base URL of the REST API server
         openapi_json: Complete OpenAPI JSON specification
         service_description: Optional service description
+        headers_template: Optional default headers template
         force_update: If True, replace all existing tools for this service
     """
     service_name = openapi_service_request.get("service_name")
     server_url = openapi_service_request.get("server_url")
     openapi_json = openapi_service_request.get("openapi_json")
     service_description = openapi_service_request.get("service_description")
+    headers_template = openapi_service_request.get("headers_template")
     force_update = openapi_service_request.get("force_update", False)
 
     if not service_name:
@@ -192,6 +194,7 @@ async def import_openapi_service_api(
             tenant_id=tenant_id,
             user_id=user_id,
             service_description=service_description,
+            headers_template=headers_template,
             force_update=force_update
         )
 
