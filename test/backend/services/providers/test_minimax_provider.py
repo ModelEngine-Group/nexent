@@ -23,17 +23,17 @@ class TestMiniMaxModelProvider:
         mock_response.json.return_value = {
             "data": [
                 {
+                    "id": "MiniMax-M3",
+                    "object": "model",
+                    "owned_by": "minimax"
+                },
+                {
                     "id": "MiniMax-M2.7",
                     "object": "model",
                     "owned_by": "minimax"
                 },
                 {
-                    "id": "MiniMax-M2.5",
-                    "object": "model",
-                    "owned_by": "minimax"
-                },
-                {
-                    "id": "MiniMax-M2.5-highspeed",
+                    "id": "MiniMax-M2.7-highspeed",
                     "object": "model",
                     "owned_by": "minimax"
                 }
@@ -70,11 +70,11 @@ class TestMiniMaxModelProvider:
         result = await provider.get_models(provider_config)
 
         assert len(result) == 3
-        assert result[0]["id"] == "MiniMax-M2.7"
+        assert result[0]["id"] == "MiniMax-M3"
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
-        # M2.7 has 1M context window
-        assert result[0]["max_tokens"] == 1000000
+        # M3 has 512K context window
+        assert result[0]["max_tokens"] == 512000
 
     @pytest.mark.asyncio
     async def test_get_models_llm_known_context_windows(self, mocker: MockFixture):
@@ -83,9 +83,9 @@ class TestMiniMaxModelProvider:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
+                {"id": "MiniMax-M3", "object": "model", "owned_by": "minimax"},
                 {"id": "MiniMax-M2.7", "object": "model", "owned_by": "minimax"},
-                {"id": "MiniMax-M2.5", "object": "model", "owned_by": "minimax"},
-                {"id": "MiniMax-M2.5-highspeed", "object": "model", "owned_by": "minimax"},
+                {"id": "MiniMax-M2.7-highspeed", "object": "model", "owned_by": "minimax"},
             ]
         }
         mock_response.raise_for_status = MagicMock()
@@ -112,9 +112,9 @@ class TestMiniMaxModelProvider:
         result = await provider.get_models(provider_config)
 
         model_map = {m["id"]: m for m in result}
-        assert model_map["MiniMax-M2.7"]["max_tokens"] == 1000000
-        assert model_map["MiniMax-M2.5"]["max_tokens"] == 204800
-        assert model_map["MiniMax-M2.5-highspeed"]["max_tokens"] == 204800
+        assert model_map["MiniMax-M3"]["max_tokens"] == 512000
+        assert model_map["MiniMax-M2.7"]["max_tokens"] == 192000
+        assert model_map["MiniMax-M2.7-highspeed"]["max_tokens"] == 192000
 
     @pytest.mark.asyncio
     async def test_get_models_embedding_success(self, mocker: MockFixture):
