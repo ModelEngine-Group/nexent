@@ -8,9 +8,9 @@ from services.providers.base import AbstractModelProvider, _classify_provider_er
 
 # MiniMax known model context windows (tokens)
 MINIMAX_MODEL_CONTEXT = {
-    "MiniMax-M2.7": 1000000,
-    "MiniMax-M2.5": 204800,
-    "MiniMax-M2.5-highspeed": 204800,
+    "MiniMax-M3": 512000,
+    "MiniMax-M2.7": 192000,
+    "MiniMax-M2.7-highspeed": 192000,
 }
 
 
