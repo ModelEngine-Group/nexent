@@ -26,6 +26,15 @@ _mem0_stubs = {
     "mem0.configs.embeddings.base": MagicMock(),
 }
 
+_optional_sdk_stubs = {
+    "boto3": MagicMock(),
+    "botocore": MagicMock(),
+    "botocore.client": MagicMock(),
+    "botocore.exceptions": MagicMock(),
+    "minio": MagicMock(),
+    "minio.error": MagicMock(),
+}
+
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
 _test_root = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +45,9 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
+
+sys.modules.update({k: v for k, v in _mem0_stubs.items() if k not in sys.modules})
+sys.modules.update({k: v for k, v in _optional_sdk_stubs.items() if k not in sys.modules})
 
 _tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))
 os.makedirs(_tmp_root, exist_ok=True)
