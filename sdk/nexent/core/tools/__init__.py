@@ -24,6 +24,8 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .run_skill_script_tool import run_skill_script
 from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
+from .store_memory_tool import StoreMemoryTool
+from .search_memory_tool import SearchMemoryTool
 
 __all__ = [
     "MySqlTool",
@@ -53,5 +55,7 @@ __all__ = [
     "AnalyzeVideoTool",
     "run_skill_script",
     "read_skill_md",
-    "read_skill_config"
+    "read_skill_config",
+    "StoreMemoryTool",
+    "SearchMemoryTool",
 ]
