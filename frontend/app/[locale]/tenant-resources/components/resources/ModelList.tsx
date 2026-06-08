@@ -13,6 +13,7 @@ import { useMonitoringData, type TimeRange } from "@/hooks/useMonitoringData";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
+import { MODEL_TYPES } from "@/const/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
@@ -177,6 +178,31 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     return "#ff4d4f";
   };
 
+  const getModelTypeName = (type: ModelType) => {
+    switch (type) {
+      case MODEL_TYPES.LLM:
+        return t("model.type.llm");
+      case MODEL_TYPES.EMBEDDING:
+        return t("model.type.embedding");
+      case MODEL_TYPES.MULTI_EMBEDDING:
+        return t("model.type.multiEmbedding");
+      case MODEL_TYPES.RERANK:
+        return t("model.type.rerank");
+      case MODEL_TYPES.STT:
+        return t("model.type.stt");
+      case MODEL_TYPES.TTS:
+        return t("model.type.tts");
+      case MODEL_TYPES.VLM:
+        return t("model.type.imageUnderstanding");
+      case MODEL_TYPES.VLM2:
+        return t("model.type.imageGeneration");
+      case MODEL_TYPES.VLM3:
+        return t("model.type.videoUnderstanding");
+      default:
+        return t("model.type.unknown");
+    }
+  };
+
   const TEXT_MODEL_TYPES = ["llm", "vlm", "long_context"];
 
   const renderTextModelMetric = (
@@ -202,7 +228,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       dataIndex: "type",
       key: "type",
       width: 100,
-      render: (type: ModelType) => <Tag>{t(`tenantResources.models.type.${type}`)}</Tag>,
+      render: (type: ModelType) => <Tag>{getModelTypeName(type)}</Tag>,
     },
     {
       title: t("common.status"),
@@ -343,9 +369,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
             value={monitoringTimeRange}
             onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
             options={[
-              { label: "24h", value: "24h" },
-              { label: "7d", value: "7d" },
-              { label: "30d", value: "30d" },
+              { label: t("monitoring.dashboard.timeRange.24h"), value: "24h" },
+              { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
+              { label: t("monitoring.dashboard.timeRange.30d"), value: "30d" },
             ]}
           />
           <Button

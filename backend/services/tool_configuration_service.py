@@ -38,6 +38,7 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.image_service import get_video_understanding_model, get_vlm_model
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
@@ -68,12 +69,12 @@ def _create_mcp_transport(url: str, authorization_token: Optional[str] = None, c
         headers.update(custom_headers)
 
     if url_stripped.endswith("/sse"):
-        return SSETransport(url=url_stripped, headers=headers)
+        return SSETransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
     elif url_stripped.endswith("/mcp"):
-        return StreamableHttpTransport(url=url_stripped, headers=headers)
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
     else:
         # Default to StreamableHttpTransport for unrecognized formats
-        return StreamableHttpTransport(url=url_stripped, headers=headers)
+        return StreamableHttpTransport(url=url_stripped, headers=headers, httpx_client_factory=create_httpx_client)
 
 
 def python_type_to_json_schema(annotation: Any) -> str:
@@ -981,6 +982,7 @@ def import_openapi_service(
     tenant_id: str,
     user_id: str,
     service_description: str = None,
+    headers_template: Dict[str, Any] = None,
     force_update: bool = False
 ) -> Dict[str, Any]:
     """
@@ -994,6 +996,7 @@ def import_openapi_service(
         tenant_id: Tenant ID for multi-tenancy
         user_id: User ID for audit
         service_description: Optional service description (if not provided, reads from openapi_json.info.description)
+        headers_template: Optional default headers template
         force_update: If True, replace all existing tools for this service
 
     Returns:
@@ -1014,7 +1017,8 @@ def import_openapi_service(
         server_url=server_url,
         tenant_id=tenant_id,
         user_id=user_id,
-        description=service_description
+        description=service_description,
+        headers_template=headers_template,
     )
 
     logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")

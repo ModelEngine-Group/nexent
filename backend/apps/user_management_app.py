@@ -8,6 +8,7 @@ from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
+from consts.const import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 from consts.model import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
 from consts.exceptions import (
     NoInviteCodeException,
@@ -71,9 +72,14 @@ async def signup(request: UserSignUpRequest):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
     except ValidationError as e:
-        logging.warning(
-            f"User registration rejected by feature flag: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+        detail = str(e)
+        if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:
+            logging.warning(
+                "User registration rejected: asset owner invite requires OAuth")
+        else:
+            logging.warning(
+                f"User registration rejected by validation: {detail}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
     except UserRegistrationException as e:
         logging.error(
             f"User registration failed by registration service: {str(e)}")

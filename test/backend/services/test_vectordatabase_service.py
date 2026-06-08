@@ -125,6 +125,11 @@ class MockOpenAICompatibleEmbedding:
         pass
 
 
+class MockDashScopeMultimodalEmbedding:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
 class MockJinaEmbedding:
     def __init__(self, *args, **kwargs):
         pass
@@ -137,6 +142,7 @@ class MockBaseEmbedding:
 embedding_model_module.OpenAICompatibleEmbedding = MockOpenAICompatibleEmbedding
 embedding_model_module.JinaEmbedding = MockJinaEmbedding
 embedding_model_module.BaseEmbedding = MockBaseEmbedding
+embedding_model_module.DashScopeMultimodalEmbedding = MockDashScopeMultimodalEmbedding
 sys.modules['nexent.core.models.embedding_model'] = embedding_model_module
 
 # Mock nexent.core.models.rerank_model with proper class exports
@@ -1044,7 +1050,7 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
              "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch",
-             "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
+             "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "preserve_source_file": False},
             {"index_name": "index2", "embedding_model_name": "test-model",
              "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY",
              "tenant_id": "test_tenant"}
@@ -1071,6 +1077,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["group_ids"], [1, 2])
         # index2 has empty group_ids, so it gets the tenant default group [1]
         self.assertEqual(result["indices_info"][1]["group_ids"], [1])
+
+        # Verify preserve_source_file is included in indices_info
+        self.assertFalse(result["indices_info"][0]["preserve_source_file"])
+        self.assertTrue(result["indices_info"][1]["preserve_source_file"])
 
         self.mock_vdb_core.get_user_indices.assert_called_once_with("*")
         self.mock_vdb_core.get_indices_detail.assert_called_once_with(
@@ -2262,6 +2272,78 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index", "test_path")
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
+
+    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    def test_delete_source_file(self, mock_file_exists, mock_delete_file):
+        mock_delete_file.return_value = {"success": True}
+        result = ElasticSearchService.delete_source_file(
+            "knowledge_base/doc.pdf"
+        )
+        self.assertTrue(result["deleted_minio"])
+        mock_delete_file.assert_called()
+
+    @patch(
+        'backend.services.vectordatabase_service.get_all_files_status',
+        new_callable=AsyncMock,
+    )
+    @patch('backend.services.vectordatabase_service.delete_file')
+    def test_delete_document_by_scope_source_only(
+        self, mock_delete_file, mock_get_status
+    ):
+        mock_get_status.return_value = {
+            "knowledge_base/doc.pdf": {"state": "COMPLETED"}
+        }
+        mock_delete_file.return_value = {"success": True}
+
+        result = asyncio.run(
+            ElasticSearchService.delete_document_by_scope(
+                "test_index",
+                "knowledge_base/doc.pdf",
+                "source_only",
+                self.mock_vdb_core,
+            )
+        )
+
+        self.assertEqual(result["scope"], "source_only")
+        self.assertEqual(result["deleted_es_count"], 0)
+        self.mock_vdb_core.delete_documents.assert_not_called()
+
+    @patch(
+        'backend.services.vectordatabase_service.get_all_files_status',
+        new_callable=AsyncMock,
+    )
+    def test_delete_document_by_scope_rejects_processing(
+        self, mock_get_status
+    ):
+        mock_get_status.return_value = {
+            "knowledge_base/doc.pdf": {"state": "PROCESSING"}
+        }
+
+        with self.assertRaises(ValueError):
+            asyncio.run(
+                ElasticSearchService.delete_document_by_scope(
+                    "test_index",
+                    "knowledge_base/doc.pdf",
+                    "source_only",
+                    self.mock_vdb_core,
+                )
+            )
+
+    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    def test_compute_source_available_completed_missing_minio(self, _mock_exists):
+        available = ElasticSearchService._compute_source_available({
+            "path_or_url": "knowledge_base/doc.pdf",
+            "status": "COMPLETED",
+        })
+        self.assertFalse(available)
+
+    def test_compute_source_available_processing_defaults_true(self):
+        available = ElasticSearchService._compute_source_available({
+            "path_or_url": "knowledge_base/doc.pdf",
+            "status": "PROCESSING",
+        })
+        self.assertTrue(available)
 
     @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.get_redis_service')
@@ -6688,6 +6770,521 @@ class TestCoverageImprovement(unittest.TestCase):
 
         self.assertEqual(result["indices"], [])
         self.assertEqual(result["count"], 0)
+
+    # ===== Coverage improvement: remaining uncovered branches =====
+
+    # Tests for _is_multimodal_by_model_id - exception branch (lines 118-124)
+    def test_is_multimodal_by_model_id_exception(self):
+        """Test _is_multimodal_by_model_id returns False when get_model_by_model_id raises."""
+        from backend.services.vectordatabase_service import _is_multimodal_by_model_id
+        with patch('backend.services.vectordatabase_service.get_model_by_model_id',
+                   side_effect=Exception("DB error")):
+            result = _is_multimodal_by_model_id(model_id=42, tenant_id="tenant-1")
+        self.assertEqual(result, False)
+
+    # Tests for _normalize_model_type - "embedding" branch (line 314)
+    def test_normalize_model_type_embedding(self):
+        """Test _normalize_model_type normalizes 'embedding' correctly."""
+        from backend.services.vectordatabase_service import _normalize_model_type
+        result = _normalize_model_type("embedding")
+        self.assertEqual(result, "embedding")
+
+    # Tests for _create_embedding_model - DashScopeMultimodalEmbedding branch (line 340)
+    def test_create_embedding_model_dashscope(self):
+        """Test _create_embedding_model creates DashScopeMultimodalEmbedding when model_factory is dashscope."""
+        from backend.services.vectordatabase_service import _create_embedding_model
+        with patch('backend.services.vectordatabase_service.get_model_name_from_config',
+                   return_value="bge-m3"):
+            result = _create_embedding_model({
+                "model_name": "bge-m3",
+                "model_type": "multi_embedding",
+                "model_factory": "dashscope",
+                "api_key": "test-key",
+                "base_url": "https://api.example.com",
+            })
+        # Should return a DashScopeMultimodalEmbedding instance (mocked)
+        self.assertIsNotNone(result)
+
+    # Tests for create_knowledge_base - is_multimodal=False with embedding_model_name (line 668)
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_is_multimodal_false_with_model(self, mock_create_record, mock_get_embedding):
+        """Test create_knowledge_base when is_multimodal=False and embedding_model_name is provided (line 668)."""
+        mock_get_embedding.return_value = (None, None)
+        mock_create_record.return_value = {
+            "knowledge_id": 99, "index_name": "99-uuid", "knowledge_name": "kb-nomodal"
+        }
+        self.mock_vdb_core.create_index.return_value = True
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb-nomodal",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            is_multimodal=False,
+            embedding_model_name="text-embedding-3-small",
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_get_embedding.assert_called_once_with("tenant-1", "text-embedding-3-small", "embedding")
+
+    # Tests for delete_index - MINIO file deletion loop (lines 862-871)
+    @pytest.mark.asyncio
+    async def test_delete_index_with_minio_files(self):
+        """Test delete_index deletes MINIO files during index deletion (lines 862-871)."""
+        self.mock_vdb_core.delete_index.return_value = True
+        mock_delete_file = MagicMock(return_value={"success": True})
+        files_payload = {
+            "files": [
+                {"path_or_url": "bucket/file1.txt", "source_type": "minio"},
+                {"path_or_url": "bucket/file2.pdf", "source_type": "minio"},
+            ]
+        }
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, return_value=files_payload), \
+                patch('backend.services.vectordatabase_service.delete_file', mock_delete_file), \
+                patch('backend.services.vectordatabase_service.delete_knowledge_record', return_value=True):
+            result = await ElasticSearchService.delete_index(
+                index_name="test-index",
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(mock_delete_file.call_count, 2)
+
+    @pytest.mark.asyncio
+    async def test_delete_index_minio_deletion_error_logs_and_continues(self):
+        """Test delete_index logs MINIO error but continues (lines 869-871)."""
+        self.mock_vdb_core.delete_index.return_value = True
+        files_payload = {"files": [{"path_or_url": "bucket/bad.txt", "source_type": "minio"}]}
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, return_value=files_payload), \
+                patch('backend.services.vectordatabase_service.delete_file',
+                      side_effect=Exception("MinIO error")), \
+                patch('backend.services.vectordatabase_service.delete_knowledge_record', return_value=True), \
+                patch('backend.services.vectordatabase_service.logger') as mock_logger:
+            result = await ElasticSearchService.delete_index(
+                index_name="test-index",
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+            )
+
+        self.assertEqual(result["status"], "success")
+        mock_logger.error.assert_called()
+
+    # Tests for list_indices - ASSET_OWNER record with SU/ADMIN/SPEED/DEV (lines 975-978)
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
+    @patch('backend.services.vectordatabase_service.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
+    def test_list_indices_asset_owner_with_su_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices ASSET_OWNER record gets READ permission when SU (lines 975-978)."""
+        mock_user_tenant.return_value = {"user_role": "SU", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = []
+        mock_get_info.return_value = [{
+            "index_name": "asset-kb",
+            "knowledge_sources": "elasticsearch",
+            "ingroup_permission": "EDIT",
+            "embedding_model_name": None,
+            "embedding_model_id": None,
+            "tenant_id": "asset_owner_tenant_id",  # matches ASSET_OWNER_TENANT_ID
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["asset-kb"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "asset-kb": {"base_info": {"embedding_model": ""}}
+        }
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="su-user",
+            vdb_core=self.mock_vdb_core,
+            include_stats=True,
+        )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
+    @patch('backend.services.vectordatabase_service.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_asset_owner_with_dev_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices ASSET_OWNER record gets READ permission when DEV (lines 975-978)."""
+        mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = []
+        mock_get_info.return_value = [{
+            "index_name": "asset-kb-2",
+            "knowledge_sources": "elasticsearch",
+            "ingroup_permission": "EDIT",
+            "embedding_model_name": None,
+            "embedding_model_id": None,
+            "tenant_id": "asset_owner_tenant_id",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["asset-kb-2"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "asset-kb-2": {"base_info": {"embedding_model": ""}}
+        }
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="dev-user",
+            vdb_core=self.mock_vdb_core,
+            include_stats=True,
+        )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
+    @patch('backend.services.vectordatabase_service.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
+    def test_list_indices_asset_owner_with_speed_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices ASSET_OWNER record gets READ permission when SPEED (lines 975-978)."""
+        mock_user_tenant.return_value = {"user_role": "SPEED", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = []
+        mock_get_info.return_value = [{
+            "index_name": "asset-kb-3",
+            "knowledge_sources": "elasticsearch",
+            "ingroup_permission": "EDIT",
+            "embedding_model_name": None,
+            "embedding_model_id": None,
+            "tenant_id": "asset_owner_tenant_id",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["asset-kb-3"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "asset-kb-3": {"base_info": {"embedding_model": ""}}
+        }
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="speed-user",
+            vdb_core=self.mock_vdb_core,
+            include_stats=True,
+        )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    # Tests for list_indices - PRIVATE permission (lines 1021-1022)
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_private_permission_hidden(self, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices excludes KB when ingroup_permission is PRIVATE (lines 1021-1022)."""
+        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = [1]
+        mock_get_info.return_value = [{
+            "index_name": "private-kb",
+            "knowledge_sources": "elasticsearch",
+            "group_ids": "1",
+            "created_by": "other-user",
+            "ingroup_permission": "PRIVATE",  # PRIVATE - should be hidden
+            "tenant_id": "tenant-1",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["private-kb"]
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="user-1",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        # PRIVATE KB should not appear in results
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["indices"], [])
+
+    # Tests for list_indices - group intersection scenario (lines 1001, 1013, 1016)
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_both_empty_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices backward compat when both kb and user groups are empty (line 999-1001)."""
+        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = []  # Empty user groups
+        mock_get_info.return_value = [{
+            "index_name": "legacy-kb",
+            "knowledge_sources": "elasticsearch",
+            "group_ids": "",  # Empty KB groups
+            "created_by": "other-user",
+            "ingroup_permission": "READ_ONLY",
+            "tenant_id": "tenant-1",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["legacy-kb"]
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="user-1",
+            vdb_core=self.mock_vdb_core,
+        )
+
+        # Both empty = intersecting for backward compat
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices"][0], "legacy-kb")
+
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_user_is_creator_gets_creator_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices grants CREATOR permission when user is the creator (line 1011-1013)."""
+        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = [1]
+        mock_get_info.return_value = [{
+            "index_name": "my-kb",
+            "knowledge_sources": "elasticsearch",
+            "group_ids": "1",
+            "created_by": "user-1",  # User IS the creator
+            "ingroup_permission": "READ_ONLY",
+            "embedding_model_name": None,
+            "embedding_model_id": None,
+            "tenant_id": "tenant-1",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["my-kb"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "my-kb": {"base_info": {"embedding_model": ""}}
+        }
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="user-1",
+            vdb_core=self.mock_vdb_core,
+            include_stats=True,
+        )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "CREATOR")
+
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_non_creator_edit_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Test list_indices grants EDIT permission when user is not creator but ingroup_permission is EDIT (line 1014-1016)."""
+        mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
+        mock_group_ids.return_value = [1]
+        mock_get_info.return_value = [{
+            "index_name": "shared-kb",
+            "knowledge_sources": "elasticsearch",
+            "group_ids": "1",
+            "created_by": "other-user",  # Not the creator
+            "ingroup_permission": "EDIT",  # But EDIT permission
+            "embedding_model_name": None,
+            "embedding_model_id": None,
+            "tenant_id": "tenant-1",
+        }]
+        self.mock_vdb_core.get_user_indices.return_value = ["shared-kb"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "shared-kb": {"base_info": {"embedding_model": ""}}
+        }
+
+        result = ElasticSearchService.list_indices(
+            target_tenant_id="tenant-1",
+            user_id="user-1",
+            vdb_core=self.mock_vdb_core,
+            include_stats=True,
+        )
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
+
+    # Tests for index_documents - skip non-dict items (lines 1156-1158)
+    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
+    def test_index_documents_skips_non_dict_items(self, mock_update_last_doc):
+        """Test index_documents skips non-dictionary items in data list (lines 1156-1158)."""
+        mock_embedding = MagicMock()
+        mock_embedding.model = "test-model"
+        mock_embedding.model_type = "text"
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 1
+
+        with patch('backend.services.vectordatabase_service.get_knowledge_record',
+                   return_value={"tenant_id": "tenant-1"}), \
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tcm:
+            mock_tcm.get_model_config.return_value = {"chunk_batch": 10}
+            result = ElasticSearchService.index_documents(
+                embedding_model=mock_embedding,
+                index_name="test-index",
+                data=[
+                    "not a dictionary",  # Should be skipped
+                    {"content": "valid document"},
+                    None,  # Should be skipped
+                ],
+                vdb_core=self.mock_vdb_core,
+            )
+
+        self.assertTrue(result["success"])
+        # vectorize_documents should only be called with 1 document (the valid dict)
+        call_args = self.mock_vdb_core.vectorize_documents.call_args
+        documents_passed = call_args.kwargs["documents"]
+        self.assertEqual(len(documents_passed), 1)
+
+    # Tests for index_documents - image bytes fetch exception and raise (lines 1206-1214)
+    @patch('backend.services.vectordatabase_service.get_file_stream')
+    def test_index_documents_image_fetch_exception_and_raise(self, mock_get_file):
+        """Test index_documents logs and re-raises exception when fetching image bytes fails (lines 1206-1214)."""
+        mock_embedding = MagicMock()
+        mock_embedding.model = "test-model"
+        mock_embedding.model_type = "text"
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 1
+        mock_get_file.side_effect = Exception("MinIO unavailable")
+
+        with patch('backend.services.vectordatabase_service.get_knowledge_record',
+                   return_value={"tenant_id": "tenant-1"}), \
+                patch('backend.services.vectordatabase_service.tenant_config_manager.get_model_config',
+                      return_value={"chunk_batch": 10}), \
+                patch('backend.services.vectordatabase_service.logger') as mock_logger:
+            with self.assertRaises(Exception) as ctx:
+                ElasticSearchService.index_documents(
+                    embedding_model=mock_embedding,
+                    index_name="test-index",
+                    data=[{
+                        "content": "test",
+                        "path_or_url": "s3://bucket/image.png",
+                        "source_type": "minio",
+                        "metadata": {"image_url": "s3://bucket/image.png"}
+                    }],
+                    vdb_core=self.mock_vdb_core,
+                )
+            self.assertIn("MinIO unavailable", str(ctx.exception))
+            # Error should be logged before re-raising
+            mock_logger.error.assert_called()
+
+    # Tests for list_files - file_size exception (lines 1382-1386)
+    @pytest.mark.asyncio
+    async def test_list_files_file_size_exception(self):
+        """Test list_files handles exception when getting file size (lines 1382-1386)."""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.get_documents_detail.return_value = []
+        mock_vdb_core.multi_search.return_value = {"responses": []}
+
+        async def mock_get_files(index_name):
+            return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
+
+        with patch('backend.services.vectordatabase_service.get_all_files_status', mock_get_files), \
+                patch('backend.services.vectordatabase_service.get_file_size',
+                      side_effect=Exception("Storage error")):
+            result = await ElasticSearchService.list_files(
+                index_name="test-index",
+                include_chunks=False,
+                vdb_core=mock_vdb_core,
+            )
+
+        self.assertIn("files", result)
+        self.assertGreater(len(result["files"]), 0)
+        # file_size should be 0 due to exception
+        self.assertEqual(result["files"][0].get("file_size"), 0)
+
+    # Tests for list_files - redis error info exception (lines 1414-1421)
+    @pytest.mark.asyncio
+    async def test_list_files_redis_error_info_exception(self):
+        """Test list_files handles exception when getting error info from Redis (lines 1414-1421)."""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.get_documents_detail.return_value = []
+
+        async def mock_get_files(index_name):
+            return {"failed_file.txt": {"state": "PROCESS_FAILED", "latest_task_id": "task-42", "source_type": "minio"}}
+
+        with patch('backend.services.vectordatabase_service.get_all_files_status', mock_get_files), \
+                patch('backend.services.vectordatabase_service.get_redis_service') as mock_get_redis:
+            mock_redis_instance = MagicMock()
+            mock_redis_instance.get_error_info.side_effect = Exception("Redis error")
+            mock_get_redis.return_value = mock_redis_instance
+            result = await ElasticSearchService.list_files(
+                index_name="test-index",
+                include_chunks=False,
+                vdb_core=mock_vdb_core,
+            )
+
+        self.assertIn("files", result)
+
+    # Tests for list_files - msearch response error (lines 1459-1462)
+    @pytest.mark.asyncio
+    async def test_list_files_msearch_response_error(self):
+        """Test list_files handles error in msearch response (lines 1459-1462)."""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.get_documents_detail.return_value = [
+            {"path_or_url": "file1.txt", "filename": "file1.txt", "file_size": 100,
+             "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 1}
+        ]
+        mock_vdb_core.multi_search.return_value = {
+            "responses": [{"error": "Search failed"}]  # Error in response
+        }
+
+        async def mock_get_files(index_name):
+            return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
+
+        with patch('backend.services.vectordatabase_service.get_all_files_status', mock_get_files):
+            result = await ElasticSearchService.list_files(
+                index_name="test-index",
+                include_chunks=True,
+                vdb_core=mock_vdb_core,
+            )
+
+        self.assertEqual(len(result["files"]), 1)
+        self.assertEqual(result["files"][0]["chunks"], [])
+
+    # Tests for list_files - outer exception (lines 1497-1498)
+    @pytest.mark.asyncio
+    async def test_list_files_outer_exception(self):
+        """Test list_files raises exception from get_documents_detail (lines 1497-1498)."""
+        mock_vdb_core = MagicMock()
+        mock_vdb_core.get_documents_detail.side_effect = Exception("Elasticsearch unavailable")
+
+        with patch('backend.services.vectordatabase_service.get_all_files_status',
+                   new_callable=AsyncMock, return_value={}):
+            with self.assertRaises(Exception) as ctx:
+                await ElasticSearchService.list_files(
+                    index_name="test-index",
+                    include_chunks=False,
+                    vdb_core=mock_vdb_core,
+                )
+        self.assertIn("Elasticsearch unavailable", str(ctx.exception))
+
+    # Tests for search_hybrid - outer exception (lines 2038-2043)
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    def test_search_hybrid_outer_exception(self, mock_get_model):
+        """Test search_hybrid handles unexpected exceptions (lines 2038-2043)."""
+        mock_model = MagicMock()
+        mock_get_model.return_value = (mock_model, 1, {"status": "ok"})
+        self.mock_vdb_core.hybrid_search.side_effect = RuntimeError("Unexpected error")
+
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.search_hybrid(
+                index_names=["test-index"],
+                query="test query",
+                tenant_id="tenant-1",
+                top_k=10,
+                vdb_core=self.mock_vdb_core,
+            )
+        self.assertIn("Error executing hybrid search", str(ctx.exception))
+
+    # Tests for search_hybrid - KnowledgeBaseNeedsModelConfigError (lines 1998-2004)
+    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    def test_search_hybrid_needs_config_raises(self, mock_get_model):
+        """Test search_hybrid raises KnowledgeBaseNeedsModelConfigError when model not configured."""
+        mock_get_model.return_value = (None, None, {"status": "needs_config"})
+        with self.assertRaises(Exception) as ctx:
+            ElasticSearchService.search_hybrid(
+                index_names=["unconfigured-kb"],
+                query="test",
+                tenant_id="tenant-1",
+                top_k=10,
+                vdb_core=self.mock_vdb_core,
+            )
+        # Should be wrapped as a generic Exception by search_hybrid's outer handler
+        self.assertIn("embedding model", str(ctx.exception).lower())
 
 
 if __name__ == '__main__':

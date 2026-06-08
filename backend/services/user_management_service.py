@@ -29,14 +29,20 @@ from consts.const import (
     ASSET_OWNER_TENANT_ID,
     ASSET_OWNER_INVITE_CODE_TYPE,
     ASSET_OWNER_ROLE,
+    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
 )
 
 from services.asset_owner_visibility import (
     filter_accessible_routes_for_asset_owner_feature,
     require_asset_owner_enabled,
 )
-from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    UnauthorizedError,
+    ValidationError,
+)
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 
@@ -191,12 +197,14 @@ async def signup_user_with_invitation(email: EmailStr,
                 user_role = "DEV"
             elif code_type == ASSET_OWNER_INVITE_CODE_TYPE:
                 require_asset_owner_enabled()
-                user_role = ASSET_OWNER_ROLE
+                raise ValidationError(ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL)
 
             logging.info(
                 f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
 
         except IncorrectInviteCodeException:
+            raise
+        except ValidationError:
             raise
         except Exception as e:
             logging.error(

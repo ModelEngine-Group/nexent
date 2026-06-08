@@ -312,6 +312,16 @@ export function RegisterModal() {
             value: values.inviteCode,
           },
         ]);
+      } else if (errorType === "ASSET_OWNER_USE_OAUTH") {
+        const errorMsg = t("auth.assetOwnerUseOAuth");
+        message.error(errorMsg);
+        form.setFields([
+          {
+            name: "inviteCode",
+            errors: [errorMsg],
+            value: values.inviteCode,
+          },
+        ]);
       }
       // Invalid email format
       else if (errorType === "INVALID_EMAIL_FORMAT") {

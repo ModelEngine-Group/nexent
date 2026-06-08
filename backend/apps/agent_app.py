@@ -607,7 +607,15 @@ async def list_published_agents_api(
     """
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, request)
-        return await list_published_agents_impl(tenant_id=tenant_id, user_id=user_id)
+        agent_list = await list_published_agents_impl(
+            tenant_id=tenant_id, user_id=user_id
+        )
+        if tenant_id != ASSET_OWNER_TENANT_ID:
+            asset_agent_list = await list_published_agents_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+            )
+            return agent_list + asset_agent_list
+        return agent_list
     except Exception as e:
         logger.error(f"Published agents list error: {str(e)}")
         raise HTTPException(

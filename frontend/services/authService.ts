@@ -200,7 +200,8 @@ export const authService = {
       if (!response.ok) {
         return {
           error: {
-            message: data.message || "Registration failed",
+            message:
+              data.detail || data.message || "Registration failed",
             code: response.status,
             data: data.data || null,
           },

@@ -332,6 +332,10 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
         request.related_agent_ids = None
     if not hasattr(request, "enabled_tool_ids"):
         request.enabled_tool_ids = None
+    if not hasattr(request, "example_questions"):
+        request.example_questions = None
+    if not hasattr(request, "greeting_message"):
+        request.greeting_message = None
     return request
 
 
@@ -744,6 +748,7 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
     request.display_name = "Test Display Name"
     request.enabled_tool_ids = None
     request.related_agent_ids = None
+    request.example_questions = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
@@ -8685,6 +8690,60 @@ async def test_list_all_agent_info_impl_admin_gets_edit_permission(
 @patch("backend.services.agent_service.get_user_tenant_by_user_id")
 @patch("backend.services.agent_service.query_group_ids_by_user")
 @patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """ASSET_OWNER-scoped agents are READ_ONLY for non-ASSET_OWNER roles even when admin."""
+    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+
+    mock_agents = [
+        {
+            "agent_id": 99,
+            "name": "Asset Agent",
+            "display_name": "Asset Agent",
+            "description": "Asset owner scoped",
+            "enabled": True,
+            "group_ids": "1",
+            "ingroup_permission": PERMISSION_EDIT,
+            "created_by": "admin_user",
+            "tenant_id": ASSET_OWNER_TENANT_ID,
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = [1]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        return [int(p.strip()) for p in str(x).split(",") if p.strip().isdigit()]
+
+    mock_convert_list.side_effect = convert_side_effect
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(
+        tenant_id=ASSET_OWNER_TENANT_ID, user_id="admin_user"
+    )
+
+    assert len(result) == 1
+    assert result[0]["permission"] == PERMISSION_READ
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_non_creator_no_group_overlap_hidden(
     mock_query_agents,
     mock_query_groups,
@@ -9000,6 +9059,8 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     mock_query_skills.return_value = []
     mock_create_skill.side_effect = Exception("Skill update failed")
@@ -9268,6 +9329,8 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Make query_sub_agents_id_list raise exception during circular check
     mock_query_sub.side_effect = Exception("Query error")
@@ -9317,6 +9380,8 @@ async def test_update_agent_info_impl_related_external_agents(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Mock current relations (empty)
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent', return_value=[]):
@@ -9367,6 +9432,8 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Mock current relations has the ID
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent',
@@ -9418,6 +9485,8 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     # Mock current relations includes the same ID - add should raise ValueError (already exists)
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent',
@@ -9530,6 +9599,8 @@ async def test_update_agent_info_impl_skill_unselected(
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     result = await update_agent_info_impl(mock_request, authorization="Bearer token")
 
@@ -9878,8 +9949,33 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
     mock_request.prompt_template_name = None
+    mock_request.example_questions = None
+    mock_request.greeting_message = None
 
     with patch.object(ag_svc.a2a_agent_db, 'list_external_relations_by_local_agent',
                      side_effect=Exception("DB error")):
         with pytest.raises(ValueError, match="Failed to update related external agents"):
             await update_agent_info_impl(mock_request, authorization="Bearer token")
+
+
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_example_questions_exceed_limit(mock_get_current_user_info):
+    """Test update_agent_info_impl raises AppException when example_questions exceeds 6 items."""
+    from consts.error_code import ErrorCode
+    from consts.exceptions import AppException
+
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.model_id = None
+    request.example_questions = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"]
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    with pytest.raises(AppException) as exc_info:
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
