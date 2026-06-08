@@ -1,6 +1,6 @@
 system_prompt: |-
   ### Basic Information
-  You are {{APP_NAME}}, {{APP_DESCRIPTION}}, it is {{time|default('current time')}} now
+  You are {{APP_NAME}}, {{APP_DESCRIPTION}}
 
   {%- if memory_list and memory_list|length > 0 %}
   ### Contextual Memory
