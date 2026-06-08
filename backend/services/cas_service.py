@@ -5,10 +5,13 @@ import secrets
 import ssl
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import Element
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
+
+import defusedxml.ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from consts.const import (
     CAS_CA_BUNDLE,
@@ -141,7 +144,7 @@ def validate_service_ticket(ticket: str, service_url: str) -> CasPrincipal:
 def parse_service_validate_response(xml_text: str, fallback_session_index: str = "") -> CasPrincipal:
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
+    except (ET.ParseError, DefusedXmlException) as exc:
         raise CasAuthenticationError("Invalid CAS validation response") from exc
 
     failure = _find_first(root, "authenticationFailure")
@@ -187,7 +190,7 @@ def parse_logout_request(logout_request: str) -> Dict[str, str]:
         return {"cas_user_id": "", "session_index": ""}
     try:
         root = ET.fromstring(logout_request)
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         logger.warning("Invalid CAS logoutRequest XML")
         return {"cas_user_id": "", "session_index": ""}
 
@@ -357,19 +360,19 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _find_first(node: ET.Element, name: str) -> Optional[ET.Element]:
+def _find_first(node: Element, name: str) -> Optional[Element]:
     for child in node.iter():
         if _local_name(child.tag) == name:
             return child
     return None
 
 
-def _get_child_text(node: ET.Element, name: str) -> str:
+def _get_child_text(node: Element, name: str) -> str:
     found = _find_first(node, name)
     return (found.text or "").strip() if found is not None else ""
 
 
-def _extract_attributes(attrs_node: ET.Element) -> Dict[str, str]:
+def _extract_attributes(attrs_node: Element) -> Dict[str, str]:
     attrs: Dict[str, str] = {}
     for child in list(attrs_node):
         value = (child.text or "").strip()

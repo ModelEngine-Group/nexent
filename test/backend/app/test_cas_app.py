@@ -20,6 +20,7 @@ _MODULES_TO_RESTORE = ["services.cas_service"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
 cas_service_mock = MagicMock()
+cas_service_mock.CAS_SERVER_URL = "https://cas.example.com"
 cas_service_mock.CasAuthenticationError = _CasAuthenticationError
 cas_service_mock.get_cas_config = MagicMock(
     return_value={
@@ -68,6 +69,9 @@ client = TestClient(app)
 class TestCasApp(unittest.TestCase):
     def tearDown(self):
         cas_service_mock.build_login_url.side_effect = None
+        cas_service_mock.build_login_url.return_value = "https://cas.example.com/login?service=x"
+        cas_service_mock.build_renew_url.side_effect = None
+        cas_service_mock.build_renew_url.return_value = "https://cas.example.com/login?gateway=true"
         cas_service_mock.login_with_ticket.side_effect = None
         cas_service_mock.revoke_from_logout_request.reset_mock()
 
@@ -93,6 +97,16 @@ class TestCasApp(unittest.TestCase):
         response = client.get("/user/cas/login")
 
         self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.json()["detail"], "CAS login is not available")
+        self.assertNotIn("CAS is not configured", response.text)
+
+    def test_login_rejects_redirect_url_outside_configured_cas_server(self):
+        cas_service_mock.build_login_url.return_value = "https://evil.example.com/login?service=x"
+
+        response = client.get("/user/cas/login?redirect=/chat", follow_redirects=False)
+
+        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.json()["detail"], "CAS login is not available")
 
     def test_callback_returns_session_payload(self):
         response = client.get("/user/cas/callback?ticket=ST-1&redirect=/chat")
@@ -109,6 +123,18 @@ class TestCasApp(unittest.TestCase):
         response = client.get("/user/cas/callback?ticket=bad")
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+        self.assertEqual(response.json()["detail"], "CAS authentication failed")
+        self.assertNotIn("bad ticket", response.text)
+
+    def test_renew_does_not_expose_cas_configuration_exception(self):
+        cas_service_mock.build_renew_url.side_effect = _CasAuthenticationError("internal CAS config path")
+
+        response = client.get("/user/cas/renew")
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertIn("cas-renew-failed", response.text)
+        self.assertIn("CAS renew failed", response.text)
+        self.assertNotIn("internal CAS config path", response.text)
 
     def test_renew_callback_without_ticket_posts_failure_to_iframe_parent(self):
         response = client.get("/user/cas/renew_callback")

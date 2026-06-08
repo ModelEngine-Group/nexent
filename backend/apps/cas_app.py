@@ -2,12 +2,13 @@ import html
 import logging
 from http import HTTPStatus
 from typing import Optional
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from services.cas_service import (
+    CAS_SERVER_URL,
     CasAuthenticationError,
     build_login_url,
     build_renew_url,
@@ -32,9 +33,11 @@ async def config():
 @router.get("/login")
 async def login(redirect: str = Query("/", description="URL to return to after login")):
     try:
-        return RedirectResponse(url=build_login_url(redirect), status_code=HTTPStatus.FOUND)
+        login_url = _require_cas_server_redirect(build_login_url(redirect))
+        return RedirectResponse(url=login_url, status_code=HTTPStatus.FOUND)
     except CasAuthenticationError as exc:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        logger.warning("CAS login rejected: %s", exc)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="CAS login is not available")
 
 
 @router.get("/callback")
@@ -46,7 +49,8 @@ async def callback(ticket: str = "", redirect: str = "/"):
             content={"message": "CAS login successful", "data": result},
         )
     except CasAuthenticationError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+        logger.warning("CAS callback rejected: %s", exc)
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="CAS authentication failed")
     except Exception as exc:
         logger.error(f"CAS callback failed: {exc}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="CAS login failed")
@@ -62,7 +66,8 @@ async def renew():
     try:
         return RedirectResponse(url=build_renew_url(), status_code=HTTPStatus.FOUND)
     except CasAuthenticationError as exc:
-        return _renew_html(False, str(exc))
+        logger.warning("CAS renew rejected: %s", exc)
+        return _renew_html(False, "CAS renew failed")
 
 
 @router.get("/renew_callback")
@@ -135,3 +140,17 @@ def _renew_html(success: bool, reason: str = "") -> HTMLResponse:
 window.parent && window.parent.postMessage({{ type: "cas-renew-{status}", reason: "{safe_reason}" }}, window.location.origin);
 </script></body></html>""",
     )
+
+
+def _require_cas_server_redirect(url: str) -> str:
+    parsed_url = urlsplit(url)
+    parsed_cas = urlsplit(CAS_SERVER_URL)
+    if (
+        parsed_url.scheme not in {"http", "https"}
+        or not parsed_url.netloc
+        or parsed_url.scheme != parsed_cas.scheme
+        or parsed_url.netloc != parsed_cas.netloc
+    ):
+        logger.warning("Blocked CAS redirect outside configured server: %s", url)
+        raise CasAuthenticationError("Invalid CAS redirect URL")
+    return url

@@ -25,6 +25,7 @@ dependencies = [
     "langchain>=0.3.26",
     "scikit-learn>=1.0.0",
     "numpy>=1.24.0",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]

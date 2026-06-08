@@ -107,6 +107,19 @@ class TestCasServiceParsing(unittest.TestCase):
         with self.assertRaises(CasAuthenticationError):
             parse_service_validate_response(xml)
 
+    def test_parse_service_validate_response_rejects_xml_entities(self):
+        xml = """<?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe "expanded-user">]>
+        <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+          <cas:authenticationSuccess>
+            <cas:user>&xxe;</cas:user>
+          </cas:authenticationSuccess>
+        </cas:serviceResponse>
+        """
+
+        with self.assertRaises(CasAuthenticationError):
+            parse_service_validate_response(xml)
+
     def test_parse_logout_request_supports_user_and_session_index(self):
         xml = """
         <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
@@ -120,6 +133,20 @@ class TestCasServiceParsing(unittest.TestCase):
 
         self.assertEqual(result["cas_user_id"], "cas-user-1")
         self.assertEqual(result["session_index"], "ST-123")
+
+    def test_parse_logout_request_rejects_xml_entities(self):
+        xml = """<?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe "cas-user-1">]>
+        <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+          xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+          <saml:NameID>&xxe;</saml:NameID>
+          <samlp:SessionIndex>ST-123</samlp:SessionIndex>
+        </samlp:LogoutRequest>
+        """
+
+        result = parse_logout_request(xml)
+
+        self.assertEqual(result, {"cas_user_id": "", "session_index": ""})
 
     def test_revoke_logout_request_falls_back_to_session_index_when_name_id_misses(self):
         xml = """
