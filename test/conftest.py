@@ -26,14 +26,7 @@ _mem0_stubs = {
     "mem0.configs.embeddings.base": MagicMock(),
 }
 
-_optional_sdk_stubs = {
-    "boto3": MagicMock(),
-    "botocore": MagicMock(),
-    "botocore.client": MagicMock(),
-    "botocore.exceptions": MagicMock(),
-    "minio": MagicMock(),
-    "minio.error": MagicMock(),
-}
+_optional_sdk_stubs = {}
 
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
