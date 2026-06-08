@@ -1,4 +1,7 @@
 from io import BytesIO
+import sys
+import types
+from pathlib import Path
 
 import pytest
 
@@ -6,6 +9,34 @@ pytest.importorskip("ijson")
 pytest.importorskip("ebooklib")
 pytest.importorskip("openpyxl")
 pytest.importorskip("pypdf")
+
+fake_unstructured = types.ModuleType("unstructured_inference")
+fake_models = types.ModuleType("unstructured_inference.models")
+fake_tables = types.ModuleType("unstructured_inference.models.tables")
+fake_tables.tables_agent = types.SimpleNamespace(model=None)
+fake_logger = types.ModuleType("unstructured_inference.logger")
+fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
+fake_models.tables = fake_tables
+fake_unstructured.models = fake_models
+sys.modules.setdefault("unstructured_inference", fake_unstructured)
+sys.modules.setdefault("unstructured_inference.models", fake_models)
+sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
+sys.modules.setdefault("unstructured_inference.logger", fake_logger)
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sdk_pkg = types.ModuleType("sdk")
+sdk_pkg.__path__ = [str(REPO_ROOT / "sdk")]
+sdk_pkg = sys.modules.setdefault("sdk", sdk_pkg)
+
+nexent_pkg = types.ModuleType("sdk.nexent")
+nexent_pkg.__path__ = [str(REPO_ROOT / "sdk" / "nexent")]
+nexent_pkg = sys.modules.setdefault("sdk.nexent", nexent_pkg)
+sdk_pkg.nexent = nexent_pkg
+
+data_process_pkg = types.ModuleType("sdk.nexent.data_process")
+data_process_pkg.__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "data_process")]
+data_process_pkg = sys.modules.setdefault("sdk.nexent.data_process", data_process_pkg)
+nexent_pkg.data_process = data_process_pkg
 
 from sdk.nexent.data_process.file_splitter import FileSplitter
 
