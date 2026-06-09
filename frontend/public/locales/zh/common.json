@@ -1070,6 +1070,7 @@
   "auth.accessDenied": "您没有权限访问此页面",
   "auth.oauthDivider": "或使用第三方登录",
   "auth.oauthLogin": "{{provider}} 登录",
+  "auth.casLogin": "{{provider}} 登录",
   "auth.oauthLoginFailed": "第三方登录失败：{{error}}",
   "auth.oauthLoginFailedGeneric": "第三方登录失败，请重试",
   "auth.oauthCompleteTitle": "补充账号信息",
