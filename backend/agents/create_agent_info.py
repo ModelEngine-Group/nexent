@@ -433,25 +433,6 @@ async def create_agent_config(
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
-    context_components = build_context_components(
-        duty=duty_prompt,
-        constraint=constraint_prompt,
-        few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        time_str=time_str,
-        user_id=user_id,
-        language=language,
-        is_manager=is_manager,
-        tools=render_kwargs["tools"],
-        skills=skills,
-        managed_agents=render_kwargs["managed_agents"],
-        external_a2a_agents=render_kwargs["external_a2a_agents"],
-        memory_list=memory_list,
-        memory_search_query=last_user_query,
-        knowledge_base_summary=knowledge_base_summary,
-    )
-
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_max_tokens = 10000
     if model_id_to_use is not None:
@@ -461,8 +442,33 @@ async def create_agent_config(
             model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
-    # Use agent-level setting for context management, default to False
+
+    # Use agent-level setting for context management, default to False.
+    # When ContextManager is disabled, do not attach context_components because
+    # downstream runtime may prefer component-based prompt assembly over the
+    # rendered system_prompt, causing the actual model input to diverge from the
+    # template output.
     enable_context_manager = agent_info.get("enable_context_manager", False)
+    context_components = []
+    if enable_context_manager:
+        context_components = build_context_components(
+            duty=duty_prompt,
+            constraint=constraint_prompt,
+            few_shots=few_shots_prompt,
+            app_name=app_name,
+            app_description=app_description,
+            time_str=time_str,
+            user_id=user_id,
+            language=language,
+            is_manager=is_manager,
+            tools=render_kwargs["tools"],
+            skills=skills,
+            managed_agents=render_kwargs["managed_agents"],
+            external_a2a_agents=render_kwargs["external_a2a_agents"],
+            memory_list=memory_list,
+            memory_search_query=last_user_query,
+            knowledge_base_summary=knowledge_base_summary,
+        )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
         token_threshold=model_max_tokens,
