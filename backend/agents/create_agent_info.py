@@ -1,4 +1,5 @@
-﻿import threading
+﻿import json
+import threading
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -383,6 +384,77 @@ async def create_agent_config(
             # Bubble up to streaming layer so it can emit <MEM_FAILED> and fall back
             raise Exception(f"Failed to retrieve memory list: {e}")
 
+    # Append active memory tools if memory is enabled
+    if memory_context.user_config.memory_switch and memory_context.memory_config:
+        try:
+            memory_metadata = {
+                "memory_config": memory_context.memory_config,
+                "memory_user_config": memory_context.user_config,
+                "tenant_id": memory_context.tenant_id,
+                "user_id": memory_context.user_id,
+                "agent_id": memory_context.agent_id,
+            }
+
+            store_tool_config = ToolConfig(
+                class_name="StoreMemoryTool",
+                name="store_memory",
+                description=(
+                    "Save important information to long-term memory for future recall. "
+                    "Use this when the user shares personal preferences, facts about themselves, "
+                    "project context, or instructions that should persist across conversations. "
+                    "Do NOT store transient information like temporary calculations, information "
+                    "already in the knowledge base, or data the user explicitly says to forget."
+                ),
+                inputs=json.dumps({
+                    "content": {
+                        "type": "string",
+                        "description": "The information to remember",
+                        "description_zh": "需要记住的信息"
+                    }
+                }, ensure_ascii=False),
+                output_type="string",
+                params={},
+                source="local",
+                usage=None,
+                metadata=memory_metadata,
+            )
+            tool_list.append(store_tool_config)
+
+            search_tool_config = ToolConfig(
+                class_name="SearchMemoryTool",
+                name="search_memory",
+                description=(
+                    "Search long-term memory for relevant information from previous interactions. "
+                    "Use this when you need context about the user's preferences, past decisions, "
+                    "or previously discussed topics that aren't in the current conversation. "
+                    "The system already provides some memory context automatically -- use this tool "
+                    "when you need to search for specific information not already available."
+                ),
+                inputs=json.dumps({
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language query describing what to search for",
+                        "description_zh": "描述要搜索内容的自然语言查询"
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return",
+                        "description_zh": "返回结果的最大数量",
+                        "default": 5,
+                        "nullable": True
+                    }
+                }, ensure_ascii=False),
+                output_type="string",
+                params={},
+                source="local",
+                usage=None,
+                metadata=memory_metadata,
+            )
+            tool_list.append(search_tool_config)
+            logger.debug("Active memory tools appended to agent tool list")
+        except Exception as e:
+            logger.warning(f"Failed to append active memory tools: {e}")
+
     # Build knowledge base summary
     knowledge_base_summary = ""
     try:
@@ -433,25 +505,6 @@ async def create_agent_config(
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
-    context_components = build_context_components(
-        duty=duty_prompt,
-        constraint=constraint_prompt,
-        few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        time_str=time_str,
-        user_id=user_id,
-        language=language,
-        is_manager=is_manager,
-        tools=render_kwargs["tools"],
-        skills=skills,
-        managed_agents=render_kwargs["managed_agents"],
-        external_a2a_agents=render_kwargs["external_a2a_agents"],
-        memory_list=memory_list,
-        memory_search_query=last_user_query,
-        knowledge_base_summary=knowledge_base_summary,
-    )
-
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_max_tokens = 10000
     if model_id_to_use is not None:
@@ -461,8 +514,33 @@ async def create_agent_config(
             model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
-    # Use agent-level setting for context management, default to False
+
+    # Use agent-level setting for context management, default to False.
+    # When ContextManager is disabled, do not attach context_components because
+    # downstream runtime may prefer component-based prompt assembly over the
+    # rendered system_prompt, causing the actual model input to diverge from the
+    # template output.
     enable_context_manager = agent_info.get("enable_context_manager", False)
+    context_components = []
+    if enable_context_manager:
+        context_components = build_context_components(
+            duty=duty_prompt,
+            constraint=constraint_prompt,
+            few_shots=few_shots_prompt,
+            app_name=app_name,
+            app_description=app_description,
+            time_str=time_str,
+            user_id=user_id,
+            language=language,
+            is_manager=is_manager,
+            tools=render_kwargs["tools"],
+            skills=skills,
+            managed_agents=render_kwargs["managed_agents"],
+            external_a2a_agents=render_kwargs["external_a2a_agents"],
+            memory_list=memory_list,
+            memory_search_query=last_user_query,
+            knowledge_base_summary=knowledge_base_summary,
+        )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
         token_threshold=model_max_tokens,

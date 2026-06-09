@@ -533,6 +533,60 @@ class TestImportOpenAPIServiceAPI:
             tenant_id="tenant456",
             user_id="user123",
             service_description="Test API",
+            headers_template=None,
+            force_update=False
+        )
+        mock_refresh_mcp.assert_called_once_with("tenant456")
+
+    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.import_openapi_service')
+    def test_import_openapi_service_success_with_headers_template(
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+    ):
+        """Test successful OpenAPI service import with headers template"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import_service.return_value = {
+            "tools_created": 1,
+            "tools_updated": 0,
+            "tools_deleted": 0
+        }
+        mock_refresh_mcp.return_value = {"status": "refreshed"}
+        headers_template = {
+            "Authorization": "Bearer {{token}}",
+            "X-Tenant-ID": "{{tenant_id}}"
+        }
+
+        response = client.post(
+            "/tool/openapi_service",
+            json={
+                "service_name": "test_service",
+                "server_url": "https://api.example.com",
+                "openapi_json": {"openapi": "3.0.0", "info": {"title": "Test"}, "paths": {}},
+                "service_description": "Test API",
+                "headers_template": headers_template,
+                "force_update": False
+            }
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["message"] == "OpenAPI service import successful"
+        assert data["data"]["tools_created"] == 1
+        assert data["data"]["tools_updated"] == 0
+        assert data["data"]["tools_deleted"] == 0
+        assert data["data"]["mcp_refresh"]["status"] == "refreshed"
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_import_service.assert_called_once_with(
+            service_name="test_service",
+            openapi_json={"openapi": "3.0.0", "info": {"title": "Test"}, "paths": {}},
+            server_url="https://api.example.com",
+            tenant_id="tenant456",
+            user_id="user123",
+            service_description="Test API",
+            headers_template=headers_template,
             force_update=False
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
