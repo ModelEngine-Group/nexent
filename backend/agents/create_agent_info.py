@@ -603,7 +603,7 @@ async def create_agent_config(
     # downstream runtime may prefer component-based prompt assembly over the
     # rendered system_prompt, causing the actual model input to diverge from the
     # template output.
-    enable_context_manager = agent_info.get("enable_context_manager", False)
+    enable_context_manager = agent_info.get("enable_context_manager", True)
     context_components = []
     if enable_context_manager:
         context_components = build_context_components(

@@ -277,18 +277,15 @@ def _format_tools_description(
     """
     if not tools:
         no_tools_msg = "- 当前没有可用的工具" if language == "zh" else "- No tools are currently available"
-        if is_manager:
-            prefix = "1. 工具\n" if language == "zh" else "1. Tools\n"
-            return prefix + no_tools_msg
-        return no_tools_msg
+        prefix = "1. 工具\n" if language == "zh" else "1. Tools\n"
+        return prefix + no_tools_msg
 
     lines = []
 
-    if is_manager:
-        if language == "zh":
-            lines.append("1. 工具")
-        else:
-            lines.append("1. Tools")
+    if language == "zh":
+        lines.append("1. 工具")
+    else:
+        lines.append("1. Tools")
 
     if language == "zh":
         lines.append("- 你只能使用以下工具，不得使用任何其他工具：")
@@ -474,18 +471,15 @@ def _format_skills_usage_requirements(
     """
     if not skills:
         no_skills_msg = "- 当前没有可用的技能" if language == "zh" else "- No skills are currently available"
-        if is_manager:
-            prefix = "3. 技能\n" if language == "zh" else "3. Skills\n"
-            return prefix + no_skills_msg
-        return no_skills_msg
+        prefix = "3. 技能\n" if language == "zh" else "3. Skills\n"
+        return prefix + no_skills_msg
 
     lines = []
 
-    if is_manager:
-        if language == "zh":
-            lines.append("3. 技能")
-        else:
-            lines.append("3. Skills")
+    if language == "zh":
+        lines.append("3. 技能")
+    else:
+        lines.append("3. Skills")
 
     if language == "zh":
         lines.append("- 你拥有上述 `<available_skills>` 中列出的技能。技能中引用的脚本通过 `run_skill_script()` 函数调用，该函数由平台提供，不需要导入。")
