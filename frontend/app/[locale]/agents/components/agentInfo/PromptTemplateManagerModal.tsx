@@ -119,16 +119,20 @@ export default function PromptTemplateManagerModal({
   };
 
   const openTemplateEditor = (template: PromptTemplate, readOnly = false) => {
-    editorForm.setFieldsValue({
-      template_name: template.template_name,
-      description: template.description || "",
-      template_content_zh: template.template_content_zh || createEmptyPromptTemplateContent(),
-      template_content_en: template.template_content_en || createEmptyPromptTemplateContent(),
-    });
     setEditingTemplate(template);
     setEditorSeedTemplate(template);
     setEditorReadOnly(readOnly);
     setEditorOpen(true);
+
+    // Defer form operations until Form is mounted inside the editor modal.
+    queueMicrotask(() => {
+      editorForm.setFieldsValue({
+        template_name: template.template_name,
+        description: template.description || "",
+        template_content_zh: template.template_content_zh || createEmptyPromptTemplateContent(),
+        template_content_en: template.template_content_en || createEmptyPromptTemplateContent(),
+      });
+    });
   };
 
   const closeEditor = () => {
@@ -136,7 +140,6 @@ export default function PromptTemplateManagerModal({
     setEditingTemplate(null);
     setEditorSeedTemplate(null);
     setEditorReadOnly(false);
-    editorForm.resetFields();
   };
 
   const buildPayload = (values: PromptTemplateFormValues): PromptTemplatePayload => {
@@ -446,7 +449,7 @@ export default function PromptTemplateManagerModal({
           : t("businessLogic.config.template.createTitle")}
         width={980}
         centered
-        destroyOnClose
+        destroyOnHidden
         okText={editorReadOnly ? t("common.close") : t("common.save")}
         cancelText={t("common.cancel")}
         cancelButtonProps={editorReadOnly ? { style: { display: "none" } } : undefined}
