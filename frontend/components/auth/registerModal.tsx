@@ -73,6 +73,7 @@ export function RegisterModal() {
   const resetForm = () => {
     setEmailError("");
     setPasswordError({ target: "", message: "" });
+    setPasswordValue("");
     form.resetFields();
   };
 
@@ -144,6 +145,7 @@ export function RegisterModal() {
 
     setEmailError("");
     setPasswordError({ target: "", message: "" });
+    setPasswordValue("");
     form.resetFields();
     if (registerModalOptions?.email) {
       form.setFieldsValue({ email: registerModalOptions.email });
