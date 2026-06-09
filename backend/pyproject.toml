@@ -33,7 +33,7 @@ dependencies = [
 [tool.uv]
 # openjiuwen's heavy transitive deps are not needed by backend's prompt_builder module
 exclude-dependencies = [
-    "transformers",    
+    "transformers",
 ]
 
 [project.optional-dependencies]
