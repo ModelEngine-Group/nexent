@@ -12,6 +12,7 @@ from services.model_health_service import embedding_dimension_check
 from services.providers.base import AbstractModelProvider
 from services.providers.silicon_provider import SiliconModelProvider
 from services.providers.tokenpony_provider import TokenPonyModelProvider
+from services.providers.litellm_provider import LiteLLMModelProvider
 from services.providers.dashscope_provider import DashScopeModelProvider
 from services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
 from utils.model_name_utils import split_repo_name, add_repo_to_name
@@ -47,6 +48,9 @@ async def get_provider_models(model_data: dict) -> List[dict]:
         model_list = await provider.get_models(model_data)
     elif model_data["provider"] == ProviderEnum.TOKENPONY.value:
         provider = TokenPonyModelProvider()
+        model_list = await provider.get_models(model_data)
+    elif model_data["provider"] == ProviderEnum.LITELLM.value:
+        provider = LiteLLMModelProvider()
         model_list = await provider.get_models(model_data)
 
     return model_list
