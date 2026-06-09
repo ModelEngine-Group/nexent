@@ -1,7 +1,7 @@
 [project]
 name = "backend"
 version = "0.1.0"
-requires-python = "==3.10.*"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "aiofiles>=0.8.0",
     "uvicorn>=0.34.0",
@@ -11,7 +11,7 @@ dependencies = [
     "aiohttp>=3.8.0",
     "authlib>=1.3.0",
     "cryptography>=42.0.0",
-    "psycopg2-binary==2.9.10",
+    "psycopg2-binary>=2.9.9",
     "PyJWT>=2.8.0",
     "sqlalchemy~=2.0.37",
     "greenlet<3.5.0",
@@ -21,11 +21,19 @@ dependencies = [
     "jsonref>=1.1.0",
     "ruamel-yaml==0.19.1",
     "redis>=5.0.0",
-    "fastmcp==2.12.0",
+    "fastmcp>=2.14.2,<3.0",
     "langchain>=0.3.26",
     "scikit-learn>=1.0.0",
     "numpy>=1.24.0",
+    "openjiuwen>=0.1.0",
+    "pydantic-settings>=2.0.0",
     "python-docx>=1.1.0",
+]
+
+[tool.uv]
+# openjiuwen's heavy transitive deps are not needed by backend's prompt_builder module
+exclude-dependencies = [
+    "transformers",    
 ]
 
 [project.optional-dependencies]
