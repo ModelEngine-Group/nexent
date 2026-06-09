@@ -27,12 +27,13 @@ dependencies = [
     "numpy>=1.24.0",
     "openjiuwen>=0.1.0",
     "pydantic-settings>=2.0.0",
+    "python-docx>=1.1.0",
 ]
 
 [tool.uv]
 # openjiuwen's heavy transitive deps are not needed by backend's prompt_builder module
 exclude-dependencies = [
-    "transformers",
+    "transformers",    
 ]
 
 [project.optional-dependencies]
