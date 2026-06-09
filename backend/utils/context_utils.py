@@ -8,7 +8,6 @@ semantic section of the system prompt is emitted by a dedicated function,
 allowing ContextManager to assemble them in the correct order.
 """
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -508,13 +507,12 @@ def _format_agent_fallback(
     return "- 当前没有可用的助手" if language == "zh" else "- No agents are currently available"
 
 
-def _format_app_context(app_name: str, app_description: str, user_id: str, time_str: str) -> str:
+def _format_app_context(app_name: str, app_description: str, user_id: str) -> str:
     """Format application context for system prompt injection."""
     lines = [
         f"Application: {app_name}",
         f"Description: {app_description}",
         f"Current user: {user_id}",
-        f"Current time: {time_str}",
     ]
     return "\n".join(lines)
 
@@ -528,7 +526,6 @@ def _format_app_context(app_name: str, app_description: str, user_id: str, time_
 def build_skeleton_header_component(
     app_name: str,
     app_description: str,
-    time_str: str,
     user_id: str,
     language: str = "zh",
     priority: int = 100,
@@ -536,14 +533,17 @@ def build_skeleton_header_component(
     """Build SystemPromptComponent for the header section.
 
     Section: "### 基本信息" / "### Basic Information"
-    Content: Agent identity, app name/description, time, user_id
+    Content: Agent identity, app name/description, user_id.
+    Note: Current time is intentionally excluded from the system prompt so the
+    static system prefix can hit the LLM KV/prompt cache across requests. The
+    current time is injected on the user-message side instead (see CoreAgent.run).
     """
     from nexent.core.agents.agent_model import SystemPromptComponent
 
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}，现在是{time_str}，用户ID为{user_id}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}，用户ID为{user_id}"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}, it is {time_str} now"
+        content = f"### Basic Information\nYou are {app_name}, {app_description}"
 
     return SystemPromptComponent(
         content=content,
@@ -1112,7 +1112,6 @@ def build_context_components(
     few_shots: Optional[str] = None,
     app_name: Optional[str] = None,
     app_description: Optional[str] = None,
-    time_str: Optional[str] = None,
     user_id: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
@@ -1167,7 +1166,6 @@ def build_context_components(
         few_shots: Example templates text
         app_name: Application name
         app_description: Application description
-        time_str: Current time string
         user_id: Current user ID
         language: Language code ('zh' or 'en')
         is_manager: Whether this is a manager agent
@@ -1188,12 +1186,11 @@ def build_context_components(
     components: List = []
 
     # 1. Header
-    if app_name and app_description and time_str and user_id:
+    if app_name and app_description and user_id:
         components.append(
             build_skeleton_header_component(
                 app_name=app_name,
                 app_description=app_description,
-                time_str=time_str,
                 user_id=user_id,
                 language=language,
             )
@@ -1328,5 +1325,4 @@ def build_app_context_string(
     Returns:
         Formatted app context string
     """
-    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return _format_app_context(app_name, app_description, user_id, time_str)
+    return _format_app_context(app_name, app_description, user_id)
