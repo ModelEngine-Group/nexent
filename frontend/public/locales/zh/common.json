@@ -379,6 +379,10 @@
   "agent.debug.stop": "停止",
   "agent.debug.clear": "清空",
   "agent.debug.send": "发送",
+  "agent.debug.optimizeTitle": "提示词优化",
+  "agent.debug.optimizeHint": "选择一条回复，输入优化反馈，系统将自动优化智能体的完整系统提示词。",
+  "agent.debug.selectedQuestion": "选中的问题",
+  "agent.debug.selectedAnswer": "选中的回复",
   "agent.debug.userStop": "用户手动停止调试",
   "agent.debug.cancelError": "取消请求时出错",
   "agent.debug.stopError": "停止调试模式智能体运行失败，但前端已停止:",
@@ -397,6 +401,11 @@
   "agent.debug.compareEmpty": "暂无输出",
   "agent.debug.defaultMode": "默认模式",
   "agent.debug.compareMode": "对比模式",
+  "agent.debug.promptCompare.title": "提示词对比",
+  "agent.debug.promptCompare.close": "关闭",
+  "agent.debug.promptCompare.apply": "一键替换",
+  "agent.debug.promptCompare.original": "优化前",
+  "agent.debug.promptCompare.optimized": "优化后",
 
   "guide.steps.describeBusinessLogic.title": "描述业务逻辑",
 
@@ -2815,5 +2824,16 @@
   "systemPrompt.optimize.optimized": "优化后",
   "systemPrompt.optimize.empty": "暂未生成优化内容",
   "systemPrompt.optimize.replace": "一键替换",
-  "systemPrompt.optimize.error": "该部分优化失败"
+  "systemPrompt.optimize.error": "该部分优化失败",
+  "systemPrompt.optimize.generating": "正在生成优化后的 prompt 模板...",
+  "systemPrompt.optimize.generatingPlaceholder": "正在生成中，请稍候...",
+
+  "systemPrompt.finetune.modeLabel": "使用要求",
+  "systemPrompt.finetune.modeGeneral": "全局优化",
+  "systemPrompt.finetune.modeGeneralDesc": "基于评价反馈对整个部分进行优化",
+  "systemPrompt.finetune.modeInsert": "插入内容",
+  "systemPrompt.finetune.modeInsertDesc": "在指定位置插入新的内容",
+  "systemPrompt.finetune.modeSelect": "替换选中",
+  "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围"
+
 }

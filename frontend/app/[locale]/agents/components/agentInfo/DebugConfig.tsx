@@ -18,6 +18,7 @@ import {
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import DebugMessageList from "./DebugMessageList";
+import DebugOptimizeModal from "./DebugOptimizeModal";
 import { useCompareStream } from "./useCompareStream";
 
 // Agent debugging component Props interface
@@ -30,6 +31,11 @@ interface AgentDebuggingProps {
   isStreaming: boolean;
   isCompareStreaming?: boolean;
   messages: ChatMessageType[];
+  onOptimizeReply?: (params: {
+    userQuestion: string;
+    assistantAnswer: string;
+    history: Array<{ role: string; content: string }>;
+  }) => void;
   comparePanel?: React.ReactNode;
   showCompare?: boolean;
   onOpenCompare?: () => void;
@@ -55,6 +61,7 @@ function AgentDebugging({
   isStreaming,
   isCompareStreaming = false,
   messages,
+  onOptimizeReply,
   comparePanel,
   showCompare,
   onOpenCompare,
@@ -74,7 +81,11 @@ function AgentDebugging({
         ) : (
           <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
             {/* Message display area */}
-            <DebugMessageList messages={messages} isStreaming={isStreaming} />
+            <DebugMessageList
+              messages={messages}
+              isStreaming={isStreaming}
+              onOptimizeReply={onOptimizeReply}
+            />
           </div>
         )}
 
@@ -152,6 +163,16 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const prevAgentIdRef = useRef<number | null | undefined>(undefined);
   // Maintain an independent step ID counter per Agent
   const stepIdCounter = useRef<{ current: number }>({ current: 0 });
+
+  const [debugOptimizeOpen, setDebugOptimizeOpen] = useState(false);
+  const [debugOptimizeSelected, setDebugOptimizeSelected] = useState<null | {
+    userQuestion: string;
+    assistantAnswer: string;
+    history: Array<{ role: string; content: string }>;
+  }>(null);
+  const [compareOriginalPrompt, setCompareOriginalPrompt] = useState("");
+  const [compareOptimizedPrompt, setCompareOptimizedPrompt] = useState("");
+
   const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
   const [compareLeftModelId, setCompareLeftModelId] = useState<number | null>(null);
   const [compareRightModelId, setCompareRightModelId] = useState<number | null>(null);
@@ -602,8 +623,113 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     }
   };
 
+  const handleOpenOptimize = (params: {
+    userQuestion: string;
+    assistantAnswer: string;
+    history: Array<{ role: string; content: string }>;
+  }) => {
+    if (!parsedAgentId) return;
+    if (!editedAgent?.model_id) return;
+
+    const duty = (editedAgent?.duty_prompt || "").trim();
+    const constraint = (editedAgent?.constraint_prompt || "").trim();
+    const fewShots = (editedAgent?.few_shots_prompt || "").trim();
+
+    const originalFullPrompt = [
+      "# 智能体角色",
+      duty,
+      "",
+      "# 使用要求",
+      constraint,
+      "",
+      "# 示例",
+      fewShots,
+    ]
+      .filter((part) => part !== undefined)
+      .join("\n")
+      .trim();
+
+    setCompareOriginalPrompt(originalFullPrompt);
+    setCompareOptimizedPrompt("");
+
+    setDebugOptimizeSelected(params);
+    setDebugOptimizeOpen(true);
+  };
+
+  const handleOptimized = (params: {
+    originalFullPrompt: string;
+    optimizedFullPrompt: string;
+  }) => {
+    setCompareOriginalPrompt(params.originalFullPrompt || "");
+    setCompareOptimizedPrompt(params.optimizedFullPrompt || "");
+  };
+
+  const handleApplyOptimizedPrompt = (optimizedFullPrompt?: string) => {
+    const optimized = (optimizedFullPrompt || compareOptimizedPrompt || "").trim();
+    if (!optimized) {
+      return;
+    }
+
+    const normalized = optimized
+      .replace(/\r\n/g, "\n")
+      .replace(/^#\s*智能体角色\s*$/gm, "# Duty")
+      .replace(/^#\s*使用要求\s*$/gm, "# Constraint")
+      .replace(/^#\s*示例\s*$/gm, "# FewShots");
+
+    const pickSection = (header: "Duty" | "Constraint" | "FewShots"): string => {
+      const headerRegex = new RegExp(`^#\\s*${header}\\s*$`, "gm");
+      const matches = [...normalized.matchAll(headerRegex)];
+      const current = matches[0];
+      if (!current) return "";
+
+      const start = current.index + current[0].length;
+      const rest = normalized.slice(start);
+      const nextHeaderMatch = rest.match(/^#\s*(Duty|Constraint|FewShots)\s*$/m);
+      const end = nextHeaderMatch?.index ?? rest.length;
+      return rest.slice(0, end).trim();
+    };
+
+    const duty = pickSection("Duty");
+    const constraint = pickSection("Constraint");
+    const fewShots = pickSection("FewShots");
+
+    const updateAgentConfig = useAgentConfigStore.getState().updateAgentConfig;
+
+    updateAgentConfig({
+      ...(duty ? { duty_prompt: duty } : {}),
+      ...(constraint ? { constraint_prompt: constraint } : {}),
+      ...(fewShots ? { few_shots_prompt: fewShots } : {}),
+    });
+    // Close optimize modal after applying.
+    setDebugOptimizeOpen(false);
+    setDebugOptimizeSelected(null);
+    setCompareOriginalPrompt("");
+    setCompareOptimizedPrompt("");
+  };
+
   return (
     <div className="w-full h-full bg-white">
+      <DebugOptimizeModal
+        open={debugOptimizeOpen}
+        agentId={parsedAgentId ?? 0}
+        modelId={editedAgent?.model_id ?? 0}
+        userQuestion={debugOptimizeSelected?.userQuestion || ""}
+        assistantAnswer={debugOptimizeSelected?.assistantAnswer || ""}
+        history={debugOptimizeSelected?.history || []}
+        initialOriginalFullPrompt={compareOriginalPrompt || ""}
+        onCancel={() => {
+          setDebugOptimizeOpen(false);
+          setDebugOptimizeSelected(null);
+          setCompareOriginalPrompt("");
+          setCompareOptimizedPrompt("");
+        }}
+        onOptimized={handleOptimized}
+        onApply={(optimizedFullPrompt) => {
+          setCompareOptimizedPrompt(optimizedFullPrompt || "");
+          handleApplyOptimizedPrompt(optimizedFullPrompt);
+        }}
+      />
+
       <AgentDebugging
         key={agentId} // Re-render when agentId changes to ensure state resets
         onStop={handleStop}
@@ -614,6 +740,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         isStreaming={isStreaming}
         isCompareStreaming={isCompareStreaming}
         messages={messages}
+        onOptimizeReply={handleOpenOptimize}
         comparePanel={comparePanel}
         showCompare={hasMultipleLlmModels}
         onOpenCompare={toggleComparePanel}

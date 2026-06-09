@@ -234,6 +234,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalOpen(true);
   };
 
+
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return (
       <Button
@@ -392,6 +393,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(null);
   };
 
+
   const handleSaveExpandModal = (content: string) => {
     switch (expandModalType) {
       case 'duty':
@@ -447,27 +449,35 @@ export default function AgentGenerateDetail({}) {
     }
   };
 
-  const getStoreFieldKey = (type: 'duty' | 'constraint' | 'few-shots') => {
-    switch (type) {
-      case "duty":
-        return "duty_prompt";
-      case "constraint":
-        return "constraint_prompt";
-      case "few-shots":
-        return "few_shots_prompt";
-    }
-  };
+  const handleReplaceOptimizedContent = (
+    content: string,
+    sectionType: "duty" | "constraint" | "few_shots"
+  ) => {
+    const value = content.trim();
 
-  const handleReplaceOptimizedContent = (content: string) => {
-    if (!optimizeModalType) {
+    if (!value) {
+      handleCloseOptimizeModal();
       return;
     }
 
-    const formFieldKey = getPromptFieldKey(optimizeModalType);
-    const storeFieldKey = getStoreFieldKey(optimizeModalType);
+    const fieldMap = {
+      duty: {
+        formField: "dutyPrompt" as const,
+        storeField: "duty_prompt" as const,
+      },
+      constraint: {
+        formField: "constraintPrompt" as const,
+        storeField: "constraint_prompt" as const,
+      },
+      few_shots: {
+        formField: "fewShotsPrompt" as const,
+        storeField: "few_shots_prompt" as const,
+      },
+    };
 
-    form.setFieldsValue({ [formFieldKey]: content });
-    updateAgentConfig({ [storeFieldKey]: content } as AgentConfigUpdate);
+    const { formField, storeField } = fieldMap[sectionType];
+    form.setFieldsValue({ [formField]: value });
+    updateAgentConfig({ [storeField]: value } as AgentConfigUpdate);
     handleCloseOptimizeModal();
   };
 

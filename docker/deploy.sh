@@ -796,6 +796,15 @@ prepare_directory_and_data() {
   create_dir_with_permission "$NEXENT_USER_DIR" 775
   echo "   🖥️  Nexent user workspace: $NEXENT_USER_DIR"
 
+  # Copy official-skills-zip folder to /mnt/nexent
+  if [ -d "official-skills-zip" ]; then
+    cp -rn official-skills-zip "$NEXENT_USER_DIR/"
+    chmod -R 775 "$NEXENT_USER_DIR/official-skills-zip"
+    echo "   📦 Official skills copied to $NEXENT_USER_DIR/official-skills-zip"
+  else
+    echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
+  fi
+
   # Export for docker-compose
   export NEXENT_USER_DIR
 
@@ -1358,7 +1367,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="$(get_app_version)"
+  APP_VERSION="latest"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1

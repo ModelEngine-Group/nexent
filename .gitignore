@@ -65,3 +65,5 @@ sdk/benchmark/.env
 
 .pytest-tmp
 doc/mermaid
+
+.claude/skills/python-import-triage
