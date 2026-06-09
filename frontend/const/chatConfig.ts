@@ -121,6 +121,7 @@ messageTypes: {
   SEARCH_CONTENT_PLACEHOLDER: "search_content_placeholder" as const,
   VIRTUAL: "virtual" as const,
   PREPROCESS: "preprocess" as const,
+  SKILL_FILES: "skill_files" as const,
 },
 
 // Content type constants for last content type tracking

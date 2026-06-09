@@ -518,7 +518,7 @@ Additional Args:
             error_msg = str(e)
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
-                level=LogLevel.WARNING,
+                level=LogLevel.ERROR,
             )
             raise AgentExecutionError(error_msg, self.logger)
 
@@ -990,7 +990,7 @@ You have been provided with these additional arguments, that you can access usin
         except Exception as e:
             # Fallback to error message if streaming fails
             model_output = f"Error in generating final LLM output: {e}"
-            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.WARNING)
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
 
         # Finalize the memory step
         final_memory_step.timing.end_time = time.time()

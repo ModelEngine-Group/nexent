@@ -27,6 +27,8 @@ export type AgentConfigUpdate = Partial<Pick<
   | "verification_config"
   | "group_ids"
   | "ingroup_permission"
+  | "greeting_message"
+  | "example_questions"
 >>;
 
 export interface AgentVerificationConfig {
@@ -107,6 +109,8 @@ export interface Agent {
   prompts_hidden?: boolean;
   current_version_no?: number;
   is_a2a_server?: boolean;
+  greeting_message?: string;
+  example_questions?: string[];
 }
 
 export interface Tool {
@@ -500,11 +504,14 @@ export interface GeneratePromptParams {
 export interface OptimizePromptSectionParams {
   agent_id: number;
   task_description: string;
-  model_id: string;
+  model_id: number;
   section_type: "duty" | "constraint" | "few_shots";
   section_title: string;
   current_content: string;
   feedback: string;
+  mode?: "general" | "insert" | "select";
+  start_pos?: number;
+  end_pos?: number;
   tool_ids?: number[];
   sub_agent_ids?: number[];
   knowledge_base_display_names?: string[];
@@ -512,6 +519,32 @@ export interface OptimizePromptSectionParams {
 
 export interface OptimizePromptSectionResponse {
   section_type: "duty" | "constraint" | "few_shots";
+  section_title: string;
+  original_content: string;
+  optimized_content: string;
+}
+
+export interface BadCaseItem {
+  question: string;
+  answer: string;
+  label?: string;
+  reason?: string;
+}
+
+export interface OptimizePromptBadCaseParams {
+  agent_id: number;
+  model_id: number;
+  current_content: string;
+  bad_cases: BadCaseItem[];
+  section_type: string;
+  section_title: string;
+  tool_ids?: number[];
+  sub_agent_ids?: number[];
+  knowledge_base_display_names?: string[];
+}
+
+export interface OptimizePromptBadCaseResponse {
+  section_type: string;
   section_title: string;
   original_content: string;
   optimized_content: string;

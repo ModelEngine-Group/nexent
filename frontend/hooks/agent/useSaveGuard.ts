@@ -150,6 +150,8 @@ export const useSaveGuard = () => {
         related_agent_ids: relatedAgentIds,
         related_external_agent_ids: relatedExternalAgentIds,
         ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
+        greeting_message: currentEditedAgent.greeting_message,
+        example_questions: currentEditedAgent.example_questions,
       });
 
       if (result.success) {

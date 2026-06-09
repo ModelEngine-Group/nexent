@@ -193,6 +193,8 @@ export const ModelDeleteDialog = ({
         return t("model.source.dashscope");
       case MODEL_SOURCES.TOKENPONY:
         return t("model.source.tokenpony");
+      case MODEL_SOURCES.VOLCENGINE:
+        return t("model.provider.volcengine");
       default:
         return t("model.source.unknown");
     }
@@ -239,6 +241,12 @@ export const ModelDeleteDialog = ({
           text: "text-cyan-600",
           border: "border-cyan-100",
         };
+      case MODEL_SOURCES.VOLCENGINE:
+        return {
+          bg: "bg-pink-50",
+          text: "text-pink-600",
+          border: "border-pink-100",
+        };
       default:
         return {
           bg: "bg-gray-50",
@@ -282,6 +290,10 @@ export const ModelDeleteDialog = ({
       case MODEL_SOURCES.TOKENPONY:
         return (
           <img src="/tokenpony.png" alt="TokenPony" className="w-5 h-5" />
+        );
+      case MODEL_SOURCES.VOLCENGINE:
+        return (
+          <img src="/volcengine.png" alt="VolcEngine" className="w-5 h-5" />
         );
       default:
         return (
@@ -1070,14 +1082,9 @@ export const ModelDeleteDialog = ({
                     );
                     setMaxTokens(existingModel?.maxTokens || 0);
                   }}
-                  disabled={
-                    type === MODEL_TYPES.STT
-                  }
                   className={`p-3 flex justify-between rounded-md border transition-colors ${
-                    type === MODEL_TYPES.STT
-                      ? `${colorScheme.border} bg-gray-100 cursor-not-allowed opacity-60`
-                      : `${colorScheme.border} ${colorScheme.bg} hover:bg-opacity-80`
-                  }`}
+                    colorScheme.border
+                  } ${colorScheme.bg} hover:bg-opacity-80`}
                 >
                   <div className="flex items-center">
                     <div
@@ -1093,8 +1100,6 @@ export const ModelDeleteDialog = ({
                         {t("model.dialog.delete.customModelCount", {
                           count: modelsByType.length,
                         })}
-                        {type === MODEL_TYPES.STT &&
-                          t("model.dialog.delete.unsupportedType")}
                       </div>
                     </div>
                   </div>
@@ -1142,6 +1147,7 @@ export const ModelDeleteDialog = ({
                 MODEL_SOURCES.OPENAI_API_COMPATIBLE,
                 MODEL_SOURCES.DASHSCOPE,
                 MODEL_SOURCES.TOKENPONY,
+                MODEL_SOURCES.VOLCENGINE,
               ] as ModelSource[]
             ).map((source) => {
               const modelsOfSource = models.filter(
@@ -1232,7 +1238,10 @@ export const ModelDeleteDialog = ({
               {t("common.back")}
             </button>
 
-            {selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE && (
+            {(selectedSource === MODEL_SOURCES.SILICON ||
+              selectedSource === MODEL_SOURCES.MODELENGINE ||
+              selectedSource === MODEL_SOURCES.DASHSCOPE ||
+              selectedSource === MODEL_SOURCES.TOKENPONY) && (
               <div className="flex gap-2">
                 <Button
                   size="small"
@@ -1336,8 +1345,9 @@ export const ModelDeleteDialog = ({
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
-                      {deletingModelType !== "embedding" &&
-                        deletingModelType !== MODEL_TYPES.MULTI_EMBEDDING && (
+                      {deletingModelType !== MODEL_TYPES.EMBEDDING &&
+                        deletingModelType !== MODEL_TYPES.MULTI_EMBEDDING &&
+                        deletingModelType !== MODEL_TYPES.STT && (
                           <Tooltip
                             title={t("model.dialog.modelList.tooltip.settings")}
                           >
@@ -1425,24 +1435,18 @@ export const ModelDeleteDialog = ({
                         </div>
                       </div>
                       <button
-                          onClick={(e) => {
+                        onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteModel(model.displayName || model.name, model.source);
+                          handleDeleteModel(
+                            model.displayName || model.name,
+                            model.source
+                          );
                         }}
-                        disabled={
-                          deletingModels.has(model.displayName || model.name) ||
-                          model.type === MODEL_TYPES.STT
-                        }
-                        className={`p-1 ${
-                          model.type === MODEL_TYPES.STT
-                            ? "text-gray-400 cursor-not-allowed"
-                            : "text-red-500 hover:text-red-700"
-                        }`}
-                        title={
-                          model.type === MODEL_TYPES.STT
-                            ? t("model.dialog.delete.unsupportedTypeHint")
-                            : t("model.dialog.delete.deleteHint")
-                        }
+                        disabled={deletingModels.has(
+                          model.displayName || model.name
+                        )}
+                        className="p-1 text-red-500 hover:text-red-700"
+                        title={t("model.dialog.delete.deleteHint")}
                       >
                         {deletingModels.has(model.displayName || model.name) ? (
                           <svg

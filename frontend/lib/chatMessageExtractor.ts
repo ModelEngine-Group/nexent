@@ -292,6 +292,24 @@ export function extractAssistantMsgFromResponse(
     });
   }
 
+  let assistantAttachments: MinioFileItem[] = [];
+  if (
+    dialog_msg.minio_files &&
+    Array.isArray(dialog_msg.minio_files) &&
+    dialog_msg.minio_files.length > 0
+  ) {
+    assistantAttachments = dialog_msg.minio_files.map((item) => {
+      return {
+        type: item.type || "",
+        name: item.name || "",
+        size: item.size || 0,
+        object_name: item.object_name,
+        url: item.url,
+        description: item.description,
+      };
+    });
+  }
+
   const formattedAssistantMsg: ChatMessageType = {
     id: `assistant-${index}-${Date.now()}`,
     role: MESSAGE_ROLES.ASSISTANT,
@@ -306,7 +324,7 @@ export function extractAssistantMsgFromResponse(
     showRawContent: false,
     searchResults: searchResultsContent,
     images: imagesContent,
-    attachments: undefined,
+    attachments: assistantAttachments.length > 0 ? assistantAttachments : undefined,
   };
   return formattedAssistantMsg;
 }

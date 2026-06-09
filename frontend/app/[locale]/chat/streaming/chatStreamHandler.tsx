@@ -974,6 +974,43 @@ export const handleStreamResponse = async (
                   }
                   break;
 
+                case chatConfig.messageTypes.SKILL_FILES:
+                  // Process skill-generated file uploads (e.g., documents created by skills)
+                  try {
+                    const skillFilesData = JSON.parse(messageContent);
+                    const skillUploads = skillFilesData.skill_file_uploads || [];
+
+                    // Convert uploads to AttachmentItem format
+                    const newAttachments = skillUploads
+                      .filter((upload: any) => upload.status === "success")
+                      .map((upload: any) => ({
+                        type: "file",
+                        name: upload.file_name || "document",
+                        size: upload.file_size || 0,
+                        object_name: upload.object_name,
+                        url: upload.preview_url || upload.presigned_url || upload.object_name,
+                        contentType: upload.mime_type,
+                      }));
+
+                    if (newAttachments.length > 0) {
+                      setMessages((prev) => {
+                        const newMessages = [...prev];
+                        const lastMsg = newMessages[newMessages.length - 1];
+                        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+                          const existingAttachments = lastMsg.attachments || [];
+                          newMessages[newMessages.length - 1] = {
+                            ...lastMsg,
+                            attachments: [...existingAttachments, ...newAttachments],
+                          };
+                        }
+                        return newMessages;
+                      });
+                    }
+                  } catch (e) {
+                    log.error(t("chatStreamHandler.streamResponseError"), e);
+                  }
+                  break;
+
                 default:
                   // Process other types of messages
                   break;

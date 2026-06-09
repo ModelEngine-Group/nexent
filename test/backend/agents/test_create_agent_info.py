@@ -3845,6 +3845,52 @@ class TestJoinMinioFileDescriptionToQuery:
         pos_history = result.find("history_2.pdf")
         assert pos_current < pos_history, "Current message files should appear before history files"
 
+    def test_format_minio_files_for_content_formats_presigned_urls(self):
+        """History attachment formatting should include both internal and external URLs."""
+        result = _format_minio_files_for_content(
+            [
+                {
+                    "name": "report.pdf",
+                    "object_name": "tenant-a/report.pdf",
+                    "presigned_url": "https://signed.example/report.pdf",
+                }
+            ]
+        )
+
+        assert result.startswith("\n[Attached files]:\n")
+        assert "report.pdf" in result
+        assert "s3://" in result
+        assert "presigned_url: https://signed.example/report.pdf" in result
+
+    def test_convert_history_with_minio_files_embeds_file_info(self):
+        """History items should preserve text and append formatted attachment details."""
+        history = [
+            HistoryItem(
+                role="user",
+                content="Please review this file",
+                minio_files=[
+                    {
+                        "name": "notes.txt",
+                        "object_name": "tenant-a/notes.txt",
+                    }
+                ],
+            ),
+            HistoryItem(role="assistant", content="Done", minio_files=None),
+        ]
+
+        result = _convert_history_with_minio_files(history)
+
+        assert len(result) == 2
+        assert result[0].role == "user"
+        assert result[0].content.startswith("Please review this file")
+        assert "[Attached files]:" in result[0].content
+        assert "notes.txt" in result[0].content
+        assert result[1].content == "Done"
+
+    def test_convert_history_with_minio_files_returns_none_for_none(self):
+        """None history should remain None for downstream SDK compatibility."""
+        assert _convert_history_with_minio_files(None) is None
+
 
 class TestPreparePromptTemplates:
     """Tests for the prepare_prompt_templates function"""
@@ -3874,6 +3920,22 @@ class TestPreparePromptTemplates:
             mock_get_template.assert_called_once_with(False, "en")
             assert result["system_prompt"] == "test system prompt"
             assert result["test"] == "template"
+
+    @pytest.mark.asyncio
+    async def test_prepare_prompt_templates_overwrites_existing_system_prompt(self):
+        """Latest rendered system prompt should replace the template default."""
+        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
+            mock_get_template.return_value = {
+                "system_prompt": "stale prompt",
+                "user_prompt": "keep me",
+            }
+
+            result = await prepare_prompt_templates(False, "fresh system prompt", "en")
+
+            assert result == {
+                "system_prompt": "fresh system prompt",
+                "user_prompt": "keep me",
+            }
 
 
 class TestExtractUrlFromCard:

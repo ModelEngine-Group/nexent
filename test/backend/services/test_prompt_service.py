@@ -4,12 +4,71 @@ import types
 import unittest
 import json
 import sys
+import atexit
 from unittest.mock import patch, MagicMock
+
+_MODULE_PATCH_SENTINEL = object()
+_MODULE_PATCH_NAMES = [
+    'boto3',
+    'elasticsearch',
+    'sqlalchemy',
+    'sqlalchemy.create_engine',
+    'sqlalchemy.orm',
+    'sqlalchemy.dialects',
+    'sqlalchemy.dialects.postgresql',
+    'sqlalchemy.sql',
+    'database.agent_db',
+    'database.tool_db',
+    'database.model_management_db',
+    'database.knowledge_db',
+    'database.client',
+    'database.db_models',
+    'utils.llm_utils',
+    'utils.prompt_template_utils',
+    'services.agent_service',
+    'services.prompt_template_service',
+    'nexent',
+    'nexent.core',
+    'nexent.core.agents',
+    'nexent.core.agents.agent_model',
+    'nexent.storage',
+    'nexent.storage.storage_client_factory',
+    'nexent.storage.minio_config',
+    'nexent.vector_database',
+    'nexent.memory',
+    'nexent.monitor',
+]
+_MODULE_PATCH_ORIGINALS = {
+    name: sys.modules.get(name, _MODULE_PATCH_SENTINEL)
+    for name in _MODULE_PATCH_NAMES
+}
+
+
+def _restore_patched_modules() -> None:
+    for name, original in _MODULE_PATCH_ORIGINALS.items():
+        if original is _MODULE_PATCH_SENTINEL:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
+
+atexit.register(_restore_patched_modules)
+
+
+class MockToolConfig:
+    def __init__(self, *args, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def model_dump(self, **kwargs):
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
 # Mock nexent module hierarchy BEFORE any backend imports that depend on it
 nexent_mock = MagicMock()
 nexent_core_mock = MagicMock()
 nexent_core_agents_mock = MagicMock()
+nexent_agent_model_mock = MagicMock()
+nexent_agent_model_mock.ToolConfig = MockToolConfig
 nexent_storage_mock = MagicMock()
 nexent_storage_storage_client_factory_mock = MagicMock()
 nexent_storage_minio_config_mock = MagicMock()
@@ -20,6 +79,7 @@ nexent_monitor_mock = MagicMock()
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 sys.modules['nexent.core.agents'] = nexent_core_agents_mock
+sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
 sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
@@ -43,6 +103,7 @@ sys.modules['sqlalchemy.sql'] = MagicMock()
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
+from consts.const import ENABLE_JIUWEN_SDK
 
 # Mock boto3 and minio client before importing the module under test
 import sys
@@ -60,39 +121,29 @@ sys.modules['elasticsearch'] = elasticsearch_mock
 # This prevents real AWS/MinIO/Elasticsearch calls during import
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
 
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 minio_client_mock._ensure_bucket_exists = MagicMock()
 minio_client_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
-patch('database.client.MinioClient', return_value=minio_client_mock).start()
-patch('backend.database.client.minio_client', minio_client_mock).start()
-patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=MagicMock()).start()
-patch('nexent.vector_database.elasticsearch_core.Elasticsearch', return_value=MagicMock()).start()
-patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-
-from jinja2 import StrictUndefined
 
 # Mock database submodules BEFORE importing prompt_service
-sys.modules['database'] = MagicMock()
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.knowledge_db'] = MagicMock()
-sys.modules['database.client'] = MagicMock()
+mock_database_client = MagicMock()
+mock_database_client.MinioClient.return_value = minio_client_mock
+mock_database_client.minio_client = minio_client_mock
+sys.modules['database.client'] = mock_database_client
+sys.modules['backend.database.client'] = mock_database_client
 sys.modules['database.db_models'] = MagicMock()
 
+from jinja2 import StrictUndefined
+
 # Mock utils
-sys.modules['utils'] = MagicMock()
 sys.modules['utils.llm_utils'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 
 # Mock services
-sys.modules['services'] = MagicMock()
 sys.modules['services.agent_service'] = MagicMock()
 sys.modules['services.prompt_template_service'] = MagicMock()
 
@@ -103,6 +154,9 @@ from backend.services.prompt_service import (
     join_info_for_generate_system_prompt,
     join_info_for_optimize_prompt_section,
     optimize_prompt_section_impl,
+    PromptOptimizationService,
+    OptimizeRequest,
+    OptimizeResult,
 )
 
 
@@ -2045,7 +2099,7 @@ class TestPromptService(unittest.TestCase):
             elif "display_name" in sys_prompt.lower():
                 return "Test Agent"
             elif "description" in sys_prompt.lower():
-                return "desc"
+                return             "desc"
             return "content"
 
         mock_call_llm.side_effect = mock_llm
@@ -2061,3 +2115,259 @@ class TestPromptService(unittest.TestCase):
         ))
 
         self.assertGreater(len(result_list), 0)
+
+class TestPromptOptimizationService(unittest.TestCase):
+    """Tests for PromptOptimizationService Jiuwen SDK integration"""
+
+    @patch('backend.services.prompt_service.optimize_prompt_section_impl')
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_optimize_nexent_fallback_general_mode(self, mock_impl):
+        """nexent 模式: mode=general 应该调用 optimize_prompt_section_impl"""
+        mock_impl.return_value = {
+            "section_type": "duty",
+            "section_title": "智能体角色",
+            "original_content": "old",
+            "optimized_content": "new",
+        }
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="智能体角色",
+            current_content="old", feedback="improve",
+            mode="general",
+        )
+        result = service.optimize(req)
+
+        self.assertEqual(result.source, "nexent")
+        self.assertEqual(result.optimized_content, "new")
+        mock_impl.assert_called_once()
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_optimize_nexent_fallback_insert_mode_raises(self):
+        """nexent 模式: mode=insert 应该抛出 NexentCapabilityError"""
+        from adapters.exception import NexentCapabilityError
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="title",
+            current_content="old", feedback="improve",
+            mode="insert",
+        )
+        with self.assertRaises(NexentCapabilityError) as ctx:
+            service.optimize(req)
+        self.assertIn("insert", str(ctx.exception))
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_optimize_nexent_fallback_select_mode_raises(self):
+        """nexent 模式: mode=select 应该抛出 NexentCapabilityError"""
+        from adapters.exception import NexentCapabilityError
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        req = OptimizeRequest(
+            agent_id=1, model_id=1, task_description="task",
+            section_type="duty", section_title="title",
+            current_content="old", feedback="improve",
+            mode="select",
+        )
+        with self.assertRaises(NexentCapabilityError):
+            service.optimize(req)
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    def test_optimize_badcase_nexent_raises(self):
+        """nexent 模式: badcase 优化应该抛出 NexentCapabilityError"""
+        from adapters.exception import NexentCapabilityError
+
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        with self.assertRaises(NexentCapabilityError) as ctx:
+            service.optimize_badcase(
+                current_content="old",
+                bad_cases=[{"question": "Q1", "answer": "A1"}],
+                agent_id=1, section_type="duty", section_title="title",
+            )
+        self.assertIn("badcase", str(ctx.exception))
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_is_jiuwen_mode_available_env_disabled(self):
+        """开关关闭时 Jiuwen SDK 不可用"""
+        from consts.const import ENABLE_JIUWEN_SDK
+
+        # Patch ENABLE_JIUWEN_SDK to False
+        with patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False):
+            service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+            self.assertFalse(service.is_jiuwen_mode_available())
+
+    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    def test_is_jiuwen_mode_available_openjiuwen_missing(self):
+        """openjiuwen 未安装时 Jiuwen SDK 不可用"""
+        service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
+        with patch('builtins.__import__', side_effect=ModuleNotFoundError("No module named 'openjiuwen'")):
+            self.assertFalse(service.is_jiuwen_mode_available())
+
+    def test_optimize_request_dataclass_fields(self):
+        """OptimizeRequest dataclass 所有字段正确"""
+        req = OptimizeRequest(
+            agent_id=1, model_id=2, task_description="task",
+            section_type="duty", section_title="title",
+            current_content="old", feedback="improve",
+            mode="insert", start_pos=5, end_pos=10,
+            tool_ids=[1, 2], sub_agent_ids=[3],
+            knowledge_base_display_names=["kb1"],
+        )
+        self.assertEqual(req.agent_id, 1)
+        self.assertEqual(req.model_id, 2)
+        self.assertEqual(req.mode, "insert")
+        self.assertEqual(req.start_pos, 5)
+        self.assertEqual(req.end_pos, 10)
+        self.assertEqual(req.tool_ids, [1, 2])
+        self.assertEqual(req.sub_agent_ids, [3])
+        self.assertEqual(req.knowledge_base_display_names, ["kb1"])
+
+    def test_optimize_result_dataclass_fields(self):
+        """OptimizeResult dataclass 所有字段正确"""
+        res = OptimizeResult(
+            optimized_content="new",
+            source="jiuwen",
+            section_type="duty",
+            section_title="title",
+            original_content="old",
+        )
+        self.assertEqual(res.optimized_content, "new")
+        self.assertEqual(res.source, "jiuwen")
+        self.assertEqual(res.section_type, "duty")
+        self.assertEqual(res.section_title, "title")
+        self.assertEqual(res.original_content, "old")
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_no_resources(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to False when both tool and sub-agent lists are empty.
+
+        This covers the fix for the regression where adding the prompt template feature inadvertently
+        bypassed the conditional generation of constraint/few_shots sections.
+        """
+        mock_enabled_tools.return_value = []
+        mock_enabled_sub_agents.return_value = []
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty content", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=True,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    False,
+                    "has_selected_resources should be False when both tool and sub-agent lists are empty",
+                )
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_has_tools(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to True when tools are present."""
+        mock_enabled_tools.return_value = [{"name": "db_tool"}]
+        mock_enabled_sub_agents.return_value = []
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty", "is_complete": True}
+                    yield {"type": "constraint", "content": "constraints", "is_complete": True}
+                    yield {"type": "few_shots", "content": "examples", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=False,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    True,
+                    "has_selected_resources should be True when tools are present",
+                )
+
+    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    def test_generate_and_save_system_prompt_impl_auto_detect_has_sub_agents(
+        self, mock_enabled_tools, mock_enabled_sub_agents
+    ):
+        """Test that has_selected_resources is automatically set to True when sub-agents are present."""
+        mock_enabled_tools.return_value = []
+        mock_enabled_sub_agents.return_value = [{"name": "sub_agent"}]
+
+        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+            mock_query_agents.return_value = []
+
+            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+                def mock_generator(*args, **kwargs):
+                    yield {"type": "duty", "content": "duty", "is_complete": True}
+                    yield {"type": "constraint", "content": "constraints", "is_complete": True}
+                    yield {"type": "few_shots", "content": "examples", "is_complete": True}
+                    yield {"type": "agent_var_name", "content": "test", "is_complete": True}
+                    yield {"type": "agent_display_name", "content": "Test", "is_complete": True}
+                    yield {"type": "agent_description", "content": "desc", "is_complete": True}
+
+                mock_gen.side_effect = mock_generator
+
+                list(generate_and_save_system_prompt_impl(
+                    agent_id=123,
+                    model_id=1,
+                    task_description="Task",
+                    user_id="u",
+                    tenant_id="t",
+                    language="zh",
+                    tool_ids=[],
+                    sub_agent_ids=[],
+                    has_selected_resources=False,
+                ))
+
+                mock_gen.assert_called_once()
+                # has_selected_resources is passed positionally (10th arg), not as keyword
+                call_args = mock_gen.call_args[0]
+                self.assertIs(
+                    call_args[9],
+                    True,
+                    "has_selected_resources should be True when sub-agents are present",
+                )

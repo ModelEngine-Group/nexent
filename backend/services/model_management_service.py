@@ -3,7 +3,13 @@ from typing import List, Dict, Any, Optional
 
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
-from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
+from consts.provider import (
+    ProviderEnum,
+    SILICON_BASE_URL,
+    DASHSCOPE_BASE_URL,
+    DASHSCOPE_REALTIME_BASE_URL,
+    TOKENPONY_BASE_URL,
+)
 
 from database.model_management_db import (
     create_model_record,
@@ -184,7 +190,7 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             # ModelEngine models carry their own base_url in each model dict
             model_url = ""
         elif provider == ProviderEnum.DASHSCOPE.value:
-            model_url = DASHSCOPE_BASE_URL
+            model_url = DASHSCOPE_REALTIME_BASE_URL if model_type in ("stt", "tts") else DASHSCOPE_BASE_URL
         elif provider == ProviderEnum.TOKENPONY.value:
             model_url = TOKENPONY_BASE_URL
         else:
@@ -219,12 +225,14 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             if model_name:
                 existing_model = existing_model_map.get(model_display_name)
                 if existing_model:
+                    update_data = {}
                     # Check if max_tokens has changed
                     existing_max_tokens = existing_model.get("max_tokens")
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
-                        update_model_record(existing_model["model_id"], {
-                                            "max_tokens": new_max_tokens}, user_id)
+                        update_data["max_tokens"] = new_max_tokens
+                    if update_data:
+                        update_model_record(existing_model["model_id"], update_data, user_id)
                     continue
 
             model_dict = await prepare_model_dict(
@@ -563,7 +571,4 @@ async def list_models_for_admin(
     except Exception as e:
         logging.error(f"Failed to retrieve admin model list: {str(e)}")
         raise Exception(f"Failed to retrieve admin model list: {str(e)}")
-
-
-
 

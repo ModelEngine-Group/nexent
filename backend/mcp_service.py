@@ -70,7 +70,7 @@ class CustomFunctionTool:
 
 
 nexent_mcp = FastMCP(name="nexent_mcp")
-nexent_mcp.mount(local_mcp_service.name, local_mcp_service)
+nexent_mcp.mount(local_mcp_service, local_mcp_service.name)
 
 _openapi_mcp_services: Dict[str, FastMCP] = {}
 
@@ -188,7 +188,8 @@ def _sanitize_function_name(name: str) -> str:
 def register_openapi_service(
     service_name: str,
     openapi_json: Dict[str, Any],
-    server_url: str
+    server_url: str,
+    headers_template: Dict[str, str],
 ) -> bool:
     """
     Register an OpenAPI service using FastMCP.from_openapi().
@@ -222,7 +223,7 @@ def register_openapi_service(
             openapi_spec["servers"] = [{"url": server_url}]
 
         # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(base_url=server_url, timeout=30.0)
+        client = httpx.AsyncClient(base_url=server_url, timeout=120.0, headers=headers_template)
 
         # Create FastMCP instance from OpenAPI spec
         mcp_server = FastMCP.from_openapi(
@@ -239,7 +240,7 @@ def register_openapi_service(
         _openapi_mcp_services[service_name] = mcp_server
 
         # Mount to the main MCP server
-        nexent_mcp.mount(service_name, mcp_server)
+        nexent_mcp.mount(mcp_server, service_name)
 
         logger.info(f"Registered OpenAPI service: {service_name}")
         return True
@@ -320,13 +321,14 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
         service_name = service.get("mcp_service_name")
         openapi_json = service.get("openapi_json")
         server_url = service.get("server_url")
+        headers_template = service.get("headers_template")
 
         if not openapi_json:
             logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
             skipped_count += 1
             continue
 
-        if register_openapi_service(service_name, openapi_json, server_url):
+        if register_openapi_service(service_name, openapi_json, server_url, headers_template):
             registered_count += 1
         else:
             skipped_count += 1
@@ -394,6 +396,7 @@ def refresh_single_openapi_service(service_name: str, tenant_id: str) -> Dict[st
     # Re-register with fresh data
     openapi_json = service_data.get("openapi_json")
     server_url = service_data.get("server_url")
+    headers_template = service_data.get("headers_template")
 
     if not openapi_json:
         logger.warning(f"Service '{service_name}' has no OpenAPI JSON")
@@ -403,7 +406,7 @@ def refresh_single_openapi_service(service_name: str, tenant_id: str) -> Dict[st
             "error": "No OpenAPI JSON found"
         }
 
-    success = register_openapi_service(service_name, openapi_json, server_url)
+    success = register_openapi_service(service_name, openapi_json, server_url, headers_template)
     return {
         "status": "refreshed" if success else "error",
         "service_name": service_name,

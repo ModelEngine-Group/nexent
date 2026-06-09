@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Literal
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
@@ -414,12 +414,47 @@ class OptimizePromptSectionRequest(BaseModel):
     section_title: str
     current_content: str
     feedback: str
+    mode: Literal["general", "insert", "select"] = "general"
+    start_pos: Optional[int] = Field(None, description="Start position for insert/select mode")
+    end_pos: Optional[int] = Field(None, description="End position for insert/select mode")
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
+class BadCaseItem(BaseModel):
+    question: str
+    answer: str
+    label: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class OptimizePromptBadCaseRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    current_content: str
+    bad_cases: List[BadCaseItem]
+    section_type: str
+    section_title: str
+    tool_ids: Optional[List[int]] = Field(None)
+    sub_agent_ids: Optional[List[int]] = Field(None)
+    knowledge_base_display_names: Optional[List[str]] = Field(None)
+
+
+class OptimizeFromDebugSelected(BaseModel):
+    user_question: str
+    assistant_answer: str
+
+
+class OptimizePromptFromDebugRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    feedback: str
+    selected: OptimizeFromDebugSelected
+    history: Optional[List[HistoryItem]] = None
 
 
 class GenerateTitleRequest(BaseModel):
@@ -455,6 +490,8 @@ class AgentInfoRequest(BaseModel):
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
     version_no: int = 0
 
     @field_validator("verification_config", mode="before")

@@ -376,12 +376,11 @@ class SkillsComponent(ContextComponent):
             return [{"role": "system", "content": self.formatted_description}]
         return []
 
-    def add_skill(self, name: str, description: str, examples: List[str] = None) -> None:
+    def add_skill(self, name: str, description: str) -> None:
         """Add a skill definition."""
         self.skills.append({
             "name": name,
-            "description": description,
-            "examples": examples or []
+            "description": description
         })
 
 

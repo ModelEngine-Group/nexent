@@ -62,3 +62,8 @@ sdk/benchmark/.env
 /docker/.env.bak
 
 .venv
+
+.pytest-tmp
+doc/mermaid
+
+.claude/skills/python-import-triage

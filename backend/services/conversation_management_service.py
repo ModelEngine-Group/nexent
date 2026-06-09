@@ -18,12 +18,14 @@ from database.conversation_db import (
     get_conversation,
     get_conversation_history,
     get_conversation_list,
+    get_latest_assistant_message_id,
     get_message_id_by_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    update_message_minio_files,
     update_message_opinion
 )
 from nexent.core.utils.observer import MessageObserver, ProcessType
@@ -509,6 +511,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'opinion_flag': msg['opinion_flag']
                 }
 
+                # Add minio_files field (if any, e.g., skill-generated attachments)
+                if 'minio_files' in msg and msg['minio_files']:
+                    message_item['minio_files'] = msg['minio_files']
+
             # Add image content (if any)
             if message_id in image_by_message:
                 message_item['picture'] = image_by_message[message_id]
@@ -701,3 +707,52 @@ async def get_message_id_by_index_impl(conversation_id: int, message_index: int)
     if message_id is None:
         raise Exception("Message not found.")
     return message_id
+
+
+def save_skill_files_to_conversation(
+    conversation_id: int,
+    skill_file_uploads: List[Dict[str, Any]],
+    user_id: str,
+) -> bool:
+    """
+    Append skill file upload records to the latest assistant message in a conversation.
+
+    This persists generated documents (e.g., DOCX, XLSX created by skills) to the
+    conversation history so they appear in subsequent GET /conversation/{id} calls.
+
+    Args:
+        conversation_id: Target conversation ID
+        skill_file_uploads: List of upload metadata dicts (e.g., from upload_fileobj)
+        user_id: User ID for ownership validation
+
+    Returns:
+        bool: True if files were saved, False if no assistant message was found
+    """
+    if not skill_file_uploads:
+        return False
+
+    try:
+        message_id = get_latest_assistant_message_id(conversation_id, user_id)
+        if message_id is None:
+            logging.warning(
+                "[skill-file] no assistant message found for conversation=%s, "
+                "cannot persist skill file uploads",
+                conversation_id,
+            )
+            return False
+
+        success = update_message_minio_files(message_id, skill_file_uploads)
+        if success:
+            logging.info(
+                "[skill-file] persisted %d file(s) to message_id=%s conversation=%s",
+                len(skill_file_uploads),
+                message_id,
+                conversation_id,
+            )
+        return success
+    except Exception as exc:
+        logging.exception(
+            "[skill-file] failed to persist skill file uploads for conversation=%s",
+            conversation_id,
+        )
+        return False

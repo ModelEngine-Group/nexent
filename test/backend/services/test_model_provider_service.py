@@ -145,6 +145,16 @@ for module_path in [
 
 # Provide concrete attributes required by the module under test
 sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
+sys.modules["consts.provider"].DASHSCOPE_GET_URL = (
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+)
+sys.modules["consts.provider"].TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
+sys.modules["consts.provider"].DASHSCOPE_REALTIME_BASE_URL = (
+    "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+)
+sys.modules["consts.provider"].DASHSCOPE_STT_BASE_URL = (
+    sys.modules["consts.provider"].DASHSCOPE_REALTIME_BASE_URL
+)
 
 # Mock constants for token and chunk sizes
 sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
@@ -175,6 +185,7 @@ class _EnumStub:
 
 
 sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
+sys.modules["consts.model"].ModelRequest = mock.MagicMock()
 
 # Mock exception classes
 
@@ -289,7 +300,7 @@ async def test_get_models_embedding_success():
 
 @pytest.mark.asyncio
 async def test_get_models_unknown_type():
-    """Unknown model types should not have extra annotations and should hit the base URL."""
+    """Unknown model types should be ignored without calling the API."""
     provider_config = {"model_type": "other", "api_key": "test-key"}
 
     with mock.patch(
@@ -298,25 +309,10 @@ async def test_get_models_unknown_type():
         "backend.services.providers.silicon_provider.SILICON_GET_URL",
         "https://silicon.com",
     ):
-
-        mock_client_instance = mock.AsyncMock()
-        mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response._json_data = {"data": [{"id": "model-x"}]}
-        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
-        mock_response.raise_for_status = mock.Mock()
-        mock_client_instance.get.return_value = mock_response
-
         result = await SiliconModelProvider().get_models(provider_config)
 
-        # No additional keys should be injected for unknown type
-        assert result == [{"id": "model-x"}]
-        mock_client_instance.get.assert_called_once_with(
-            "https://silicon.com",
-            headers={"Authorization": "Bearer test-key"},
-        )
+        assert result == []
+        mock_client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -709,6 +705,98 @@ async def test_prepare_model_dict_rerank_dashscope():
         assert "services/rerank" in result["base_url"]
         assert "text-rerank/text-rerank" in result["base_url"]
         assert "rerank" in result["base_url"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_dashscope_stt_uses_realtime_ws_url():
+    """DashScope STT models should use the realtime websocket endpoint."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("", "qwen3-asr-flash-realtime"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="qwen3-asr-flash-realtime",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "qwen3-asr-flash-realtime",
+            "model_type": "stt",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "qwen3-asr-flash-realtime",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        result = await prepare_model_dict(
+            "dashscope",
+            {"id": "qwen3-asr-flash-realtime", "model_type": "stt"},
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "test-key",
+        )
+
+        mock_split_repo.assert_called_once_with("qwen3-asr-flash-realtime")
+        mock_add_repo_to_name.assert_called_once_with(
+            "", "qwen3-asr-flash-realtime"
+        )
+        mock_emb_dim_check.assert_not_called()
+        assert result["base_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        assert result["connect_status"] == "not_detected"
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_dashscope_tts_uses_realtime_ws_url():
+    """DashScope TTS models should use the realtime websocket endpoint."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("", "qwen-tts-realtime"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="qwen-tts-realtime",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "qwen-tts-realtime",
+            "model_type": "tts",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "qwen-tts-realtime",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        result = await prepare_model_dict(
+            "dashscope",
+            {"id": "qwen-tts-realtime", "model_type": "tts"},
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "test-key",
+        )
+
+        mock_split_repo.assert_called_once_with("qwen-tts-realtime")
+        mock_add_repo_to_name.assert_called_once_with("", "qwen-tts-realtime")
+        mock_emb_dim_check.assert_not_called()
+        assert result["base_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        assert result["connect_status"] == "not_detected"
 
 
 @pytest.mark.asyncio
