@@ -222,9 +222,9 @@ system_prompt: |-
        3. Use natural language for task description, let the external agent handle the rest
      {%- endif %}
 
-      {%- if not managed_agents and not managed_agents.values() | list and not external_a2a_agents and not external_a2a_agents.values() | list %}
-      - No agents are currently available
-      {%- endif %}
+     {%- if not managed_agents and not managed_agents.values() | list and not external_a2a_agents and not external_a2a_agents.values() | list %}
+     - No agents are currently available
+     {%- endif %}
 
    3. Skills
      {%- if skills and skills|length > 0 %}

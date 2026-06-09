@@ -88,6 +88,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
             if getattr(agent_run_info, 'context_manager', None) is not None:
                 agent.context_manager = agent_run_info.context_manager
+                context_components = getattr(agent_run_info.agent_config, 'context_components', None)
+                agent.context_manager.replace_components(context_components or [])
 
             nexent.add_history_to_agent(agent_run_info.history)
             nexent.agent_run_with_observer(
@@ -109,6 +111,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
                 if getattr(agent_run_info, 'context_manager', None) is not None:
                     agent.context_manager = agent_run_info.context_manager
+                    context_components = getattr(agent_run_info.agent_config, 'context_components', None)
+                    agent.context_manager.replace_components(context_components or [])
 
                 nexent.add_history_to_agent(agent_run_info.history)
                 nexent.agent_run_with_observer(

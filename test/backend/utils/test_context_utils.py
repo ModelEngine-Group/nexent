@@ -19,7 +19,7 @@ class TestFormatFunctions:
     def test_format_tools_empty_managed(self):
         from backend.utils.context_utils import _format_tools_description
         result = _format_tools_description({}, language="zh", is_manager=False)
-        assert result == "- 当前没有可用的工具"
+        assert result == "1. 工具\n- 当前没有可用的工具"
 
     def test_format_tools_single(self):
         from backend.utils.context_utils import _format_tools_description
