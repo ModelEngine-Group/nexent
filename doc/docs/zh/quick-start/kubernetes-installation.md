@@ -291,6 +291,71 @@ Provider 回调地址：
 
 本地 NodePort 默认回调示例为 `http://localhost:30000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，并在 OAuth provider 控制台中登记相同地址。
 
+### CAS 登录配置
+
+CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `nexent-common.config.cas.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`nexent-common.config.cas.serverUrl` 是 CAS Server 根地址，也不要带结尾 `/`。
+
+Kubernetes 部署通过 `nexent-common` 的 `config.cas.*` values 写入后端环境变量：
+
+```bash
+helm upgrade --install nexent nexent \
+  --namespace nexent --create-namespace \
+  --set nexent-common.config.cas.enabled=true \
+  --set nexent-common.config.cas.serverUrl=https://cas.example.com/cas \
+  --set nexent-common.config.cas.callbackBaseUrl=https://nexent.example.com \
+  --set nexent-common.config.cas.loginMode=force \
+  --set nexent-common.config.cas.logoutUrl=/logout
+```
+
+可配置的 CAS values：
+
+| Values | 对应环境变量 | 说明 |
+|--------|--------------|------|
+| `nexent-common.config.cas.enabled` | `CAS_ENABLED` | 是否启用 CAS |
+| `nexent-common.config.cas.serverUrl` | `CAS_SERVER_URL` | CAS Server 根地址 |
+| `nexent-common.config.cas.validatePath` | `CAS_VALIDATE_PATH` | serviceValidate 路径，默认 `/p3/serviceValidate` |
+| `nexent-common.config.cas.callbackBaseUrl` | `CAS_CALLBACK_BASE_URL` | Web 入口地址，CAS 回调路径会自动拼接 |
+| `nexent-common.config.cas.loginMode` | `CAS_LOGIN_MODE` | `disabled`、`button` 或 `force` |
+| `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | 用户标识属性。为空时使用 `<cas:user>` |
+| `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | 邮箱属性 |
+| `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | 角色属性 |
+| `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | 租户属性 |
+| `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | CAS 角色到 Nexent 角色的 JSON 映射 |
+| `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | CAS 本地会话最长有效期 |
+| `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent 本地会话有效期 |
+| `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | 距离过期多少秒内触发无感续期 |
+| `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | 无感续期等待超时时间 |
+| `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | CAS 未返回邮箱时生成邮箱使用的域名 |
+| `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS 登出地址。为空时 Nexent 主动退出不调用 CAS Server 登出接口 |
+| `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | 访问 CAS Server 时是否校验证书 |
+| `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | 自定义 CA bundle 路径 |
+
+常用 CAS 地址：
+
+| 用途 | 地址 |
+|------|------|
+| Nexent 登录入口 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service 回调 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS 无感续期回调 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS 单点登出回调 | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+Apereo CAS 使用 JSON Service Registry 时，可以新增一个服务注册文件，例如 `Nexent-10001.json`。文件需要放到 CAS 部署配置的 service registry 目录中，`id` 必须全局唯一。本地 NodePort 示例：
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:30000/api/user/cas/logout_callback"
+}
+```
+
+生产环境建议保持 `CAS_SSL_VERIFY=true`；自签名证书优先配置 `CAS_CA_BUNDLE`，仅本地验证时再临时设置 `CAS_SSL_VERIFY=false`。
+
 ## 🔍 故障排查
 
 ### 查看 Pod 状态
