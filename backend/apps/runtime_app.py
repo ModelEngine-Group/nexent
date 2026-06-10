@@ -8,6 +8,7 @@ from apps.memory_config_app import router as memory_config_router
 from apps.file_management_app import file_management_runtime_router as file_management_router
 from apps.skill_app import skill_creator_router
 from middleware.exception_handler import ExceptionHandlerMiddleware
+from services.scheduled_task_scheduler import scheduled_task_scheduler
 
 # Create logger instance
 logger = logging.getLogger("runtime_app")
@@ -24,3 +25,13 @@ app.include_router(memory_config_router)
 app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)
+
+
+@app.on_event("startup")
+async def start_scheduled_task_scheduler():
+    scheduled_task_scheduler.start()
+
+
+@app.on_event("shutdown")
+async def stop_scheduled_task_scheduler():
+    scheduled_task_scheduler.stop()

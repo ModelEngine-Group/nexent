@@ -1164,6 +1164,35 @@ class A2AMessage(SimpleTableBase):
         timezone=False), server_default=func.now(), doc="Message creation timestamp")
 
 
+class ScheduledTaskRecord(TableBase):
+    """
+    Scheduled task records for deferred / recurring agent execution.
+    """
+    __tablename__ = "scheduled_tasks_t"
+    __table_args__ = (
+        Index("ix_scheduled_task_status_next_fire", "status", "next_fire_time"),
+        Index("ix_scheduled_task_agent_delete", "agent_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
+
+    task_id = Column(Integer, Sequence("scheduled_tasks_t_task_id_seq", schema=SCHEMA),
+                     primary_key=True, nullable=False, autoincrement=True, doc="Primary key")
+    task_uuid = Column(String(36), unique=True, nullable=False, doc="Unique task identifier (UUID)")
+    task_name = Column(String(200), doc="Human-readable task name")
+    task_prompt = Column(Text, nullable=False, doc="The prompt to execute when the task fires")
+    task_type = Column(String(10), nullable=False, doc="Task type: oneshot or cron")
+    cron_expression = Column(String(100), doc="Cron expression for recurring tasks")
+    delay_seconds = Column(Integer, doc="Delay in seconds for oneshot tasks")
+    status = Column(String(20), default="pending", doc="Task status: pending, fired, cancelled, error")
+    next_fire_time = Column(TIMESTAMP(timezone=False), doc="Next scheduled execution time")
+    fire_count = Column(Integer, default=0, doc="Number of times this task has fired")
+    max_fires = Column(Integer, nullable=True, doc="Maximum number of fires (NULL = unlimited)")
+    agent_id = Column(Integer, nullable=False, doc="Agent ID that owns this task")
+    conversation_id = Column(Integer, nullable=True, doc="Conversation ID associated with this task")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID for multi-tenancy isolation")
+    user_id = Column(String(100), nullable=False, doc="User ID who created this task")
+
+
 class A2AArtifact(SimpleTableBase):
     """
     A2A artifacts. Stores the output/artifacts produced by a task.
