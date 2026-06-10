@@ -2,6 +2,8 @@
 FastAPI application factory with common configurations and exception handlers.
 """
 import logging
+from contextlib import asynccontextmanager
+from typing import Callable, Awaitable, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,8 @@ def create_app(
     cors_origins: list = None,
     cors_methods: list = None,
     enable_monitoring: bool = True,
+    lifespan_startup: Optional[Callable[[], Awaitable[None]]] = None,
+    lifespan_shutdown: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -33,15 +37,28 @@ def create_app(
         cors_origins: List of allowed CORS origins (default: ["*"])
         cors_methods: List of allowed CORS methods (default: ["*"])
         enable_monitoring: Whether to enable monitoring
+        lifespan_startup: Optional async startup hook (replaces @app.on_event("startup"))
+        lifespan_shutdown: Optional async shutdown hook (replaces @app.on_event("shutdown"))
 
     Returns:
         Configured FastAPI application
     """
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        if lifespan_startup is not None:
+            await lifespan_startup()
+        try:
+            yield
+        finally:
+            if lifespan_shutdown is not None:
+                await lifespan_shutdown()
+
     app = FastAPI(
         title=title,
         description=description,
         version=version,
-        root_path=root_path
+        root_path=root_path,
+        lifespan=_lifespan if (lifespan_startup or lifespan_shutdown) else None,
     )
 
     # Add CORS middleware

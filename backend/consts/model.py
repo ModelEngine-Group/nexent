@@ -555,6 +555,17 @@ class MessageIdRequest(BaseModel):
     message_index: int
 
 
+class NewMessageCheckItem(BaseModel):
+    """A single conversation to check for new messages in a batch request."""
+    conversation_id: int
+    since_index: int = 0
+
+
+class BatchMessageCheckRequest(BaseModel):
+    """Request body for batch new-message polling."""
+    checks: List[NewMessageCheckItem] = []
+
+
 class ExportAndImportAgentInfo(BaseModel):
     agent_id: int
     name: str
