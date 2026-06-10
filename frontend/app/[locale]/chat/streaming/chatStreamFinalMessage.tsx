@@ -10,7 +10,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 
 /**
  * Convert custom code tags to standard markdown code fences

@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "antd";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
-import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
@@ -27,7 +27,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
-import { TokenUsageIndicator } from "@/components/ui/tokenUsageIndicator";
+import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
 import { TokenMetrics } from "@/types/chat";
 
 // Get file extension

@@ -6,7 +6,7 @@ import { Table, Popconfirm, message, Button, Modal, Tag } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Edit, Trash2, BookOpen } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
