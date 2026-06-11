@@ -310,6 +310,7 @@ async def create_agent_config(
     allow_memory_search: bool = True,
     version_no: int = 0,
     override_model_id: int | None = None,
+    conversation_id: int = None,
 ):
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
@@ -331,13 +332,14 @@ async def create_agent_config(
             allow_memory_search=allow_memory_search,
             version_no=sub_agent_version_no,
             override_model_id=None,
+            conversation_id=None,
         )
         managed_agents.append(sub_agent_config)
 
     # create external A2A agents (synchronous function, no await needed)
     external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
 
-    tool_list = await create_tool_config_list(agent_id, tenant_id, user_id, version_no=version_no)
+    tool_list = await create_tool_config_list(agent_id, tenant_id, user_id, version_no=version_no, conversation_id=conversation_id)
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
@@ -562,7 +564,7 @@ async def create_agent_config(
     return agent_config
 
 
-async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int = 0):
+async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int = 0, conversation_id: int = None):
     # create tool
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -664,6 +666,17 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                 "vlm_model": get_video_understanding_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name == "ScheduledTaskTool":
+            from database.scheduled_task_db import create_scheduled_task, query_tasks_by_agent, cancel_task
+            tool_config.metadata = {
+                "db_create": create_scheduled_task,
+                "db_list": query_tasks_by_agent,
+                "db_cancel": cancel_task,
+                "agent_id": agent_id,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "conversation_id": conversation_id,
             }
 
         tool_config_list.append(tool_config)
@@ -929,6 +942,7 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
+    conversation_id: int = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -957,6 +971,7 @@ async def create_agent_run_info(
         "last_user_query": final_query,
         "allow_memory_search": allow_memory_search,
         "version_no": version_no,
+        "conversation_id": conversation_id,
     }
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id

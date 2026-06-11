@@ -3,6 +3,7 @@ from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from starlette.responses import JSONResponse
 
 from consts.model import (
     ConversationRequest,
@@ -18,6 +19,7 @@ from services.conversation_management_service import (
     generate_conversation_title_service,
     get_conversation_history_service,
     get_conversation_list_service,
+    get_new_messages_service,
     get_sources_service,
     rename_conversation_service,
     update_message_opinion_service, get_message_id_by_index_impl,
@@ -239,4 +241,53 @@ async def get_message_id_endpoint(request: MessageIdRequest):
         return ConversationResponse(code=0, message="success", data=message_id)
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/{conversation_id}/new_messages", response_model=Dict[str, Any])
+async def check_new_messages_endpoint(conversation_id: int, since_index: int = 0, authorization: Optional[str] = Header(None)):
+    """
+    Lightweight polling: check if new messages exist for a single conversation.
+
+    Args:
+        conversation_id: Conversation ID
+        since_index: Last known message index on the client side
+        authorization: Authorization header
+
+    Returns:
+        Dict with has_new, max_index, since_index
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = get_new_messages_service(conversation_id, user_id, since_index)
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except Exception as e:
+        logging.error(f"Failed to check new messages: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/batch_new_messages", response_model=Dict[str, Any])
+async def batch_check_new_messages_endpoint(request: Dict[str, Any], authorization: Optional[str] = Header(None)):
+    """
+    Batch check for new messages across multiple conversations.
+
+    Args:
+        request: Body with "checks" list of {"conversation_id": int, "since_index": int}
+        authorization: Authorization header
+
+    Returns:
+        Dict mapping conversation_id to {has_new, max_index, since_index}
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        checks = request.get("checks", [])
+        results = {}
+        for check in checks:
+            cid = check.get("conversation_id")
+            since = check.get("since_index", 0)
+            if cid is not None:
+                results[str(cid)] = get_new_messages_service(cid, user_id, since)
+        return JSONResponse(status_code=HTTPStatus.OK, content={"results": results})
+    except Exception as e:
+        logging.error(f"Failed to batch check new messages: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
