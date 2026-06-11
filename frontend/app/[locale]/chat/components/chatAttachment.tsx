@@ -19,7 +19,7 @@ import {
 } from "@/services/storageService";
 import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
-import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { App } from "antd";
 
 // Selected file state for preview drawer
