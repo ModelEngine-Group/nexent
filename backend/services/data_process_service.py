@@ -600,7 +600,7 @@ class DataProcessService:
             f"Processing uploaded file: {filename} using SDK DataProcessCore")
 
         data_processor = DataProcessCore()
-        chunks = data_processor.file_process(
+        chunks, _ = data_processor.file_process(
             file_data=file_content,
             filename=filename,
             chunking_strategy=chunking_strategy
