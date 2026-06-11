@@ -1,0 +1,4 @@
+email,password,role
+alice1@example.com,password123,USER
+bob1@example.com,password456,DEV
+carol1@example.com,adminpass,ADMIN

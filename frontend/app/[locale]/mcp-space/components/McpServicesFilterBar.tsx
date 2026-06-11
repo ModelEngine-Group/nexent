@@ -46,10 +46,7 @@ export default function McpServicesFilterBar({
           options={[
             { value: FILTER_ALL, label: t("mcpTools.page.sourceFilter.all") },
             { value: McpSource.LOCAL, label: t("mcpTools.source.local") },
-            {
-              value: McpSource.REGISTRY,
-              label: t("mcpTools.source.registry"),
-            },
+            // { value: McpSource.REGISTRY, label: t("mcpTools.source.registry") },
             { value: McpSource.COMMUNITY, label: t("mcpTools.source.community") },
           ]}
         />

@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse, unquote
 import re
 import uuid
@@ -12,6 +12,7 @@ from pydantic import BaseModel, EmailStr
 
 from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError, AdminCreateUserException
 from consts.model import ToolParamsRequest
+from consts.const import SERVICE_ROLE_KEY
 from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
@@ -23,7 +24,8 @@ from services.northbound_service import (
     upload_files_for_northbound,
     admin_create_user,
 )
-
+from services.tenant_service import create_tenant
+from services.user_management_service import create_token
 from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_access_key
 
 from .file_management_app import build_content_disposition_header
@@ -39,6 +41,26 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str
     role: str = "USER"
+
+
+class UserSpec(BaseModel):
+    """Spec for a single user to create during provisioning."""
+    email: EmailStr
+    password: str
+    role: str = "USER"
+
+
+class TenantProvisionSpec(BaseModel):
+    """Spec for one tenant in the provisioning request."""
+    tenant_name: str
+    admin_email: EmailStr
+    admin_password: str
+    users: List[UserSpec] = []
+
+
+class ProvisionTenantRequest(BaseModel):
+    """Request model for bulk tenant provisioning via internal API."""
+    tenants: List[TenantProvisionSpec]
 
 
 def _resolve_proxy_download_filename(presigned_url: str, content_disposition: str) -> str:
@@ -574,4 +596,148 @@ async def create_user(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+
+
+# ==================== Internal Provisioning ====================
+
+@router.post("/internal/provision")
+async def provision_tenant_internal(
+    payload: ProvisionTenantRequest,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
+    """
+    Provision one or more tenants with admin users and optional members.
+
+    Authentication: X-Internal-Key header must match SERVICE_ROLE_KEY configured
+    on the server side. This endpoint is intended for offline scripts and
+    provisioning tools only.
+
+    Args:
+        payload: List of tenant specs to provision
+
+    Returns:
+        JSONResponse with per-tenant results including admin access keys
+    """
+    # Authenticate using X-Internal-Key header
+    if not SERVICE_ROLE_KEY:
+        logging.error("SERVICE_ROLE_KEY not configured on server")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal provisioning not configured"
+        )
+
+    if x_internal_key != SERVICE_ROLE_KEY:
+        logging.warning("Invalid X-Internal-Key provided for provisioning")
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid internal key"
+        )
+
+    if not payload.tenants:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="At least one tenant spec is required"
+        )
+
+    results = []
+    for spec in payload.tenants:
+        tenant_result = await _provision_single_tenant(spec)
+        results.append(tenant_result)
+
+    return JSONResponse(
+        status_code=HTTPStatus.OK,
+        content={
+            "message": f"Provisioned {len(results)} tenant(s)",
+            "data": results,
+        }
+    )
+
+
+async def _provision_single_tenant(spec: TenantProvisionSpec) -> Dict[str, Any]:
+    """Create one tenant with admin user + optional members. All DB writes go through service layer."""
+    try:
+        tenant_info = create_tenant(
+            tenant_name=spec.tenant_name,
+            created_by="system-provision",
+        )
+    except Exception as exc:
+        logging.error(f"Tenant creation failed: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Failed to create tenant: {str(exc)}"
+        )
+
+    tenant_id = tenant_info["tenant_id"]
+    default_group_id = tenant_info.get("default_group_id")
+
+    # Create admin user
+    try:
+        admin_info = await admin_create_user(
+            email=spec.admin_email,
+            password=spec.admin_password,
+            role="ADMIN",
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logging.error(f"Admin creation failed: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"Failed to create admin user: {str(exc)}"
+        )
+    admin_user_id = admin_info["user_id"]
+
+    # Generate Access Key for admin
+    try:
+        token_info = create_token(admin_user_id)
+        access_key = token_info["access_key"]
+    except Exception as exc:
+        logging.error(f"Token creation failed: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate access key: {str(exc)}"
+        )
+
+    user_results = []
+    for user_spec in spec.users:
+        try:
+            user_info = await admin_create_user(
+                email=user_spec.email,
+                password=user_spec.password,
+                role=user_spec.role,
+                tenant_id=tenant_id,
+            )
+            user_results.append({
+                "user_id": user_info["user_id"],
+                "email": user_spec.email,
+                "role": user_spec.role,
+                "status": "created",
+            })
+        except AdminCreateUserException as exc:
+            error_msg = str(exc)
+            if "EMAIL_ALREADY_EXISTS" in error_msg:
+                user_results.append({
+                    "email": user_spec.email,
+                    "role": user_spec.role,
+                    "status": "skipped",
+                    "reason": "email already exists",
+                })
+            else:
+                user_results.append({
+                    "email": user_spec.email,
+                    "role": user_spec.role,
+                    "status": "failed",
+                    "reason": error_msg,
+                })
+
+    return {
+        "tenant_id": tenant_id,
+        "tenant_name": spec.tenant_name,
+        "default_group_id": default_group_id,
+        "admin": {
+            "user_id": admin_user_id,
+            "email": spec.admin_email,
+            "access_key": access_key,
+        },
+        "users": user_results,
+    }
 

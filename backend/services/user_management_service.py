@@ -36,18 +36,16 @@ from services.asset_owner_visibility import (
     filter_accessible_routes_for_asset_owner_feature,
     require_asset_owner_enabled,
 )
+from consts.const import SSO_ENABLED, SSO_PROVIDER
 from consts.exceptions import (
     NoInviteCodeException,
     IncorrectInviteCodeException,
     UserRegistrationException,
     UnauthorizedError,
     ValidationError,
-    SSO_ENABLED,
-    SSO_PROVIDER
+    AppException,
 )
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 from consts.error_code import ErrorCode
-from consts.exceptions import AppException
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
@@ -66,6 +64,7 @@ from services.oauth_service import (
     exchange_code_for_provider_token,
     get_provider_user_info,
 )
+from services.tenant_service import create_tenant
 
 
 async def sync_sso_after_login(user_id: str, email: str) -> Optional[Dict[str, Any]]:

@@ -271,7 +271,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>
-          <Button type="primary" onClick={openCreateUser}>
+          <Button type="primary" onClick={openCreateUser} style={{ display: "none" }}>
             + {t("tenantResources.users.addUser")}
           </Button>
         </div>

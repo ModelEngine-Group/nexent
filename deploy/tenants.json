@@ -1,0 +1,15 @@
+{
+    "internal_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3ODAzODk5NTIsImV4cCI6MTkzODA2OTk1Mn0.8D6SIcIQgxLSQVk939RVZiZCOeBV_qQULibk4WBLH04",
+    "backend_url": "http://localhost:5013",
+    "tenants": [
+        {
+        "tenant_name": "Acme Corp",
+        "admin_email": "admin@acme.com",
+        "admin_password": "SecurePass123",
+        "users": [
+            { "email": "alice@acme.com", "password": "Pass1", "role": "USER" },
+            { "email": "bob@acme.com",   "password": "Pass2", "role": "DEV" }
+        ]
+        }
+    ]
+}

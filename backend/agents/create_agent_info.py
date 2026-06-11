@@ -981,6 +981,14 @@ async def create_agent_config(
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
     )
+    logger.info(
+        "Agent metadata | name=%s | tool_list=%s | managed_agents=%s | model_name=%s | max_steps=%s",
+        agent_config.name,
+        [t.name for t in agent_config.tools],
+        [a.name for a in agent_config.managed_agents],
+        agent_config.model_name,
+        agent_config.max_steps,
+    )
     return agent_config
 
 

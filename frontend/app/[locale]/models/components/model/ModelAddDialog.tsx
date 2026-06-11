@@ -1481,24 +1481,6 @@ export const ModelAddDialog = ({
               {t("model.type.videoUnderstanding")}
             </Option>
             <Option value={MODEL_TYPES.RERANK}>{t("model.type.rerank")}</Option>
-            <Option
-              value={MODEL_TYPES.STT}
-              disabled={
-                form.isBatchImport &&
-                !isBatchModelTypeSupported(form.provider, MODEL_TYPES.STT)
-              }
-            >
-              {t("model.type.stt")}
-            </Option>
-            <Option
-              value={MODEL_TYPES.TTS}
-              disabled={
-                form.isBatchImport &&
-                !isBatchModelTypeSupported(form.provider, MODEL_TYPES.TTS)
-              }
-            >
-              {t("model.type.tts")}
-            </Option>
           </Select>
         </div>
 

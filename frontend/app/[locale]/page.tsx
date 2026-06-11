@@ -62,7 +62,7 @@ export default function Homepage() {
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
+          className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-10 tracking-tight"
         >
           {t("灵犀智能体平台")}
           <span className="text-blue-600 dark:text-blue-500">
@@ -109,7 +109,7 @@ export default function Homepage() {
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
-        {!isSpeedMode && (
+        {/* {!isSpeedMode && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -119,7 +119,7 @@ export default function Homepage() {
             <AlertTriangle className="h-4 w-4" />
             <span>{t("page.dataProtection")}</span>
           </motion.div>
-        )}
+        )} */}
       </section>
 
       {/* Feature cards */}

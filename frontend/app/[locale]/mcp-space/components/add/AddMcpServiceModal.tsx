@@ -66,10 +66,7 @@ export default function AddMcpServiceModal({
             onChange={(value) => setTab(value as McpSource)}
             options={[
               { label: t("mcpTools.addModal.tabLocal"), value: McpSource.LOCAL },
-              {
-                label: t("mcpTools.addModal.tabRegistry"),
-                value: McpSource.REGISTRY,
-              },
+              // { label: t("mcpTools.addModal.tabRegistry"), value: McpSource.REGISTRY },
               {
                 label: t("mcpTools.addModal.tabCommunity"),
                 value: McpSource.COMMUNITY,

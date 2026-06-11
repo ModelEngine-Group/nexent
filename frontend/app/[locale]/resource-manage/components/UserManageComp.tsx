@@ -1310,18 +1310,7 @@ export default function UserManageComp() {
                           label: "Skills",
                           children: <SkillList tenantId={tenantId} />,
                         },
-                        {
-                          key: "invitations",
-                          label:
-                            t("tenantResources.invitation.tab") ||
-                            "Invitations",
-                          children: (
-                            <InvitationList
-                              tenantId={tenantId}
-                              refreshKey={invitationListRefreshKey}
-                            />
-                          ),
-                        },
+
                       ]}
                     />
                   ) : (
