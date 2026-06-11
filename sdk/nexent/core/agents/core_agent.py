@@ -491,7 +491,12 @@ You have been provided with these additional arguments, that you can access usin
 {str(additional_args)}."""
 
         system_prompt_content = self.system_prompt
-        if self.context_manager and self.context_manager.get_registered_components():
+        registered = self.context_manager.get_registered_components() if self.context_manager else []
+        if registered:
+            self.logger.log(
+                f"ContextManager component path active: "
+                f"{[f'{c.component_type}(priority={c.priority},tokens={c.token_estimate})' for c in registered]}"
+            )
             component_messages = self.context_manager.build_system_prompt()
             if component_messages:
                 system_prompt_content = "\n\n".join(

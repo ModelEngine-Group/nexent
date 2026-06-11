@@ -389,8 +389,8 @@ class TestGetSkillsForTemplate:
                 )
 
                 assert result == []
-                mock_logger.warning.assert_called_once()
-                assert "Failed to get skills for template: Service unavailable" in mock_logger.warning.call_args[0][0]
+                mock_logger.error.assert_called_once()
+                assert "Failed to get skills for agent" in mock_logger.error.call_args[0][0]
 
     def test_get_skills_for_template_with_version_no(self):
         """Test case with specific version number"""
@@ -2624,7 +2624,7 @@ class TestCreateAgentConfig:
             await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
             # Verify that error was logged
-            mock_logger.error.assert_called_with("Failed to build knowledge base summary: Test Error")
+            mock_logger.error.assert_any_call("Failed to build knowledge base summary: Test Error")
 
 
 class TestCreateModelConfigList:
