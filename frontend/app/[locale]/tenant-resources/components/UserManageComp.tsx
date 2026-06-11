@@ -1234,7 +1234,7 @@ export default function UserManageComp() {
             </Col>
           </Can>
           <Col className="flex-1 flex flex-col p-6 overflow-hidden">
-            <div className="h-full bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
               {/* Tenant name header */}
               <div className="flex">
                 {isEditingTenantName ? (
@@ -1267,7 +1267,7 @@ export default function UserManageComp() {
                   {tenantId ? (
                     <Tabs
                       defaultActiveKey="users"
-                      className="h-full flex flex-col tenant-resource-tabs w-full"
+                      className="h-full flex flex-col tenant-resource-tabs w-full overflow-hidden"
                       items={[
                         {
                           key: "users",
@@ -1347,3 +1347,15 @@ export default function UserManageComp() {
     </div>
   );
 }
+
+<style jsx global>{`
+  .tenant-resource-tabs .ant-tabs-content {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .tenant-resource-tabs .ant-tabs-tabpane {
+    max-width: 100%;
+    overflow: hidden;
+  }
+`}</style>

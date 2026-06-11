@@ -443,7 +443,7 @@ export default function InvitationList({
   }, [invitations, tenantId]);
 
   return (
-    <div className="h-full flex flex-col overflow-auto">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="mb-4 flex justify-between items-center flex-shrink-0">
         <div />
         <div>
@@ -465,8 +465,8 @@ export default function InvitationList({
           loading={isLoading}
           rowKey="invitation_id"
           pagination={{ pageSize: 10 }}
-          scroll={{ x: 1000 }}
-          className="flex-1"
+          scroll={{ y: "calc(100vh - 560px)" }}
+          className="flex-1 [&_.ant-table]:h-full"
         />
       ) : (
         // Multi-tenant view with collapse

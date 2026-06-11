@@ -360,7 +360,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-y-auto">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Segmented
@@ -397,8 +397,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           total: total,
         }}
         onChange={handlePageChange}
-        scroll={{ x: true }}
-        className="flex-1"
+        scroll={{ y: "calc(100vh - 580px)" }}
+        className="flex-1 [&_.ant-table]:h-full"
       />
 
       <ModelAddDialog
