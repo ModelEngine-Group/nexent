@@ -48,6 +48,10 @@ class KnowledgeBaseSearchTool(Tool):
         },
     }
 
+    # Internal parameter: restricts search results to specified document paths only.
+    # Not exposed to LLM, only settable via tool_params from /chat/run.
+    _internal_document_paths: Optional[List[str]] = None
+
     init_param_descriptions = {
         "top_k": {
             "description": "Maximum number of search results",
@@ -96,6 +100,10 @@ class KnowledgeBaseSearchTool(Tool):
         display_name_to_index_map: dict = Field(
             description="Mapping from display_name (knowledge_name) to index_name",
             default_factory=dict, exclude=True),
+        # Internal parameter: not exposed to LLM, only settable via tool_params from /chat/run.
+        document_paths: Optional[List[str]] = Field(
+            description="Internal: restrict results to documents with these path_or_urls", default=None, exclude=True
+        ),
     ):
         """Initialize the KBSearchTool.
 
@@ -121,10 +129,22 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank_model = rerank_model
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
         self.display_name_to_index_map = display_name_to_index_map
+        self._internal_document_paths = document_paths
 
         self.record_ops = 1
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
+
+    def set_document_paths(self, document_paths: Optional[List[str]]) -> None:
+        """Set the internal document_paths filter for access control.
+
+        This method is intended for internal use only, called via tool_params
+        from the /chat/run endpoint. It is NOT exposed to the LLM.
+
+        Args:
+            document_paths: List of allowed document path_or_urls. If None, no filtering is applied.
+        """
+        self._internal_document_paths = document_paths
 
     def _convert_to_index_names(self, names: List[str]) -> List[str]:
         """Convert display names (knowledge_name) to index names if necessary.
@@ -154,6 +174,36 @@ class KnowledgeBaseSearchTool(Tool):
             else:
                 converted_names.append(name)
         return converted_names
+
+    def _filter_by_document_paths(self, results: List[dict]) -> List[dict]:
+        """Filter search results by allowed document paths for access control.
+
+        If _internal_document_paths is set, only results whose path_or_url is in the
+        allowed list are returned. Results with no path_or_url field are discarded
+        when the filter is active.
+
+        Args:
+            results: List of search result dicts from VDB search
+
+        Returns:
+            Filtered list containing only results with allowed document paths
+        """
+        allowed_paths = self._internal_document_paths
+        if not allowed_paths:
+            return results
+
+        filtered = [
+            result for result in results
+            if result.get("path_or_url") in allowed_paths
+        ]
+
+        if filtered:
+            logger.info(
+                "Document paths filter applied: %d/%d results match allowed paths",
+                len(filtered),
+                len(results),
+            )
+        return filtered
 
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
         # Parse index_names from string (always required)
@@ -202,6 +252,9 @@ class KnowledgeBaseSearchTool(Tool):
             top_k=effective_top_k,
         )
         kb_search_results = kb_search_data["results"]
+
+        # Apply document_paths access control: filter out results not in allowed list
+        kb_search_results = self._filter_by_document_paths(kb_search_results)
 
         if not kb_search_results:
             raise Exception("No results found! Try a less restrictive/shorter query.")

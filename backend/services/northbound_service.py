@@ -3,29 +3,37 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from os.path import basename
+from typing import Any, Dict, List, Optional
 
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
+
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
+    ConversationNotFoundError,
 )
-from consts.model import AgentRequest
+from consts.model import AgentRequest, ToolParamsRequest
 from database.conversation_db import get_conversation_messages
 from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
     run_agent_stream,
     stop_agent_tasks,
-    list_all_agent_info_impl,
     get_agent_id_by_name
 )
+from services.agent_version_service import list_published_agents_impl
 from services.conversation_management_service import (
     save_conversation_user,
     get_conversation_list_service,
     create_new_conversation,
     update_conversation_title as update_conversation_title_service,
 )
+from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from database.attachment_db import build_s3_url, get_file_url
+from nexent.multi_modal.utils import parse_s3_url
 
 logger = logging.getLogger("northbound_service")
 
@@ -37,6 +45,102 @@ class NorthboundContext:
     user_id: str
     authorization: str
     token_id: int = 0
+
+
+def _build_northbound_file_descriptor(upload_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize upload metadata for northbound API consumers."""
+    object_name = str(upload_result.get("object_name") or "").strip()
+    file_name = str(upload_result.get("file_name") or basename(object_name) or "")
+    descriptor = {
+        "name": file_name,
+        "object_name": object_name,
+        "s3_url": build_s3_url(object_name),
+    }
+    presigned_url = upload_result.get("presigned_url")
+    if presigned_url:
+        descriptor["presigned_url"] = presigned_url
+    return descriptor
+
+
+async def upload_files_for_northbound(
+    ctx: NorthboundContext,
+    files: List[UploadFile],
+    folder: str = "attachments",
+) -> Dict[str, Any]:
+    """Upload files for northbound callers and return reusable storage references."""
+    if not files:
+        raise ValueError("No files in the request")
+
+    actual_folder = resolve_minio_upload_folder(folder, ctx.user_id, ctx.tenant_id)
+    results = await upload_to_minio(files=files, folder=actual_folder)
+    normalized_files = [
+        _build_northbound_file_descriptor(result)
+        for result in results
+        if result.get("success") and result.get("object_name")
+    ]
+
+    if not normalized_files:
+        raise ValueError("No valid files uploaded")
+
+    success_count = sum(1 for result in results if result.get("success", False))
+    failed_count = sum(1 for result in results if not result.get("success", False))
+
+    return {
+        "message": f"Processed {len(results)} files",
+        "requestId": ctx.request_id,
+        "summary": {
+            "total": len(results),
+            "uploaded": success_count,
+            "failed": failed_count,
+        },
+        "files": normalized_files,
+    }
+
+
+def _normalize_northbound_attachments(
+    attachments: Optional[List[str]],
+    user_id: str,
+    tenant_id: str,
+) -> Optional[List[Dict[str, Any]]]:
+    """Convert northbound S3 attachment references into internal minio_files objects."""
+    if attachments is None:
+        return None
+    if not isinstance(attachments, list):
+        raise ValueError("attachments must be an array of S3 URLs")
+
+    normalized_files: List[Dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, str) or not attachment.strip():
+            raise ValueError("attachments must contain non-empty S3 URLs")
+
+        attachment_url = attachment.strip()
+        if not attachment_url.startswith("s3://"):
+            raise ValueError(f"Invalid S3 URL format: {attachment_url}")
+
+        try:
+            _, object_name = parse_s3_url(attachment_url)
+        except ValueError as exc:
+            raise ValueError(f"Invalid S3 URL format: {attachment_url}") from exc
+
+        try:
+            validate_urls_access([attachment_url], user_id, tenant_id)
+            presigned_result = get_file_url(object_name=object_name, expires=86400)
+        except PermissionError as exc:
+            detail = str(exc)
+            if "Invalid S3 URL format" in detail:
+                raise ValueError(detail) from exc
+            raise PermissionError(detail) from exc
+
+        normalized_file = {
+            "name": basename(object_name.rstrip("/")),
+            "object_name": object_name,
+            "url": attachment_url,
+        }
+        if presigned_result.get("success") and presigned_result.get("url"):
+            normalized_file["presigned_url"] = presigned_result["url"]
+        normalized_files.append(normalized_file)
+
+    return normalized_files
 
 
 # -----------------------------
@@ -111,6 +215,12 @@ def _build_idempotency_key(*parts: Any) -> str:
     return ":".join(processed)
 
 
+def _build_title_update_idempotency_key(tenant_id: str, conversation_id: int, title: str) -> str:
+    """Build an ASCII-safe idempotency key for title updates."""
+    title_hash = hashlib.sha256(title.encode("utf-8")).hexdigest()
+    return _build_idempotency_key(tenant_id, str(conversation_id), title_hash)
+
+
 # -----------------------------
 # Agent resolver
 # -----------------------------
@@ -126,7 +236,9 @@ async def start_streaming_chat(
     conversation_id: Optional[int],
     agent_name: str,
     query: str,
+    attachments: Optional[List[str]] = None,
     meta_data: Optional[Dict[str, Any]] = None,
+    tool_params: Optional[ToolParamsRequest] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
@@ -145,6 +257,11 @@ async def start_streaming_chat(
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
         agent_id = await get_agent_id_by_name(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        normalized_attachments = _normalize_northbound_attachments(
+            attachments=attachments,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+        )
         # Idempotency: only prevent concurrent duplicate starts
         composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), agent_id, query)
         await idempotency_start(composed_key)
@@ -153,8 +270,9 @@ async def start_streaming_chat(
             agent_id=agent_id,
             query=query,
             history=(history_resp.get("data", {})).get("history", []),
-            minio_files=None,
+            minio_files=normalized_attachments,
             is_debug=False,
+            tool_params=tool_params,
         )
 
         # Synchronously persist the user message before starting the stream to avoid race conditions
@@ -284,7 +402,18 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
 
 async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
-        agent_info_list = await list_all_agent_info_impl(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
+        agent_info_list = await list_published_agents_impl(
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+        )
+        # Match the same scope as /agent/published_list: non-asset-owner tenants
+        # also get the asset owner's published agents merged in.
+        if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
+            asset_agent_list = await list_published_agents_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID,
+                user_id=ctx.user_id,
+            )
+            agent_info_list.extend(asset_agent_list)
         # Remove internal information that partner don't need
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
@@ -298,7 +427,11 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     composed_key: Optional[str] = None
     try:
         # Idempotency: avoid concurrent duplicate title update for same conversation
-        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), title)
+        composed_key = idempotency_key or _build_title_update_idempotency_key(
+            ctx.tenant_id,
+            conversation_id,
+            title,
+        )
         await idempotency_start(composed_key)
 
         update_conversation_title_service(conversation_id, title, ctx.user_id)
@@ -324,6 +457,8 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
         }
     except LimitExceededError as _:
         raise LimitExceededError("Duplicate request is still running, please wait.")
+    except ConversationNotFoundError:
+        raise
     except Exception as e:
         raise Exception(f"Failed to update conversation title for conversation_id {conversation_id}: {str(e)}")
     finally:
