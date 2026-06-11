@@ -15,8 +15,7 @@ import {
 } from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "antd";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Button, Tooltip } from "antd";
 import { Textarea } from "@/components/ui/textarea";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { conversationService } from "@/services/conversationService";

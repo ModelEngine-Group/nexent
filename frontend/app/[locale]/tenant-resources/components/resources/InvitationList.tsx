@@ -17,6 +17,7 @@ import {
   Collapse,
   DatePicker,
   Progress,
+  Tooltip 
 } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { useInvitationList } from "@/hooks/invitation/useInvitationList";
@@ -41,7 +42,6 @@ import {
   Copy,
   CircleSlash,
 } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { formatDate } from "@/lib/date";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import {
@@ -443,7 +443,7 @@ export default function InvitationList({
   }, [invitations, tenantId]);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-auto">
       <div className="mb-4 flex justify-between items-center flex-shrink-0">
         <div />
         <div>

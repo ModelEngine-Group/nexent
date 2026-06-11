@@ -13,10 +13,10 @@ import {
   Form,
   Switch,
   InputNumber,
+  Tooltip
 } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Download } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 
 import {
   fetchSkillsList,
@@ -730,7 +730,7 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
     : "closed";
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-y-auto">
       <div className="flex justify-end mb-2">
         <Button
           type="primary"

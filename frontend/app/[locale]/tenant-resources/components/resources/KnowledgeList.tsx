@@ -2,10 +2,9 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Popconfirm, message, Button, Modal, Tag } from "antd";
+import { Table, Popconfirm, message, Button, Modal, Tag, Tooltip } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Edit, Trash2, BookOpen } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -255,7 +254,7 @@ export default function KnowledgeList({
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-auto">
       <Table
         columns={columns}
         dataSource={knowledgeBases}
