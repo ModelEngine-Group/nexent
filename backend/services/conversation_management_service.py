@@ -8,6 +8,7 @@ from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, ConversationResponse, MessageRequest, MessageUnit
+from consts.exceptions import ConversationNotFoundError
 from database.conversation_db import (
     create_conversation,
     create_conversation_message,
@@ -298,7 +299,9 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     """
     success = rename_conversation(conversation_id, title, user_id)
     if not success:
-        raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or has been deleted"
+        )
     return success
 
 

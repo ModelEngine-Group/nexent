@@ -2046,6 +2046,7 @@ async def prepare_agent_run(
         is_debug=agent_request.is_debug,
         override_version_no=agent_request.version_no,
         override_model_id=agent_request.model_id,
+        tool_params=agent_request.tool_params,
     )
 
     # Mount conversation-level reusable ContextManager if enabled

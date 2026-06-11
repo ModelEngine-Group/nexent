@@ -82,7 +82,9 @@ sys.modules['backend.services.conversation_management_service'] = conv_mgmt_mock
 # Mock consts.model
 consts_model_mock = MagicMock()
 AgentRequest_mock = MagicMock()
+ToolParamsRequest_mock = MagicMock()
 consts_model_mock.AgentRequest = AgentRequest_mock
+consts_model_mock.ToolParamsRequest = ToolParamsRequest_mock
 sys.modules['consts.model'] = consts_model_mock
 
 # Mock database.db_models
@@ -225,6 +227,30 @@ class TestStartStreamingChat:
 
                         # Verify log_token_usage was called
                         token_db_mock.log_token_usage.assert_called()
+
+    async def test_start_streaming_chat_passes_tool_params_to_agent_request(self):
+        """Test request-scoped tool_params are forwarded into AgentRequest."""
+        ctx = MockNorthboundContext(token_id=0)
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        agent_service_mock.run_agent_stream.return_value = mock_response
+        tool_params = {"agents": {"test_agent": {"tools": {"knowledge_base_search": {"top_k": 9}}}}}
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', new_callable=AsyncMock) as mock_history:
+            mock_history.return_value = {"data": {"history": []}}
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query",
+                tool_params=tool_params,
+            )
+
+        _, kwargs = AgentRequest_mock.call_args
+        assert kwargs["tool_params"] == tool_params
 
 
 @pytest.mark.asyncio
