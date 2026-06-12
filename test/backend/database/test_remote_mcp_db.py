@@ -83,6 +83,7 @@ from backend.database.remote_mcp_db import (
     get_mcp_server_by_name_and_tenant,
     get_mcp_authorization_token_by_name_and_url,
     get_mcp_record_by_id_and_tenant,
+    get_mcp_custom_headers_by_name_and_url,
     check_mcp_name_exists,
     check_enabled_mcp_name_exists,
 )
@@ -99,6 +100,7 @@ class MockMcpRecord:
         self.delete_flag = "N"
         self.container_id = "container-1"
         self.authorization_token = "test_token_123"
+        self.custom_headers = None
         self.create_time = "2024-01-01 00:00:00"
         self.__dict__ = {
             "mcp_id": 1,
@@ -110,6 +112,7 @@ class MockMcpRecord:
             "delete_flag": "N",
             "container_id": "container-1",
             "authorization_token": "test_token_123",
+            "custom_headers": None,
             "create_time": "2024-01-01 00:00:00",
         }
 
@@ -139,6 +142,36 @@ def test_create_mcp_record_success(monkeypatch, mock_session):
     mcp_data = {"mcp_name": "test_mcp", "mcp_server": "http://test.server.com", "status": True}
     create_mcp_record(mcp_data, "tenant1", "user1")
     session.add.assert_called_once()
+
+
+def test_create_mcp_record_with_custom_headers(monkeypatch, mock_session):
+    """Test that custom_headers is included in the allowed fields (line 29 coverage)"""
+    session, _ = mock_session
+    session.add = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.remote_mcp_db.filter_property", lambda data, model: data)
+
+    captured_kwargs = {}
+
+    def mock_mcp_record(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("backend.database.remote_mcp_db.McpRecord", mock_mcp_record)
+
+    custom_headers = {"X-Custom-Auth": "Bearer token123", "X-Api-Key": "apikey"}
+    mcp_data = {
+        "mcp_name": "test_mcp",
+        "mcp_server": "http://test.server.com",
+        "status": True,
+        "custom_headers": custom_headers,
+    }
+    create_mcp_record(mcp_data, "tenant1", "user1")
+
+    assert captured_kwargs.get("custom_headers") == custom_headers
 
 
 def test_create_mcp_record_failure(monkeypatch, mock_session):
@@ -329,7 +362,7 @@ def test_update_mcp_record_manage_fields_by_id_success(monkeypatch, mock_session
         mcp_id=1, tenant_id="tid", user_id="uid",
         name="new-name", server_url="http://new.url",
         description="desc", tags=["a"], source="local",
-        authorization_token="tok", config_json={"key": "val"},
+        authorization_token="tok", custom_headers=None, config_json={"key": "val"},
     )
     mock_update.assert_called_once()
     call_args = mock_update.call_args[0][0]
@@ -354,10 +387,40 @@ def test_update_mcp_record_manage_fields_by_id_none_tags(monkeypatch, mock_sessi
     update_mcp_record_manage_fields_by_id(
         mcp_id=1, tenant_id="tid", user_id="uid",
         name="n", server_url="u", description=None,
-        tags=None, source="local", authorization_token=None, config_json=None,
+        tags=None, source="local", authorization_token=None,
+        custom_headers=None, config_json=None,
     )
     call_args = mock_update.call_args[0][0]
     assert call_args["tags"] == []
+
+
+def test_update_mcp_record_manage_fields_by_id_with_custom_headers(monkeypatch, mock_session):
+    """Test custom_headers parameter in update_mcp_record_manage_fields_by_id (lines 146, 162)"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    custom_headers = {"X-Custom-Header": "value123", "Authorization": "Bearer token"}
+    update_mcp_record_manage_fields_by_id(
+        mcp_id=1, tenant_id="tid", user_id="uid",
+        name="new-name", server_url="http://new.url",
+        description="updated description", tags=["tag1", "tag2"],
+        source="community", authorization_token="new_token",
+        custom_headers=custom_headers,
+        config_json={"timeout": 30},
+    )
+    mock_update.assert_called_once()
+    call_args = mock_update.call_args[0][0]
+    assert call_args["custom_headers"] == custom_headers
+    assert call_args["mcp_name"] == "new-name"
+    assert call_args["authorization_token"] == "new_token"
 
 
 # ============================================================================
@@ -558,6 +621,72 @@ def test_get_mcp_authorization_token_not_found(monkeypatch, mock_session):
 
 
 # ============================================================================
+# get_mcp_custom_headers_by_name_and_url (NEW - lines 277-294)
+# ============================================================================
+
+def test_get_mcp_custom_headers_by_name_and_url_success(monkeypatch, mock_session):
+    """Test get_mcp_custom_headers_by_name_and_url when record exists (lines 277-294)"""
+    session, query = mock_session
+    mock_mcp = MockMcpRecord()
+    expected_headers = {"X-Custom-Auth": "Bearer token123", "X-Api-Key": "apikey"}
+    mock_mcp.custom_headers = expected_headers
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_mcp
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_custom_headers_by_name_and_url("test_mcp", "http://test.server.com", "tenant1")
+    assert result == expected_headers
+
+
+def test_get_mcp_custom_headers_by_name_and_url_not_found(monkeypatch, mock_session):
+    """Test get_mcp_custom_headers_by_name_and_url when record does not exist (lines 277-294)"""
+    session, query = mock_session
+
+    mock_first = MagicMock()
+    mock_first.return_value = None
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_custom_headers_by_name_and_url("nonexistent", "http://test.server.com", "tenant1")
+    assert result is None
+
+
+def test_get_mcp_custom_headers_by_name_and_url_empty_headers(monkeypatch, mock_session):
+    """Test get_mcp_custom_headers_by_name_and_url when custom_headers is None (lines 277-294)"""
+    session, query = mock_session
+    mock_mcp = MockMcpRecord()
+    mock_mcp.custom_headers = None
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_mcp
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_custom_headers_by_name_and_url("test_mcp", "http://test.server.com", "tenant1")
+    assert result is None
+
+
+# ============================================================================
 # get_mcp_record_by_id_and_tenant
 # ============================================================================
 
@@ -688,12 +817,13 @@ def test_check_enabled_mcp_name_exists_false(monkeypatch, mock_session):
 # ============================================================================
 
 class MockMCPUpdateRequest:
-    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url, new_authorization_token=None):
+    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url, new_authorization_token=None, custom_headers=None):
         self.current_service_name = current_service_name
         self.current_mcp_url = current_mcp_url
         self.new_service_name = new_service_name
         self.new_mcp_url = new_mcp_url
         self.new_authorization_token = new_authorization_token
+        self.custom_headers = custom_headers
 
 
 def test_update_mcp_record_by_name_and_url_success(monkeypatch, mock_session):
@@ -714,6 +844,7 @@ def test_update_mcp_record_by_name_and_url_success(monkeypatch, mock_session):
     mock_update.assert_called_once_with({
         "mcp_name": "new", "mcp_server": "http://new.url",
         "updated_by": "user1", "status": True, "authorization_token": None,
+        "custom_headers": None,
     })
 
 
@@ -735,6 +866,7 @@ def test_update_mcp_record_by_name_and_url_without_status(monkeypatch, mock_sess
     mock_update.assert_called_once_with({
         "mcp_name": "new", "mcp_server": "http://new.url",
         "updated_by": "user1", "authorization_token": None,
+        "custom_headers": None,
     })
 
 
@@ -756,7 +888,82 @@ def test_update_mcp_record_by_name_and_url_with_token(monkeypatch, mock_session)
     mock_update.assert_called_once_with({
         "mcp_name": "new", "mcp_server": "http://new.url",
         "updated_by": "user1", "status": True, "authorization_token": "new_token_456",
+        "custom_headers": None,
     })
+
+
+def test_update_mcp_record_by_name_and_url_with_custom_headers(monkeypatch, mock_session):
+    """Test custom_headers handling in update_mcp_record_by_name_and_url (lines 324-327)"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    custom_headers = {"X-Custom-Auth": "Bearer token123", "X-Api-Key": "apikey"}
+    update_data = MockMCPUpdateRequest(
+        "old", "http://old.url", "new", "http://new.url",
+        custom_headers=custom_headers
+    )
+    update_mcp_record_by_name_and_url(update_data=update_data, tenant_id="tenant1", user_id="user1", status=True)
+
+    mock_update.assert_called_once()
+    call_args = mock_update.call_args[0][0]
+    assert call_args["custom_headers"] == custom_headers
+    assert call_args["mcp_name"] == "new"
+
+
+def test_update_mcp_record_by_name_and_url_with_token_and_custom_headers(monkeypatch, mock_session):
+    """Test both authorization_token and custom_headers in update_mcp_record_by_name_and_url (lines 320-326)"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    custom_headers = {"X-Header": "value"}
+    update_data = MockMCPUpdateRequest(
+        "old", "http://old.url", "new", "http://new.url",
+        new_authorization_token="new_token",
+        custom_headers=custom_headers
+    )
+    update_mcp_record_by_name_and_url(update_data=update_data, tenant_id="tenant1", user_id="user1", status=True)
+
+    mock_update.assert_called_once()
+    call_args = mock_update.call_args[0][0]
+    assert call_args["authorization_token"] == "new_token"
+    assert call_args["custom_headers"] == custom_headers
+
+
+def test_update_mcp_record_by_name_and_url_with_none_custom_headers(monkeypatch, mock_session):
+    """Test update_mcp_record_by_name_and_url when custom_headers attribute exists but is None (line 325)"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_data = MockMCPUpdateRequest("old", "http://old.url", "new", "http://new.url", custom_headers=None)
+    update_mcp_record_by_name_and_url(update_data=update_data, tenant_id="tenant1", user_id="user1", status=True)
+
+    mock_update.assert_called_once()
+    call_args = mock_update.call_args[0][0]
+    assert call_args.get("custom_headers") is None
 
 
 # ============================================================================

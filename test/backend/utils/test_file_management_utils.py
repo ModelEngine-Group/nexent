@@ -7,11 +7,14 @@ import pytest
 
 
 class _ProcessParams:
-    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str]):
+    def __init__(self, authorization: str, source_type: str, chunking_strategy: str, index_name: Optional[str], model_id: Optional[int] = 42,
+        tenant_id: Optional[str] = "tenant-1"):
         self.authorization = authorization
         self.source_type = source_type
         self.chunking_strategy = chunking_strategy
         self.index_name = index_name
+        self.model_id = model_id  
+        self.tenant_id = tenant_id
 
 
 @pytest.fixture(autouse=True)

@@ -340,6 +340,8 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     version_no INTEGER DEFAULT 0 NOT NULL,
     current_version_no INTEGER NULL,
     ingroup_permission VARCHAR(30),
+    greeting_message TEXT,
+    example_questions JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -397,6 +399,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = dr
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to enable context management (compression) for this agent';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.greeting_message IS 'Agent greeting message displayed on chat initial screen';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.example_questions IS 'List of example questions for starting a conversation with this agent';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -605,6 +609,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
     authorization_token VARCHAR(500) DEFAULT NULL,
+    custom_headers JSON DEFAULT NULL,
     source VARCHAR(30),
     registry_json JSONB,
     config_json JSON,
@@ -631,6 +636,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
 COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
+COMMENT ON COLUMN nexent.mcp_record_t.custom_headers IS 'Custom HTTP headers as JSON object for MCP server requests';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
@@ -1860,3 +1866,31 @@ FOR EACH ROW
 EXECUTE FUNCTION update_mcp_community_record_update_time();
 
 COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t IS 'Trigger to maintain update_time';
+
+CREATE TABLE IF NOT EXISTS nexent.user_cas_session_t (
+    cas_session_id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL UNIQUE,
+    user_id VARCHAR(100) NOT NULL,
+    cas_user_id VARCHAR(200) NOT NULL,
+    cas_session_index VARCHAR(500),
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_session_id
+    ON nexent.user_cas_session_t (session_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_user_id
+    ON nexent.user_cas_session_t (user_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_cas_user_id
+    ON nexent.user_cas_session_t (cas_user_id);
+
+COMMENT ON TABLE nexent.user_cas_session_t IS 'Server-side session records for CAS SSO login and logout synchronization';
+COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for revocation checks';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';

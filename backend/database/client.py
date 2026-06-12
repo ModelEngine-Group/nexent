@@ -89,6 +89,9 @@ class MinioClient:
         if MinioClient._initialized:
             return
         MinioClient._initialized = True
+        # Explicitly initialize attributes so external callers never hit missing-attribute errors.
+        self._storage_client = None
+        self.storage_config = None
 
     def _ensure_initialized(self):
         """Lazily initialize the storage client on first use."""
@@ -107,6 +110,23 @@ class MinioClient:
                 self.storage_config)
             return True
         return False
+
+    @property
+    def default_bucket(self) -> Optional[str]:
+        """
+        Resolve default bucket safely for callers that need bucket info.
+        Falls back to configured constant when lazy init has not run yet.
+        """
+        try:
+            self._ensure_initialized()
+        except Exception:
+            # Keep this accessor resilient; operational methods can still raise
+            # detailed storage errors when invoked.
+            pass
+
+        if getattr(self, "storage_config", None) is not None:
+            return self.storage_config.default_bucket
+        return MINIO_DEFAULT_BUCKET
 
     def upload_file(
             self,

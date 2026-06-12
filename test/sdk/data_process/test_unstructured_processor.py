@@ -5,6 +5,20 @@ import pytest
 from pytest_mock import MockFixture
 from unittest.mock import Mock, MagicMock, patch
 
+
+fake_unstructured = types.ModuleType("unstructured_inference")
+fake_models = types.ModuleType("unstructured_inference.models")
+fake_tables = types.ModuleType("unstructured_inference.models.tables")
+fake_tables.tables_agent = types.SimpleNamespace(model=None)
+fake_logger = types.ModuleType("unstructured_inference.logger")
+fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
+fake_models.tables = fake_tables
+fake_unstructured.models = fake_models
+sys.modules.setdefault("unstructured_inference", fake_unstructured)
+sys.modules.setdefault("unstructured_inference.models", fake_models)
+sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
+sys.modules.setdefault("unstructured_inference.logger", fake_logger)
+
 from sdk.nexent.data_process.unstructured_processor import UnstructuredProcessor
 
 
@@ -23,7 +37,7 @@ def setup_partition_mock(mocker: MockFixture, return_value):
         "unstructured.partition.auto": fake_auto_mod,
     })
 
-    mock_partition = mocker.Mock(return_value=return_value)
+    mock_partition = Mock(return_value=return_value)
     fake_auto_mod.partition = mock_partition
     return mock_partition
 

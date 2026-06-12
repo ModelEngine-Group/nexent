@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Modal, Select, Input, Button, App } from "antd";
@@ -13,6 +13,11 @@ import {
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
 } from "./ModelChunkSizeSilder";
+import {
+  isValidMaxTokens,
+  ModelMaxTokensInput,
+  parseMaxTokens,
+} from "./ModelMaxTokensInput";
 
 const { Option } = Select;
 
@@ -40,7 +45,7 @@ export const ModelEditDialog = ({
     displayName: "",
     url: "",
     apiKey: "",
-    maxTokens: "4096",
+    maxTokens: "",
     timeoutSeconds: "120",
     concurrencyLimit: "",
     vectorDimension: "1024",
@@ -72,7 +77,7 @@ export const ModelEditDialog = ({
         displayName: model.displayName || model.name,
         url: model.apiUrl || "",
         apiKey: model.apiKey || "",
-        maxTokens: model.maxTokens?.toString() || "4096",
+        maxTokens: model.maxTokens?.toString() || "",
         timeoutSeconds: model.timeoutSeconds?.toString() || "120",
         concurrencyLimit: model.concurrencyLimit?.toString() || "",
         vectorDimension: model.maxTokens?.toString() || "1024",
@@ -118,7 +123,12 @@ export const ModelEditDialog = ({
     form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS;
 
   const isFormValid = () => {
+    const needsMaxTokens = !isEmbeddingModel && !isRerankModel;
+
     if (isVoiceModel) {
+      if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
+        return false;
+      }
       if (form.modelFactory === "volcengine") {
         return (
           form.modelAppid.trim() !== "" &&
@@ -128,7 +138,11 @@ export const ModelEditDialog = ({
         return form.name.trim() !== "" && form.apiKey.trim() !== "";
       }
     }
-    return form.name.trim() !== "" && form.url.trim() !== "";
+    return (
+      form.name.trim() !== "" &&
+      form.url.trim() !== "" &&
+      (!needsMaxTokens || isValidMaxTokens(form.maxTokens))
+    );
   };
 
   // Verify model connectivity
@@ -155,7 +169,7 @@ export const ModelEditDialog = ({
             ? parseInt(form.vectorDimension)
             : form.type === MODEL_TYPES.RERANK
               ? 0
-              : parseInt(form.maxTokens),
+              : parseMaxTokens(form.maxTokens),
         embeddingDim:
           form.type === MODEL_TYPES.EMBEDDING
             ? parseInt(form.vectorDimension)
@@ -203,7 +217,7 @@ export const ModelEditDialog = ({
       // Use update interface instead of delete + add
       const modelType = form.type as ModelType;
       // Determine max tokens
-      let maxTokensValue = parseInt(form.maxTokens);
+      let maxTokensValue = parseMaxTokens(form.maxTokens) || 0;
       if (isEmbeddingModel || isRerankModel) maxTokensValue = 0;
 
       // Use original displayName for lookup, pass new displayName in body if changed
@@ -420,11 +434,13 @@ export const ModelEditDialog = ({
         {!isEmbeddingModel && !isRerankModel && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.maxTokens")}
+              {t("model.dialog.label.maxTokens")}{" "}
+              <span className="text-red-500">*</span>
             </label>
-            <Input
+            <ModelMaxTokensInput
               value={form.maxTokens}
-              onChange={(e) => handleFormChange("maxTokens", e.target.value)}
+              placeholder={t("model.dialog.placeholder.maxTokens")}
+              onChange={(value) => handleFormChange("maxTokens", value)}
             />
           </div>
         )}
@@ -576,7 +592,7 @@ interface ProviderConfigEditDialogProps {
 export const ProviderConfigEditDialog = ({
   isOpen,
   initialApiKey = '',
-  initialMaxTokens = '4096',
+  initialMaxTokens = '',
   initialTimeoutSeconds = '120',
   initialConcurrencyLimit = '',
   modelType,
@@ -599,8 +615,8 @@ export const ProviderConfigEditDialog = ({
   }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit])
 
   const valid = () => {
-    const parsed = parseInt(maxTokens)
-    return !Number.isNaN(parsed) && parsed >= 0
+    const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+    return isEmbeddingModel || isValidMaxTokens(maxTokens)
   }
 
   const handleSave = async () => {
@@ -611,7 +627,7 @@ export const ProviderConfigEditDialog = ({
       const isRerankModel = modelType === MODEL_TYPES.RERANK
       await onSave({
         ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
-        maxTokens: parseInt(maxTokens),
+        maxTokens: parseMaxTokens(maxTokens) || 0,
         ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
         ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
       })
@@ -644,9 +660,13 @@ export const ProviderConfigEditDialog = ({
         {!isEmbeddingModel && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.maxTokens')}
+              {t('model.dialog.label.maxTokens')} <span className="text-red-500">*</span>
             </label>
-            <Input value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+            <ModelMaxTokensInput
+              value={maxTokens}
+              placeholder={t("model.dialog.placeholder.maxTokens")}
+              onChange={setMaxTokens}
+            />
           </div>
         )}
         {!isEmbeddingModel && !isRerankModel && (
@@ -688,4 +708,4 @@ export const ProviderConfigEditDialog = ({
       </div>
     </Modal>
   )
-}
+} 

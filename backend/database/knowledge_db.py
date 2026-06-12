@@ -34,6 +34,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
             - user_id: Optional user ID for created_by and updated_by fields
             - tenant_id: Optional tenant ID for created_by and updated_by fields
             - embedding_model_name: embedding model name for the knowledge base
+            - preserve_source_file: whether to preserve uploaded source documents (optional)
 
     Returns:
         Dict[str, Any]: Dictionary with at least 'knowledge_id' and 'index_name'
@@ -57,6 +58,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_name": knowledge_name,
                 "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
                 "ingroup_permission": query.get("ingroup_permission"),
+                "preserve_source_file": query.get("preserve_source_file", True),
             }
 
             # For backward compatibility: if caller explicitly provides index_name,
@@ -117,11 +119,16 @@ def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
 
             if existing_record:
                 # Update existing record
-                existing_record.knowledge_name = query.get('knowledge_name') or query.get('index_name')
-                existing_record.knowledge_describe = query.get('knowledge_describe', '')
-                existing_record.knowledge_sources = query.get('knowledge_sources', 'elasticsearch')
-                existing_record.embedding_model_name = query.get('embedding_model_name')
-                existing_record.embedding_model_id = query.get('embedding_model_id')
+                existing_record.knowledge_name = query.get(
+                    'knowledge_name') or query.get('index_name')
+                existing_record.knowledge_describe = query.get(
+                    'knowledge_describe', '')
+                existing_record.knowledge_sources = query.get(
+                    'knowledge_sources', 'elasticsearch')
+                existing_record.embedding_model_name = query.get(
+                    'embedding_model_name')
+                existing_record.embedding_model_id = query.get(
+                    'embedding_model_id')
                 existing_record.updated_by = query.get('user_id')
                 existing_record.update_time = func.current_timestamp()
 
@@ -251,9 +258,11 @@ def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, An
 
             # Support both index_name and knowledge_name queries
             if 'index_name' in query:
-                db_query = db_query.filter(KnowledgeRecord.index_name == query['index_name'])
+                db_query = db_query.filter(
+                    KnowledgeRecord.index_name == query['index_name'])
             elif 'knowledge_name' in query:
-                db_query = db_query.filter(KnowledgeRecord.knowledge_name == query['knowledge_name'])
+                db_query = db_query.filter(
+                    KnowledgeRecord.knowledge_name == query['knowledge_name'])
 
             # Add tenant_id filter only if it is provided in the query
             if 'tenant_id' in query and query['tenant_id'] is not None:
@@ -404,14 +413,25 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
     """
     try:
         with get_db_session() as session:
+            # First try resolving by user-facing knowledge_name.
             result = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.knowledge_name == knowledge_name,
                 KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
             ).first()
-
             if result:
                 return result.index_name
+
+            # Backward/forward compatibility: if caller already passes internal index_name,
+            # accept it directly by resolving on index_name as well.
+            index_result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if index_result:
+                return index_result.index_name
+
             raise ValueError(
                 f"Knowledge base '{knowledge_name}' not found for the current tenant"
             )

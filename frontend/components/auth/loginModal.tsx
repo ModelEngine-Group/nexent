@@ -3,13 +3,14 @@
 import { useCallback, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, Typography, Space, Divider, Alert } from "antd";
-import { UserRound, LockKeyhole, Github, Link2 } from "lucide-react";
+import { UserRound, LockKeyhole, Github, Link2, KeyRound } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { oauthService } from "@/services/oauthService";
+import { casService, CasConfig } from "@/services/casService";
 import log from "@/lib/logger";
 
 const { Text } = Typography;
@@ -44,6 +45,30 @@ function OAuthLoginButtons() {
           </Button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function CasLoginButton() {
+  const { t } = useTranslation("common");
+  const [config, setConfig] = useState<CasConfig | null>(null);
+
+  useEffect(() => {
+    casService.getConfig().then(setConfig);
+  }, []);
+
+  if (!config?.enabled || config.login_mode !== "button") return null;
+
+  return (
+    <div className="mt-2 mb-2">
+      <Button
+        block
+        size="large"
+        icon={<KeyRound size={18} />}
+        onClick={() => casService.startLogin()}
+      >
+        {t("auth.casLogin", { provider: config.display_name }) || `${config.display_name} Login`}
+      </Button>
     </div>
   );
 }
@@ -94,6 +119,15 @@ export function LoginModal() {
       router.replace("/");
     }
   }, [searchParams, router, getOAuthLoginErrorMessage]);
+
+  useEffect(() => {
+    if (!isLoginModalOpen || isAuthenticated || isSpeedMode) return;
+    casService.getConfig().then((config) => {
+      if (config.enabled && config.login_mode === "force") {
+        casService.startLogin();
+      }
+    });
+  }, [isLoginModalOpen, isAuthenticated, isSpeedMode]);
 
   const resetForm = () => {
     setEmailError("");
@@ -307,6 +341,8 @@ export function LoginModal() {
               {isLoading ? t("auth.loggingIn") : t("auth.login")}
             </Button>
           </Form.Item>
+
+          <CasLoginButton />
 
           {/* OAuth login section */}
           <OAuthLoginButtons />

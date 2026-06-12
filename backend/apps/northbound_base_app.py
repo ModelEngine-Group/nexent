@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from apps.app_factory import create_app
 from .northbound_app import router as northbound_router
+from .northbound_knowledge_app import router as northbound_knowledge_router
 
 
 class A2AServerSettings(BaseModel):
@@ -49,6 +50,7 @@ northbound_app = create_app(
 )
 
 northbound_app.include_router(northbound_router)
+northbound_app.include_router(northbound_knowledge_router)
 
 
 # =============================================================================

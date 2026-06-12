@@ -230,6 +230,7 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "summary_frequency" varchar(10) COLLATE "pg_catalog"."default",
   "last_summary_time" timestamp(0),
   "last_doc_update_time" timestamp(0),
+  "preserve_source_file" boolean NOT NULL DEFAULT true,
   CONSTRAINT "knowledge_record_t_pk" PRIMARY KEY ("knowledge_id")
 );
 ALTER TABLE "knowledge_record_t" OWNER TO "root";
@@ -251,6 +252,7 @@ COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'User who created the rec
 COMMENT ON COLUMN "knowledge_record_t"."summary_frequency" IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
 COMMENT ON COLUMN "knowledge_record_t"."last_summary_time" IS 'Timestamp of last summary generation';
 COMMENT ON COLUMN "knowledge_record_t"."last_doc_update_time" IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
+COMMENT ON COLUMN "knowledge_record_t"."preserve_source_file" IS 'Whether to preserve uploaded source documents after vectorization';
 COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and status information';
@@ -340,6 +342,8 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     version_no INTEGER DEFAULT 0 NOT NULL,
     current_version_no INTEGER NULL,
     ingroup_permission VARCHAR(30),
+    greeting_message TEXT,
+    example_questions JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -397,6 +401,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = dr
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to enable context management (compression) for this agent';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.greeting_message IS 'Agent greeting message displayed on chat initial screen';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.example_questions IS 'List of example questions for starting a conversation with this agent';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -605,6 +611,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
     authorization_token VARCHAR(500) DEFAULT NULL,
+    custom_headers JSON DEFAULT NULL,
     source VARCHAR(30),
     registry_json JSONB,
     config_json JSON,
@@ -631,6 +638,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
 COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
+COMMENT ON COLUMN nexent.mcp_record_t.custom_headers IS 'Custom HTTP headers as JSON object for MCP server requests';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
@@ -820,7 +828,7 @@ COMMENT ON COLUMN nexent.tenant_invitation_code_t.group_ids IS 'Associated group
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.capacity IS 'Invitation code capacity';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.expiry_date IS 'Invitation code expiry date';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.status IS 'Invitation code status: IN_USE, EXPIRE, DISABLE, RUN_OUT';
-COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS 'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE';
+COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS 'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE, ASSET_OWNER_INVITE';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.create_time IS 'Create time';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.tenant_invitation_code_t.created_by IS 'Created by';
@@ -1101,7 +1109,42 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (184, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE');
+(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
+(188, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'CREATE'),
+(189, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'READ'),
+(190, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'UPDATE'),
+(191, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'DELETE'),
+(192, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(193, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
+(194, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
+(195, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(196, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
+(197, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
+(198, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
+(199, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'CREATE'),
+(200, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'READ'),
+(201, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'UPDATE'),
+(202, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'DELETE'),
+(203, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'CREATE'),
+(204, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'READ'),
+(205, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'UPDATE'),
+(206, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'DELETE'),
+(207, 'ASSET_OWNER', 'RESOURCE', 'KB', 'CREATE'),
+(208, 'ASSET_OWNER', 'RESOURCE', 'KB', 'READ'),
+(209, 'ASSET_OWNER', 'RESOURCE', 'KB', 'UPDATE'),
+(210, 'ASSET_OWNER', 'RESOURCE', 'KB', 'DELETE'),
+(211, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'CREATE'),
+(212, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'READ'),
+(213, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'UPDATE'),
+(214, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'DELETE'),
+(215, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'CREATE'),
+(216, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'READ'),
+(217, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'UPDATE'),
+(218, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'DELETE'),
+(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ'),
+(220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(221, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/asset-owner-resources')
+;
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
@@ -1223,6 +1266,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     config_schemas JSON,
     config_values JSON,
     source VARCHAR(30) DEFAULT 'official',
+    tenant_id VARCHAR(100),
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1773,7 +1817,7 @@ EXECUTE FUNCTION update_user_oauth_account_t_update_time();
 COMMENT ON TABLE nexent.user_oauth_account_t IS 'User OAuth account table - third-party login bindings';
 COMMENT ON COLUMN nexent.user_oauth_account_t.oauth_account_id IS 'OAuth account ID, primary key';
 COMMENT ON COLUMN nexent.user_oauth_account_t.user_id IS 'Nexent user ID (Supabase UUID)';
-COMMENT ON COLUMN nexent.user_oauth_account_t.provider IS 'OAuth provider name: github, wechat';
+COMMENT ON COLUMN nexent.user_oauth_account_t.provider IS 'OAuth provider name: github, wechat, gde, link_app';
 COMMENT ON COLUMN nexent.user_oauth_account_t.provider_user_id IS 'User ID from the OAuth provider';
 COMMENT ON COLUMN nexent.user_oauth_account_t.provider_email IS 'Email from the OAuth provider';
 COMMENT ON COLUMN nexent.user_oauth_account_t.provider_username IS 'Display name from the OAuth provider';
@@ -1862,3 +1906,31 @@ FOR EACH ROW
 EXECUTE FUNCTION update_mcp_community_record_update_time();
 
 COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t IS 'Trigger to maintain update_time';
+
+CREATE TABLE IF NOT EXISTS nexent.user_cas_session_t (
+    cas_session_id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL UNIQUE,
+    user_id VARCHAR(100) NOT NULL,
+    cas_user_id VARCHAR(200) NOT NULL,
+    cas_session_index VARCHAR(500),
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_session_id
+    ON nexent.user_cas_session_t (session_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_user_id
+    ON nexent.user_cas_session_t (user_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_cas_user_id
+    ON nexent.user_cas_session_t (cas_user_id);
+
+COMMENT ON TABLE nexent.user_cas_session_t IS 'Server-side session records for CAS SSO login and logout synchronization';
+COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for revocation checks';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';

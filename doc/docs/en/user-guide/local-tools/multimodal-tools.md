@@ -4,18 +4,22 @@ title: Multimodal Tools
 
 # Multimodal Tools
 
-Multimodal tools analyze text files and images with model support. URLs can be S3, HTTP, or HTTPS.
+Multimodal tools analyze text files, images, videos, and audio with model support. URLs can be S3, HTTP, or HTTPS.
 
 ## 🧭 Tool List
 
 - `analyze_text_file`: Download and extract text, then analyze per question
 - `analyze_image`: Download images and interpret them with a vision-language model
+- `analyze_video`: Download videos and analyze them with a video understanding model
+- `analyze_audio`: Download audio and analyze it with an audio understanding model
 
 ## 🧰 Example Use Cases
 
 - Summarize documents stored in buckets
 - Explain screenshots, product photos, or chart images
-- Produce per-file or per-image answers aligned with the input order
+- Understand video content, such as extracting key frame information, human actions, or scene descriptions
+- Analyze audio content, such as transcription, speaker identification, or content summarization
+- Produce per-file or per-image/video/audio answers aligned with the input order
 
 ## 🧾 Parameters & Behavior
 
@@ -29,16 +33,26 @@ Multimodal tools analyze text files and images with model support. URLs can be S
 - `query`: User focus/question.
 - Downloads each image, runs VLM analysis, and returns an array matching input order.
 
+### analyze_video
+- `video_url`: Video URL (`s3://bucket/key`, `/bucket/key`, `http(s)://`).
+- `query`: User focus/question.
+- Downloads the video, runs video understanding model analysis, and returns the result.
+
+### analyze_audio
+- `audio_url`: Audio URL (`s3://bucket/key`, `/bucket/key`, `http(s)://`).
+- `query`: User focus/question.
+- Downloads the audio, runs audio understanding model analysis, and returns the result.
+
 ## ⚙️ Prerequisites
 
 - Configure storage access (e.g., MinIO/S3) and data processing service to fetch files.
-- Provide an LLM for `analyze_text_file` and a VLM for `analyze_image`.
+- Provide an LLM for `analyze_text_file`, a VLM for `analyze_image`, and a video understanding model for `analyze_video` and `analyze_audio` (must support audio/video input, e.g., Qwen3-Omni series).
 
 ## 🛠️ How to Use
 
-1. Prepare accessible URLs and confirm permissions.
-2. Call the corresponding tool with the URL list and question; multiple resources are supported at once.
-3. Use results in the same order as inputs for display or follow-up steps.
+1. Prepare accessible URLs for files, images, videos, or audio; confirm permissions.
+2. Call the corresponding tool with the URL and question; multiple resources are supported at once.
+3. Verify results before using them in follow-up steps.
 
 ## 💡 Best Practices
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -13,9 +13,11 @@ import {
   Flex,
   Card,
   App,
+  Alert,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 import {
   AgentConfigUpdate,
@@ -38,6 +40,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 import PromptTemplateManagerModal from "./PromptTemplateManagerModal";
 import PromptOptimizeModal from "./PromptOptimizeModal";
+import { isAgentPromptsHidden } from "@/lib/agentPromptVisibility";
 
 const { TextArea } = Input;
 
@@ -88,8 +91,8 @@ export default function AgentGenerateDetail({}) {
     );
   }, [defaultLlmModelConfig, availableLlmModels, models]);
 
-  // Agent list for name uniqueness validation
-  const { agents: agentList } = useAgentList(user?.tenantId ?? null);
+  // Agent list for name uniqueness validation (auth-scoped, same as agent dev sidebar)
+  const { agents: agentList } = useAgentList("");
 
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
@@ -159,7 +162,7 @@ export default function AgentGenerateDetail({}) {
       agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
       mainAgentModel: editedAgent.model,
       mainAgentModelId: editedAgent.model_id,
-      mainAgentMaxStep: editedAgent.max_step || 5,
+      mainAgentMaxStep: editedAgent.max_step || 15,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -230,6 +233,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(type);
     setOptimizeModalOpen(true);
   };
+
 
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return (
@@ -331,6 +335,8 @@ export default function AgentGenerateDetail({}) {
     );
   };
 
+  const promptsHidden = isAgentPromptsHidden(editedAgent);
+
   const renderPromptSection = (
     type: "duty" | "constraint" | "few-shots",
     fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
@@ -339,6 +345,14 @@ export default function AgentGenerateDetail({}) {
   ) => {
     return (
       <div className="flex flex-col h-full">
+        {promptsHidden && (
+          <Alert
+            type="warning"
+            showIcon
+            className="mb-3 shrink-0"
+            message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+          />
+        )}
         {renderPromptToolbar(type, title)}
         <Form
           form={form}
@@ -362,7 +376,7 @@ export default function AgentGenerateDetail({}) {
         <TextArea
           placeholder={placeholder}
           style={promptEditorStyle}
-          disabled={!editable || isGenerating}
+          disabled={!editable || isGenerating || promptsHidden}
           onBlur={(e) => onBlurUpdate(e.target.value)}
         />
       </Form.Item>
@@ -378,6 +392,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalOpen(false);
     setOptimizeModalType(null);
   };
+
 
   const handleSaveExpandModal = (content: string) => {
     switch (expandModalType) {
@@ -434,27 +449,35 @@ export default function AgentGenerateDetail({}) {
     }
   };
 
-  const getStoreFieldKey = (type: 'duty' | 'constraint' | 'few-shots') => {
-    switch (type) {
-      case "duty":
-        return "duty_prompt";
-      case "constraint":
-        return "constraint_prompt";
-      case "few-shots":
-        return "few_shots_prompt";
-    }
-  };
+  const handleReplaceOptimizedContent = (
+    content: string,
+    sectionType: "duty" | "constraint" | "few_shots"
+  ) => {
+    const value = content.trim();
 
-  const handleReplaceOptimizedContent = (content: string) => {
-    if (!optimizeModalType) {
+    if (!value) {
+      handleCloseOptimizeModal();
       return;
     }
 
-    const formFieldKey = getPromptFieldKey(optimizeModalType);
-    const storeFieldKey = getStoreFieldKey(optimizeModalType);
+    const fieldMap = {
+      duty: {
+        formField: "dutyPrompt" as const,
+        storeField: "duty_prompt" as const,
+      },
+      constraint: {
+        formField: "constraintPrompt" as const,
+        storeField: "constraint_prompt" as const,
+      },
+      few_shots: {
+        formField: "fewShotsPrompt" as const,
+        storeField: "few_shots_prompt" as const,
+      },
+    };
 
-    form.setFieldsValue({ [formFieldKey]: content });
-    updateAgentConfig({ [storeFieldKey]: content } as AgentConfigUpdate);
+    const { formField, storeField } = fieldMap[sectionType];
+    form.setFieldsValue({ [formField]: value });
+    updateAgentConfig({ [storeField]: value } as AgentConfigUpdate);
     handleCloseOptimizeModal();
   };
 
@@ -665,16 +688,17 @@ export default function AgentGenerateDetail({}) {
         <Col className="w-full h-full">
           <Tabs
             value={activeTab}
-            onValueChange={(value) => {
+            onValueChange={(value: string) => {
               setActiveTab(value);
             }}
             className="agent-config-tabs flex flex-col h-full w-full"
           >
-            <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
+            <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
               <TabsTrigger value="agent-info">{t("agent.info.title")}</TabsTrigger>
               <TabsTrigger value="duty">{t("systemPrompt.card.duty.title")}</TabsTrigger>
               <TabsTrigger value="constraint">{t("systemPrompt.card.constraint.title")}</TabsTrigger>
               <TabsTrigger value="few-shots">{t("systemPrompt.card.fewShots.title")}</TabsTrigger>
+              <TabsTrigger value="greeting">{t("agent.greeting.tabTitle")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="agent-info" className="flex-1 min-h-0 overflow-y-auto">
@@ -861,14 +885,14 @@ export default function AgentGenerateDetail({}) {
                               {
                                 type: "number",
                                 min: 1,
-                                max: 20,
+                                max: 30,
                                 message: t("businessLogic.config.maxSteps"),
                               },
                             ]}
                           >
                             <InputNumber
                               min={1}
-                              max={20}
+                              max={30}
                               style={{ width: "100%" }}
                               onBlur={() => {
                                 const value = form.getFieldValue("mainAgentMaxStep");
@@ -946,6 +970,70 @@ export default function AgentGenerateDetail({}) {
                 t("systemPrompt.card.fewShots.title"),
                 (value) => updateAgentConfig({ few_shots_prompt: value })
               )}
+            </TabsContent>
+
+            <TabsContent value="greeting" className="flex-1 min-h-0 overflow-y-auto">
+              <div className="overflow-y-auto overflow-x-hidden h-full px-3 pb-3">
+                <div className="mb-4">
+                  <div className="flex items-center mb-2">
+                    <h4 className="text-md font-medium text-gray-700">{t("agent.greeting.messageTitle")}</h4>
+                  </div>
+                  <Textarea
+                    value={editedAgent.greeting_message || ""}
+                    onChange={(e) => updateAgentConfig({ greeting_message: e.target.value })}
+                    disabled={!editable || isGenerating}
+                    placeholder={t("agent.greeting.messagePlaceholder")}
+                    className="w-full min-h-[80px]"
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <div className="flex items-center mb-2">
+                    <h4 className="text-md font-medium text-gray-700">{t("agent.greeting.questionsTitle")}</h4>
+                  </div>
+                  {(editedAgent.example_questions || []).length > 0 && (
+                    <div className="space-y-2">
+                      {(editedAgent.example_questions || []).map((q: string, idx: number) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <Input
+                            value={q}
+                            onChange={(e) => {
+                              const newQuestions = [...(editedAgent.example_questions || [])];
+                              newQuestions[idx] = e.target.value;
+                              updateAgentConfig({ example_questions: newQuestions });
+                            }}
+                            disabled={!editable || isGenerating}
+                            className="flex-1"
+                          />
+                          <Button
+                            size="small"
+                            disabled={!editable || isGenerating}
+                            onClick={() => {
+                              const newQuestions = (editedAgent.example_questions || []).filter((_: string, i: number) => i !== idx);
+                              updateAgentConfig({ example_questions: newQuestions });
+                            }}
+                          >
+                            {t("agent.greeting.removeQuestion")}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(editedAgent.example_questions || []).length < 6 && editable && !isGenerating && (
+                    <Button
+                      size="small"
+                      type="dashed"
+                      onClick={() => {
+                        const newQuestions = [...(editedAgent.example_questions || []), ""];
+                        updateAgentConfig({ example_questions: newQuestions });
+                      }}
+                      className="mt-2"
+                    >
+                      {t("agent.greeting.addQuestion")}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
         </Col>

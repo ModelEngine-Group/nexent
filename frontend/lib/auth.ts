@@ -15,6 +15,7 @@ import {
   hasAuthCookies,
   handleSessionExpired,
 } from "@/lib/session";
+import { authFlowState } from "@/lib/authFlow";
 
 /**
  * Role color mapping - Ant Design color presets
@@ -25,6 +26,7 @@ const ROLE_COLORS: Record<string, string> = {
   [USER_ROLES.DEV]: "cyan",
   [USER_ROLES.USER]: "geekblue",
   [USER_ROLES.SPEED]: "green",
+  [USER_ROLES.ASSET_OWNER]: "gold",
 };
 
 /**
@@ -48,7 +50,11 @@ export function generateAvatarUrl(email: string): string {
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   // Frontend pre-check: detect session expiry without hitting backend
   if (typeof window !== "undefined") {
-    if (hasAuthCookies() && !checkSessionValid()) {
+    if (
+      !authFlowState.isExplicitLogoutInProgress() &&
+      hasAuthCookies() &&
+      !checkSessionValid()
+    ) {
       handleSessionExpired();
       throw new ApiError(
         STATUS_CODES.TOKEN_EXPIRED,

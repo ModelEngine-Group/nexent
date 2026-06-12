@@ -173,6 +173,168 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ## 🔧 Advanced Configuration
 
+### Monitoring Configuration
+
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `docker/.env`, then starts the matching observability services from `docker/docker-compose-monitoring.yml`.
+
+```bash
+cd nexent/docker
+bash deploy.sh
+```
+
+If `docker/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+
+Supported providers:
+
+| Provider | Purpose | Default URL |
+|----------|---------|-------------|
+| `otlp` | OpenTelemetry Collector only, useful for forwarding to an external platform | No dashboard |
+| `phoenix` | Local Phoenix trace analysis | `http://localhost:6006` |
+| `langfuse` | Local Langfuse observability stack | `http://localhost:3001` |
+| `langsmith` | Forwarding to hosted LangSmith | `https://smith.langchain.com/` |
+| `grafana` | Local Grafana + Tempo | `http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
+| `zipkin` | Local Zipkin | `http://localhost:9411` |
+
+To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
+
+```bash
+cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
+```
+
+Common variables:
+
+| Variable | Description |
+|----------|-------------|
+| `MONITORING_PROVIDER` | Default monitoring provider; updated when you choose a provider in the deployment script |
+| `OTEL_COLLECTOR_HTTP_PORT` / `OTEL_COLLECTOR_GRPC_PORT` | Published OTLP HTTP/gRPC ports |
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
+| `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
+| `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
+
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `docker/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `docker/.env`:
+
+```bash
+ENABLE_TELEMETRY=true
+MONITORING_PROVIDER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http
+MONITORING_DASHBOARD_URL=
+```
+
+> **Production note**: Replace default passwords, secrets, and the Langfuse `ENCRYPTION_KEY`. Restrict dashboard and Collector access with a reverse proxy or firewall.
+
+### OAuth Login Configuration
+
+OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `OAUTH_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL.
+
+```bash
+bash deploy.sh --components infrastructure,application,supabase
+```
+
+For Docker, configure OAuth in `docker/.env`:
+
+```bash
+# Web entry URL. The full callback path is generated as:
+# {OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=<provider>
+OAUTH_CALLBACK_BASE_URL=http://localhost:3000
+
+# GitHub OAuth
+GITHUB_OAUTH_CLIENT_ID=
+GITHUB_OAUTH_CLIENT_SECRET=
+
+# GDE OAuth
+GDE_URL=
+GDE_OAUTH_CLIENT_ID=
+GDE_OAUTH_CLIENT_SECRET=
+
+# Link App OAuth
+LINK_APP_URL=
+LINK_APP_OAUTH_CLIENT_ID=
+LINK_APP_OAUTH_CLIENT_SECRET=
+
+# WeChat OAuth
+ENABLE_WECHAT_OAUTH=false
+WECHAT_OAUTH_APP_ID=
+WECHAT_OAUTH_APP_SECRET=
+
+# TLS verification when contacting OAuth providers
+OAUTH_SSL_VERIFY=true
+OAUTH_CA_BUNDLE=
+```
+
+Provider enablement rules:
+
+| Provider | Required variables | Callback URL |
+|----------|--------------------|--------------|
+| GitHub | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=github` |
+| GDE | `GDE_URL`, `GDE_OAUTH_CLIENT_ID`, `GDE_OAUTH_CLIENT_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=gde` |
+| Link App | `LINK_APP_URL`, `LINK_APP_OAUTH_CLIENT_ID`, `LINK_APP_OAUTH_CLIENT_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=link_app` |
+| WeChat | `ENABLE_WECHAT_OAUTH=true`, `WECHAT_OAUTH_APP_ID`, `WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
+
+For local Docker, a GitHub callback example is `http://localhost:3000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain such as `https://nexent.example.com/api/user/oauth/callback?provider=github` and register the exact same URL in the OAuth provider console.
+
+### CAS Login Configuration
+
+CAS SSO does not require the `supabase` component. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
+
+For Docker, configure CAS in `docker/.env`:
+
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=http://localhost:8080/cas
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://localhost:3000
+
+# disabled: disable the CAS login entry and automatic redirects
+# button: show CAS as an optional login button
+# force: redirect unauthenticated Nexent users to CAS automatically
+CAS_LOGIN_MODE=force
+
+# Empty means use <cas:user>; set userName to read <cas:attributes><cas:userName>
+CAS_USER_ATTRIBUTE=
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=role
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+
+# Empty means Nexent logout will not call the CAS Server logout endpoint.
+# /logout is resolved against CAS_SERVER_URL.
+CAS_LOGOUT_URL=/logout
+CAS_SSL_VERIFY=true
+CAS_CA_BUNDLE=
+```
+
+Common CAS URLs:
+
+| Purpose | URL |
+|---------|-----|
+| Nexent login entry | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS silent renewal callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS single logout callback | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+For Apereo CAS JSON Service Registry, create a service registration file such as `Nexent-10001.json` in the service registry directory configured by your CAS deployment. The `id` must be globally unique. This is a local Docker example:
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:3000/api/user/cas/logout_callback"
+}
+```
+
+In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
+
 ### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
 
 If you need to use any of the following features, configure the `NORTHBOUND_EXTERNAL_URL` environment variable:

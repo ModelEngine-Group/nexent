@@ -47,10 +47,8 @@ def _tool_name(tool_obj: Any) -> str:
 
 def _is_retriever_tool(tool_obj: Any) -> bool:
     """Classify tools that should use RETRIEVER rather than TOOL semantics."""
-    return (
-        type(tool_obj).__name__ == "KnowledgeBaseSearchTool"
-        or _tool_name(tool_obj) == "knowledge_base_search"
-    )
+    name = type(tool_obj).__name__
+    return name in ("KnowledgeBaseSearchTool", "SearchMemoryTool")
 
 
 def _build_tool_input(callable_obj: Callable, args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,6 +252,19 @@ extra_body=model_config.extra_body,
                                        storage_client=tool_config.metadata.get("storage_client", []),
                                        validate_url_access=validate_url_access,
                                        **params)
+            elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                tools_obj = tool_class()
+                tools_obj.observer = self.observer
+                tools_obj.memory_config = tool_config.metadata.get(
+                    "memory_config", {}) if tool_config.metadata else {}
+                tools_obj.tenant_id = tool_config.metadata.get(
+                    "tenant_id", "") if tool_config.metadata else ""
+                tools_obj.user_id = tool_config.metadata.get(
+                    "user_id", "") if tool_config.metadata else ""
+                tools_obj.agent_id = tool_config.metadata.get(
+                    "agent_id", "") if tool_config.metadata else ""
+                tools_obj.memory_user_config = tool_config.metadata.get(
+                    "memory_user_config", None) if tool_config.metadata else None
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
@@ -436,13 +447,13 @@ extra_body=model_config.extra_body,
             )
             agent.stop_event = self.stop_event
 
-            # Mount context manager and register components
-            if ctx_manager is not None:
-                agent.context_manager = ctx_manager
-                context_components = getattr(agent_config, 'context_components', None)
-                if context_components:
-                    for component in context_components:
-                        agent.context_manager.register_component(component)
+            # Mount context manager if config provided
+            ctx_config = getattr(agent_config, 'context_manager_config', None)
+            if ctx_config:
+                agent.context_manager = ContextManager(
+                    config=ctx_config,
+                    max_steps=agent_config.max_steps
+                )
 
             return agent
         except Exception as e:

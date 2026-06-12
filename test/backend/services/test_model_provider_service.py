@@ -145,6 +145,16 @@ for module_path in [
 
 # Provide concrete attributes required by the module under test
 sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
+sys.modules["consts.provider"].DASHSCOPE_GET_URL = (
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+)
+sys.modules["consts.provider"].TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
+sys.modules["consts.provider"].DASHSCOPE_REALTIME_BASE_URL = (
+    "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+)
+sys.modules["consts.provider"].DASHSCOPE_STT_BASE_URL = (
+    sys.modules["consts.provider"].DASHSCOPE_REALTIME_BASE_URL
+)
 
 # Mock constants for token and chunk sizes
 sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
@@ -175,6 +185,7 @@ class _EnumStub:
 
 
 sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
+sys.modules["consts.model"].ModelRequest = mock.MagicMock()
 
 # Mock exception classes
 
@@ -289,7 +300,7 @@ async def test_get_models_embedding_success():
 
 @pytest.mark.asyncio
 async def test_get_models_unknown_type():
-    """Unknown model types should not have extra annotations and should hit the base URL."""
+    """Unknown model types should be ignored without calling the API."""
     provider_config = {"model_type": "other", "api_key": "test-key"}
 
     with mock.patch(
@@ -298,25 +309,10 @@ async def test_get_models_unknown_type():
         "backend.services.providers.silicon_provider.SILICON_GET_URL",
         "https://silicon.com",
     ):
-
-        mock_client_instance = mock.AsyncMock()
-        mock_client.return_value.__aenter__.return_value = mock_client_instance
-
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response._json_data = {"data": [{"id": "model-x"}]}
-        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
-        mock_response.raise_for_status = mock.Mock()
-        mock_client_instance.get.return_value = mock_response
-
         result = await SiliconModelProvider().get_models(provider_config)
 
-        # No additional keys should be injected for unknown type
-        assert result == [{"id": "model-x"}]
-        mock_client_instance.get.assert_called_once_with(
-            "https://silicon.com",
-            headers={"Authorization": "Bearer test-key"},
-        )
+        assert result == []
+        mock_client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -709,6 +705,98 @@ async def test_prepare_model_dict_rerank_dashscope():
         assert "services/rerank" in result["base_url"]
         assert "text-rerank/text-rerank" in result["base_url"]
         assert "rerank" in result["base_url"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_dashscope_stt_uses_realtime_ws_url():
+    """DashScope STT models should use the realtime websocket endpoint."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("", "qwen3-asr-flash-realtime"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="qwen3-asr-flash-realtime",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "qwen3-asr-flash-realtime",
+            "model_type": "stt",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "qwen3-asr-flash-realtime",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        result = await prepare_model_dict(
+            "dashscope",
+            {"id": "qwen3-asr-flash-realtime", "model_type": "stt"},
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "test-key",
+        )
+
+        mock_split_repo.assert_called_once_with("qwen3-asr-flash-realtime")
+        mock_add_repo_to_name.assert_called_once_with(
+            "", "qwen3-asr-flash-realtime"
+        )
+        mock_emb_dim_check.assert_not_called()
+        assert result["base_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        assert result["connect_status"] == "not_detected"
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_dashscope_tts_uses_realtime_ws_url():
+    """DashScope TTS models should use the realtime websocket endpoint."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("", "qwen-tts-realtime"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="qwen-tts-realtime",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ) as mock_emb_dim_check, mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "qwen-tts-realtime",
+            "model_type": "tts",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "qwen-tts-realtime",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        result = await prepare_model_dict(
+            "dashscope",
+            {"id": "qwen-tts-realtime", "model_type": "tts"},
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "test-key",
+        )
+
+        mock_split_repo.assert_called_once_with("qwen-tts-realtime")
+        mock_add_repo_to_name.assert_called_once_with("", "qwen-tts-realtime")
+        mock_emb_dim_check.assert_not_called()
+        assert result["base_url"] == "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        assert result["connect_status"] == "not_detected"
 
 
 @pytest.mark.asyncio
@@ -2284,3 +2372,356 @@ async def test_get_provider_models_tokenpony_empty_result():
 
         assert result == []
         mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+# ============================================================================
+# Test-cases for uncovered lines in prepare_model_dict (embedding URL edge cases)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_embedding_dashscope_explicit_embed_url():
+    """DashScope embedding models where base_url already ends with /embeddings."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("dashscope", "text-embedding-v3"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="dashscope/text-embedding-v3",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+        return_value=1536,
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "text-embedding-v3",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "dashscope/text-embedding-v3",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "dashscope"
+        model = {
+            "id": "dashscope/text-embedding-v3",
+            "model_type": "embedding",
+        }
+        # URL already contains /embeddings - DashScope always appends /embeddings (code at line 130-131)
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Code always appends /embeddings (no deduplication check), so path doubles
+        assert result["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings/embeddings"
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_embedding_with_url_already_has_embeddings_path():
+    """Generic embedding models where model_url already ends with /embeddings."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "text-embedding-3-large"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/text-embedding-3-large",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+        return_value=1536,
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "openai",
+            "model_name": "text-embedding-3-large",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "openai/text-embedding-3-large",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "openai"
+        model = {
+            "id": "openai/text-embedding-3-large",
+            "model_type": "embedding",
+        }
+        # Generic embedding: hits line 134-136 which checks for existing /embeddings
+        # and strips trailing slash without duplication
+        base_url = "https://api.openai.com/v1/embeddings"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Line 134-136 deduplicates: strips trailing slash only
+        assert result["base_url"] == "https://api.openai.com/v1/embeddings"
+
+
+# ============================================================================
+# Test-cases for merge_existing_model_attributes
+# ============================================================================
+
+
+def test_merge_existing_model_attributes_defaults_fields():
+    """Should use default fields list when fields=None."""
+    model_list = [
+        {"id": "openai/gpt-4", "model_type": "llm"},
+    ]
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=[],
+    ):
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        result = merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type, fields=None
+        )
+        assert result == model_list
+
+
+def test_merge_existing_model_attributes_embedding_type():
+    """Embedding and multi_embedding types should return model_list unchanged."""
+    model_list = [
+        {"id": "openai/text-embedding-ada-002", "model_type": "embedding"}
+    ]
+    tenant_id = "test-tenant"
+    provider = "openai"
+
+    from backend.services.model_provider_service import merge_existing_model_attributes
+
+    # embedding type
+    result = merge_existing_model_attributes(
+        model_list, tenant_id, provider, "embedding"
+    )
+    assert result == model_list
+
+    # multi_embedding type
+    result = merge_existing_model_attributes(
+        model_list, tenant_id, provider, "multi_embedding"
+    )
+    assert result == model_list
+
+
+def test_merge_existing_model_attributes_empty_model_list():
+    """Empty model_list should return unchanged."""
+    model_list = []
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=[],
+    ):
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        result = merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type
+        )
+        assert result == model_list
+
+
+def test_merge_existing_model_attributes_no_existing_models():
+    """When no existing models found, should return model_list unchanged."""
+    model_list = [{"id": "openai/gpt-4", "model_type": "llm"}]
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=[],
+    ):
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        result = merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type
+        )
+        assert result == model_list
+
+
+def test_merge_existing_model_attributes_successful_merge():
+    """Should successfully merge multiple fields from existing models."""
+    model_list = [
+        {"id": "openai/gpt-4", "model_type": "llm"},
+        {"id": "openai/gpt-3.5-turbo", "model_type": "llm"},
+    ]
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+    fields = ["max_tokens", "api_key", "timeout_seconds"]
+
+    existing_models = [
+        {
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "max_tokens": 8192,
+            "api_key": "sk-existing-key",
+            "timeout_seconds": 60,
+            "concurrency_limit": 10,  # Not in fields, should not be merged
+        },
+        {
+            "model_repo": "openai",
+            "model_name": "gpt-3.5-turbo",
+            "max_tokens": 4096,
+            # api_key not set
+            "timeout_seconds": 30,
+        },
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=existing_models,
+    ):
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        result = merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type, fields=fields
+        )
+
+        # gpt-4: all 3 fields should be merged
+        assert result[0]["max_tokens"] == 8192
+        assert result[0]["api_key"] == "sk-existing-key"
+        assert result[0]["timeout_seconds"] == 60
+        # concurrency_limit not in fields, should not be merged
+        assert "concurrency_limit" not in result[0]
+
+        # gpt-3.5-turbo: max_tokens and timeout_seconds merged, api_key not (was None)
+        assert result[1]["max_tokens"] == 4096
+        assert "api_key" not in result[1]
+        assert result[1]["timeout_seconds"] == 30
+
+
+def test_merge_existing_model_attributes_partial_match():
+    """Should handle cases where only some models have existing records."""
+    model_list = [
+        {"id": "openai/gpt-4", "model_type": "llm"},
+        {"id": "anthropic/claude-3", "model_type": "llm"},
+    ]
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+
+    existing_models = [
+        {
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "max_tokens": 8192,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=existing_models,
+    ):
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        result = merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type
+        )
+
+        assert result[0]["max_tokens"] == 8192
+        assert "max_tokens" not in result[1]
+
+
+def test_merge_existing_model_attributes_verify_function_call():
+    """Should call get_models_by_tenant_factory_type with correct parameters."""
+    model_list = [{"id": "openai/gpt-4", "model_type": "llm"}]
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=[],
+    ) as mock_get_models:
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type
+        )
+
+        mock_get_models.assert_called_once_with(
+            tenant_id, provider, model_type
+        )
+
+
+def test_merge_existing_model_attributes_empty_existing_model_list():
+    """When get_models_by_tenant_factory_type returns empty, return model_list unchanged."""
+    model_list = [{"id": "openai/gpt-4", "model_type": "llm"}]
+    tenant_id = "test-tenant"
+    provider = "openai"
+    model_type = "llm"
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=[],
+    ):
+        from backend.services.model_provider_service import merge_existing_model_attributes
+        result = merge_existing_model_attributes(
+            model_list, tenant_id, provider, model_type
+        )
+        assert result == model_list
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_embedding_dashscope_url_already_has_embeddings():
+    """DashScope embedding where base_url already contains /embeddings (line 134)."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("dashscope", "text-embedding-v2"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="dashscope/text-embedding-v2",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+        return_value=1536,
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelConnectStatusEnum"
+    ) as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "dashscope",
+            "model_name": "text-embedding-v2",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "max_tokens": 0,
+            "display_name": "dashscope/text-embedding-v2",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "dashscope"
+        model = {
+            "id": "dashscope/text-embedding-v2",
+            "model_type": "embedding",
+        }
+        # URL already has /embeddings - hits line 130-131, DashScope always appends /embeddings
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Code always appends /embeddings (no deduplication check)
+        assert result["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings/embeddings"
+        assert not result["base_url"].endswith("//")

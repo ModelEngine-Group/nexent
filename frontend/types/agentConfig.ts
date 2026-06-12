@@ -26,6 +26,8 @@ export type AgentConfigUpdate = Partial<Pick<
   | "prompt_template_name"
   | "group_ids"
   | "ingroup_permission"
+  | "greeting_message"
+  | "example_questions"
 >>;
 
 // ========== Core Interfaces ==========
@@ -63,8 +65,12 @@ export interface Agent {
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
+  prompts_hidden?: boolean;
   current_version_no?: number;
   is_a2a_server?: boolean;
+  greeting_message?: string;
+  example_questions?: string[];
 }
 
 export interface Tool {
@@ -399,6 +405,7 @@ export interface McpServer {
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;
+  custom_headers?: Record<string, string> | null;
   mcp_id: number;
   /**
    * Per-item permission returned by /mcp/list.
@@ -457,11 +464,14 @@ export interface GeneratePromptParams {
 export interface OptimizePromptSectionParams {
   agent_id: number;
   task_description: string;
-  model_id: string;
+  model_id: number;
   section_type: "duty" | "constraint" | "few_shots";
   section_title: string;
   current_content: string;
   feedback: string;
+  mode?: "general" | "insert" | "select";
+  start_pos?: number;
+  end_pos?: number;
   tool_ids?: number[];
   sub_agent_ids?: number[];
   knowledge_base_display_names?: string[];
@@ -469,6 +479,32 @@ export interface OptimizePromptSectionParams {
 
 export interface OptimizePromptSectionResponse {
   section_type: "duty" | "constraint" | "few_shots";
+  section_title: string;
+  original_content: string;
+  optimized_content: string;
+}
+
+export interface BadCaseItem {
+  question: string;
+  answer: string;
+  label?: string;
+  reason?: string;
+}
+
+export interface OptimizePromptBadCaseParams {
+  agent_id: number;
+  model_id: number;
+  current_content: string;
+  bad_cases: BadCaseItem[];
+  section_type: string;
+  section_title: string;
+  tool_ids?: number[];
+  sub_agent_ids?: number[];
+  knowledge_base_display_names?: string[];
+}
+
+export interface OptimizePromptBadCaseResponse {
+  section_type: string;
   section_title: string;
   original_content: string;
   optimized_content: string;

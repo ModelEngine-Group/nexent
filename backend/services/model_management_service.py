@@ -3,12 +3,17 @@ from typing import List, Dict, Any, Optional
 
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
-from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
+from consts.provider import (
+    ProviderEnum,
+    SILICON_BASE_URL,
+    DASHSCOPE_BASE_URL,
+    DASHSCOPE_REALTIME_BASE_URL,
+    TOKENPONY_BASE_URL,
+)
 
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
-    get_model_by_display_name,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
@@ -20,7 +25,7 @@ from services.model_provider_service import (
     merge_existing_model_attributes,
     get_provider_models,
 )
-from services.model_health_service import embedding_dimension_check
+from services.model_health_service import embedding_dimension_check, _infer_model_factory
 from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
@@ -31,6 +36,23 @@ from services.vectordatabase_service import get_vector_db_core
 from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
+
+INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
+
+
+def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
+    """Allow the three multimodal slots to share display names across slots."""
+    if not existing_models:
+        return False
+
+    if model_type in INDEPENDENT_MULTIMODAL_MODEL_TYPES:
+        return any(
+            existing.get("model_type") == model_type
+            or existing.get("model_type") not in INDEPENDENT_MULTIMODAL_MODEL_TYPES
+            for existing in existing_models
+        )
+
+    return True
 
 
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
@@ -77,17 +99,31 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
 
         # Check display name conflict scoped by tenant
         if model_data.get("display_name"):
-            existing_model_by_display = get_model_by_display_name(
+            existing_models_by_display = get_models_by_display_name(
                 model_data["display_name"], tenant_id)
-            if existing_model_by_display:
+            if _has_display_name_conflict(existing_models_by_display, model_data.get("model_type")):
                 logging.error(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
                 raise ValueError(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
 
-        # If embedding or multi_embedding, set max_tokens via embedding dimension check
+        # If embedding or multi_embedding, ensure base_url ends with /embeddings
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
-            model_data["max_tokens"] = await embedding_dimension_check(model_data)
+            base_url = model_data.get("base_url", "")
+            if base_url and "/embeddings" not in base_url:
+                model_data["base_url"] = f"{base_url.rstrip('/')}/embeddings"
+            # Infer model_factory from base_url if not set
+            model_data["model_factory"] = _infer_model_factory(
+                model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
+            )
+            # Get embedding dimension
+            dimension = await embedding_dimension_check(model_data)
+            if dimension is None:
+                raise ValueError(
+                    f"Failed to get embedding dimension for model '{model_data.get('display_name', model_data.get('model_name'))}'. "
+                    "Please verify the URL, API key, and network connection."
+                )
+            model_data["max_tokens"] = dimension
             # Set default chunk_batch if not provided
             if model_data.get("chunk_batch") is None:
                 model_data["chunk_batch"] = 10
@@ -154,7 +190,7 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             # ModelEngine models carry their own base_url in each model dict
             model_url = ""
         elif provider == ProviderEnum.DASHSCOPE.value:
-            model_url = DASHSCOPE_BASE_URL
+            model_url = DASHSCOPE_REALTIME_BASE_URL if model_type in ("stt", "tts") else DASHSCOPE_BASE_URL
         elif provider == ProviderEnum.TOKENPONY.value:
             model_url = TOKENPONY_BASE_URL
         else:
@@ -189,12 +225,14 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             if model_name:
                 existing_model = existing_model_map.get(model_display_name)
                 if existing_model:
+                    update_data = {}
                     # Check if max_tokens has changed
                     existing_max_tokens = existing_model.get("max_tokens")
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
-                        update_model_record(existing_model["model_id"], {
-                                            "max_tokens": new_max_tokens}, user_id)
+                        update_data["max_tokens"] = new_max_tokens
+                    if update_data:
+                        update_model_record(existing_model["model_id"], update_data, user_id)
                     continue
 
             model_dict = await prepare_model_dict(
@@ -533,7 +571,4 @@ async def list_models_for_admin(
     except Exception as e:
         logging.error(f"Failed to retrieve admin model list: {str(e)}")
         raise Exception(f"Failed to retrieve admin model list: {str(e)}")
-
-
-
 

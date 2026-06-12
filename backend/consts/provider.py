@@ -17,6 +17,8 @@ SILICON_GET_URL = "https://api.siliconflow.cn/v1/models"
 # Dashcope
 DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
 DASHSCOPE_GET_URL = "https://dashscope.aliyuncs.com/api/v1/models"
+DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+DASHSCOPE_STT_BASE_URL = DASHSCOPE_REALTIME_BASE_URL
 
 # TokenPony
 TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"

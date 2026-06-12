@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
-import { Tabs, Collapse, message, Tooltip } from "antd";
+import { Tabs, Collapse, message, Tooltip, Badge } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
@@ -17,8 +17,7 @@ import { Settings, AlertTriangle } from "lucide-react";
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
-  currentAgentId?: number | undefined;
-  isReadOnly?: boolean;
+  currentAgentId?: number;
 }
 
 // Tool types that require knowledge base selection
@@ -89,16 +88,13 @@ function isToolDisabledDueToEmbedding(toolName: string, embeddingAvailable: bool
 export default function ToolManagement({
   toolGroups,
   isCreatingMode,
-  currentAgentId,
-  isReadOnly: isReadOnlyProp,
+  currentAgentId
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
 
-  // Use prop if provided, otherwise fall back to store
-  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
@@ -311,21 +307,29 @@ export default function ToolManagement({
   // Generate Tabs configuration
   const tabItems = toolGroups.map((group) => {
     const label = t(group.label);
+    const selectedCount = group.subGroups
+      ? group.subGroups.reduce(
+          (sum, sg) => sum + sg.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length, 0)
+      : group.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length;
 
     return {
       key: group.key,
       label: (
         <Tooltip title={label} placement="right">
-          <span
-            style={{
-              display: "block",
-              maxWidth: "100px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {label}
+          <span className="inline-flex items-center gap-1">
+            <span
+              style={{
+                maxWidth: "100px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label}
+            </span>
+            {selectedCount > 0 && (
+              <Badge count={selectedCount} size="small" color="blue" />
+            )}
           </span>
         </Tooltip>
       ),
@@ -355,17 +359,25 @@ export default function ToolManagement({
                   items={group.subGroups.map((subGroup, index) => ({
                     key: subGroup.key,
                     label: (
-                      <span
-                        className="text-gray-700 font-medium"
-                        style={{
-                          paddingTop: "8px",
-                          paddingBottom: "8px",
-                          display: "block",
-                          minHeight: "36px",
-                          lineHeight: "20px",
-                        }}
-                      >
-                        {subGroup.label}
+                      <span className="inline-flex items-center gap-1">
+                        <span
+                          className="text-gray-700 font-medium"
+                          style={{
+                            paddingTop: "8px",
+                            paddingBottom: "8px",
+                            minHeight: "36px",
+                            lineHeight: "20px",
+                          }}
+                        >
+                          {subGroup.label}
+                        </span>
+                        {subGroup.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length > 0 && (
+                          <Badge
+                            count={subGroup.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length}
+                            size="small"
+                            color="blue"
+                          />
+                        )}
                       </span>
                     ),
                     className: `tool-category-panel ${
@@ -385,9 +397,7 @@ export default function ToolManagement({
                           const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
-                          const tooltipTitle = isReadOnly
-                            ? t("agent.noEditPermission")
-                            : isDisabledDueToVlm
+                          const tooltipTitle = isDisabledDueToVlm
                             ? t("toolPool.vlmDisabledTooltip")
                             : isDisabledDueToEmbedding
                             ? t("toolPool.embeddingDisabledTooltip")
@@ -494,9 +504,7 @@ export default function ToolManagement({
                 const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
-                const tooltipTitle = isReadOnly
-                  ? t("agent.noEditPermission")
-                  : isDisabledDueToVlm
+                const tooltipTitle = isDisabledDueToVlm
                   ? t("toolPool.vlmDisabledTooltip")
                   : isDisabledDueToEmbedding
                   ? t("toolPool.embeddingDisabledTooltip")

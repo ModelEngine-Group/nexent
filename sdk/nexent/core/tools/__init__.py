@@ -24,7 +24,6 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .run_skill_script_tool import run_skill_script
 from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
-from .reload_original_context_tool import ReloadOriginalContextTool
 
 __all__ = [
     "MySqlTool",
@@ -54,6 +53,5 @@ __all__ = [
     "AnalyzeVideoTool",
     "run_skill_script",
     "read_skill_md",
-    "read_skill_config",
-    "ReloadOriginalContextTool"
+    "read_skill_config"
 ]

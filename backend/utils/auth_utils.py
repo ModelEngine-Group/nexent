@@ -3,13 +3,15 @@ import time
 import hmac
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import jwt
 from fastapi import Request
 from supabase import create_client
 
 from consts.const import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
     DEFAULT_TENANT_ID,
     DEFAULT_USER_ID,
     IS_SPEED_MODE,
@@ -99,7 +101,8 @@ def verify_aksk_signature(
     if access_key != expected_access_key:
         return False
 
-    expected_sig = calculate_hmac_signature(secret_key, access_key, timestamp, body)
+    expected_sig = calculate_hmac_signature(
+        secret_key, access_key, timestamp, body)
     return hmac.compare_digest(expected_sig, signature)
 
 
@@ -228,6 +231,24 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     }
 
 
+def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
+    """
+    Resolve the effective tenant_id from a user_tenant_t record.
+
+    ASSET_OWNER users may have an empty legacy tenant_id; map them to the
+    virtual ASSET_OWNER tenant. Fall back to DEFAULT_TENANT_ID when unset.
+    """
+    tenant_id = user_tenant.get("tenant_id")
+    if tenant_id:
+        return tenant_id
+
+    user_role = (user_tenant.get("user_role") or "").upper()
+    if user_role == ASSET_OWNER_ROLE:
+        return ASSET_OWNER_TENANT_ID
+
+    return DEFAULT_TENANT_ID
+
+
 def get_supabase_client():
     """Get Supabase client instance with regular key (user-context operations)."""
     try:
@@ -263,7 +284,8 @@ def get_jwt_expiry_seconds(token: str) -> int:
             return 10 * 365 * 24 * 60 * 60
         # Ensure token is pure JWT, remove possible Bearer prefix
         jwt_token = (
-            token.replace("Bearer ", "") if token.startswith("Bearer ") else token
+            token.replace("Bearer ", "") if token.startswith(
+                "Bearer ") else token
         )
 
         # If debug expiration time is set, return directly for quick debugging
@@ -304,15 +326,12 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
     return int((datetime.now() + timedelta(seconds=expiry_seconds)).timestamp())
 
 
-def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
+def _decode_jwt_token(authorization: str) -> dict:
     """
     Extract user ID from JWT token after verifying signature and expiration.
 
     Args:
         authorization: Authorization header value
-
-    Returns:
-        Optional[str]: User ID, return None if parsing fails
 
     Raises:
         UnauthorizedError: If token is invalid, expired, or signature verification fails
@@ -333,17 +352,12 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
 
         # Decode and verify JWT (signature + expiration)
         # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
-        decoded = jwt.decode(
+        return jwt.decode(
             token,
             SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
             options={"verify_exp": True, "verify_aud": False},
         )
-
-        # Extract user ID from JWT claims
-        user_id = decoded.get("sub")
-
-        return user_id
     except jwt.ExpiredSignatureError:
         logging.warning("Token expired")
         raise UnauthorizedError("Token has expired")
@@ -356,8 +370,45 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
     except UnauthorizedError:
         raise
     except Exception as e:
-        logging.error(f"Failed to extract user ID from token: {str(e)}")
+        logging.error(f"Failed to decode token: {str(e)}")
         raise UnauthorizedError("Invalid or expired authentication token")
+
+
+def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
+    """
+    Extract user ID from JWT token after verifying signature and expiration.
+    """
+    decoded = _decode_jwt_token(authorization)
+    return decoded.get("sub")
+
+
+def extract_session_id_from_authorization(authorization: Optional[str]) -> Optional[str]:
+    """Extract the sid claim without enforcing token validity, for idempotent logout."""
+    if not authorization:
+        return None
+    try:
+        token = (
+            authorization.replace("Bearer ", "")
+            if authorization.startswith("Bearer ")
+            else authorization
+        )
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        sid = decoded.get("sid")
+        return str(sid) if sid else None
+    except Exception:
+        return None
+
+
+def ensure_cas_session_active_from_authorization(authorization: Optional[str]) -> None:
+    """Reject CAS-issued JWTs whose server-side session is expired or revoked."""
+    session_id = extract_session_id_from_authorization(authorization)
+    if not session_id:
+        return
+
+    from database.cas_session_db import is_cas_session_active
+
+    if not is_cas_session_active(str(session_id)):
+        raise UnauthorizedError("CAS session has expired or been revoked")
 
 
 def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
@@ -372,7 +423,8 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     """
     # In speed mode, allow unauthenticated access with default user for demo/dev
     if IS_SPEED_MODE:
-        logging.debug("Speed mode detected - returning default user ID and tenant ID")
+        logging.debug(
+            "Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
     # In normal mode, missing auth header means unauthorized - return 401, not default user
@@ -382,9 +434,12 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
         raise UnauthorizedError("No authorization header provided")
 
     try:
-        user_id = _extract_user_id_from_jwt_token(authorization)
+        decoded = _decode_jwt_token(authorization)
+        user_id = decoded.get("sub")
         if not user_id:
             raise UnauthorizedError("Invalid or expired authentication token")
+
+        ensure_cas_session_active_from_authorization(authorization)
 
         user_tenant_record = get_user_tenant_by_user_id(user_id)
         if user_tenant_record and user_tenant_record.get("tenant_id"):
@@ -398,6 +453,8 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
 
         return user_id, tenant_id
 
+    except UnauthorizedError:
+        raise
     except Exception as e:
         logging.error(f"Failed to get user ID and tenant ID: {str(e)}")
         raise UnauthorizedError("Invalid or expired authentication token")
@@ -449,7 +506,7 @@ def generate_test_jwt(user_id: str, expires_in: int = 3600) -> str:
     return jwt.encode(payload, MOCK_JWT_SECRET_KEY, algorithm="HS256")
 
 
-def generate_session_jwt(user_id: str, expires_in: int = 3600) -> str:
+def generate_session_jwt(user_id: str, expires_in: int = 3600, session_id: str = None) -> str:
     """Generate a signed JWT compatible with the existing auth verification flow."""
     now = int(time.time())
     payload = {
@@ -460,6 +517,8 @@ def generate_session_jwt(user_id: str, expires_in: int = 3600) -> str:
         "exp": now + expires_in,
         "iss": SUPABASE_URL,
     }
+    if session_id:
+        payload["sid"] = session_id
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
 
 

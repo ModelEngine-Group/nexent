@@ -29,6 +29,8 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
   const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
+  const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
+  const selectedSkills = useAgentConfigStore((state) => state.editedAgent.skills);
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
@@ -125,7 +127,12 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
       <Tabs defaultValue="tools" className="w-full flex-1 min-h-0 flex flex-col overflow-hidden">
         <TabsList className="grid w-full grid-cols-2 flex-shrink-0">
           <TabsTrigger value="tools">
-            {t("toolPool.title")}
+            <span className="inline-flex items-center gap-1">
+              {t("toolPool.title")}
+              {selectedTools.length > 0 && (
+                <Badge count={selectedTools.length} size="small" color="blue" />
+              )}
+            </span>
             <Tooltip
               title={<div style={{ whiteSpace: "pre-line" }}>{t("toolPool.tooltip.functionGuide")}</div>}
               color="#ffffff"
@@ -144,7 +151,14 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
               <Lightbulb className="mx-2 text-yellow-500" size={16} />
             </Tooltip>
           </TabsTrigger>
-          <TabsTrigger value="skills">{t("skillPool.title")}</TabsTrigger>
+          <TabsTrigger value="skills">
+            <span className="inline-flex items-center gap-1">
+              {t("skillPool.title")}
+              {selectedSkills && selectedSkills.length > 0 && (
+                <Badge count={selectedSkills.length} size="small" color="blue" />
+              )}
+            </span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="tools" className="mt-4 flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -183,7 +197,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 toolGroups={groupedTools}
                 isCreatingMode={isCreatingMode}
                 currentAgentId={currentAgentId ?? undefined}
-                isReadOnly={isReadOnly}
               />
             </Col>
           </Row>

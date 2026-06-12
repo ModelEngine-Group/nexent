@@ -41,9 +41,12 @@ export type EditableAgent = Pick<
   | "sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
+  | "greeting_message"
+  | "example_questions"
 > & {
   skills: Skill[];
   external_sub_agent_id_list?: number[];
+  prompts_hidden?: boolean;
 };
 
 interface AgentConfigStoreState {
@@ -155,7 +158,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     author: "",
     model: llmConfig?.name || "",
     model_id: llmConfig?.id || 0,
-    max_step: 5,
+    max_step: 15,
     provide_run_summary: false,
     tools: [],
     skills: [],
@@ -170,6 +173,8 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     sub_agent_id_list: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
+    greeting_message: "",
+    example_questions: [],
   };
 }
 
@@ -200,6 +205,9 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
+        prompts_hidden: agent.prompts_hidden,
+        greeting_message: agent.greeting_message || "",
+        example_questions: agent.example_questions || [],
       }
     : { ...emptyEditableAgent };
 
@@ -315,7 +323,9 @@ const isDirty = (
       normalizeArray(editedAgent.external_sub_agent_id_list || []).length > 0 ||
       editedAgent.tools.length > 0 ||
       editedAgent.skills.length > 0 ||
-      editedAgent.ingroup_permission !== "READ_ONLY"
+      editedAgent.ingroup_permission !== "READ_ONLY" ||
+      editedAgent.greeting_message !== "" ||
+      (editedAgent.example_questions || []).length > 0
     );
   }
 
@@ -344,7 +354,9 @@ const isDirty = (
       JSON.stringify(normalizeArray(editedAgent.external_sub_agent_id_list ?? [])) ||
     isToolsDirty(baselineAgent.tools, editedAgent.tools) ||
     isSkillsDirty(baselineAgent.skills, editedAgent.skills) ||
-    baselineAgent.ingroup_permission !== editedAgent.ingroup_permission
+    baselineAgent.ingroup_permission !== editedAgent.ingroup_permission ||
+    baselineAgent.greeting_message !== editedAgent.greeting_message ||
+    JSON.stringify(baselineAgent.example_questions ?? []) !== JSON.stringify(editedAgent.example_questions ?? [])
   );
 };
 
@@ -360,7 +372,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   forceRefreshKey: 0,
 
   isReadOnly: () => {
-    const { isCreatingMode, currentAgentPermission } = get();
+    const { isCreatingMode, currentAgentId, currentAgentPermission } = get();
+    if (isCreatingMode === false && currentAgentId === null) return true;
     if (isCreatingMode) return false;
     return currentAgentPermission === 'READ_ONLY';
   },
@@ -381,6 +394,12 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
         if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
         if (cached.constraintPrompt) cacheUpdates.constraint_prompt = cached.constraintPrompt;
         if (cached.fewShotsPrompt) cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
+        if (cached.greetingMessage) cacheUpdates.greeting_message = cached.greetingMessage;
+        if (cached.exampleQuestions) {
+          cacheUpdates.example_questions = typeof cached.exampleQuestions === "string"
+            ? (() => { try { return JSON.parse(cached.exampleQuestions); } catch { return []; } })()
+            : cached.exampleQuestions;
+        }
         
         // Only restore agent metadata if not already set in baseline
         if (cached.agentName && !editedAgent.name) cacheUpdates.name = cached.agentName;

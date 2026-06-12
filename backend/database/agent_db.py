@@ -1,9 +1,10 @@
 import logging
 from typing import List
-from sqlalchemy import update
+from sqlalchemy import or_, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from consts.const import ASSET_OWNER_TENANT_ID
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
@@ -22,9 +23,12 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
     with get_db_session() as session:
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y'
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
+            AgentInfo.delete_flag != 'Y',
         ).first()
 
         if not agent:
@@ -158,7 +162,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     :return: Created agent object
     """
     info_with_metadata = dict(agent_info)
-    info_with_metadata.setdefault("max_steps", 5)
+    info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -197,6 +201,8 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
+            "greeting_message": new_agent.greeting_message,
+            "example_questions": new_agent.example_questions,
             "current_version_no": new_agent.current_version_no,
             "version_no": new_agent.version_no,
             "created_by": new_agent.created_by,

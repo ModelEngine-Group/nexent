@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Literal
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from nexent.core.agents.agent_model import ToolConfig
@@ -338,6 +338,7 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
+    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):
@@ -413,12 +414,47 @@ class OptimizePromptSectionRequest(BaseModel):
     section_title: str
     current_content: str
     feedback: str
+    mode: Literal["general", "insert", "select"] = "general"
+    start_pos: Optional[int] = Field(None, description="Start position for insert/select mode")
+    end_pos: Optional[int] = Field(None, description="End position for insert/select mode")
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
+class BadCaseItem(BaseModel):
+    question: str
+    answer: str
+    label: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class OptimizePromptBadCaseRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    current_content: str
+    bad_cases: List[BadCaseItem]
+    section_type: str
+    section_title: str
+    tool_ids: Optional[List[int]] = Field(None)
+    sub_agent_ids: Optional[List[int]] = Field(None)
+    knowledge_base_display_names: Optional[List[str]] = Field(None)
+
+
+class OptimizeFromDebugSelected(BaseModel):
+    user_question: str
+    assistant_answer: str
+
+
+class OptimizePromptFromDebugRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    feedback: str
+    selected: OptimizeFromDebugSelected
+    history: Optional[List[HistoryItem]] = None
 
 
 class GenerateTitleRequest(BaseModel):
@@ -436,7 +472,7 @@ class AgentInfoRequest(BaseModel):
     author: Optional[str] = None
     model_name: Optional[str] = None
     model_id: Optional[int] = None
-    max_steps: Optional[int] = None
+    max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
@@ -453,6 +489,8 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
     version_no: int = 0
 
 
@@ -679,6 +717,8 @@ class MCPUpdateRequest(BaseModel):
     new_mcp_url: str = Field(..., description="New MCP server URL")
     new_authorization_token: Optional[str] = Field(
         None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
+    custom_headers: Optional[Dict[str, Any]] = Field(
+        None, description="Custom HTTP headers as JSON object")
 
 
 # Tenant Management Data Models
@@ -1118,6 +1158,7 @@ class AddMcpServiceRequest(BaseModel):
     source: MCPSourceType = Field(default=MCPSourceType.LOCAL, description="MCP source type")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
@@ -1157,6 +1198,7 @@ class UpdateMcpServiceRequest(BaseModel):
     server_url: str = Field(..., min_length=1, description="New MCP server URL")
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
 
     @field_validator("name", "server_url", "description", "authorization_token", mode="before")
     @classmethod

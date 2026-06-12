@@ -30,6 +30,11 @@ export const API_ENDPOINTS = {
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
     unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
+  cas: {
+    config: `${API_BASE_URL}/user/cas/config`,
+    login: `${API_BASE_URL}/user/cas/login`,
+    renew: `${API_BASE_URL}/user/cas/renew`,
+  },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
     create: `${API_BASE_URL}/conversation/create`,
@@ -160,10 +165,10 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/model/delete?display_name=${encodeURIComponent(
         displayName
       )}`,
-    customModelHealthcheck: (displayName: string) =>
+    customModelHealthcheck: (displayName: string, modelType: string) =>
       `${API_BASE_URL}/model/healthcheck?display_name=${encodeURIComponent(
         displayName
-      )}`,
+      )}&model_type=${encodeURIComponent(modelType)}`,
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
     updateSingleModel: (displayName: string) =>
       `${API_BASE_URL}/model/update?display_name=${encodeURIComponent(displayName)}`,

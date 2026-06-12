@@ -128,6 +128,7 @@ def publish_version_impl(
         'status': STATUS_RELEASED,
         'is_a2a': publish_as_a2a,
         'created_by': user_id,
+        'updated_by': user_id,
     }
     version_id = insert_version(version_data)
 
@@ -820,7 +821,7 @@ async def list_published_agents_impl(
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
-                is_creator = str(agent.get("created_by)) == str(user_id)"))
+                is_creator = str(agent.get("created_by")) == str(user_id)
                 if not is_creator and len(user_group_ids.intersection(agent_group_ids)) == 0:
                     continue
 
@@ -909,6 +910,8 @@ async def list_published_agents_impl(
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "published_version_no": agent.get("published_version_no"),
+                "greeting_message": agent.get("greeting_message"),
+                "example_questions": agent.get("example_questions"),
             })
 
         return simple_agent_list

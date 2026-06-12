@@ -56,6 +56,8 @@ config:
   modelPath:
     clipModelPath: "/opt/models/clip-vit-base-patch32"
     nltkData: "/opt/models/nltk_data"
+    tableTransformerModelPath: "/opt/models/table-transformer-structure-recognition"
+    unstructuredDefaultModelInitializeParamsJsonPath: "/opt/models/yolox"
   terminal:
     sshPrivateKeyPath: "/path/to/openssh-server/ssh-keys/openssh_server_key"
   supabase:
@@ -137,6 +139,29 @@ config:
     sslVerify: "true"
     caBundle: ""
     callbackBaseUrl: "http://localhost:30000"
+  cas:
+    enabled: "false"
+    serverUrl: ""
+    validatePath: "/p3/serviceValidate"
+    callbackBaseUrl: "http://localhost:30000"
+    # Supported values:
+    # - disabled: disable CAS login entry and automatic CAS redirects.
+    # - button: show CAS as an optional login entry.
+    # - force: automatically redirect unauthenticated users to CAS login.
+    loginMode: "disabled"
+    userAttribute: ""
+    emailAttribute: "email"
+    roleAttribute: "role"
+    tenantAttribute: "tenant_id"
+    roleMapJson: ""
+    sessionMaxAgeSeconds: "3600"
+    localSessionMaxAgeSeconds: "3600"
+    renewBeforeSeconds: "300"
+    renewTimeoutSeconds: "10"
+    syntheticEmailDomain: "cas.local"
+    logoutUrl: ""
+    sslVerify: "true"
+    caBundle: ""
 
 # Secrets used by common templates
 secrets:

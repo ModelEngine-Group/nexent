@@ -18,8 +18,22 @@ import {
   Pagination,
   Alert,
   Space,
+  Divider,
+  Tooltip
 } from "antd";
-import { Users, Plus, Edit, Edit2, Building2, Trash2, AlertTriangle, CircleCheckBig, CircleOff, CircleDot, LoaderCircle } from "lucide-react";
+import {
+  Users,
+  Plus,
+  Edit,
+  Edit2,
+  Building2,
+  Trash2,
+  AlertTriangle,
+  CircleCheckBig,
+  CircleOff,
+  CircleDot,
+  LoaderCircle,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
@@ -31,7 +45,10 @@ import {
   getTenantUsers,
   getTenant,
 } from "@/services/tenantService";
-import { createInvitation, deleteInvitation } from "@/services/invitationService";
+import {
+  createInvitation,
+  deleteInvitation,
+} from "@/services/invitationService";
 import { authService } from "@/services/authService";
 import { fetchOfficialSkillsWithStatus } from "@/services/skillService";
 import { InstallableSkill } from "@/types/agentConfig";
@@ -47,7 +64,11 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
-import { Tooltip } from "@/components/ui/tooltip";
+import {
+  getPasswordChecks,
+  getStrengthLevel,
+  validatePassword as validatePasswordUtil,
+} from "@/lib/utils";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -81,9 +102,9 @@ function TenantList({
   onTenantsRefetch: () => Promise<unknown>;
   loading?: boolean;
   t: (key: string, options?: any) => string;
-    onUserListRefresh?: () => void;
-    onInvitationListRefresh?: () => void;
-    locale?: string;
+  onUserListRefresh?: () => void;
+  onInvitationListRefresh?: () => void;
+  locale?: string;
 }) {
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -100,13 +121,28 @@ function TenantList({
 
   // State for auto-install official skills feature
   const [installOfficialSkills, setInstallOfficialSkills] = useState(false);
-  const [installableSkills, setInstallableSkills] = useState<InstallableSkill[]>([]);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
+  const [installableSkills, setInstallableSkills] = useState<
+    InstallableSkill[]
+  >([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
+    new Set()
+  );
   const [skillsLoading, setSkillsLoading] = useState(false);
   // Tracks which skills are currently being installed (per-skill async flow)
-  const [installingSkills, setInstallingSkills] = useState<Set<string>>(new Set());
+  const [installingSkills, setInstallingSkills] = useState<Set<string>>(
+    new Set()
+  );
   // Tracks which skills have completed installation in the current session
-  const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
+  const [installedSkills, setInstalledSkills] = useState<Set<string>>(
+    new Set()
+  );
+
+  // Password validation state for admin account
+  const [adminPasswordValue, setAdminPasswordValue] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState<{
+    target: "adminPassword" | "confirmAdminPassword" | "";
+    message: string;
+  }>({ target: "", message: "" });
 
   // Fetch official skills when install switch is toggled on
   useEffect(() => {
@@ -136,7 +172,9 @@ function TenantList({
         if (!cancelled) setSkillsLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [installOfficialSkills]);
 
   const openCreate = () => {
@@ -148,6 +186,8 @@ function TenantList({
     setSelectedSkillIds(new Set<string>());
     setInstallingSkills(new Set<string>());
     setInstalledSkills(new Set<string>());
+    setAdminPasswordValue("");
+    setAdminPasswordError({ target: "", message: "" });
     setModalVisible(true);
   };
 
@@ -199,7 +239,8 @@ function TenantList({
         }
       }
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.detail || error?.message || "";
+      const errorMessage =
+        error?.response?.data?.detail || error?.message || "";
       message.error(errorMessage || t("tenantResources.tenantDeleteFailed"));
     } finally {
       setDeleteModalVisible(false);
@@ -215,6 +256,60 @@ function TenantList({
     setTenantUsers([]);
   };
 
+  // Handle admin password input change
+  const handleAdminPasswordChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    setAdminPasswordValue(value);
+
+    if (value && !validatePasswordUtil(value)) {
+      setAdminPasswordError({
+        target: "adminPassword",
+        message:
+          t("auth.passwordStrengthError") ||
+          "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    setAdminPasswordError({ target: "", message: "" });
+    const confirmPassword = form.getFieldValue("confirmAdminPassword");
+    if (confirmPassword && confirmPassword !== value) {
+      setAdminPasswordError({
+        target: "confirmAdminPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    }
+  };
+
+  // Handle confirm admin password input change
+  const handleConfirmAdminPasswordChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.value;
+    const password = form.getFieldValue("adminPassword");
+
+    if (password && !validatePasswordUtil(password)) {
+      setAdminPasswordError({
+        target: "adminPassword",
+        message:
+          t("auth.passwordStrengthError") ||
+          "Password must contain uppercase, lowercase, and digit",
+      });
+      return;
+    }
+
+    if (value && value !== password) {
+      setAdminPasswordError({
+        target: "confirmAdminPassword",
+        message: t("auth.passwordsDoNotMatch"),
+      });
+    } else {
+      setAdminPasswordError({ target: "", message: "" });
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
@@ -228,9 +323,10 @@ function TenantList({
         message.success(t("tenantResources.tenants.updated"));
       } else {
         // Build skill_names list from selected skill names for backend ZIP-based installation
-        const skillNamesToInstall = installOfficialSkills && selectedSkillIds.size > 0
-          ? Array.from(selectedSkillIds)
-          : undefined;
+        const skillNamesToInstall =
+          installOfficialSkills && selectedSkillIds.size > 0
+            ? Array.from(selectedSkillIds)
+            : undefined;
 
         // Create tenant (skills are installed via ZIP upload inside the backend)
         const newTenant = await createTenant({
@@ -290,10 +386,15 @@ function TenantList({
             if (signupResult.error) {
               // Handle signup error
               const errorMsg = signupResult.error.message || "";
-              if (errorMsg.includes("already exists") || errorMsg.includes("EMAIL_ALREADY_EXISTS")) {
+              if (
+                errorMsg.includes("already exists") ||
+                errorMsg.includes("EMAIL_ALREADY_EXISTS")
+              ) {
                 message.error(t("tenantResources.tenants.emailAlreadyExists"));
               } else {
-                message.error(t("tenantResources.tenants.failedToCreateAdminAccount"));
+                message.error(
+                  t("tenantResources.tenants.failedToCreateAdminAccount")
+                );
               }
             } else {
               message.success(t("tenantResources.tenants.adminAccountCreated"));
@@ -302,7 +403,10 @@ function TenantList({
                 await deleteInvitation(invitation.invitation_code);
               } catch (deleteError) {
                 // Log error but don't block the success flow
-                console.warn("Failed to delete invitation code after admin registration:", deleteError);
+                console.warn(
+                  "Failed to delete invitation code after admin registration:",
+                  deleteError
+                );
               }
               // Refresh user list and invitation list to show the newly created admin
               onUserListRefresh?.();
@@ -310,11 +414,17 @@ function TenantList({
             }
           } catch (adminError: any) {
             // Handle admin account creation error
-            const errorMsg = adminError?.response?.data?.message || adminError?.message || "";
-            if (errorMsg.includes("already exists") || errorMsg.includes("EMAIL_ALREADY_EXISTS")) {
+            const errorMsg =
+              adminError?.response?.data?.message || adminError?.message || "";
+            if (
+              errorMsg.includes("already exists") ||
+              errorMsg.includes("EMAIL_ALREADY_EXISTS")
+            ) {
               message.error(t("tenantResources.tenants.emailAlreadyExists"));
             } else {
-              message.error(t("tenantResources.tenants.failedToCreateAdminAccount"));
+              message.error(
+                t("tenantResources.tenants.failedToCreateAdminAccount")
+              );
             }
           }
         }
@@ -322,11 +432,17 @@ function TenantList({
       setModalVisible(false);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
-      const nameConflictMatch = errorMessage.match(/Tenant with name '(.*)' already exists/i);
+      const nameConflictMatch = errorMessage.match(
+        /Tenant with name '(.*)' already exists/i
+      );
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         // Extract the duplicate name and show translated error
-        message.error(t("tenantResources.tenants.nameExists", { name: nameConflictMatch[1] }));
+        message.error(
+          t("tenantResources.tenants.nameExists", {
+            name: nameConflictMatch[1],
+          })
+        );
       } else if (errorMessage.includes("Tenant name cannot be empty")) {
         // Handle empty name error
         message.error(t("tenantResources.tenants.nameRequired"));
@@ -361,49 +477,51 @@ function TenantList({
           </div>
         )}
         {!loading && tenants.length === 0 && (
-          <div key="empty" className="p-4 text-center text-gray-500">No tenants found</div>
+          <div key="empty" className="p-4 text-center text-gray-500">
+            No tenants found
+          </div>
         )}
         {!loading && tenants.length > 0 && (
           <>
             {tenants.map((tenant, index) => (
-            <div
-              key={tenant.tenant_id || `tenant-${index}`}
-              className={`group p-2 rounded-md cursor-pointer transition-all ${
-                selected === tenant.tenant_id
-                  ? "bg-blue-50 border border-blue-200"
-                  : "hover:bg-gray-50"
-              }`}
-              onClick={() => onSelect(tenant.tenant_id)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
-                </div>
-                <div className="opacity-0 group-hover:opacity-100 flex space-x-1">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Edit className="h-3 w-3" />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEdit(tenant);
-                    }}
-                    className="p-1 hover:bg-gray-200 rounded"
-                  />
-                  {/* Delete button - shows warning modal with users list */}
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Trash2 className="h-3 w-3" />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteClick(tenant);
-                    }}
-                    className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
-                  />
+              <div
+                key={tenant.tenant_id || `tenant-${index}`}
+                className={`group p-2 rounded-md cursor-pointer transition-all ${
+                  selected === tenant.tenant_id
+                    ? "bg-blue-50 border border-blue-200"
+                    : "hover:bg-gray-50"
+                }`}
+                onClick={() => onSelect(tenant.tenant_id)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
+                  </div>
+                  <div className="opacity-0 group-hover:opacity-100 flex space-x-1">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Edit className="h-3 w-3" />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEdit(tenant);
+                      }}
+                      className="p-1 hover:bg-gray-200 rounded"
+                    />
+                    {/* Delete button - shows warning modal with users list */}
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Trash2 className="h-3 w-3" />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(tenant);
+                      }}
+                      className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
             ))}
           </>
         )}
@@ -437,7 +555,12 @@ function TenantList({
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
       >
-        <Form layout="vertical" form={form} autoComplete="off" style={{ marginBottom: -12 }}>
+        <Form
+          layout="vertical"
+          form={form}
+          autoComplete="off"
+          style={{ marginBottom: -12 }}
+        >
           <Form.Item
             name="name"
             label={t("tenantResources.tenants.name")}
@@ -454,18 +577,21 @@ function TenantList({
           {/* Generate Admin Account Switch - Only show in create mode */}
           {!editingTenant && (
             <>
-              <Form.Item
-                labelCol={{ span: 24 }}
-                wrapperCol={{ span: 24 }}
-              >
+              <Form.Item labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}>
                 <div className="flex items-center justify-between">
-                  <span>{t("tenantResources.tenants.generateAdminAccount")}</span>
+                  <span>
+                    {t("tenantResources.tenants.generateAdminAccount")}
+                  </span>
                   <Switch
                     checked={generateAdminAccount}
                     onChange={(checked) => {
                       setGenerateAdminAccount(checked);
                       if (!checked) {
-                        form.resetFields(["adminEmail", "adminPassword", "confirmAdminPassword"]);
+                        form.resetFields([
+                          "adminEmail",
+                          "adminPassword",
+                          "confirmAdminPassword",
+                        ]);
                       }
                     }}
                   />
@@ -481,59 +607,170 @@ function TenantList({
                     rules={[
                       {
                         required: true,
-                        message: t("tenantResources.tenants.adminEmailRequired"),
+                        message: t(
+                          "tenantResources.tenants.adminEmailRequired"
+                        ),
                       },
                       {
                         type: "email",
-                        message: t("tenantResources.tenants.invalidEmailFormat"),
+                        message: t(
+                          "tenantResources.tenants.invalidEmailFormat"
+                        ),
                       },
                     ]}
                   >
-                    <Input placeholder={t("tenantResources.tenants.adminEmail")} autoComplete="new-email" />
+                    <Input
+                      placeholder={t("tenantResources.tenants.adminEmail")}
+                      autoComplete="new-email"
+                    />
                   </Form.Item>
 
                   <Form.Item
                     name="adminPassword"
                     label={t("tenantResources.tenants.adminPassword")}
+                    validateStatus={
+                      adminPasswordError.target === "adminPassword"
+                        ? "error"
+                        : ""
+                    }
+                    help={
+                      form.getFieldError("adminPassword").length
+                        ? undefined
+                        : adminPasswordError.target === "adminPassword"
+                          ? adminPasswordError.message
+                          : undefined
+                    }
                     rules={[
                       {
                         required: true,
-                        message: t("tenantResources.tenants.adminPasswordRequired"),
+                        message: t(
+                          "tenantResources.tenants.adminPasswordRequired"
+                        ),
                       },
                       {
-                        min: 6,
-                        message: t("tenantResources.tenants.weakPassword"),
+                        validator: (_, value) => {
+                          if (!value) return Promise.resolve();
+                          if (!validatePasswordUtil(value)) {
+                            return Promise.reject(
+                              new Error(
+                                t("auth.passwordStrengthError") ||
+                                  "Password must contain uppercase, lowercase, and digit"
+                              )
+                            );
+                          }
+                          return Promise.resolve();
+                        },
                       },
                     ]}
+                    hasFeedback
                   >
                     <Input.Password
                       placeholder={t("tenantResources.tenants.adminPassword")}
                       autoComplete="new-password"
+                      onChange={handleAdminPasswordChange}
                     />
                   </Form.Item>
+
+                  {/* Password Strength Indicator */}
+                  {adminPasswordValue &&
+                    generateAdminAccount &&
+                    (() => {
+                      const checks = getPasswordChecks(adminPasswordValue);
+                      const levelInfo = getStrengthLevel(adminPasswordValue, t);
+                      return (
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-gray-500">
+                              {t("auth.passwordStrength") ||
+                                "Password strength"}
+                            </span>
+                            <span
+                              className="text-xs font-medium"
+                              style={{ color: levelInfo.color }}
+                            >
+                              {levelInfo.label}
+                            </span>
+                          </div>
+                          <div className="flex gap-1">
+                            {[0, 1, 2, 3].map((level) => (
+                              <div
+                                key={level}
+                                className="h-1 flex-1 rounded-full transition-colors"
+                                style={{
+                                  backgroundColor:
+                                    level <= levelInfo.level
+                                      ? levelInfo.color
+                                      : "#e5e7eb",
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                   <Form.Item
                     name="confirmAdminPassword"
                     label={t("tenantResources.tenants.confirmAdminPassword")}
+                    validateStatus={
+                      adminPasswordError.target === "confirmAdminPassword"
+                        ? "error"
+                        : ""
+                    }
+                    help={
+                      form.getFieldError("confirmAdminPassword").length
+                        ? undefined
+                        : adminPasswordError.target === "confirmAdminPassword"
+                          ? adminPasswordError.message
+                          : undefined
+                    }
                     dependencies={["adminPassword"]}
                     rules={[
                       {
                         required: true,
-                        message: t("tenantResources.tenants.adminPasswordRequired"),
+                        message: t(
+                          "tenantResources.tenants.adminPasswordRequired"
+                        ),
                       },
                       ({ getFieldValue }) => ({
                         validator(_, value) {
-                          if (!value || getFieldValue("adminPassword") === value) {
+                          const password = getFieldValue("adminPassword");
+                          if (password && !validatePasswordUtil(password)) {
+                            setAdminPasswordError({
+                              target: "adminPassword",
+                              message:
+                                t("auth.passwordStrengthError") ||
+                                "Password must contain uppercase, lowercase, and digit",
+                            });
+                            return Promise.reject(
+                              new Error(
+                                t("auth.passwordStrengthError") ||
+                                  "Password must contain uppercase, lowercase, and digit"
+                              )
+                            );
+                          }
+                          if (
+                            !value ||
+                            getFieldValue("adminPassword") === value
+                          ) {
                             return Promise.resolve();
                           }
-                          return Promise.reject(new Error(t("tenantResources.tenants.passwordsDoNotMatch")));
+                          return Promise.reject(
+                            new Error(
+                              t("tenantResources.tenants.passwordsDoNotMatch")
+                            )
+                          );
                         },
                       }),
                     ]}
+                    hasFeedback
                   >
                     <Input.Password
-                      placeholder={t("tenantResources.tenants.confirmAdminPassword")}
+                      placeholder={t(
+                        "tenantResources.tenants.confirmAdminPassword"
+                      )}
                       autoComplete="new-password"
+                      onChange={handleConfirmAdminPasswordChange}
                     />
                   </Form.Item>
                 </>
@@ -544,12 +781,11 @@ function TenantList({
           {/* Auto-Install Official Skills Switch - Only show in create mode */}
           {!editingTenant && (
             <>
-              <Form.Item
-                labelCol={{ span: 24 }}
-                wrapperCol={{ span: 24 }}
-              >
+              <Form.Item labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}>
                 <div className="flex items-center justify-between">
-                  <span>{t("tenantResources.tenants.installOfficialSkills")}</span>
+                  <span>
+                    {t("tenantResources.tenants.installOfficialSkills")}
+                  </span>
                   <Switch
                     checked={installOfficialSkills}
                     onChange={(checked) => {
@@ -591,12 +827,20 @@ function TenantList({
                       <div className="flex items-center px-3 py-2 border-b border-gray-200 bg-gray-50">
                         <input
                           type="checkbox"
-                          checked={installableSkills.every((s) => selectedSkillIds.has(s.name))}
+                          checked={installableSkills.every((s) =>
+                            selectedSkillIds.has(s.name)
+                          )}
                           onChange={() => {
-                            if (installableSkills.every((s) => selectedSkillIds.has(s.name))) {
+                            if (
+                              installableSkills.every((s) =>
+                                selectedSkillIds.has(s.name)
+                              )
+                            ) {
                               setSelectedSkillIds(new Set<string>());
                             } else {
-                              setSelectedSkillIds(new Set(installableSkills.map((s) => s.name)));
+                              setSelectedSkillIds(
+                                new Set(installableSkills.map((s) => s.name))
+                              );
                             }
                           }}
                           className="mr-3 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
@@ -609,9 +853,13 @@ function TenantList({
                       {installableSkills.map((skill) => {
                         // Determine effective status: installing > installed > original status
                         const isInstalling = installingSkills.has(skill.name);
-                        const isInstalledSession = installedSkills.has(skill.name);
-                        const isAlreadyInstalled = skill.status === "installed" || isInstalledSession;
-                        const isResourceMissing = skill.status === "resource_missing";
+                        const isInstalledSession = installedSkills.has(
+                          skill.name
+                        );
+                        const isAlreadyInstalled =
+                          skill.status === "installed" || isInstalledSession;
+                        const isResourceMissing =
+                          skill.status === "resource_missing";
 
                         let iconElement: React.ReactNode;
                         let tooltipText: string;
@@ -620,25 +868,34 @@ function TenantList({
                           iconElement = (
                             <LoaderCircle className="h-4 w-4 text-gray-400 shrink-0 animate-spin" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.installing");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.installing"
+                          );
                         } else if (isAlreadyInstalled) {
                           iconElement = (
                             <CircleCheckBig className="h-4 w-4 text-green-500 shrink-0" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.installed");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.installed"
+                          );
                         } else if (isResourceMissing) {
                           iconElement = (
                             <CircleOff className="h-4 w-4 text-red-400 shrink-0" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.resourceMissing");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.resourceMissing"
+                          );
                         } else {
                           iconElement = (
                             <CircleDot className="h-4 w-4 text-green-500 shrink-0" />
                           );
-                          tooltipText = t("tenantResources.tenants.skillStatus.installable");
+                          tooltipText = t(
+                            "tenantResources.tenants.skillStatus.installable"
+                          );
                         }
 
-                        const isDisabled = isAlreadyInstalled || isResourceMissing;
+                        const isDisabled =
+                          isAlreadyInstalled || isResourceMissing;
 
                         return (
                           <div
@@ -660,7 +917,11 @@ function TenantList({
                                 }
                                 setSelectedSkillIds(newSet);
                               }}
-                              disabled={isInstalling || isAlreadyInstalled || isResourceMissing}
+                              disabled={
+                                isInstalling ||
+                                isAlreadyInstalled ||
+                                isResourceMissing
+                              }
                               className="mr-3 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
                             />
                             <span className="flex-1 text-sm text-gray-800 truncate">
@@ -849,11 +1110,15 @@ export default function UserManageComp() {
   if (!isSuperAdmin && directTenantData) {
     // Non-super-admin: use directly fetched tenant info
     currentTenant = directTenantData;
-    currentTenantName = directTenantData.tenant_name || t("tenantResources.tenants.unnamed");
+    currentTenantName =
+      directTenantData.tenant_name || t("tenantResources.tenants.unnamed");
   } else {
     // Super-admin: search in paginated list
-    currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
-    currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+    currentTenant = tenantData?.data?.find(
+      (t: Tenant) => t.tenant_id === tenantId
+    );
+    currentTenantName =
+      currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
   }
 
   // Tenant name editing states
@@ -915,153 +1180,182 @@ export default function UserManageComp() {
   };
 
   return (
-    <div className="w-full h-full">
+    <div className="flex flex-col w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="w-full px-10 pt-10">
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
-              <Building2 className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
-                {t("tenantResources.title") || "Tenant Resource Management"}
-              </h1>
-              <p className="text-slate-600 dark:text-slate-300 mt-1">
-                {t("tenantResources.subtitle") ||
-                  "Manage tenants, users, groups and resources"}
-              </p>
-            </div>
+      <div className="flex w-full px-6 pt-12">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
+            <Building2 className="h-6 w-6 text-white" />
           </div>
-        </motion.div>
+          <div>
+            <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
+              {t("tenantResources.title") || "Tenant Resource Management"}
+            </h1>
+            <p className="text-slate-600 dark:text-slate-300 mt-1">
+              {t("tenantResources.subtitle") ||
+                "Manage tenants, users, groups and resources"}
+            </p>
+          </div>
+        </div>
       </div>
-      <Row className="flex-1 min-h-0 h-full" align="stretch">
-        <Can permission="tenant.list:read">
-          <Col className="flex flex-col h-full" style={{ width: 300 }}>
-            <div className="h-full pr-6">
-              <div className="sticky top-6">
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                  <TenantList
-                    selected={tenantId}
-                    onSelect={(id) => setTenantId(id)}
-                    tenants={tenantData?.data || []}
-                    total={tenantData?.total}
-                    page={tenantData?.page}
-                    pageSize={tenantData?.page_size}
-                    totalPages={tenantData?.total_pages}
-                    onPageChange={handlePageChange}
-                    onTenantsRefetch={async () => {
-                      setCurrentPage(1);
-                      return refetchTenants();
-                    }}
-                    loading={tenantsLoading}
-                    t={t}
-                    onUserListRefresh={() => setUserListRefreshKey((prev) => prev + 1)}
-                    onInvitationListRefresh={() => setInvitationListRefreshKey((prev) => prev + 1)}
-                    locale={locale}
-                  />
+      <div className="flex-1 min-h-0 h-full">
+        <div className="flex h-full">
+          <Can permission="tenant.list:read">
+            <Col className="flex flex-col h-full" style={{ width: 300 }}>
+              <div className="h-full pr-6">
+                <div className="sticky top-6">
+                  <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                    <TenantList
+                      selected={tenantId}
+                      onSelect={(id) => setTenantId(id)}
+                      tenants={tenantData?.data || []}
+                      total={tenantData?.total}
+                      page={tenantData?.page}
+                      pageSize={tenantData?.page_size}
+                      totalPages={tenantData?.total_pages}
+                      onPageChange={handlePageChange}
+                      onTenantsRefetch={async () => {
+                        setCurrentPage(1);
+                        return refetchTenants();
+                      }}
+                      loading={tenantsLoading}
+                      t={t}
+                      onUserListRefresh={() =>
+                        setUserListRefreshKey((prev) => prev + 1)
+                      }
+                      onInvitationListRefresh={() =>
+                        setInvitationListRefreshKey((prev) => prev + 1)
+                      }
+                      locale={locale}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          </Col>
-        </Can>
-        <Col className="flex-1 flex flex-col p-6 overflow-hidden">
-          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
-            {/* Tenant name header */}
-            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              {isEditingTenantName ? (
-                <Input
-                  ref={tenantNameInputRef}
-                  value={editingTenantName}
-                  onChange={(e) => setEditingTenantName(e.target.value)}
-                  onBlur={saveTenantName}
-                  onKeyDown={handleTenantNameKeyDown}
-                  className="text-lg font-semibold text-gray-900 dark:text-gray-100"
-                  placeholder={t("tenantResources.tenants.name")}
-                />
-              ) : (
-                <div
-                  className="flex items-center gap-2 group cursor-pointer"
-                  onClick={startEditingTenantName}
-                >
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {currentTenantName}
-                  </h2>
-                  <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              )}
-            </div>
-
-            {tenantId ? (
-              <Tabs
-                defaultActiveKey="users"
-                className="h-full flex flex-col"
-                items={[
-                  {
-                    key: "users",
-                    label: t("tenantResources.tabs.users") || "Users",
-                    children: <UserList tenantId={tenantId} refreshKey={userListRefreshKey} />,
-                  },
-                  {
-                    key: "groups",
-                    label: t("tenantResources.tabs.groups") || "Groups",
-                    children: <GroupList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "models",
-                    label: t("tenantResources.tabs.models") || "Models",
-                    children: <ModelList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "knowledge",
-                    label:
-                      t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                    children: <KnowledgeList tenantId={tenantId} />,
-                  },
-                  {
+            </Col>
+          </Can>
+          <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
+              {/* Tenant name header */}
+              <div className="flex">
+                {isEditingTenantName ? (
+                  <Input
+                    ref={tenantNameInputRef}
+                    value={editingTenantName}
+                    onChange={(e) => setEditingTenantName(e.target.value)}
+                    onBlur={saveTenantName}
+                    onKeyDown={handleTenantNameKeyDown}
+                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                    placeholder={t("tenantResources.tenants.name")}
+                  />
+                ) : (
+                  <div
+                    className="flex items-center gap-2 group cursor-pointer"
+                    onClick={startEditingTenantName}
+                  >
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {currentTenantName}
+                    </h2>
+                    <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                )}
+                
+              </div>
+              
+              <div className="flex-1 min-h-0 h-full">
+                <Divider size="small"/>
+                <div className="flex h-full w-full">
+                  {tenantId ? (
+                    <Tabs
+                      defaultActiveKey="users"
+                      className="h-full flex flex-col tenant-resource-tabs w-full overflow-hidden"
+                      items={[
+                        {
+                          key: "users",
+                          label: t("tenantResources.tabs.users") || "Users",
+                          children: (
+                            <UserList
+                              tenantId={tenantId}
+                              refreshKey={userListRefreshKey}
+                            />
+                          ),
+                        },
+                        {
+                          key: "groups",
+                          label: t("tenantResources.tabs.groups") || "Groups",
+                          children: <GroupList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "models",
+                          label: t("tenantResources.tabs.models") || "Models",
+                          children: <ModelList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "knowledge",
+                          label:
+                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                          children: <KnowledgeList tenantId={tenantId} />,
+                        },
+                        {
                           key: "agents",
                           label: t("tenantResources.tabs.agents") || "Agents",
                           children: <AgentList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "mcp",
-                    label: t("tenantResources.tabs.mcp") || "MCP",
-                    children: <McpList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "skills",
-                    label: "Skills",
-                    children: <SkillList tenantId={tenantId} />,
-                  },
-                  {
-                    key: "invitations",
-                    label: t("tenantResources.invitation.tab") || "Invitations",
-                    children: <InvitationList tenantId={tenantId} refreshKey={invitationListRefreshKey} />,
-                  },
-                ]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                  <Users className="h-8 w-8 text-gray-400" />
+                        },
+                        {
+                          key: "mcp",
+                          label: t("tenantResources.tabs.mcp") || "MCP",
+                          children: <McpList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "skills",
+                          label: "Skills",
+                          children: <SkillList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "invitations",
+                          label: t("tenantResources.invitation.tab") || "Invitations",
+                          children: (
+                            <InvitationList
+                              tenantId={tenantId}
+                              refreshKey={invitationListRefreshKey}
+                            />
+                          ),
+                        },
+                      ]}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                        <Users className="h-8 w-8 text-gray-400" />
+                      </div>
+                      <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                        {t("tenantResources.selectTenantFirst") ||
+                          "Please select a tenant"}
+                      </h3>
+                      <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+                        {t("tenantResources.selectTenantDescription") ||
+                          "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
+                      </p>
+                    </div>
+                  )}
                 </div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                  {t("tenantResources.selectTenantFirst") ||
-                    "Please select a tenant"}
-                </h3>
-                <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                  {t("tenantResources.selectTenantDescription") ||
-                    "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
-                </p>
+
               </div>
-            )}
-          </div>
-        </Col>
-      </Row>
+            </div>
+          </Col>
+        </div>
+      </div>
     </div>
   );
 }
+
+<style jsx global>{`
+  .tenant-resource-tabs .ant-tabs-content {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .tenant-resource-tabs .ant-tabs-tabpane {
+    max-width: 100%;
+    overflow: hidden;
+  }
+`}</style>

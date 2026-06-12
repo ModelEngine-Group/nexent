@@ -2,6 +2,7 @@ import json
 import ast
 import time
 import threading
+from datetime import datetime
 from textwrap import dedent
 from typing import Any, Optional, List, Dict
 from collections.abc import Generator
@@ -431,6 +432,7 @@ Additional Args:
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
+        exec_start = time.time()
         try:
             monitoring_manager = get_monitoring_manager()
             with monitoring_manager.trace_tool_call(
@@ -463,6 +465,7 @@ Additional Args:
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
+            exec_duration_ms = (time.time() - exec_start) * 1000
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
                     self.python_executor.state["_print_outputs"])
@@ -477,53 +480,23 @@ Additional Args:
                     self.logger.log(
                         Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
+            self.logger.log(
+                f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
+                level=LogLevel.ERROR,
+            )
             raise AgentExecutionError(error_msg, self.logger)
+
+        exec_duration_ms = (time.time() - exec_start) * 1000
+        self.logger.log(
+            f"[Code Execution] step={memory_step.step_number} completed in {exec_duration_ms:.1f}ms",
+            level=LogLevel.INFO,
+        )
 
         truncated_output = None
         if code_output is not None and code_output.output is not None:
             truncated_output = truncate_content(str(code_output.output))
             observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
-
-        # --- Save raw observation for offload when needed ---
-        # Only preserve the truly original content when:
-        #   1. ContextManager is enabled with reload
-        #   2. per_step_render_limit is active (offload mechanism on)
-        #   3. max_observation_length will truncate the observation
-        # This avoids unconditional double-storage for short observations.
-        ctx_cfg = self.context_manager.config if self.context_manager else None
-        needs_raw = (
-            ctx_cfg
-            and ctx_cfg.enable_reload
-            and ctx_cfg.per_step_render_limit > 0
-            and ctx_cfg.max_observation_length > 0
-            and len(observation) > ctx_cfg.max_observation_length
-        )
-        if needs_raw:
-            raw_limit = getattr(ctx_cfg, 'max_offload_entry_chars', 30000)
-            if len(observation) > raw_limit:
-                memory_step._raw_observation = observation[:raw_limit] + "\n...[RAW_TRUNCATED]"
-            else:
-                memory_step._raw_observation = observation
-        # --- end raw observation save ---
-
-        # Pre-truncate observations when ContextManager is enabled. Keeps the
-        # head + tail of long outputs around a truncation marker so downstream
-        # compression sees bounded-length step records and the model can still
-        # search/read for the elided portion.
-        if self.context_manager and self.context_manager.config.enabled:
-            max_obs = self.context_manager.config.max_observation_length
-            if max_obs > 0 and memory_step.observations and len(memory_step.observations) > max_obs:
-                obs_text = memory_step.observations
-                truncation_marker = (
-                    f"\n...[Output truncated to {max_obs} characters. "
-                    f"Use search or read tools to find specific results.]\n"
-                )
-                # Reserve space for the marker itself so the total stays
-                # within max_obs (half + marker + half ≤ max_obs).
-                content_budget = max(0, max_obs - len(truncation_marker))
-                half = content_budget // 2
-                memory_step.observations = obs_text[:half] + truncation_marker + obs_text[-half:]
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -558,7 +531,11 @@ Additional Args:
         ```
         """
         max_steps = max_steps or self.max_steps
-        self.task = task
+        # Prepend current time to the user task instead of baking it into the
+        # system prompt. This keeps the system prefix stable so prompt/KV caches
+        # can hit across requests; only the trailing user message varies.
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.task = f"[Current time: {time_str}]\n\n{task}"
         if additional_args is not None:
             self.state.update(additional_args)
             self.task += f"""
@@ -876,7 +853,7 @@ You have been provided with these additional arguments, that you can access usin
         except Exception as e:
             # Fallback to error message if streaming fails
             model_output = f"Error in generating final LLM output: {e}"
-            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.WARNING)
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
 
         # Finalize the memory step
         final_memory_step.timing.end_time = time.time()

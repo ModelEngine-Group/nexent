@@ -12,9 +12,9 @@ import {
   Popconfirm,
   message,
   Tag,
+  Tooltip 
 } from "antd";
 import { Edit, Trash2 } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import { useUserList } from "@/hooks/user/useUserList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -141,6 +141,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
         title: t("common.email"),
         dataIndex: "username",
         key: "username",
+        width: "50%"
       },
       {
         title: t("common.type"),
@@ -152,16 +153,19 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
             ADMIN: t("user.role.admin"),
             DEV: t("user.role.dev"),
             USER: t("user.role.user"),
+            ASSET_OWNER: t("user.role.assetOwner"),
           };
           const color =
             role === "SUPER_ADMIN" ? "magenta" :
             role === "ADMIN" ? "purple" :
             role === "DEV" ? "cyan" :
-            role === "USER" ? "blue" : "gray";
+            role === "USER" ? "blue" :
+            role === "ASSET_OWNER" ? "gold" : "gray";
           return <Tag color={color}>
               {roleLabels[role] || role}
             </Tag>;
         },
+        width: "20%"
       },
       {
         title: t("common.actions"),
@@ -195,6 +199,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
             </Popconfirm>
           </div>
         ),
+        width: "20%"
       },
     ],
     []
@@ -205,7 +210,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
       <Table
         dataSource={users}
         columns={columns}
@@ -217,10 +222,9 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
           total: total,
           onChange: handlePageChange,
         }}
-        scroll={{ x: true }}
-        className="flex-1"
+        className="flex-1 [&_.ant-table]:h-full"
+        scroll={{ y: "calc(100vh - 480px)" }}
       />
-
       <Modal
         title={t("tenantResources.users.editUser")}
         open={modalVisible}

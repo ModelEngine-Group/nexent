@@ -85,6 +85,7 @@ export default function McpServiceDetailModal({
       description: draft.description,
       serverUrl: draft.serverUrl,
       authorizationToken: draft.authorizationToken ?? "",
+      customHeaders: draft.customHeaders ? JSON.stringify(draft.customHeaders, null, 2) : "",
     });
   }, [draft, form]);
 
@@ -111,12 +112,25 @@ export default function McpServiceDetailModal({
     }
     // Sync form values to draft before saving
     const values = form.getFieldsValue();
+    // Parse custom headers JSON if provided
+    let parsedCustomHeaders: Record<string, string> | undefined;
+    if (values.customHeaders?.trim()) {
+      try {
+        parsedCustomHeaders = JSON.parse(values.customHeaders.trim());
+      } catch {
+        modal.error({
+          content: t("mcpConfig.message.invalidCustomHeadersJson"),
+        });
+        return;
+      }
+    }
     detail.setDraft((prev) => prev ? {
       ...prev,
       name: values.name ?? "",
       description: values.description ?? "",
       serverUrl: values.serverUrl ?? "",
       authorizationToken: values.authorizationToken ?? "",
+      customHeaders: parsedCustomHeaders,
     } : prev);
     await detail.save();
     setIsEditing(false);
@@ -129,6 +143,7 @@ export default function McpServiceDetailModal({
       description: draft.description,
       serverUrl: draft.serverUrl,
       authorizationToken: draft.authorizationToken ?? "",
+      customHeaders: draft.customHeaders ? JSON.stringify(draft.customHeaders, null, 2) : "",
     });
     setIsEditing(true);
   };
@@ -139,6 +154,7 @@ export default function McpServiceDetailModal({
       description: draft.description,
       serverUrl: draft.serverUrl,
       authorizationToken: draft.authorizationToken ?? "",
+      customHeaders: draft.customHeaders ? JSON.stringify(draft.customHeaders, null, 2) : "",
     });
     setIsEditing(false);
   };
@@ -413,6 +429,29 @@ export default function McpServiceDetailModal({
                       ) : (
                         <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg">
                           {draft.authorizationToken ? "••••••••" : "-"}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {isHttpLike && (
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1.5">
+                      {t("mcpTools.addModal.customHeaders")}
+                    </label>
+                    <div className="min-h-[38px]">
+                      {isEditing ? (
+                        <Form.Item name="customHeaders" className="mb-0">
+                          <Input.TextArea
+                            className="rounded-lg"
+                            placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
+                            autoSize={{ minRows: 1, maxRows: 3 }}
+                          />
+                        </Form.Item>
+                      ) : (
+                        <div className="text-sm text-slate-700 font-medium py-1.5 px-3 bg-slate-50 rounded-lg">
+                          {draft.customHeaders ? JSON.stringify(draft.customHeaders) : "-"}
                         </div>
                       )}
                     </div>

@@ -27,6 +27,7 @@ fi
 MODE_CHOICE_SAVED=""
 VERSION_CHOICE_SAVED=""
 IS_MAINLAND_SAVED=""
+ENABLE_SKILLS_SAVED="Y"
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
 APP_VERSION=""
@@ -428,12 +429,22 @@ persist_deploy_options() {
     echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
     echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "ENABLE_SKILLS=\"${ENABLE_SKILLS_SAVED}\""
     echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
     echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
   } > "$DEPLOY_OPTIONS_FILE"
 }
 
 generate_minio_ak_sk() {
+  if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
+    echo "   Reusing existing MinIO access keys from docker/.env"
+    export MINIO_ACCESS_KEY
+    export MINIO_SECRET_KEY
+    update_env_var "MINIO_ACCESS_KEY" "$MINIO_ACCESS_KEY"
+    update_env_var "MINIO_SECRET_KEY" "$MINIO_SECRET_KEY"
+    return 0
+  fi
+
   echo "🔑 Generating MinIO keys..."
 
   if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "mingw" ] || [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "msys" ]; then
@@ -588,6 +599,12 @@ get_compose_version() {
 disable_dashboard() {
   update_env_var "DISABLE_RAY_DASHBOARD" "true"
   update_env_var "DISABLE_CELERY_FLOWER" "true"
+}
+
+sync_monitoring_env_vars() {
+  update_env_var "ENABLE_TELEMETRY" "$(deployment_monitoring_enabled)"
+  update_env_var "MONITORING_PROVIDER" "$DEPLOYMENT_MONITORING_PROVIDER"
+  update_env_var "MONITORING_DASHBOARD_URL" "$(deployment_monitoring_dashboard_url docker)"
 }
 
 pull_mcp_image() {
@@ -779,6 +796,15 @@ prepare_directory_and_data() {
   create_dir_with_permission "$NEXENT_USER_DIR" 775
   echo "   🖥️  Nexent user workspace: $NEXENT_USER_DIR"
 
+  # Copy official-skills-zip folder to /mnt/nexent
+  if [ -d "official-skills-zip" ]; then
+    cp -rn official-skills-zip "$NEXENT_USER_DIR/"
+    chmod -R 775 "$NEXENT_USER_DIR/official-skills-zip"
+    echo "   📦 Official skills copied to $NEXENT_USER_DIR/official-skills-zip"
+  else
+    echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
+  fi
+
   # Export for docker-compose
   export NEXENT_USER_DIR
 
@@ -809,6 +835,17 @@ deploy_core_services() {
     echo "   ❌ ERROR Failed to start core services"
     return 1
   fi
+}
+
+stop_unselected_data_process_service() {
+  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && return 0
+
+  local compose_file="docker-compose${COMPOSE_FILE_SUFFIX}"
+  [ -f "$compose_file" ] || return 0
+
+  echo "data-process is not selected; stopping existing Docker container if present..."
+  ${docker_compose_command} -p nexent -f "$compose_file" stop nexent-data-process >/dev/null 2>&1 || true
+  ${docker_compose_command} -p nexent -f "$compose_file" rm -f nexent-data-process >/dev/null 2>&1 || true
 }
 
 deploy_infrastructure() {
@@ -958,6 +995,7 @@ apply_deployment_common_config() {
   set -a
   source "$SCRIPT_DIR/.env.generated"
   set +a
+  sync_monitoring_env_vars
   deployment_print_summary docker
 }
 
@@ -1329,7 +1367,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="$(get_app_version)"
+  APP_VERSION="latest"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
@@ -1338,6 +1376,8 @@ main_deploy() {
 
   # Select deployment components, port policy and image source via shared config.
   apply_deployment_common_config || { echo "❌ Deployment configuration failed"; exit 1; }
+
+  deployment_persist_local_config
 
   # Check only the ports published by the selected deployment configuration.
   check_deployment_ports
@@ -1364,6 +1404,8 @@ main_deploy() {
   deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
 
   deploy_monitoring || { echo "❌ Monitoring deployment failed"; exit 1; }
+
+  stop_unselected_data_process_service
 
   # Generate Elasticsearch API key
   generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
@@ -1433,7 +1475,7 @@ docker_compose_command=""
 case $version_type in
     "v1")
         echo "Detected Docker Compose V1, version: $version_number"
-        # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
+        # The version 1.28.0 is the minimum requirement in Docker Compose v1 for default interpolation syntax.
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
             exit 1

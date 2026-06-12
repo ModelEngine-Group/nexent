@@ -323,6 +323,22 @@ def test_get_current_user_id_with_mapping(monkeypatch):
     assert uid == "user-a" and tid == "tenant-a"
 
 
+def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
+    monkeypatch.setattr(au, "get_user_tenant_by_user_id",
+                        lambda u: {"tenant_id": "tenant-a"})
+    sys.modules["database.cas_session_db"] = MagicMock(
+        is_cas_session_active=MagicMock(return_value=False)
+    )
+
+    token = au.generate_session_jwt("user-a", 1000, session_id="cas-session-1")
+
+    with pytest.raises(UnauthorizedError, match="CAS session"):
+        au.get_current_user_id(token)
+
+
 def test_get_user_language_from_cookie():
     class Req:
         cookies = {"NEXT_LOCALE": "en"}
@@ -628,3 +644,23 @@ class TestGetUserAndTenantByAccessKey:
 
         with pytest.raises(UnauthorizedError, match="No user associated with this access key"):
             au.get_user_and_tenant_by_access_key("nexent-abc123")
+
+
+class TestResolveTenantIdFromUserTenantRecord:
+    """Tests for resolve_tenant_id_from_user_tenant_record."""
+
+    def setup_method(self):
+        au.ASSET_OWNER_ROLE = "ASSET_OWNER"
+        au.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+    def test_returns_explicit_tenant_id(self):
+        record = {"tenant_id": "tenant_explicit", "user_role": "USER"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == "tenant_explicit"
+
+    def test_empty_tenant_asset_owner_role_maps_to_virtual_tenant(self):
+        record = {"tenant_id": "", "user_role": "ASSET_OWNER"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == au.ASSET_OWNER_TENANT_ID
+
+    def test_empty_tenant_other_role_falls_back_to_default(self):
+        record = {"tenant_id": None, "user_role": "USER"}
+        assert au.resolve_tenant_id_from_user_tenant_record(record) == au.DEFAULT_TENANT_ID

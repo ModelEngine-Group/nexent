@@ -10,10 +10,11 @@ import { API_ENDPOINTS } from "@/services/api";
 import { sessionService } from "@/services/sessionService";
 
 import { Session, SessionResponse, AuthInfoResponse } from "@/types/auth";
-import { STATUS_CODES } from "@/const/auth";
+import { ASSET_OWNER_TENANT_ID, STATUS_CODES, USER_ROLES } from "@/const/auth";
 
 import { generateAvatarUrl } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/auth";
+import { authFlowState } from "@/lib/authFlow";
 import {
   removeSessionFromStorage,
   getSessionFromStorage,
@@ -25,6 +26,19 @@ import log from "@/lib/logger";
 import { ErrorCode } from "@/const/errorCode";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 
+/** Map legacy empty tenant_id to the asset-owner virtual tenant for API consumers. */
+function resolveTenantIdForClient(
+  tenantId?: string | null,
+  userRole?: string
+): string | undefined {
+  if (tenantId && tenantId.trim() !== "") {
+    return tenantId.trim();
+  }
+  if (userRole === USER_ROLES.ASSET_OWNER) {
+    return ASSET_OWNER_TENANT_ID;
+  }
+  return undefined;
+}
 
 export const authService = {
   getSession: async (): Promise<Session | null> => {
@@ -149,7 +163,9 @@ export const authService = {
       return {
         error: {
           message:
-            error instanceof Error ? error.message : "Network error, please try again later",
+            error instanceof Error
+              ? error.message
+              : "Network error, please try again later",
           code:
             error instanceof Error && "code" in error
               ? (error as any).code
@@ -184,7 +200,8 @@ export const authService = {
       if (!response.ok) {
         return {
           error: {
-            message: data.message || "Registration failed",
+            message:
+              data.detail || data.message || "Registration failed",
             code: response.status,
             data: data.data || null,
           },
@@ -254,19 +271,29 @@ export const authService = {
   },
 
   signOut: async (): Promise<{ error: null }> => {
+    authFlowState.beginExplicitLogout();
     try {
-      await fetchWithAuth(API_ENDPOINTS.user.logout, {
+      const response = await fetchWithAuth(API_ENDPOINTS.user.logout, {
         method: "POST",
+        keepalive: true,
       });
+      const data = await response.json().catch(() => null);
+      const casLogoutUrl = data?.data?.cas_logout_url;
 
       // server.js clears HttpOnly cookies; clear local user info
       removeSessionFromStorage();
+      if (casLogoutUrl && typeof window !== "undefined") {
+        window.location.href = casLogoutUrl;
+      } else {
+        authFlowState.endExplicitLogout();
+      }
 
       return { error: null };
     } catch (error) {
       log.error("Logout failed:", error);
 
       removeSessionFromStorage();
+      authFlowState.endExplicitLogout();
 
       return { error: null };
     }
@@ -311,14 +338,22 @@ export const authService = {
         user: {
           id: data.data.user.user_id,
           groupIds: data.data.user.group_ids,
-          tenantId: data.data.user.tenant_id,
+          tenantId: resolveTenantIdForClient(
+            data.data.user.tenant_id,
+            data.data.user.user_role
+          ),
           email: data.data.user.user_email,
           role: data.data.user.user_role,
+          authProvider: data.data.user.auth_provider,
           avatarUrl: data.data.user.avatarUrl,
-          permissions: data.data.user.permissions.map((permission:string) => permission.toLowerCase()),
-          accessibleRoutes: data.data.user.accessibleRoutes.map((router:string) => router.toLowerCase()),
-        }
-      }
+          permissions: data.data.user.permissions.map((permission: string) =>
+            permission.toLowerCase()
+          ),
+          accessibleRoutes: data.data.user.accessibleRoutes.map(
+            (router: string) => router.toLowerCase()
+          ),
+        },
+      };
       return userData as AuthInfoResponse;
     } catch (error) {
       log.error("Failed to get user Info:", error);
@@ -357,7 +392,9 @@ export const authService = {
       if (errorCode === ErrorCode.INVALID_CREDENTIALS) {
         return {
           errorCode: ErrorCode.INVALID_CREDENTIALS,
-          error: error?.message || getI18nErrorMessage(ErrorCode.INVALID_CREDENTIALS),
+          error:
+            error?.message ||
+            getI18nErrorMessage(ErrorCode.INVALID_CREDENTIALS),
         };
       }
       if (errorCode === ErrorCode.PASSWORD_WEAK) {
@@ -369,7 +406,9 @@ export const authService = {
       if (errorCode === ErrorCode.PASSWORD_SAME_AS_OLD) {
         return {
           errorCode: ErrorCode.PASSWORD_SAME_AS_OLD,
-          error: error?.message || getI18nErrorMessage(ErrorCode.PASSWORD_SAME_AS_OLD),
+          error:
+            error?.message ||
+            getI18nErrorMessage(ErrorCode.PASSWORD_SAME_AS_OLD),
         };
       }
 

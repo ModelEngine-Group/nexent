@@ -80,6 +80,7 @@ export default function McpConfigModal({
   const [openApiJson, setOpenApiJson] = useState("");
   const [openApiServiceName, setOpenApiServiceName] = useState("");
   const [openApiServerUrl, setOpenApiServerUrl] = useState("");
+  const [openApiHeadersTemplate, setOpenApiHeadersTemplate] = useState("");
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
@@ -89,6 +90,7 @@ export default function McpConfigModal({
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
   const [newServerAuthorizationToken, setNewServerAuthorizationToken] = useState("");
+  const [newServerCustomHeaders, setNewServerCustomHeaders] = useState("");
 
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<any[]>([]);
@@ -174,16 +176,33 @@ export default function McpConfigModal({
       return;
     }
 
+    // Parse custom headers
+    let parsedCustomHeaders: Record<string, string> | null = null;
+    if (newServerCustomHeaders.trim()) {
+      try {
+        parsedCustomHeaders = JSON.parse(newServerCustomHeaders.trim());
+        if (typeof parsedCustomHeaders !== 'object' || parsedCustomHeaders === null || Array.isArray(parsedCustomHeaders)) {
+          message.error(t("mcpConfig.message.invalidCustomHeaders"));
+          return;
+        }
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+    }
+
     setAddingServer(true);
     const result = await handleAddServer(
       newServerUrl.trim(),
       serverName,
-      newServerAuthorizationToken.trim() || null
+      newServerAuthorizationToken.trim() || null,
+      parsedCustomHeaders
     );
     if (result.success) {
       setNewServerName("");
       setNewServerUrl("");
       setNewServerAuthorizationToken("");
+      setNewServerCustomHeaders("");
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
     } else {
       message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addServerFailed")));
@@ -280,6 +299,7 @@ export default function McpConfigModal({
           service_name: result.data.mcp_name,
           mcp_url: result.data.mcp_server,
           authorization_token: result.data.authorization_token,
+          custom_headers: result.data.custom_headers,
         });
       } else {
         message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getMcpRecordFailed")));
@@ -288,7 +308,7 @@ export default function McpConfigModal({
     setLoadingMcpRecord(false);
   };
 
-  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null) => {
+  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null, customHeaders?: Record<string, string> | null) => {
     if (!editingServer) return;
     if (!name.trim() || !url.trim()) {
       message.error(t("mcpConfig.message.nameAndUrlRequired"));
@@ -311,7 +331,8 @@ export default function McpConfigModal({
       editingServer.mcp_id,
       name.trim(),
       url.trim(),
-      authorizationToken
+      authorizationToken,
+      customHeaders
     );
     if (result.success) {
       setEditServerModalVisible(false);
@@ -486,6 +507,7 @@ export default function McpConfigModal({
           service_name: openApiServiceName.trim(),
           server_url: openApiServerUrl.trim(),
           openapi_json: parsedJson,
+          headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
         }),
       });
 
@@ -494,6 +516,7 @@ export default function McpConfigModal({
         setOpenApiJson("");
         setOpenApiServiceName("");
         setOpenApiServerUrl("");
+        setOpenApiHeadersTemplate("");
         await loadOpenapiServices();
         await refreshToolsAndAgents();
       } else {
@@ -876,6 +899,14 @@ export default function McpConfigModal({
                             disabled={actionsLocked || addingServer}
                           />
                         </div>
+                        <Input.TextArea
+                          placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                          value={newServerCustomHeaders}
+                          onChange={(e) => setNewServerCustomHeaders(e.target.value)}
+                          rows={2}
+                          disabled={actionsLocked || addingServer}
+                          style={{ fontSize: 14 }}
+                        />
                         <div
                           style={{
                             display: "flex",
@@ -1192,15 +1223,20 @@ export default function McpConfigModal({
                           style={{ flex: 3 }}
                         />
                       </div>
-                      <div>
-                        <Input.TextArea
-                          placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
-                          value={openApiJson}
-                          onChange={(e) => setOpenApiJson(e.target.value)}
-                          rows={6}
-                          disabled={actionsLocked || importingOpenApi}
-                        />
-                      </div>
+                      <Input.TextArea
+                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                        value={openApiHeadersTemplate}
+                        onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
+                        rows={2}
+                        disabled={actionsLocked || importingOpenApi}
+                      />
+                      <Input.TextArea
+                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                        value={openApiJson}
+                        onChange={(e) => setOpenApiJson(e.target.value)}
+                        rows={6}
+                        disabled={actionsLocked || importingOpenApi}
+                      />
                       <div
                         style={{
                           display: "flex",
@@ -1335,6 +1371,7 @@ export default function McpConfigModal({
         initialName={editingServer?.service_name || ""}
         initialUrl={editingServer?.mcp_url || ""}
         initialAuthorizationToken={editingServer?.authorization_token || null}
+        initialCustomHeaders={editingServer?.custom_headers || null}
         loading={updatingServer || loadingMcpRecord}
       />
 

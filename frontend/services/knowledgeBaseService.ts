@@ -19,6 +19,20 @@ import log from "@/lib/logger";
 // @ts-ignore
 const fetch: typeof fetchWithAuth = fetchWithAuth;
 
+const normalizeIsMultimodal = (value: unknown): boolean => {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "y" || normalized === "true" || normalized === "yes";
+  }
+  if (typeof value === "number") return value === 1;
+  return false;
+};
+
+const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
+  normalizeIsMultimodal(indexInfo.is_multimodal ?? stats.is_multimodal);
+
 // Knowledge base service class
 class KnowledgeBaseService {
   // Check Elasticsearch health (force refresh, no caching for setup page)
@@ -141,7 +155,10 @@ class KnowledgeBaseService {
     userId: string
   ): Promise<Array<{ id: string; name: string }>> {
     try {
-      const url = new URL(API_ENDPOINTS.idata.knowledgeSpaces, window.location.origin);
+      const url = new URL(
+        API_ENDPOINTS.idata.knowledgeSpaces,
+        window.location.origin
+      );
       url.searchParams.set("idata_api_base", idataApiBase);
       url.searchParams.set("api_key", apiKey);
       url.searchParams.set("user_id", userId);
@@ -156,8 +173,12 @@ class KnowledgeBaseService {
       // Check for error response from middleware (has code field)
       if (result.code !== undefined && result.code !== 0) {
         const errorCode = result.code || response.status;
-        const errorMessage = result.message || "Failed to fetch iData knowledge spaces";
-        log.error("iData API error:", { code: errorCode, message: errorMessage });
+        const errorMessage =
+          result.message || "Failed to fetch iData knowledge spaces";
+        log.error("iData API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
         throw new ApiError(errorCode, errorMessage);
       }
 
@@ -198,7 +219,10 @@ class KnowledgeBaseService {
       if (result.code !== undefined && result.code !== 0) {
         const errorCode = result.code || response.status;
         const errorMessage = result.message || "Failed to fetch iData datasets";
-        log.error("iData API error:", { code: errorCode, message: errorMessage });
+        log.error("iData API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
         throw new ApiError(errorCode, errorMessage);
       }
 
@@ -353,7 +377,10 @@ class KnowledgeBaseService {
   /**
    * Fetch Haotian knowledge sets via backend proxy.
    */
-  async getHaotianKnowledgeSets(listUrl: string, externalAuthorization: string): Promise<{
+  async getHaotianKnowledgeSets(
+    listUrl: string,
+    externalAuthorization: string
+  ): Promise<{
     knowledge_sets: Array<{
       name: string;
       knowledge_bases: Array<{ dify_dataset_id: string; name: string }>;
@@ -380,7 +407,10 @@ class KnowledgeBaseService {
   /**
    * Test Haotian connection via backend proxy.
    */
-  async testHaotianConnection(listUrl: string, externalAuthorization: string): Promise<{
+  async testHaotianConnection(
+    listUrl: string,
+    externalAuthorization: string
+  ): Promise<{
     success: boolean;
     error?: string;
   }> {
@@ -402,7 +432,8 @@ class KnowledgeBaseService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Connection test failed",
+        error:
+          error instanceof Error ? error.message : "Connection test failed",
       };
     }
   }
@@ -545,8 +576,12 @@ class KnowledgeBaseService {
                       stats.update_date ||
                       stats.creation_date ||
                       null,
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
                     // Use embedding_model_name (display_name) from backend, fallback to ES stats
-                    embeddingModel: indexInfo.embedding_model_name || stats.embedding_model || "unknown",
+                    embeddingModel:
+                      indexInfo.embedding_model_name ||
+                      stats.embedding_model ||
+                      "unknown",
                     summaryFrequency: indexInfo.summary_frequency || null,
                     lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
@@ -564,6 +599,7 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "nexent",
                     tenant_id: indexInfo.tenant_id,
+                    preserve_source_file: indexInfo.preserve_source_file ?? true,
                   };
                 }
               );
@@ -616,6 +652,7 @@ class KnowledgeBaseService {
                     createdAt: stats.creation_date || null,
                     updatedAt: stats.update_date || stats.creation_date || null,
                     embeddingModel: stats.embedding_model || "unknown",
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
                     knowledge_sources:
                       indexInfo.knowledge_sources || "datamate",
                     ingroup_permission: indexInfo.ingroup_permission || "",
@@ -738,13 +775,16 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embedding_model_name?: string;
+        embeddingModel?: string;
         ingroup_permission?: string;
         group_ids?: number[];
+        is_multimodal?: boolean;
+        preserve_source_file?: boolean;
       } = {
         name: params.name,
         description: params.description || "",
-        embedding_model_name: params.embeddingModel || "",
+        embeddingModel: params.embeddingModel || "",
+        is_multimodal: params.is_multimodal || false,
       };
 
       // Include group permission and user groups if provided
@@ -753,6 +793,9 @@ class KnowledgeBaseService {
       }
       if (params.group_ids && params.group_ids.length > 0) {
         requestBody.group_ids = params.group_ids;
+      }
+      if (params.preserve_source_file !== undefined) {
+        requestBody.preserve_source_file = params.preserve_source_file;
       }
 
       const response = await fetch(
@@ -779,6 +822,7 @@ class KnowledgeBaseService {
         chunkCount: 0,
         createdAt: new Date().toISOString(),
         embeddingModel: params.embeddingModel || "",
+        is_multimodal: params.is_multimodal || false,
         avatar: "",
         chunkNum: 0,
         language: "",
@@ -888,7 +932,8 @@ class KnowledgeBaseService {
   async uploadDocuments(
     kbId: string,
     files: File[],
-    chunkingStrategy?: string
+    chunkingStrategy?: string,
+    modelId?: number
   ): Promise<void> {
     try {
       // Create FormData object
@@ -950,6 +995,7 @@ class KnowledgeBaseService {
           files: filesToProcess,
           chunking_strategy: chunkingStrategy,
           destination: "minio",
+          model_id: modelId,
         }),
       });
 
@@ -1504,9 +1550,7 @@ class KnowledgeBaseService {
   }
 
   // Embedding model status and configuration
-  async getEmbeddingModelStatus(
-    indexName: string
-  ): Promise<{
+  async getEmbeddingModelStatus(indexName: string): Promise<{
     status: "configured" | "legacy" | "missing";
     needs_config: boolean;
     index_name: string;
@@ -1533,7 +1577,9 @@ class KnowledgeBaseService {
         const errorData = await response.json().catch(() => ({}));
         throw new ApiError(
           response.status,
-          errorData.detail || errorData.message || "Failed to get embedding model status"
+          errorData.detail ||
+            errorData.message ||
+            "Failed to get embedding model status"
         );
       }
 

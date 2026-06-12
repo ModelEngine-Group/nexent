@@ -64,6 +64,7 @@ export interface MarketAgentDetail extends MarketAgentListItem {
   duty_prompt: string;
   constraint_prompt: string;
   few_shots_prompt: string;
+  prompts_hidden?: boolean;
   enabled: boolean;
   model_id: number;
   model_name: string;

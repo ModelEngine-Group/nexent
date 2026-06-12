@@ -1,5 +1,7 @@
 import sys
 import os
+import importlib.machinery
+import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import pytest
@@ -7,7 +9,11 @@ from unittest.mock import patch, MagicMock
 
 # Mock external dependencies before importing
 sys.modules['psycopg2'] = MagicMock()
-sys.modules['boto3'] = MagicMock()
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 sys.modules['supabase'] = MagicMock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
@@ -196,6 +202,25 @@ class TestGetTenantsPaginated:
             assert result["total_pages"] == 1
             assert len(result["data"]) == 3
             assert result["data"] == tenant_infos
+
+    def test_get_tenants_paginated_excludes_asset_owner_virtual_tenant(self, service_mocks):
+        """Virtual ASSET_OWNER tenant must not appear in admin tenant listings."""
+        from consts.const import ASSET_OWNER_TENANT_ID
+
+        tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, "tenant2"]
+        tenant_infos = [
+            {"tenant_id": "tenant1", "tenant_name": "Tenant 1", "default_group_id": "g1"},
+            {"tenant_id": "tenant2", "tenant_name": "Tenant 2", "default_group_id": "g2"},
+        ]
+
+        with patch("backend.services.tenant_service.get_all_tenant_ids", return_value=tenant_ids), \
+             patch("backend.services.tenant_service.get_tenant_info", side_effect=tenant_infos):
+            result = get_tenants_paginated(page=1, page_size=20)
+
+        assert result["total"] == 2
+        returned_ids = [t["tenant_id"] for t in result["data"]]
+        assert ASSET_OWNER_TENANT_ID not in returned_ids
+        assert returned_ids == ["tenant1", "tenant2"]
 
     def test_get_tenants_paginated_with_missing_configs(self, service_mocks):
         """Test get_tenants_paginated when some tenants have missing configs"""

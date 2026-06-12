@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
-import { Tabs, message, Tooltip } from "antd";
+import { Tabs, message, Tooltip, Badge } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Info, Trash2, Settings } from "lucide-react";
@@ -207,21 +207,27 @@ export default function SkillManagement({
   };
 
   const tabItems = skillGroups.map((group) => {
+    const selectedCount = group.skills.filter(s => originalSelectedSkillIdsSet.has(s.skill_id)).length;
+
     return {
       key: group.key,
       label: (
         <Tooltip title={group.label} placement="right">
-          <span
-            style={{
-              display: "block",
-              maxWidth: "100px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              textAlign: "left",
-            }}
-          >
-            {group.label}
+          <span className="inline-flex items-center gap-1">
+            <span
+              style={{
+                maxWidth: "100px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                textAlign: "left",
+              }}
+            >
+              {group.label}
+            </span>
+            {selectedCount > 0 && (
+              <Badge count={selectedCount} size="small" color="blue" />
+            )}
           </span>
         </Tooltip>
       ),
@@ -255,19 +261,25 @@ export default function SkillManagement({
                   {isSelected && hasConfigurableParams && (
                     <Settings
                       size={16}
-                      className="cursor-pointer text-gray-400 hover:text-blue-600 transition-colors"
-                      onClick={(e) => handleConfigClick(skill, e)}
+                      className={`cursor-pointer text-gray-400 hover:text-blue-600 transition-colors ${
+                        isReadOnly ? "pointer-events-none opacity-50" : ""
+                      }`}
+                      onClick={isReadOnly ? undefined : (e) => handleConfigClick(skill, e)}
                     />
                   )}
                   <Info
                     size={16}
-                    className="cursor-pointer text-gray-400 hover:text-gray-600 transition-colors"
-                    onClick={(e) => handleInfoClick(skill, e)}
+                    className={`cursor-pointer text-gray-400 hover:text-gray-600 transition-colors ${
+                      isReadOnly ? "pointer-events-none opacity-50" : ""
+                    }`}
+                    onClick={isReadOnly ? undefined : (e) => handleInfoClick(skill, e)}
                   />
                   <Trash2
                     size={16}
-                    className="cursor-pointer text-gray-400 hover:text-red-500 transition-colors"
-                    onClick={(e) => handleDeleteClick(skill, e)}
+                    className={`cursor-pointer text-gray-400 hover:text-red-500 transition-colors ${
+                      isReadOnly ? "pointer-events-none opacity-50" : ""
+                    }`}
+                    onClick={isReadOnly ? undefined : (e) => handleDeleteClick(skill, e)}
                   />
                 </div>
               </div>

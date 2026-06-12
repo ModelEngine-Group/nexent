@@ -302,7 +302,11 @@ class TestModelConfig:
             temperature=0.7,
             top_p=0.9,
             ssl_verify=False,
-            model_factory="openai"
+            model_factory="openai",
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            max_tokens=4096,
+            timeout_seconds=45.5,
+            concurrency_limit=3,
         )
         assert config.cite_name == "gpt-4"
         assert config.api_key == "sk-test-key"
@@ -312,6 +316,10 @@ class TestModelConfig:
         assert config.top_p == 0.9
         assert config.ssl_verify is False
         assert config.model_factory == "openai"
+        assert config.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+        assert config.max_tokens == 4096
+        assert config.timeout_seconds == 45.5
+        assert config.concurrency_limit == 3
 
     def test_model_config_creation_with_minimal_fields(self):
         """Test ModelConfig creation with only required fields."""
@@ -326,6 +334,10 @@ class TestModelConfig:
         assert config.top_p == 0.95
         assert config.ssl_verify is True
         assert config.model_factory is None
+        assert config.extra_body is None
+        assert config.max_tokens is None
+        assert config.timeout_seconds is None
+        assert config.concurrency_limit is None
 
     def test_model_config_defaults(self):
         """Test ModelConfig has correct default values."""
@@ -1144,7 +1156,7 @@ class TestAgentConfig:
             model_name="default-model"
         )
         assert config.prompt_templates is None
-        assert config.max_steps == 5
+        assert config.max_steps == 15
         assert config.provide_run_summary is False
         assert config.instructions is None
         assert config.managed_agents == []
@@ -1222,9 +1234,29 @@ class TestAgentConfig:
             description="Max steps",
             tools=[],
             model_name="test",
-            max_steps=100
+            max_steps=30
         )
-        assert config_max.max_steps == 100
+        assert config_max.max_steps == 30
+
+    def test_agent_config_max_steps_rejects_out_of_bounds(self):
+        """Test AgentConfig rejects max_steps values outside 1-30 range."""
+        with pytest.raises(Exception):
+            agent_model_module.AgentConfig(
+                name="too_high",
+                description="Too high steps",
+                tools=[],
+                model_name="test",
+                max_steps=31
+            )
+
+        with pytest.raises(Exception):
+            agent_model_module.AgentConfig(
+                name="too_low",
+                description="Too low steps",
+                tools=[],
+                model_name="test",
+                max_steps=0
+            )
 
 
 # ----------------------------------------------------------------------------

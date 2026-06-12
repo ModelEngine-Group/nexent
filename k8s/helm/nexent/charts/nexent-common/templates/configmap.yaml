@@ -57,6 +57,8 @@ data:
   # Model Path Config
   CLIP_MODEL_PATH: {{ .Values.config.modelPath.clipModelPath | quote }}
   NLTK_DATA: {{ .Values.config.modelPath.nltkData | quote }}
+  TABLE_TRANSFORMER_MODEL_PATH: {{ .Values.config.modelPath.tableTransformerModelPath | quote }}
+  UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH: {{ .Values.config.modelPath.unstructuredDefaultModelInitializeParamsJsonPath | quote }}
 
   # Terminal Tool SSH Config
   SSH_PRIVATE_KEY_PATH: {{ .Values.config.terminal.sshPrivateKeyPath | quote }}
@@ -164,3 +166,23 @@ data:
   OAUTH_SSL_VERIFY: {{ .Values.config.oauth.sslVerify | quote }}
   OAUTH_CA_BUNDLE: {{ .Values.config.oauth.caBundle | quote }}
   OAUTH_CALLBACK_BASE_URL: {{ .Values.config.oauth.callbackBaseUrl | quote }}
+
+  # ===== CAS SSO Configuration =====
+  CAS_ENABLED: {{ .Values.config.cas.enabled | quote }}
+  CAS_SERVER_URL: {{ .Values.config.cas.serverUrl | quote }}
+  CAS_VALIDATE_PATH: {{ .Values.config.cas.validatePath | quote }}
+  CAS_CALLBACK_BASE_URL: {{ .Values.config.cas.callbackBaseUrl | quote }}
+  CAS_LOGIN_MODE: {{ .Values.config.cas.loginMode | quote }}
+  CAS_USER_ATTRIBUTE: {{ .Values.config.cas.userAttribute | quote }}
+  CAS_EMAIL_ATTRIBUTE: {{ .Values.config.cas.emailAttribute | quote }}
+  CAS_ROLE_ATTRIBUTE: {{ .Values.config.cas.roleAttribute | quote }}
+  CAS_TENANT_ATTRIBUTE: {{ .Values.config.cas.tenantAttribute | quote }}
+  CAS_ROLE_MAP_JSON: {{ .Values.config.cas.roleMapJson | quote }}
+  CAS_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.sessionMaxAgeSeconds | quote }}
+  LOCAL_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.localSessionMaxAgeSeconds | quote }}
+  CAS_RENEW_BEFORE_SECONDS: {{ .Values.config.cas.renewBeforeSeconds | quote }}
+  CAS_RENEW_TIMEOUT_SECONDS: {{ .Values.config.cas.renewTimeoutSeconds | quote }}
+  CAS_SYNTHETIC_EMAIL_DOMAIN: {{ .Values.config.cas.syntheticEmailDomain | quote }}
+  CAS_LOGOUT_URL: {{ .Values.config.cas.logoutUrl | quote }}
+  CAS_SSL_VERIFY: {{ .Values.config.cas.sslVerify | quote }}
+  CAS_CA_BUNDLE: {{ .Values.config.cas.caBundle | quote }}
