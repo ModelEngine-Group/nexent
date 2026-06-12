@@ -53,7 +53,7 @@ dependencies = [
     "pymssql>=2.2.11",
     "openpyxl>=3.1.5",
     "orjson==3.10",
-    "pypdf==6.9.1",
+    "pypdf==6.13.2",
     "python-pptx==1.0.2",
     "ijson==3.5.0",
     "langchain-text-splitters==1.1.2",
