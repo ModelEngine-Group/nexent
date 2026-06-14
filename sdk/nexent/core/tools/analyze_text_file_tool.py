@@ -4,16 +4,20 @@ Analyze Text File Tool
 Extracts content from text files (excluding images) and analyzes it using a large language model.
 Supports files from S3, HTTP, and HTTPS URLs.
 """
+import json
 import logging
 from typing import List, Optional
 
 from jinja2 import Template, StrictUndefined
 from pydantic import Field
+import zipfile
+import io
+import olefile
 from smolagents.tools import Tool
 
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
-from ...core.utils.tools_common_message import ToolCategory, ToolSign
+from ...core.utils.tools_common_message import ToolCategory, ToolSign, SearchResultTextMessage
 from ...storage import MinIOStorageClient
 from ...multi_modal.load_save_object import LoadSaveObjectManager
 from ...utils.http_client_manager import http_client_manager
@@ -32,7 +36,7 @@ class AnalyzeTextFileTool(Tool):
         "The tool will extract text content from each file and return an analysis based on your question."
     )
 
-    description_zh = "从文本文件中提取内容，并根据你的问题使用大语言模型进行分析。支持来自 S3、HTTP 和 HTTPS URL 的多个文件。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。该工具将从每个文件中提取文本内容，并根据你的问题返回分析结果。"
+    description_zh = "从文件中提取内容，并根据你的问题使用大语言模型进行分析。支持来自 S3、HTTP 和 HTTPS URL 的多个文件。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。该工具将从每个文件中提取文本内容以及图片元数据，并根据你的问题返回分析结果。"
 
     inputs = {
         "file_url_list": {
@@ -148,8 +152,12 @@ class AnalyzeTextFileTool(Tool):
 
             for index, single_file in enumerate(file_url_list, start=1):
                 logger.info(
-                    f"Extracting text content from file #{index}, query: {query}")
-                filename = f"file_{index}.txt"
+                    f"Extracting text content and image info from file #{index}, query: {query}")
+                
+                # detect file type
+                file_extension = self.detect_file_type(single_file)
+                
+                filename = f"file_{index}.{file_extension}"
 
                 # Step 1: Get file content
                 raw_text = self.process_text_file(filename, single_file)
@@ -206,6 +214,21 @@ class AnalyzeTextFileTool(Tool):
 
             if response.status_code == 200:
                 result = response.json()
+                
+                # process image information
+                images_list_url, image_info = result.get("images_info", ([], []))
+                if images_list_url:
+                    search_images_list_json = json.dumps(
+                        {"images_url": images_list_url}, ensure_ascii=False
+                    )
+                    self.observer.add_message(
+                        "", ProcessType.PICTURE_WEB, search_images_list_json
+                    )
+                if image_info:
+                    search_results_json = self._build_search_results(image_info)
+                    search_results_data = json.dumps(search_results_json, ensure_ascii=False)
+                    self.observer.add_message("", ProcessType.SEARCH_CONTENT, search_results_data)
+                
                 raw_text = result.get("text", "")
                 logger.info(
                     f"File processed successfully: {raw_text[:200]}...{raw_text[-200:]}...， length: {len(raw_text)}")
@@ -245,3 +268,58 @@ class AnalyzeTextFileTool(Tool):
             user_prompt=user_prompt
         )
         return result.content, truncation_percentage
+
+    def detect_file_type(self, file_bytes: bytes) -> str:
+        if file_bytes.startswith(b"%PDF"):
+            return "pdf"
+
+        try:
+            # doc/xls/ppt
+            if file_bytes.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"):
+                ole = olefile.OleFileIO(io.BytesIO(file_bytes))
+
+                for stream, file_type in {
+                    "WordDocument": "doc",
+                    "Workbook": "xls",
+                    "Book": "xls",
+                    "PowerPoint Document": "ppt",
+                }.items():
+                    if ole.exists(stream):
+                        return file_type
+
+            # docx/xlsx/pptx
+            elif file_bytes.startswith(b"PK"):
+                names = set(zipfile.ZipFile(io.BytesIO(file_bytes)).namelist())
+
+                for marker, file_type in {
+                    "word/document.xml": "docx",
+                    "xl/workbook.xml": "xlsx",
+                    "ppt/presentation.xml": "pptx",
+                }.items():
+                    if marker in names:
+                        return file_type
+
+        except olefile.OleFileError:
+            logger.error("Failed to determine file extension, defaulting to txt type.")
+
+        return "txt"
+    
+    
+    def _build_search_results(self, image_info):
+        search_results_json = []
+        for index, single_image in enumerate(image_info):
+            search_result_message = SearchResultTextMessage(
+                title=single_image.get("filename", ""),
+                url=single_image.get("image_url", ""),
+                text=single_image.get("content", ""),
+                source_type=single_image.get("source_type", ""),
+                filename=single_image.get("filename", ""),
+                score_details={},
+                cite_index=single_image.get("page", 0) + index,
+                search_type=self.name,
+                tool_sign=self.tool_sign,
+            )
+
+            search_results_json.append(search_result_message.to_dict())
+
+        return search_results_json
