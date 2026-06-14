@@ -515,31 +515,30 @@ class TestIdataAppRouter:
         assert router.prefix == "/idata"
 
     def test_routes_registered(self):
-        """Test that all routes are registered."""
-        app = _build_app()
-        routes = [route.path for route in app.routes]
-
-        assert "/idata/knowledge-space" in routes
-        assert "/idata/datasets" in routes
+        """Test that all routes are registered on the router."""
+        # Get routes directly from the router
+        route_paths = [route.path for route in router.routes]
+        
+        # The routes already include the router prefix
+        assert "/idata/knowledge-space" in route_paths
+        assert "/idata/datasets" in route_paths
 
     def test_router_methods(self):
         """Test that routes have correct HTTP methods."""
-        app = _build_app()
-
-        # Find routes by path
+        # Check routes directly from the router
         knowledge_space_route = None
         datasets_route = None
-
-        for route in app.routes:
-            if hasattr(route, 'path'):
-                if route.path == "/idata/knowledge-space":
-                    knowledge_space_route = route
-                elif route.path == "/idata/datasets":
-                    datasets_route = route
-
+        
+        for route in router.routes:
+            # Match against the full path including prefix
+            if route.path == "/idata/knowledge-space":
+                knowledge_space_route = route
+            elif route.path == "/idata/datasets":
+                datasets_route = route
+                
         assert knowledge_space_route is not None
         assert datasets_route is not None
-
-        # Check HTTP methods
-        assert "GET" in [method for method in knowledge_space_route.methods]
-        assert "GET" in [method for method in datasets_route.methods]
+        
+        # Check HTTP methods (APIRoute has 'methods' attribute)
+        assert "GET" in knowledge_space_route.methods
+        assert "GET" in datasets_route.methods

@@ -361,7 +361,7 @@ class TestDataProcessService(unittest.TestCase):
             Image.new('L', (9, 9), color=10),
         ]
 
-        result = asyncio.run(self.service._load_image(session, "http://example.com/a.bin"))
+        result = asyncio.run(self.service._load_image(session, "https://example.com/a.bin"))
 
         self.assertEqual(result.mode, 'RGB')
         temp_file.write.assert_called_once_with(b"not-directly-readable")
@@ -396,14 +396,14 @@ class TestDataProcessService(unittest.TestCase):
             Image.new('RGBA', (9, 9), color=(1, 2, 3, 4)),
         ]
 
-        result = asyncio.run(self.service._load_image(session, "http://example.com/a.bin"))
+        result = asyncio.run(self.service._load_image(session, "https://example.com/a.bin"))
 
         self.assertEqual(result.mode, 'RGB')
         mock_unlink.assert_called_once_with("temp-image.bin")
 
     def test_load_image_svg_is_filtered(self):
         """SVG URLs are skipped before any HTTP request."""
-        result = asyncio.run(self.service._load_image(MagicMock(), "http://example.com/a.svg"))
+        result = asyncio.run(self.service._load_image(MagicMock(), "https://example.com/a.svg"))
 
         self.assertIsNone(result)
 

@@ -274,12 +274,14 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
     def test_router_inclusion(self):
         """The main northbound router should be included."""
-        routes = [route.path for route in app.routes]
+        from fastapi.routing import APIRoute
+        routes = [route.path for route in app.routes if isinstance(route, APIRoute)]
         self.assertIn("/dummy", routes)
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""
-        routes = [route.path for route in app.routes]
+        from fastapi.routing import APIRoute
+        routes = [route.path for route in app.routes if isinstance(route, APIRoute)]
         self.assertIn("/nb/a2a/{endpoint_id}/.well-known/agent-card.json", routes)
         self.assertIn("/nb/a2a/{endpoint_id}/v1", routes)
         self.assertIn("/nb/a2a/{endpoint_id}/message:send", routes)
