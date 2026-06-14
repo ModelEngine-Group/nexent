@@ -134,7 +134,7 @@ class TestAnalyzeTextFileTool:
         tool = AnalyzeTextFileTool(
             storage_client=MagicMock(),
             observer=None,
-            data_process_service_url="http://data-process",
+            data_process_service_url="http://data-process",  # NOSONAR
             llm_model=llm_model,
         )
         tool.process_text_file = MagicMock(return_value="text")
