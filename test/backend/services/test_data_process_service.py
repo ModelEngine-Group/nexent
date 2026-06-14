@@ -1924,7 +1924,7 @@ class TestDataProcessService(unittest.TestCase):
                 {"no_content": True},
                 {"content": "Second chunk"},
             ],
-            {}
+            []  # images_info
         )
         mock_data_process_core.return_value = mock_instance
 
