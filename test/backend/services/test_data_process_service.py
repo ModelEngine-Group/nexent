@@ -47,6 +47,9 @@ mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
 sys.modules['consts.const'] = mock_const
 
+mock_const.TABLE_TRANSFORMER_MODEL_PATH = "mock_table_transformer_path"
+mock_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "mock_unstructured_params_path"
+
 # Stub consts.exceptions with a *real* exception class so assertRaises works correctly
 _exceptions_mod = types.ModuleType('consts.exceptions')
 
@@ -1910,11 +1913,6 @@ class TestDataProcessService(unittest.TestCase):
     async def async_test_process_uploaded_text_file(self, mock_data_process_core):
         """
         Async implementation for testing processing uploaded text file with mixed chunks.
-
-        This test verifies that:
-        1. Chunks with 'content' are concatenated and returned
-        2. Chunks without 'content' are ignored from text/chunks but count towards chunks_count
-        3. Returned metadata fields are set correctly
         """
         # Arrange: mock DataProcessCore.file_process to return mixed chunks
         mock_instance = MagicMock()
@@ -1939,11 +1937,14 @@ class TestDataProcessService(unittest.TestCase):
             chunking_strategy=chunking_strategy
         )
 
-        # Assert core call
+        # Assert core call - matching the actual implementation
         mock_instance.file_process.assert_called_once_with(
             file_data=file_bytes,
             filename=filename,
-            chunking_strategy=chunking_strategy
+            chunking_strategy=chunking_strategy,
+            model_type="vlm",
+            table_transformer_model_path=mock_const.TABLE_TRANSFORMER_MODEL_PATH,
+            unstructured_default_model_initialize_params_json_path=mock_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
         )
 
         # Assert result shape and values
@@ -1951,11 +1952,9 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(result["filename"], filename)
         self.assertEqual(result["chunking_strategy"], chunking_strategy)
         self.assertEqual(result["chunks"], ["First chunk", "Second chunk"])
-        # includes chunk without 'content'
-        self.assertEqual(result["chunks_count"], 3)
+        self.assertEqual(result["chunks_count"], 3)  # includes chunk without 'content'
         self.assertEqual(result["text"], "First chunk\nSecond chunk")
-        self.assertEqual(result["text_length"],
-                         len("First chunk\nSecond chunk"))
+        self.assertEqual(result["text_length"], len("First chunk\nSecond chunk"))
 
     def test_process_uploaded_text_file(self):
         """
