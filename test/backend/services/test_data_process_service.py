@@ -27,6 +27,7 @@ sys.modules['database.client'].minio_client = MagicMock()
 sys.modules['transformers'] = MagicMock()
 sys.modules['transformers'].CLIPProcessor = MagicMock()
 sys.modules['transformers'].CLIPModel = MagicMock()
+sys.modules['torch'] = MagicMock()
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
@@ -69,9 +70,13 @@ if 'utils.file_management_utils' not in sys.modules:
     sys.modules['utils.file_management_utils'] = _utils_mod
 
 # from backend.services.data_process_service import DataProcessService, get_data_process_service
-with patch('data_process.utils.get_task_info') as mock_get_task_info, \
-        patch('backend.services.data_process_service.get_all_task_ids_from_redis') as mock_get_redis_task_ids:
+with patch('data_process.utils.get_task_info') as mock_get_task_info:
     from backend.services.data_process_service import DataProcessService, get_data_process_service
+
+mock_get_redis_task_ids = patch(
+    'backend.services.data_process_service.get_all_task_ids_from_redis',
+    return_value=[]
+).start()
 
 
 class TestDataProcessService(unittest.TestCase):
@@ -281,6 +286,147 @@ class TestDataProcessService(unittest.TestCase):
             150, 150, min_width=100, min_height=100))
         self.assertFalse(self.service.check_image_size(
             150, 150, min_width=200, min_height=200))
+
+    def test_load_image_base64_rgba_to_rgb(self):
+        """Base64 RGBA images are decoded and flattened to RGB."""
+        img = Image.new('RGBA', (12, 12), color=(255, 0, 0, 128))
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        payload = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+        result = asyncio.run(
+            self.service._load_image(
+                MagicMock(), f"data:image/png;base64,{payload}"
+            )
+        )
+
+        self.assertEqual(result.mode, 'RGB')
+        self.assertEqual(result.size, (12, 12))
+
+    @patch('backend.services.data_process_service.get_file_stream')
+    def test_load_image_s3_missing_returns_none(self, mock_get_file_stream):
+        """Missing S3 objects are handled as a failed load."""
+        mock_get_file_stream.return_value = None
+
+        result = asyncio.run(self.service._load_image(MagicMock(), "s3://bucket/missing.png"))
+
+        self.assertIsNone(result)
+
+    @patch('backend.services.data_process_service.os.path.isfile', return_value=True)
+    @patch('backend.services.data_process_service.Image.open')
+    def test_load_image_local_file_converts_non_rgb(self, mock_open, _mock_isfile):
+        """Local non-RGB images are converted before returning."""
+        mock_open.return_value = Image.new('L', (10, 10), color=128)
+
+        result = asyncio.run(self.service._load_image(MagicMock(), "local.png"))
+
+        self.assertEqual(result.mode, 'RGB')
+
+    @patch('backend.services.data_process_service.os.path.isfile', return_value=True)
+    @patch('backend.services.data_process_service.Image.open')
+    def test_load_image_local_file_flattens_rgba(self, mock_open, _mock_isfile):
+        """Local RGBA images are flattened onto a white RGB background."""
+        mock_open.return_value = Image.new('RGBA', (10, 10), color=(1, 2, 3, 4))
+
+        result = asyncio.run(self.service._load_image(MagicMock(), "local.png"))
+
+        self.assertEqual(result.mode, 'RGB')
+
+    @patch('backend.services.data_process_service.os.unlink')
+    @patch('backend.services.data_process_service.tempfile.NamedTemporaryFile')
+    @patch('backend.services.data_process_service.Image.open')
+    def test_load_image_url_falls_back_to_temp_file(
+        self, mock_image_open, mock_named_temp, mock_unlink
+    ):
+        """If in-memory URL image loading fails, a temp file is tried and removed."""
+        class _Response:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def read(self):
+                return b"not-directly-readable"
+
+        session = MagicMock()
+        session.get.return_value = _Response()
+        temp_file = MagicMock()
+        temp_file.name = "temp-image.bin"
+        mock_named_temp.return_value.__enter__.return_value = temp_file
+        mock_image_open.side_effect = [
+            OSError("direct open failed"),
+            Image.new('L', (9, 9), color=10),
+        ]
+
+        result = asyncio.run(self.service._load_image(session, "http://example.com/a.bin"))
+
+        self.assertEqual(result.mode, 'RGB')
+        temp_file.write.assert_called_once_with(b"not-directly-readable")
+        mock_unlink.assert_called_once_with("temp-image.bin")
+
+    @patch('backend.services.data_process_service.os.unlink')
+    @patch('backend.services.data_process_service.tempfile.NamedTemporaryFile')
+    @patch('backend.services.data_process_service.Image.open')
+    def test_load_image_url_temp_file_flattens_rgba(
+        self, mock_image_open, mock_named_temp, mock_unlink
+    ):
+        """Temp-file URL fallback also flattens RGBA images."""
+        class _Response:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def read(self):
+                return b"not-directly-readable"
+
+        session = MagicMock()
+        session.get.return_value = _Response()
+        temp_file = MagicMock()
+        temp_file.name = "temp-image.bin"
+        mock_named_temp.return_value.__enter__.return_value = temp_file
+        mock_image_open.side_effect = [
+            OSError("direct open failed"),
+            Image.new('RGBA', (9, 9), color=(1, 2, 3, 4)),
+        ]
+
+        result = asyncio.run(self.service._load_image(session, "http://example.com/a.bin"))
+
+        self.assertEqual(result.mode, 'RGB')
+        mock_unlink.assert_called_once_with("temp-image.bin")
+
+    def test_load_image_svg_is_filtered(self):
+        """SVG URLs are skipped before any HTTP request."""
+        result = asyncio.run(self.service._load_image(MagicMock(), "http://example.com/a.svg"))
+
+        self.assertIsNone(result)
+
+    def test_filter_important_image_clip_success_with_rgba_input(self):
+        """CLIP probabilities drive the important-image decision."""
+        rgba = Image.new('RGBA', (240, 240), color=(0, 255, 0, 128))
+        self.service.load_image = AsyncMock(return_value=rgba)
+        self.service.clip_available = True
+        self.service.processor = MagicMock(return_value={"pixel_values": "mock"})
+
+        probs = MagicMock()
+        probs.__getitem__.return_value.tolist.return_value = [0.2, 0.8]
+        logits = MagicMock()
+        logits.softmax.return_value = probs
+        outputs = MagicMock(logits_per_image=logits)
+        self.service.model = MagicMock(return_value=outputs)
+
+        result = asyncio.run(self.service.filter_important_image("image-url"))
+
+        self.assertTrue(result["is_important"])
+        self.assertEqual(result["confidence"], 0.8)
+        self.service.processor.assert_called_once()
+        self.service.model.assert_called_once()
 
     async def async_test_start_stop(self):
         """
@@ -1813,6 +1959,30 @@ class TestDataProcessService(unittest.TestCase):
 
     @patch('backend.services.data_process_service.submit_process_forward_chain')
     @pytest.mark.asyncio
+    async def async_test_create_batch_tasks_impl_submit_returns_empty(self, mock_submit_chain):
+        """A valid source is skipped if enqueueing returns no chain id."""
+        mock_submit_chain.return_value = ""
+
+        from consts.model import BatchTaskRequest
+        request = BatchTaskRequest(
+            sources=[{
+                'source': 'http://example.com/doc1.pdf',
+                'source_type': 'url',
+                'chunking_strategy': 'semantic',
+                'index_name': 'test_index_1',
+                'original_filename': 'doc1.pdf',
+                'embedding_model_id': 'embed',
+                'tenant_id': 'tenant',
+            }]
+        )
+
+        result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
+
+        self.assertEqual(result, [])
+        mock_submit_chain.assert_called_once()
+
+    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_optional_fields(self, mock_submit_chain):
         """
         Async implementation for testing batch task creation with optional fields.
@@ -1905,6 +2075,7 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(
             self.async_test_create_batch_tasks_impl_missing_both_required_fields())
         asyncio.run(self.async_test_create_batch_tasks_impl_empty_sources())
+        asyncio.run(self.async_test_create_batch_tasks_impl_submit_returns_empty())
         asyncio.run(self.async_test_create_batch_tasks_impl_optional_fields())
         asyncio.run(self.async_test_create_batch_tasks_impl_no_authorization())
 
@@ -1961,6 +2132,49 @@ class TestDataProcessService(unittest.TestCase):
         Test wrapper to run the async test for processing uploaded text files.
         """
         asyncio.run(self.async_test_process_uploaded_text_file())
+
+    @patch('backend.services.data_process_service.upload_fileobj')
+    @patch('backend.services.data_process_service.build_s3_url')
+    @patch('backend.services.data_process_service.DataProcessCore')
+    def test_process_uploaded_text_file_with_images_and_skipped_entries(
+        self, mock_data_process_core, mock_build_s3_url, mock_upload_fileobj
+    ):
+        """Images are uploaded, described, and invalid image entries are skipped."""
+        mock_processor = MagicMock()
+        mock_data_process_core.return_value = mock_processor
+        mock_processor.file_process.return_value = (
+            [{"content": "text chunk"}, {"metadata": "ignored"}],
+            [
+                "not-a-dict",
+                {"image_format": "png"},
+                {
+                    "image_bytes": b"png-bytes",
+                    "image_format": "png",
+                    "position": {
+                        "page_number": 2,
+                        "coordinates": {"x1": 1, "y1": 2, "x2": 3, "y2": 4},
+                    },
+                },
+            ],
+        )
+        mock_upload_fileobj.return_value = {"object_name": "images/2.png"}
+        mock_build_s3_url.return_value = "s3://bucket/images/2.png"
+
+        result = asyncio.run(
+            self.service.process_uploaded_text_file(
+                b"file-bytes", "sample.docx", "semantic"
+            )
+        )
+
+        self.assertTrue(result["success"])
+        self.assertIn("text chunk", result["text"])
+        self.assertIn("Image information for sample.docx", result["text"])
+        self.assertEqual(result["images_info"][0], ["s3://bucket/images/2.png"])
+        self.assertEqual(len(result["images_info"][1]), 1)
+        self.assertEqual(result["images_info"][1][0]["page"], 2)
+        self.assertEqual(result["chunks_count"], 5)
+        mock_upload_fileobj.assert_called_once()
+        mock_build_s3_url.assert_called_once_with("images/2.png")
 
     def test_convert_celery_states_to_custom(self):
         """
