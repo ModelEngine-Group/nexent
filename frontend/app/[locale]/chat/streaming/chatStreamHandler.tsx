@@ -549,6 +549,7 @@ export const handleStreamResponse = async (
                           item.text || t("chatRightPanel.noContentDescription"),
                         published_date: item.published_date || "",
                         source_type: item.source_type || "",
+                        search_type: item.search_type || "",
                         filename: item.filename || "",
                         score:
                           typeof item.score === "number"
@@ -642,21 +643,18 @@ export const handleStreamResponse = async (
 
                 case chatConfig.messageTypes.PICTURE_WEB:
                   try {
-                    // Parse the image data structure
-                    let imageUrls = JSON.parse(messageContent).images_url;
+                    const parsedData = JSON.parse(messageContent);
+                    const imageUrls = parsedData.images_url || [];
 
                     if (imageUrls.length > 0) {
-                      // Update the images of the current message
                       setMessages((prev) => {
                         const newMessages = [...prev];
                         const lastMsg = newMessages[newMessages.length - 1];
 
-                        // Check if lastMsg exists before accessing its properties
                         if (!lastMsg) {
                           return newMessages;
                         }
 
-                        // Create a new object reference so React.memo detects the change
                         const updatedMsg = {
                           ...lastMsg,
                           images: deduplicateImages(

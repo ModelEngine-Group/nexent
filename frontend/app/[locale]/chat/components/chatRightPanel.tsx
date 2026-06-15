@@ -26,7 +26,12 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
   const published_date = result.published_date || "";
   const source_type = result.source_type || "url";
   const filename = result.filename || result.title || "";
-  const datamateDatasetId = result.score_details?.datamate_dataset_id;
+  const searchType = result.search_type || "";
+  const isKnowledgeResult =
+    source_type === "file" ||
+    source_type === "datamate" ||
+    source_type === "aidp" ||
+    searchType === "aidp_search";
   const datamateFileId = result.score_details?.datamate_file_id;
   const datamateBaseUrl = result.score_details?.datamate_base_url;
 
@@ -106,7 +111,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
             >
               {title}
             </a>
-          ) : source_type === "file" || source_type === "datamate" ? (
+          ) : isKnowledgeResult ? (
             <a
               href="#"
               onClick={handleFileDownload}
@@ -193,6 +198,8 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
                   <div className="text-xs text-gray-500">
                     {source_type === "datamate"
                       ? t("chatRightPanel.source.datamate", "Source: Datamate")
+                      : source_type === "aidp" || searchType === "aidp_search"
+                      ? t("chatRightPanel.source.aidp", "Source: AIDP")
                       : source_type === "file"
                       ? t("chatRightPanel.source.nexent", "Source: Nexent")
                       : ""}
@@ -280,10 +287,14 @@ export function ChatRightPanel({
     [onImageError]
   );
 
-  // Load image
-  const loadImage = async (imageUrl: string) => {
-    // If it is already in the cache and is not loading, return directly
-    if (imageData[imageUrl] && !imageData[imageUrl].isLoading) {
+  // Load image - wrapped in useCallback to ensure fresh state references
+  // NOTE: does NOT depend on imageData to avoid stale-closure issues
+  const loadImage = useCallback(async (imageUrl: string) => {
+    // Read current state inside the async function to avoid stale closure
+    const currentState = imageData;
+
+    // If it is already loaded with data, return directly
+    if (currentState[imageUrl]?.base64Data && !currentState[imageUrl]?.isLoading) {
       return Promise.resolve();
     }
 
@@ -295,8 +306,8 @@ export function ChatRightPanel({
     // Mark as loading
     loadingImages.current.add(imageUrl);
 
-    // Get the current load attempts
-    const currentAttempts = imageData[imageUrl]?.loadAttempts || 0;
+    // Get the current load attempts (from captured state)
+    const currentAttempts = currentState[imageUrl]?.loadAttempts || 0;
 
     // If the number of attempts is too high, do not continue to try
     if (currentAttempts >= 3) {
@@ -342,7 +353,7 @@ export function ChatRightPanel({
             base64Data: base64,
             contentType: blob.type || "image/jpeg",
             isLoading: false,
-            loadAttempts: currentAttempts + 1,
+            loadAttempts: (prev[imageUrl]?.loadAttempts || 0) + 1,
           },
         }));
         loadingImages.current.delete(imageUrl);
@@ -363,7 +374,7 @@ export function ChatRightPanel({
     }
 
     return Promise.resolve();
-  };
+  }, [handleImageLoadFail]);
 
   // Listen for message changes, update search results and images
   useEffect(() => {
@@ -398,33 +409,35 @@ export function ChatRightPanel({
       setSearchResults([]);
     }
 
-    // Process images
+    // Process images from the current message
     if (currentMessage?.images && Array.isArray(currentMessage.images)) {
-      // Get and remove duplicates
+      // Get unique images from the message
       const allImages = currentMessage.images;
 
-      // Filter out images that have been marked as failed to load
+      // Filter out images that have been marked as permanently failed
       const validImages = allImages.filter((imageUrl) => {
-        return !(imageData[imageUrl] && imageData[imageUrl].error);
+        const imgState = imageData[imageUrl];
+        // Keep image if: never tried, still loading, or has data (not in error state)
+        // Remove image if: has error AND loadAttempts >= 3
+        if (imgState?.error && (imgState?.loadAttempts || 0) >= 3) {
+          return false;
+        }
+        return true;
       });
 
       setProcessedImages(validImages);
 
-      // Preload images, but only load images that are not loaded yet
-      const loadPromises = validImages.map((imageUrl) => {
-        if (
-          !imageData[imageUrl] ||
-          (imageData[imageUrl].error === undefined &&
-            !imageData[imageUrl].isLoading)
-        ) {
-          return loadImage(imageUrl);
-        }
-        return Promise.resolve();
-      });
+      // Preload images - only load if not already loaded and not currently loading
+      validImages.forEach((imageUrl) => {
+        const imgState = imageData[imageUrl];
+        // Load if: no state, or has error but not yet reached max attempts
+        const shouldLoad =
+          !imgState ||
+          (imgState.error && (imgState.loadAttempts || 0) < 3 && !imgState.isLoading);
 
-      // Load all images in parallel
-      Promise.all(loadPromises).catch((error) => {
-        log.error(t("chatRightPanel.parallelLoadImagesError"), error);
+        if (shouldLoad) {
+          loadImage(imageUrl);
+        }
       });
     } else {
       setProcessedImages([]);
@@ -433,6 +446,11 @@ export function ChatRightPanel({
     currentMessage?.searchResults,
     currentMessage?.images,
     selectedMessageId,
+    // Include imageData to re-render when image loading state changes
+    imageData,
+    // Include loadImage and handleImageLoadFail to avoid stale closures
+    loadImage,
+    handleImageLoadFail,
   ]);
 
   // Handle image click

@@ -1,5 +1,7 @@
+import base64
 import logging
 from http import HTTPStatus
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -13,7 +15,42 @@ from nexent.core.models import OpenAIVLModel
 logger = logging.getLogger("image_service")
 
 
+def _is_loopback_image_url(decoded_url: str) -> bool:
+    try:
+        parsed = urlparse(decoded_url)
+    except Exception:
+        return False
+
+    if parsed.scheme not in {"http", "https"}:
+        return False
+
+    return parsed.hostname in {"127.0.0.1", "localhost"}
+
+
+async def _fetch_image_directly(decoded_url: str):
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(decoded_url) as response:
+            if response.status != HTTPStatus.OK:
+                error_text = await response.text()
+                logger.error(
+                    "Failed to fetch loopback image directly: %s", error_text
+                )
+                return {"success": False, "error": "Failed to fetch image"}
+
+            content = await response.read()
+            content_type = response.headers.get("Content-Type", "image/jpeg")
+            return {
+                "success": True,
+                "base64": base64.b64encode(content).decode("utf-8"),
+                "content_type": content_type,
+            }
+
+
 async def proxy_image_impl(decoded_url: str):
+    if _is_loopback_image_url(decoded_url):
+        return await _fetch_image_directly(decoded_url)
+
     # Create session to call the data processing service
     async with aiohttp.ClientSession() as session:
         # Call the data processing service to load the image
