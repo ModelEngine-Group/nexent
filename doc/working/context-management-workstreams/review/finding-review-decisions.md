@@ -308,6 +308,30 @@ accepted decision.
   passed in the delegation task.
 - **Updated documents:** W4, W5, W12, parent production plan, findings registry.
 
+## CM-022: Decision Trace Volume and Sensitivity
+
+- **Decision:** Retained as `Low / Measure-triggered`, with scope consolidated.
+- **Approved minimum:** Consolidate all decision trace requirements (from W5, W6,
+  W10, W15) into a single unified telemetry/observability specification document.
+  This document is low priority, to be implemented after core functionality
+  (W1-W6, W8-W14). Use OpenTelemetry-style spans, attributes, and events for
+  decision trace output. Traces are collected and stored by external observability
+  infrastructure (Jaeger, Tempo, Datadog, etc.), not by product-internal data
+  persistence. In normal production operation, traces are either disabled or emit
+  only summary-level spans with reason codes. Detailed traces (including content
+  snippets) are enabled only during active debugging or W15 benchmark runs.
+- **Rationale:** Decision traces are observability telemetry, not product data.
+  They are not consumed during normal runtime operation. Scattering trace
+  requirements across W5, W6, W10, and W15 creates inconsistency and unnecessary
+  product-internal storage burden. OpenTelemetry patterns provide mature label
+  management, sampling, and export to external systems, naturally resolving CM-022's
+  three risks: volume (external systems handle scale), sensitivity (detailed traces
+  only during debugging), and label cardinality (OTel best practices).
+- **Explicitly out of scope:** Product-internal decision trace persistence, dedicated
+  trace storage tables, trace data in the product database, and trace retention
+  policies managed by the product.
+- **Updated documents:** W5, W6, W15, parent production plan, findings registry.
+
 ## CM-015: Complete-Prefix Hashing Cost
 
 - **Decision:** Retained as `Low / Measure-triggered`, with scope reduced by W7 retirement.

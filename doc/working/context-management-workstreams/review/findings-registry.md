@@ -93,8 +93,14 @@ and review-artifact updates were written and consistency-checked.
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 25 | CM-001-CM-015, CM-016-CM-021, CM-023-CM-026 |
-| Pending individual review | 1 | CM-022 |
+| CM-022 | Retain as Low / Measure-triggered | Accepted | Completed | Consolidate decision trace requirements into a single unified telemetry spec (low priority). Use OpenTelemetry-style spans/attributes/events. External observability infrastructure collects and stores traces, not product database. Production: disabled or summary-level. Debug: detailed traces enabled on demand. | W5, W6, W15, parent plan, review artifacts |
+
+### Review Progress Summary
+
+| Progress state | Count | Findings |
+| --- | ---: | --- |
+| Accepted and document updates completed | 26 | CM-001-CM-026 |
+| Pending individual review | 0 | — |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary

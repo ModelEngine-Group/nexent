@@ -846,8 +846,12 @@ events → resume. If no snapshot exists, replay entire event log.
   - Duplicate equivalent tool calls, avoidable refetches, and context-thrash rate.
 - Run existing LongMemEval/EventQA/manual suites in CI with fixed baselines.
 - Add production dashboards and alerts.
-- Add an authorized decision trace showing candidate memories, write decisions, retrieval selection, exclusions, conflicts, reductions, and final context assembly reasons.
-- Add deterministic trace replay and an optional offline oracle that estimates whether observed faults were policy-controllable or unavoidable because mandatory minimum representations could not fit.
+- Add OpenTelemetry-style decision trace output for context/memory pipeline
+  observability (projection, policy, fit, and reduction decisions). Traces are
+  collected by external observability infrastructure, not persisted in the product
+  database. Detailed traces are enabled only during debugging or benchmark runs.
+  A unified telemetry specification consolidates all trace requirements (low
+  priority, post-core). **Finding:** CM-022.
 
 **Proof and benefit:** Converts context quality from anecdotal behavior into a maintained product contract.
 
@@ -1123,7 +1127,8 @@ Deliver:
 
 - Stable-prefix prompt assembly and cached-token metrics.
 - Full CI benchmark gates and production dashboards.
-- Memory-specific SLOs and authorized context/memory decision traces.
+- Memory-specific SLOs and unified telemetry specification for context/memory
+  decision traces (OpenTelemetry-style, external observability infrastructure).
 - Scope-appropriate load, fault, multilingual, and cost testing.
 - Optional effect-reconciliation, production-topology, or advanced-migration evidence
   only for capability claims approved for this release.
