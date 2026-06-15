@@ -402,6 +402,54 @@ async def test_prepare_model_dict_llm():
 
 
 @pytest.mark.asyncio
+async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
+    """Provider capacity candidates remain UI hints until an operator saves them."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "gpt-4"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/gpt-4",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "openai",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+            "api_key": "test-key",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "display_name": "openai/gpt-4",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+
+        model = {
+            "id": "openai/gpt-4",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "context_window_tokens": 128000,
+            "max_output_tokens": 16384,
+            "tokenizer_family": "o200k_base",
+            "capacity_source": "provider_candidate",
+        }
+
+        result = await prepare_model_dict(
+            "openai",
+            model,
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        assert "context_window_tokens" not in result
+        assert "max_output_tokens" not in result
+        assert "tokenizer_family" not in result
+        assert "capacity_source" not in result
+
+
+@pytest.mark.asyncio
 async def test_prepare_model_dict_vlm():
     """VLM models should behave like LLM: no emb dim check; chunk sizes None; base_url untouched."""
     with mock.patch(
