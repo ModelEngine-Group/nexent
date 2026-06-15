@@ -9,29 +9,79 @@ caches, checkpoints, locks, metrics, lifecycle operations, and authorization.
 
 `backend/agents/agent_run_manager.py` qualifies active runs by user and conversation,
 but keys reusable `ContextManager` instances and run counts only by `conversation_id`.
-Identical IDs across tenants or users can therefore collide. Future branches,
+Identical IDs across tenants or users can therefore collide. Durable sessions,
 checkpoints, and artifacts would multiply the impact unless identity is fixed first.
 
 ## Identity Contract
 
-Introduce immutable `ContextIdentity`:
+W4 owns identity resolution, authorization, and identity-qualified keying. It does not
+define event schemas, checkpoint contents, or lifecycle behavior; W5, W7, and W9 consume
+the authorized identity contract.
+
+Introduce immutable branchless `ContextIdentity`:
 
 ```text
-tenant_id, user_id, conversation_id, agent_id, branch_id
+tenant_id, user_id, conversation_id
 ```
 
-All fields are required for context-state mutation. `branch_id` defaults to an explicit
-root branch, never null. Stable serialization is used for database uniqueness, cache
-keys, distributed locks, and metric labels. Public APIs derive tenant/user identity
-from authenticated request context and must not trust caller-supplied ownership fields.
+All fields are required for conversation/session-state mutation. Agent identity is a
+run property, not a session-ownership field, because a conversation may execute
+different agents over time. Stable serialization is used for database uniqueness,
+cache keys, distributed locks, and metric labels. Public APIs derive tenant/user
+identity from authenticated request context and must not trust caller-supplied
+ownership fields.
+
+### Initial Single-Owner Contract
+
+The initial release supports exactly one immutable owning `tenant_id` and `user_id` for
+each conversation and its W5 `agent_session`. It does not support conversation
+membership, shared-session access, or ownership transfer. A future product request to
+give another user an independent copy creates a new conversation/session; it does not
+change the original owner's durable identity.
+
+Shared agents, tenant-shared memories, and other independently governed resources do
+not grant access to a conversation, session, event, checkpoint, artifact, projection,
+or lifecycle operation. Explicit administrator/operator privileges, when separately
+defined, are audited policy exceptions and never change session ownership.
 
 ## Authorization Rules
 
-- Read/write requires tenant and user authorization plus conversation access.
-- Shared-agent state uses an explicit policy and distinct scope, not omitted user IDs.
+- Ordinary conversation/session read and write requires the authenticated user to
+  match the immutable owner resolved by trusted backend code.
+- Requests to share a conversation or transfer ownership return
+  `shared_conversation_unsupported` or `ownership_transfer_unsupported`.
+- Ordinary unauthorized resource access returns the existing non-disclosing
+  `access_denied`/`not_found` behavior rather than revealing whether another user's
+  resource exists.
+- Shared-agent and tenant-shared-memory state use their own explicit policy and scope,
+  not omitted user IDs or inherited conversation access.
 - Cross-tenant operations are denied before storage lookup.
 - Metrics must avoid unbounded raw identity labels; use scoped hashes or aggregate labels.
 - Deletion and cleanup operate on the same identity contract.
+
+## Identity Resolution Contract
+
+```text
+resolve_context_identity(authenticated_request, conversation_id) -> ContextIdentity
+authorize_context_operation(identity, operation, resource) -> AuthorizationDecision
+```
+
+The immutable identity is canonically serialized. Decisions contain allow/deny, policy
+version, reason code, and audit metadata. Tenant/user ownership is always derived and
+verified server-side. Required denials include `identity_not_found`, `tenant_mismatch`,
+`user_not_authorized`, `conversation_not_owned`, and `resource_scope_mismatch`.
+Caller-supplied identity fields or authorization decisions are untrusted. Model
+dispatch and governed persistence require a current server-issued allow decision bound
+to the operation and resource being executed.
+
+## Keying, Deliverables, and Phases
+
+- Caches, durable uniqueness constraints, locks, and cleanup selectors use the complete
+  identity or a collision-resistant canonical hash; raw identities are not metric labels.
+- Deliver the shared identity model, resolver, authorization matrix/service, migrated
+  runtime/storage keys, collision report, and denied-access audit events.
+- Phase through shadow dual-key comparison, cache/run/lock migration, full enforcement,
+  then removal of bare internal mutation APIs and legacy keys.
 
 ## Implementation Plan
 
@@ -40,8 +90,12 @@ from authenticated request context and must not trust caller-supplied ownership 
 3. Require identity in context-manager creation, cleanup, and run registration.
 4. Add identity columns and composite indexes to W5/W7 persistence schemas.
 5. Add an authorization service used by checkpoint, artifact, and lifecycle operations.
-6. Remove or deprecate mutation APIs that accept only `conversation_id`.
+6. Remove or deprecate internal mutation APIs that accept only `conversation_id`;
+   public conversation APIs may retain it but must resolve and authorize the full
+   identity from request context.
 7. Add structured security audit events for denied access.
+8. Require model dispatch and governed persistence boundaries to reject missing, stale,
+   mismatched, or caller-supplied authorization decisions.
 
 ## Repository Touchpoints
 
@@ -55,16 +109,21 @@ from authenticated request context and must not trust caller-supplied ownership 
 
 ## Tests
 
-- Collision tests use identical conversation and branch IDs across tenants and users.
-- Authorization tests cover reads, writes, deletes, restore, fork, and artifact access.
+- Collision tests use identical conversation IDs across tenants and users.
+- Authorization tests cover reads, writes, deletes, restore, and artifact access.
+- Single-owner tests reject sharing and ownership-transfer requests, prove shared-agent
+  or tenant-shared-memory access does not grant session access, and prove audited
+  operator privileges do not mutate the session owner.
 - Concurrency tests prove locks are identity-qualified.
 - Cleanup tests prove deleting one identity leaves all colliding identities untouched.
 - Static checks or targeted repository tests reject new bare-ID context mutation APIs.
+- Negative integration tests prove SDK/client identity and authorization assertions
+  cannot authorize model dispatch or governed persistence.
 
 ## Rollout and Definition of Done
 
 Dual-key in-memory state briefly while logging mismatches, then switch to the full
-identity and remove legacy keys. Existing sessions receive an explicit root branch and
-agent identity during migration. W4 is done when every context-state mutation requires
-authorized `ContextIdentity` and collision/security suites pass.
-
+identity and remove legacy keys. Existing conversations receive an internal W5 session
+during migration. W4 is done when every context-state mutation requires authorized
+`ContextIdentity`, unsupported sharing/transfer fails explicitly, and collision/security
+suites pass.

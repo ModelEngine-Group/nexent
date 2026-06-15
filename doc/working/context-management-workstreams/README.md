@@ -13,6 +13,23 @@ the source of truth for roadmap priority and cross-workstream architecture.
 - Add links to ADRs, migrations, pull requests, dashboards, and test evidence as work proceeds.
 - Do not mark a workstream complete until its definition of done and release evidence are satisfied.
 
+## Implementation-Ready Standard
+
+Every W-ID specification must make the following executable without requiring the
+implementing squad to invent missing architecture:
+
+1. State objective, ownership boundaries, dependencies, and non-goals.
+2. Define typed input/output, persistence, versioning, and failure contracts.
+3. Describe runtime ordering, concurrency, idempotency, authorization, and recovery.
+4. Name required deliverables and concrete repository integration points.
+5. Divide delivery into safe phases with compatibility, migration, and rollback behavior.
+6. Define observable reason codes, metrics, and operator/debugging evidence.
+7. Specify unit, integration, property, migration, security, chaos, and replay tests as applicable.
+8. End with measurable completion gates that prove bypass paths and legacy authority are removed.
+
+If a workstream delegates behavior to another W-ID, it must name the boundary and must
+not duplicate or weaken the delegated contract.
+
 ## Workstream Index
 
 | ID | Topic | Module | Depends on |
@@ -43,4 +60,5 @@ the source of truth for roadmap priority and cross-workstream architecture.
 5. All persisted payloads are redacted and governed before storage.
 6. Context selection and lifecycle decisions emit stable reason codes and observable metrics.
 7. Existing chat UI behavior remains compatible during migration.
-
+8. Durable execution history is linear and branchless. Existing public APIs keep
+   integer `conversation_id`; internal execution logging uses `agent_session_id`.
