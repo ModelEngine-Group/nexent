@@ -177,6 +177,17 @@ def compute_fingerprint(
     return hashlib.sha256(encoded).hexdigest()[:32]
 
 
+_OVERRIDABLE_FIELDS = (
+    "context_window_tokens",
+    "max_input_tokens",
+    "max_output_tokens",
+    "default_output_reserve_tokens",
+    "tokenizer_family",
+)
+
+_DEFAULT_REQUESTED_OUTPUT_TOKENS = 1024
+
+
 def resolve_capacity(
     *,
     model_id: str,
@@ -187,10 +198,149 @@ def resolve_capacity(
 ) -> ModelCapacitySnapshot:
     """Resolve capacity for one model request.
 
-    Skeleton only; the full resolver is implemented in a follow-up PR.
-    Resolution precedence (per W1 spec): operator override > approved profile >
-    provider discovery (candidate) > unknown.
+    Precedence per W1 spec: operator override > approved profile > unknown.
+    Production dispatch requires known hard capacity; otherwise
+    `ProviderCapabilityUnknown` is raised. Provider-discovery candidate metadata
+    is not consulted by this implementation — it is recorded by upstream provider
+    adapters and surfaced only after operators promote it into an approved
+    profile.
     """
-    raise NotImplementedError(
-        "ModelCapacityResolver.resolve_capacity is implemented in the W1 follow-up PR."
+    # Lazy import to avoid a static cycle (tokenizer_registry imports CountingMode).
+    from . import tokenizer_registry as _tokenizer_registry
+
+    overrides = dict(operator_overrides) if operator_overrides else {}
+    profile = capability_profiles.get((provider, model_id))
+
+    field_sources: dict[str, CapacitySource] = {}
+
+    def _pick(field: str) -> Any:
+        value = overrides.get(field)
+        if value is not None:
+            field_sources[field] = "operator"
+            return value
+        if profile is not None:
+            profile_value = getattr(profile, field)
+            if profile_value is not None:
+                field_sources[field] = "profile"
+                return profile_value
+        field_sources[field] = "unknown"
+        return None
+
+    context_window_tokens = _pick("context_window_tokens")
+    max_input_tokens = _pick("max_input_tokens")
+    max_output_tokens = _pick("max_output_tokens")
+    default_output_reserve_tokens = _pick("default_output_reserve_tokens")
+    tokenizer_family = _pick("tokenizer_family")
+    capability_profile_version = (
+        profile.capability_profile_version if profile is not None else None
+    )
+
+    if context_window_tokens is None and max_input_tokens is None:
+        raise ProviderCapabilityUnknown(
+            f"No known hard capacity for ({provider!r}, {model_id!r}); "
+            f"set context_window_tokens or max_input_tokens via operator override "
+            f"or add a capability profile entry."
+        )
+
+    for name, value in (
+        ("context_window_tokens", context_window_tokens),
+        ("max_input_tokens", max_input_tokens),
+        ("max_output_tokens", max_output_tokens),
+        ("default_output_reserve_tokens", default_output_reserve_tokens),
+    ):
+        if value is not None and value <= 0:
+            raise InvalidCapacityConfiguration(
+                f"{name} must be a positive integer, got {value}"
+            )
+
+    if (
+        max_output_tokens is not None
+        and context_window_tokens is not None
+        and max_output_tokens > context_window_tokens
+    ):
+        raise InvalidCapacityConfiguration(
+            f"max_output_tokens ({max_output_tokens}) exceeds context_window_tokens "
+            f"({context_window_tokens})"
+        )
+
+    if requested_output_tokens is None:
+        requested_output_tokens = (
+            default_output_reserve_tokens
+            if default_output_reserve_tokens is not None
+            else _DEFAULT_REQUESTED_OUTPUT_TOKENS
+        )
+    if requested_output_tokens <= 0:
+        raise InvalidCapacityConfiguration(
+            f"requested_output_tokens must be positive, got {requested_output_tokens}"
+        )
+    if (
+        max_output_tokens is not None
+        and requested_output_tokens > max_output_tokens
+    ):
+        raise RequestedOutputExceedsCap(
+            f"requested_output_tokens ({requested_output_tokens}) exceeds "
+            f"max_output_tokens ({max_output_tokens})"
+        )
+
+    derived_limits: list[int] = []
+    if max_input_tokens is not None:
+        derived_limits.append(max_input_tokens)
+    if context_window_tokens is not None:
+        derived_limits.append(context_window_tokens - requested_output_tokens)
+    provider_input_limit_tokens = min(derived_limits)
+    if provider_input_limit_tokens <= 0:
+        raise InvalidCapacityConfiguration(
+            f"derived provider_input_limit_tokens is non-positive: "
+            f"{provider_input_limit_tokens}"
+        )
+
+    _, counting_mode = _tokenizer_registry.resolve(tokenizer_family)
+
+    unknown_capabilities: list[str] = []
+    if profile is None:
+        unknown_capabilities.append("capability_profile_missing")
+    else:
+        if profile.reasoning_window_behavior == "unknown":
+            unknown_capabilities.append("reasoning_window_behavior")
+        if profile.provider_overhead_behavior == "unknown":
+            unknown_capabilities.append("provider_overhead_behavior")
+        if profile.prompt_cache == "unknown":
+            unknown_capabilities.append("prompt_cache")
+    if counting_mode == "estimated":
+        unknown_capabilities.append("tokenizer")
+
+    fingerprint = compute_fingerprint(
+        resolver_version=RESOLVER_VERSION,
+        provider=provider,
+        model_name=model_id,
+        context_window_tokens=context_window_tokens,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        default_output_reserve_tokens=default_output_reserve_tokens,
+        requested_output_tokens=requested_output_tokens,
+        provider_input_limit_tokens=provider_input_limit_tokens,
+        tokenizer_family=tokenizer_family,
+        counting_mode=counting_mode,
+        capability_profile_version=capability_profile_version,
+        unknown_capabilities=unknown_capabilities,
+        field_sources=dict(field_sources),
+    )
+
+    return ModelCapacitySnapshot(
+        provider=provider,
+        model_name=model_id,
+        context_window_tokens=context_window_tokens,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        default_output_reserve_tokens=default_output_reserve_tokens,
+        requested_output_tokens=requested_output_tokens,
+        provider_input_limit_tokens=provider_input_limit_tokens,
+        tokenizer_family=tokenizer_family,
+        counting_mode=counting_mode,
+        unknown_capabilities=unknown_capabilities,
+        field_sources=dict(field_sources),
+        capability_profile_version=capability_profile_version,
+        resolver_version=RESOLVER_VERSION,
+        warnings=[],
+        fingerprint=fingerprint,
     )
