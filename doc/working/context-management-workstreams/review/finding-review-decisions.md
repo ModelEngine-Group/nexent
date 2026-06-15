@@ -308,6 +308,27 @@ accepted decision.
   passed in the delegation task.
 - **Updated documents:** W4, W5, W12, parent production plan, findings registry.
 
+## CM-010: Numeric Availability and Recovery Targets
+
+- **Decision:** Retained as `Medium / Claim-gated`, with deferred target definition.
+- **Approved minimum:** Do not pre-define numeric availability, RPO, RTO, rebuild
+  time, queue lag, or storage capacity targets. After W1-W16 functional
+  implementation is complete, use W15 measurement infrastructure to collect real
+  recovery time, data loss, queue lag, and storage data for each deployment topology.
+  Define topology-specific numeric targets based on observed data before making any
+  production-scale claim. Until targets are defined, do not claim production-scale
+  readiness.
+- **Rationale:** Pre-defining numeric targets without real data risks either
+  over-engineering (targets set too aggressive) or under-delivering (targets set too
+  loose). This aligns with CM-009 (measure before defining envelopes), CM-004
+  (measure before optimizing), and CM-011 (evidence-based gates). W7 retirement
+  simplifies recovery to compression.snapshot event replay, making rebuild time
+  measurement straightforward.
+- **Explicitly out of scope:** Pre-defined RPO/RTO targets, general SLO framework,
+  complete RPO/RTO matrix for all topologies, and automatic SLO discovery before
+  real measurement data exists.
+- **Updated documents:** W15, parent production plan, findings registry.
+
 ## CM-009: Representative Workload Model
 
 - **Decision:** Retained as `High / Claim-gated`, with deferred envelope definition.
