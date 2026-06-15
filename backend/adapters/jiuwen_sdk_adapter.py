@@ -273,7 +273,7 @@ def _lazy_import_jiuwen():
     except ImportError as e:
         raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
 
-    from openjiuwen.core.foundation.llm import (
+    from openjiuwen.core.foundation.llm.schema.config import (
         ModelRequestConfig,
         ModelClientConfig,
         ProviderType,
@@ -383,6 +383,23 @@ def _build_openai_client(
 
 def _build_message(role: str, content: str) -> dict:
     return {"role": role, "content": content}
+def _lazy_import_jiuwen_builders():
+    """Lazily import prompt builders only when optimization paths need them."""
+    _install_jiuwen_bypasser()
+
+    try:
+        import openjiuwen  # noqa: F401
+    except ImportError as e:
+        raise JiuwenSDKError(f"Jiuwen SDK 未安装: {e}") from e
+
+    from openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder import (
+        FeedbackPromptBuilder,
+    )
+    from openjiuwen.dev_tools.prompt_builder.builder.badcase_prompt_builder import (
+        BadCasePromptBuilder,
+    )
+
+    return FeedbackPromptBuilder, BadCasePromptBuilder
 
 
 def _unwrap_prompt_response(text: str) -> str:
@@ -484,8 +501,6 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        lang = normalize_language(language)
-
         logger.info(f"[jiuwen-adapter] mode={mode}, start_pos={start_pos}, end_pos={end_pos}")
 
         request_config, client_config = build_jiuwen_model_configs(
@@ -496,7 +511,7 @@ class JiuwenSDKAdapter:
             f"api_base={client_config.api_base}, model={request_config.model_name}, "
             f"timeout={getattr(client_config, 'timeout', None)}, max_retries={getattr(client_config, 'max_retries', None)}"
         )
-        _, _, _, FeedbackPromptBuilder, _, _, _, _ = _lazy_import_jiuwen()
+        FeedbackPromptBuilder, _ = _lazy_import_jiuwen_builders()
 
         builder = FeedbackPromptBuilder(
             model_config=request_config,
@@ -511,7 +526,7 @@ class JiuwenSDKAdapter:
                     mode=mode,
                     start_pos=start_pos,
                     end_pos=end_pos,
-                    language=lang,
+                    language=normalize_language(language),
                 )
             )
             if result is None:
@@ -535,7 +550,7 @@ class JiuwenSDKAdapter:
         """
         self._ensure_available()
 
-        _, _, _, _, BadCasePromptBuilder, _, _, _ = _lazy_import_jiuwen()
+        _, BadCasePromptBuilder = _lazy_import_jiuwen_builders()
 
         request_config, client_config = build_jiuwen_model_configs(
             self.model_id, self.tenant_id

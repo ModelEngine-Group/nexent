@@ -1627,10 +1627,10 @@ class TestEnsureNetwork:
         mock_network = MagicMock()
         docker_container_client.client.networks.get.return_value = mock_network
 
-        docker_container_client._ensure_network("nexent_nexent")
+        docker_container_client._ensure_network("nexent_network")
 
         docker_container_client.client.networks.get.assert_called_once_with(
-            "nexent_nexent")
+            "nexent_network")
         docker_container_client.client.networks.create.assert_not_called()
 
     def test_ensure_network_create_new(self, docker_container_client):
@@ -1640,12 +1640,12 @@ class TestEnsureNetwork:
         mock_network = MagicMock()
         docker_container_client.client.networks.create.return_value = mock_network
 
-        docker_container_client._ensure_network("nexent_nexent")
+        docker_container_client._ensure_network("nexent_network")
 
         docker_container_client.client.networks.get.assert_called_once_with(
-            "nexent_nexent")
+            "nexent_network")
         docker_container_client.client.networks.create.assert_called_once_with(
-            "nexent_nexent")
+            "nexent_network")
 
     def test_ensure_network_race_condition(self, docker_container_client):
         """Test ensuring network when race condition occurs (another process creates it)"""
@@ -1657,7 +1657,7 @@ class TestEnsureNetwork:
         docker_container_client.client.networks.create.side_effect = APIError(
             "Network already exists")
 
-        docker_container_client._ensure_network("nexent_nexent")
+        docker_container_client._ensure_network("nexent_network")
 
         assert docker_container_client.client.networks.get.call_count == 2
         docker_container_client.client.networks.create.assert_called_once()
@@ -1672,7 +1672,7 @@ class TestEnsureNetwork:
             "Create failed")
 
         with pytest.raises(ContainerError, match="Failed to create or get Docker network"):
-            docker_container_client._ensure_network("nexent_nexent")
+            docker_container_client._ensure_network("nexent_network")
 
     def test_ensure_network_get_api_error(self, docker_container_client):
         """Test ensuring network when get raises APIError"""
@@ -1680,7 +1680,7 @@ class TestEnsureNetwork:
             "API error")
 
         with pytest.raises(ContainerError, match="Failed to get Docker network"):
-            docker_container_client._ensure_network("nexent_nexent")
+            docker_container_client._ensure_network("nexent_network")
 
 
 # ---------------------------------------------------------------------------

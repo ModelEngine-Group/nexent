@@ -12,9 +12,9 @@ import {
   Popconfirm,
   message,
   Select,
+  Tooltip
 } from "antd";
 import { Edit, Trash2 } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useUserList } from "@/hooks/user/useUserList";
@@ -278,7 +278,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full w-full flex flex-col overflow-auto">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>

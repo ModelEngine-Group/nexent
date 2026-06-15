@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { TokenMetrics } from "@/types/chat";
+import { Tooltip } from "antd"
 
 interface TokenUsageIndicatorProps {
   latestMetrics: TokenMetrics | null;

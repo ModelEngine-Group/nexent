@@ -9,12 +9,12 @@ description = "Nexent Agent Framework"
 authors = [
     { name = "Nexent Dev Team" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.12"
 keywords = ["agent", "ai", "framework"]
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
     "aiofiles>=24.1.0",
@@ -58,6 +58,7 @@ dependencies = [
     "ijson==3.5.0",
     "langchain-text-splitters==1.1.2",
     "ebooklib==0.20",
+    "pypandoc==1.17",
 ]
 
 [tool.uv]

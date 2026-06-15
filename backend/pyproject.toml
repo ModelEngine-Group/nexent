@@ -25,17 +25,10 @@ dependencies = [
     "langchain>=0.3.26",
     "scikit-learn>=1.0.0",
     "numpy>=1.24.0",
+    "defusedxml>=0.7.1",
     "openjiuwen>=0.1.0",
     "pydantic-settings>=2.0.0",
-]
-
-[tool.uv]
-# openjiuwen's heavy transitive deps are not needed by backend's prompt_builder module
-exclude-dependencies = [
-    "transformers",
-    "dashscope",
-    "pymilvus",
-    "pdfplumber",
+    "python-docx>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +40,7 @@ data-process = [
     "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
     "openpyxl>=3.1.5",
     "xlrd>=2.0.1",
-    "huggingface_hub>=0.19.0,<0.21.0"
+    "huggingface_hub>=0.30.0,<1.0"
 ]
 test = [
     "pytest",

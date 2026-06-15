@@ -30,6 +30,11 @@ export const API_ENDPOINTS = {
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
     unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
+  cas: {
+    config: `${API_BASE_URL}/user/cas/config`,
+    login: `${API_BASE_URL}/user/cas/login`,
+    renew: `${API_BASE_URL}/user/cas/renew`,
+  },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
     create: `${API_BASE_URL}/conversation/create`,

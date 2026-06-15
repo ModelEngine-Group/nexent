@@ -2,9 +2,8 @@
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag, Segmented } from "antd";
+import { Table, Button, Popconfirm, message, Tag, Segmented, Tooltip } from "antd";
 import { Edit, Trash2, RefreshCw } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
@@ -13,6 +12,7 @@ import { useMonitoringData, type TimeRange } from "@/hooks/useMonitoringData";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
+import { MODEL_TYPES } from "@/const/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
@@ -177,6 +177,31 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     return "#ff4d4f";
   };
 
+  const getModelTypeName = (type: ModelType) => {
+    switch (type) {
+      case MODEL_TYPES.LLM:
+        return t("model.type.llm");
+      case MODEL_TYPES.EMBEDDING:
+        return t("model.type.embedding");
+      case MODEL_TYPES.MULTI_EMBEDDING:
+        return t("model.type.multiEmbedding");
+      case MODEL_TYPES.RERANK:
+        return t("model.type.rerank");
+      case MODEL_TYPES.STT:
+        return t("model.type.stt");
+      case MODEL_TYPES.TTS:
+        return t("model.type.tts");
+      case MODEL_TYPES.VLM:
+        return t("model.type.imageUnderstanding");
+      case MODEL_TYPES.VLM2:
+        return t("model.type.imageGeneration");
+      case MODEL_TYPES.VLM3:
+        return t("model.type.videoUnderstanding");
+      default:
+        return t("model.type.unknown");
+    }
+  };
+
   const TEXT_MODEL_TYPES = ["llm", "vlm", "long_context"];
 
   const renderTextModelMetric = (
@@ -202,7 +227,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       dataIndex: "type",
       key: "type",
       width: 100,
-      render: (type: ModelType) => <Tag>{t(`tenantResources.models.type.${type}`)}</Tag>,
+      render: (type: ModelType) => <Tag>{getModelTypeName(type)}</Tag>,
     },
     {
       title: t("common.status"),
@@ -335,7 +360,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-auto">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Segmented
@@ -343,9 +368,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
             value={monitoringTimeRange}
             onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
             options={[
-              { label: "24h", value: "24h" },
-              { label: "7d", value: "7d" },
-              { label: "30d", value: "30d" },
+              { label: t("monitoring.dashboard.timeRange.24h"), value: "24h" },
+              { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
+              { label: t("monitoring.dashboard.timeRange.30d"), value: "30d" },
             ]}
           />
           <Button
@@ -372,8 +397,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           total: total,
         }}
         onChange={handlePageChange}
-        scroll={{ x: true }}
-        className="flex-1"
+        scroll={{ y: "calc(100vh - 580px)" }}
+        className="flex-1 [&_.ant-table]:h-full"
       />
 
       <ModelAddDialog

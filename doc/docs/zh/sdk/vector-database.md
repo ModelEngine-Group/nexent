@@ -579,7 +579,11 @@ python -m nexent.service.vectordatabase_service
   - 参数:
     - `index_name`: 索引名称 (路径参数)
     - `path_or_url`: 文档路径或URL (查询参数)
-  - 返回示例: `{"status": "success", "deleted_count": 1}`
+    - `scope`: 删除范围 (查询参数，默认 `full`)
+      - `source_only`: 仅删除 MinIO 源文件，保留 ES 中的切片与向量（检索仍可用，预览不可用）
+      - `full`: 删除 ES 文档、MinIO 源文件，并清理相关 Redis 任务记录
+  - 返回示例 (`source_only`): `{"status": "success", "scope": "source_only", "deleted_es_count": 0, "deleted_minio": true, "source_available": false}`
+  - 返回示例 (`full`): `{"status": "success", "scope": "full", "deleted_es_count": 5, "deleted_minio": true}`
 
 #### 搜索操作
 
@@ -728,8 +732,11 @@ curl -X POST "http://localhost:8000/indices/search/hybrid" \
     "weight_accurate": 0.3
   }'
 
-# 删除文档
-curl -X DELETE "http://localhost:8000/indices/my_documents/documents?path_or_url=https://example.com/doc1"
+# 删除源文件（保留索引）
+curl -X DELETE "http://localhost:8000/indices/my_documents/documents?path_or_url=knowledge_base/doc1.pdf&scope=source_only"
+
+# 从知识库彻底移除文档
+curl -X DELETE "http://localhost:8000/indices/my_documents/documents?path_or_url=knowledge_base/doc1.pdf&scope=full"
 
 # 创建索引
 curl -X POST "http://localhost:8000/indices/my_documents"

@@ -2,6 +2,7 @@ import json
 import ast
 import time
 import threading
+from datetime import datetime
 from textwrap import dedent
 from typing import Any, Optional, List, Dict
 from collections.abc import Generator
@@ -414,7 +415,7 @@ Additional Args:
             error_msg = str(e)
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
-                level=LogLevel.WARNING,
+                level=LogLevel.ERROR,
             )
             raise AgentExecutionError(error_msg, self.logger)
 
@@ -478,7 +479,11 @@ Additional Args:
         ```
         """
         max_steps = max_steps or self.max_steps
-        self.task = task
+        # Prepend current time to the user task instead of baking it into the
+        # system prompt. This keeps the system prefix stable so prompt/KV caches
+        # can hit across requests; only the trailing user message varies.
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.task = f"[Current time: {time_str}]\n\n{task}"
         if additional_args is not None:
             self.state.update(additional_args)
             self.task += f"""
@@ -796,7 +801,7 @@ You have been provided with these additional arguments, that you can access usin
         except Exception as e:
             # Fallback to error message if streaming fails
             model_output = f"Error in generating final LLM output: {e}"
-            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.WARNING)
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
 
         # Finalize the memory step
         final_memory_step.timing.end_time = time.time()

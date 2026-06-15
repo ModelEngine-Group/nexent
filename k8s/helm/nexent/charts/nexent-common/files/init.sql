@@ -340,6 +340,8 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     version_no INTEGER DEFAULT 0 NOT NULL,
     current_version_no INTEGER NULL,
     ingroup_permission VARCHAR(30),
+    greeting_message TEXT,
+    example_questions JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -397,6 +399,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = dr
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to enable context management (compression) for this agent';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.greeting_message IS 'Agent greeting message displayed on chat initial screen';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.example_questions IS 'List of example questions for starting a conversation with this agent';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -1883,6 +1887,17 @@ CREATE TABLE IF NOT EXISTS nexent.evaluation_set_t (
 
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+CREATE TABLE IF NOT EXISTS nexent.user_cas_session_t (
+    cas_session_id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL UNIQUE,
+    user_id VARCHAR(100) NOT NULL,
+    cas_user_id VARCHAR(200) NOT NULL,
+    cas_session_index VARCHAR(500),
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
     delete_flag VARCHAR(1) DEFAULT 'N'
@@ -1993,3 +2008,14 @@ CREATE INDEX IF NOT EXISTS ix_agent_eval_case_tenant_id ON nexent.agent_evaluati
 COMMENT ON TABLE nexent.agent_evaluation_case_t IS 'Per-case evaluation results.';
 COMMENT ON COLUMN nexent.agent_evaluation_case_t.predict IS 'Predict JSON: {answer: string, raw?: any}';
 COMMENT ON COLUMN nexent.agent_evaluation_case_t.status IS 'Case status: PENDING/RUNNING/COMPLETED/FAILED';
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_session_id
+    ON nexent.user_cas_session_t (session_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_user_id
+    ON nexent.user_cas_session_t (user_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_cas_user_id
+    ON nexent.user_cas_session_t (cas_user_id);
+
+COMMENT ON TABLE nexent.user_cas_session_t IS 'Server-side session records for CAS SSO login and logout synchronization';
+COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for revocation checks';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';

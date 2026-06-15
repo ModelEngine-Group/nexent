@@ -34,6 +34,7 @@ from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
 from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
+from apps.cas_app import router as cas_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
 
@@ -75,6 +76,7 @@ else:
     app.include_router(user_management_router)
 
 app.include_router(oauth_router)
+app.include_router(cas_router)
 
 app.include_router(summary_router)
 app.include_router(prompt_router)

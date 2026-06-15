@@ -15,7 +15,7 @@ import aiohttp
 import redis
 import torch
 from PIL import Image
-from celery import states, chain
+from celery import states
 from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
 
@@ -25,7 +25,7 @@ from consts.model import BatchTaskRequest
 from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
 from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
-from data_process.tasks import process, forward
+from data_process.tasks import submit_process_forward_chain
 from data_process.utils import get_task_info, get_all_task_ids_from_redis
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
@@ -54,7 +54,8 @@ class DataProcessService:
 
         self._inspector = None
         self._inspector_last_time = 0
-        self._inspector_ttl = 300  # 5 minutes - inspector is expensive to create (ping all workers)
+        # 5 minutes - inspector is expensive to create (ping all workers)
+        self._inspector_ttl = 300
         self._inspector_lock = None
         self._inspector_lock = threading.Lock()
 
@@ -152,7 +153,8 @@ class DataProcessService:
 
             def _normalize_runtime_meta(task: Dict[str, Any]) -> Dict[str, Any]:
                 task_name_full = task.get('name', '') or ''
-                task_name = task_name_full.split('.')[-1] if task_name_full else ''
+                task_name = task_name_full.split(
+                    '.')[-1] if task_name_full else ''
                 kwargs = task.get('kwargs') or {}
                 if isinstance(kwargs, str):
                     try:
@@ -178,35 +180,43 @@ class DataProcessService:
             def get_active():
                 t = time.time()
                 # Create fresh inspector with short timeout for each call
-                short_inspector = celery_app.control.inspect(timeout=short_timeout)
+                short_inspector = celery_app.control.inspect(
+                    timeout=short_timeout)
                 result = short_inspector.active()
                 elapsed = time.time() - t
-                logger.info(f"[get_all_tasks] inspector.active() took {elapsed:.3f}s")
+                logger.info(
+                    f"[get_all_tasks] inspector.active() took {elapsed:.3f}s")
                 return result if result else {}
 
             def get_reserved():
                 t = time.time()
-                short_inspector = celery_app.control.inspect(timeout=short_timeout)
+                short_inspector = celery_app.control.inspect(
+                    timeout=short_timeout)
                 result = short_inspector.reserved()
                 elapsed = time.time() - t
-                logger.info(f"[get_all_tasks] inspector.reserved() took {elapsed:.3f}s")
+                logger.info(
+                    f"[get_all_tasks] inspector.reserved() took {elapsed:.3f}s")
                 return result if result else {}
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 future_active = executor.submit(get_active)
                 future_reserved = executor.submit(get_reserved)
-                active_tasks_dict = future_active.result(timeout=short_timeout + 0.5)
-                reserved_tasks_dict = future_reserved.result(timeout=short_timeout + 0.5)
+                active_tasks_dict = future_active.result(
+                    timeout=short_timeout + 0.5)
+                reserved_tasks_dict = future_reserved.result(
+                    timeout=short_timeout + 0.5)
             celery_duration = time.time() - celery_start
             if celery_duration > 0.5:
-                logger.warning(f"[get_all_tasks] Inspector took {celery_duration:.3f}s (expected <0.5s)")
+                logger.warning(
+                    f"[get_all_tasks] Inspector took {celery_duration:.3f}s (expected <0.5s)")
             if active_tasks_dict:
                 for worker, tasks in active_tasks_dict.items():
                     for task in tasks:
                         task_id = task.get('id')
                         if task_id:
                             task_ids.add(task_id)
-                            runtime_task_meta[task_id] = _normalize_runtime_meta(task)
+                            runtime_task_meta[task_id] = _normalize_runtime_meta(
+                                task)
             if reserved_tasks_dict:
                 for worker, tasks in reserved_tasks_dict.items():
                     for task in tasks:
@@ -214,7 +224,8 @@ class DataProcessService:
                         if task_id:
                             task_ids.add(task_id)
                             # Keep active metadata if already present
-                            runtime_task_meta.setdefault(task_id, _normalize_runtime_meta(task))
+                            runtime_task_meta.setdefault(
+                                task_id, _normalize_runtime_meta(task))
 
             # Get task IDs from Redis backend (covers completed/failed tasks within expiry)
             try:
@@ -241,11 +252,14 @@ class DataProcessService:
                     if not task_info.get('task_name') and runtime_meta.get('task_name'):
                         task_info['task_name'] = runtime_meta.get('task_name')
                     if not task_info.get('index_name') and runtime_meta.get('index_name'):
-                        task_info['index_name'] = runtime_meta.get('index_name')
+                        task_info['index_name'] = runtime_meta.get(
+                            'index_name')
                     if not task_info.get('path_or_url') and runtime_meta.get('path_or_url'):
-                        task_info['path_or_url'] = runtime_meta.get('path_or_url')
+                        task_info['path_or_url'] = runtime_meta.get(
+                            'path_or_url')
                     if not task_info.get('original_filename') and runtime_meta.get('original_filename'):
-                        task_info['original_filename'] = runtime_meta.get('original_filename')
+                        task_info['original_filename'] = runtime_meta.get(
+                            'original_filename')
 
                 if filter and not (task_info.get('index_name') and task_info.get('task_name')):
                     # Keep user-visible queued tasks even before worker updates task meta.
@@ -538,30 +552,23 @@ class DataProcessService:
                     f"Missing required field 'index_name' in source config: {source_config}")
                 continue
 
-            # Create and submit a chain: process -> forward
-            task_chain = chain(
-                process.s(
-                    source=source,
-                    source_type=source_type,
-                    chunking_strategy=chunking_strategy,
-                    index_name=index_name,
-                    original_filename=original_filename,
-                    embedding_model_id=embedding_model_id,
-                    tenant_id=tenant_id
-                ).set(queue='process_q'),
-                forward.s(
-                    index_name=index_name,
-                    source=source,
-                    source_type=source_type,
-                    original_filename=original_filename,
-                    authorization=authorization
-                ).set(queue='forward_q')
+            chain_id = submit_process_forward_chain(
+                source=source,
+                source_type=source_type,
+                chunking_strategy=chunking_strategy,
+                index_name=index_name,
+                original_filename=original_filename,
+                authorization=authorization,
+                embedding_model_id=embedding_model_id,
+                tenant_id=tenant_id,
             )
+            if not chain_id:
+                logger.error(
+                    f"Failed to enqueue process-forward chain for source: {source}")
+                continue
 
-            task_result = task_chain.apply_async()
-
-            task_ids.append(task_result.id)
-            logger.debug(f"Created task {task_result.id} for source: {source}")
+            task_ids.append(chain_id)
+            logger.debug(f"Created task {chain_id} for source: {source}")
         logger.info(
             f"Created {len(task_ids)} individual tasks for batch processing")
         return task_ids
@@ -593,7 +600,7 @@ class DataProcessService:
             f"Processing uploaded file: {filename} using SDK DataProcessCore")
 
         data_processor = DataProcessCore()
-        chunks = data_processor.file_process(
+        chunks, _ = data_processor.file_process(
             file_data=file_content,
             filename=filename,
             chunking_strategy=chunking_strategy
@@ -642,7 +649,8 @@ class DataProcessService:
                 # Step 1: Download original Office file from MinIO
                 original_stream = get_file_stream(object_name)
                 if original_stream is None:
-                    raise OfficeConversionException(f"Source file not found in storage: {object_name}")
+                    raise OfficeConversionException(
+                        f"Source file not found in storage: {object_name}")
 
                 original_filename = os.path.basename(object_name)
                 input_path = os.path.join(temp_dir, original_filename)
@@ -654,10 +662,12 @@ class DataProcessService:
                 try:
                     pdf_path = await convert_office_to_pdf(input_path, temp_dir, timeout=30)
                 except Exception as exc:
-                    raise OfficeConversionException(f"LibreOffice conversion failed: {exc}") from exc
+                    raise OfficeConversionException(
+                        f"LibreOffice conversion failed: {exc}") from exc
 
                 # Step 3: Upload converted PDF to MinIO
-                result = upload_file(file_path=pdf_path, object_name=pdf_object_name)
+                result = upload_file(file_path=pdf_path,
+                                     object_name=pdf_object_name)
                 if not result.get('success'):
                     raise OfficeConversionException(
                         f"Failed to upload PDF to MinIO: {result.get('error', 'Unknown error')}"
@@ -666,14 +676,16 @@ class DataProcessService:
                 # Step 4: Validate the uploaded PDF (header check + minimum size)
                 remote_size = get_file_size_from_minio(pdf_object_name)
                 if remote_size <= 0:
-                    raise OfficeConversionException("PDF validation failed: cannot read remote file size")
+                    raise OfficeConversionException(
+                        "PDF validation failed: cannot read remote file size")
                 if remote_size < 100:
                     raise OfficeConversionException(
                         f"PDF validation failed: file too small ({remote_size} bytes)"
                     )
                 remote_stream = get_file_stream(pdf_object_name)
                 if remote_stream is None:
-                    raise OfficeConversionException("PDF validation failed: cannot read uploaded file")
+                    raise OfficeConversionException(
+                        "PDF validation failed: cannot read uploaded file")
                 try:
                     header = remote_stream.read(5)
                 finally:
@@ -682,7 +694,8 @@ class DataProcessService:
                     except Exception:
                         pass
                 if not header.startswith(b'%PDF-'):
-                    raise OfficeConversionException("PDF validation failed: invalid PDF header")
+                    raise OfficeConversionException(
+                        "PDF validation failed: invalid PDF header")
 
             except OfficeConversionException:
                 # Clean up any partially-uploaded remote PDF so a future retry starts clean
@@ -690,14 +703,16 @@ class DataProcessService:
                     delete_file(pdf_object_name)
                 raise
             except Exception as exc:
-                raise OfficeConversionException(f"Unexpected error during conversion: {exc}") from exc
+                raise OfficeConversionException(
+                    f"Unexpected error during conversion: {exc}") from exc
             finally:
                 # Step 5: Clean up local temporary directory
                 if temp_dir and os.path.exists(temp_dir):
                     try:
                         shutil.rmtree(temp_dir)
                     except Exception as cleanup_err:
-                        logger.warning(f"Failed to cleanup temp dir '{temp_dir}': {cleanup_err}")
+                        logger.warning(
+                            f"Failed to cleanup temp dir '{temp_dir}': {cleanup_err}")
 
     def convert_celery_states_to_custom(self, process_celery_state: Optional[str], forward_celery_state: Optional[str]) -> str:
         """Map Celery task states to a custom frontend state string.

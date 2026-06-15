@@ -13,6 +13,7 @@ import {
   XCircle,
   Edit,
   Sparkles,
+  ClipboardList,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -144,6 +145,12 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
     router.push("/agents");
   };
 
+  // Handle evaluate - navigate to evaluation page
+  const handleEvaluate = () => {
+    if (!agent.id) return;
+    router.push(`/space/agents/${agent.id}/evaluate`);
+  };
+
   const queryClient = useQueryClient();
 
   // Handle view detail
@@ -258,6 +265,18 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
               title={t("space.actions.edit", "Edit")}
             >
               <Edit className="h-4 w-4" />
+            </button>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEvaluate();
+              }}
+              disabled={!agent.is_available}
+              className="p-2 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
+              title={t("space.actions.evaluate", "Evaluate")}
+            >
+              <ClipboardList className="h-4 w-4" />
             </button>
 
 

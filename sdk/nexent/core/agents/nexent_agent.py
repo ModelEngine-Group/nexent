@@ -46,10 +46,8 @@ def _tool_name(tool_obj: Any) -> str:
 
 def _is_retriever_tool(tool_obj: Any) -> bool:
     """Classify tools that should use RETRIEVER rather than TOOL semantics."""
-    return (
-        type(tool_obj).__name__ == "KnowledgeBaseSearchTool"
-        or _tool_name(tool_obj) == "knowledge_base_search"
-    )
+    name = type(tool_obj).__name__
+    return name in ("KnowledgeBaseSearchTool", "SearchMemoryTool")
 
 
 def _build_tool_input(callable_obj: Callable, args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -253,6 +251,19 @@ extra_body=model_config.extra_body,
                                        storage_client=tool_config.metadata.get("storage_client", []),
                                        validate_url_access=validate_url_access,
                                        **params)
+            elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                tools_obj = tool_class()
+                tools_obj.observer = self.observer
+                tools_obj.memory_config = tool_config.metadata.get(
+                    "memory_config", {}) if tool_config.metadata else {}
+                tools_obj.tenant_id = tool_config.metadata.get(
+                    "tenant_id", "") if tool_config.metadata else ""
+                tools_obj.user_id = tool_config.metadata.get(
+                    "user_id", "") if tool_config.metadata else ""
+                tools_obj.agent_id = tool_config.metadata.get(
+                    "agent_id", "") if tool_config.metadata else ""
+                tools_obj.memory_user_config = tool_config.metadata.get(
+                    "memory_user_config", None) if tool_config.metadata else None
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

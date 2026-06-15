@@ -27,6 +27,8 @@ import { SIDER_CONFIG } from "@/const/layoutConstants";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents } from "@/lib/authEvents";
+import { authFlowState } from "@/lib/authFlow";
+import { casService } from "@/services/casService";
 
 interface SideNavigationProps {
   collapsed?: boolean;
@@ -51,15 +53,50 @@ const ROUTE_CONFIG: RouteConfig[] = [
   { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 1 },
   { path: "/setup", Icon: Zap, labelKey: "sidebar.quickConfig", order: 2 },
   { path: "/space", Icon: Globe, labelKey: "sidebar.agentSpace", order: 3 },
-  { path: "/market", Icon: ShoppingBag, labelKey: "sidebar.agentMarket", order: 4 },
+  {
+    path: "/market",
+    Icon: ShoppingBag,
+    labelKey: "sidebar.agentMarket",
+    order: 4,
+  },
   { path: "/agents", Icon: Code, labelKey: "sidebar.agentDev", order: 5 },
-  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBase", order: 6 },
-  { path: "/mcp-tools", Icon: Puzzle, labelKey: "sidebar.mcpToolsManagement", order: 7 },
-  { path: "/monitoring", Icon: Activity, labelKey: "sidebar.monitoringManagement", order: 8 },
-  { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 9 },
-  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 10 },
+  {
+    path: "/knowledges",
+    Icon: BookOpen,
+    labelKey: "sidebar.knowledgeBase",
+    order: 6,
+  },
+  {
+    path: "/mcp-tools",
+    Icon: Puzzle,
+    labelKey: "sidebar.mcpToolsManagement",
+    order: 7,
+  },
+  {
+    path: "/monitoring",
+    Icon: Activity,
+    labelKey: "sidebar.monitoringManagement",
+    order: 8,
+  },
+  {
+    path: "/models",
+    Icon: Settings,
+    labelKey: "sidebar.modelManagement",
+    order: 9,
+  },
+  {
+    path: "/memory",
+    Icon: Database,
+    labelKey: "sidebar.memoryManagement",
+    order: 10,
+  },
   { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 11 },
-  { path: "/tenant-resources", Icon: Building2, labelKey: "sidebar.tenantResources", order: 12 },
+  {
+    path: "/tenant-resources",
+    Icon: Building2,
+    labelKey: "sidebar.tenantResources",
+    order: 12,
+  },
   { path: "/asset-owner-resources", Icon: Building2, labelKey: "sidebar.assetOwnerResources", order: 13 },
 ];
 
@@ -72,9 +109,7 @@ const ROUTE_PATHS = ROUTE_CONFIG.map((route) => route.path);
  * Side navigation component with collapsible menu
  * Displays main navigation items for the application based on user's accessible routes
  */
-export function SideNavigation({
-  collapsed,
-}: SideNavigationProps) {
+export function SideNavigation({ collapsed }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
@@ -83,7 +118,9 @@ export function SideNavigation({
   const pathname = usePathname();
 
   const [selectedKey, setSelectedKey] = useState("/");
-  const [pendingNavigationPath, setPendingNavigationPath] = useState<string | null>(null);
+  const [pendingNavigationPath, setPendingNavigationPath] = useState<
+    string | null
+  >(null);
   const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
 
   // Update selected key when pathname changes
@@ -105,7 +142,10 @@ export function SideNavigation({
       }
     };
 
-    const cleanup = authEvents.on(AUTH_EVENTS.LOGIN_SUCCESS, handleLoginSuccess);
+    const cleanup = authEvents.on(
+      AUTH_EVENTS.LOGIN_SUCCESS,
+      handleLoginSuccess
+    );
     return cleanup;
   }, [pendingNavigationPath, isAuthenticated, router]);
 
@@ -148,7 +188,17 @@ export function SideNavigation({
         // Pre-check authentication - show auth prompt if user is not authenticated
         if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
           setPendingNavigationPath(route.path);
-          openAuthPromptModal();
+          casService.getConfig().then((config) => {
+            if (
+              !authFlowState.isExplicitLogoutInProgress() &&
+              config.enabled &&
+              config.login_mode === "force"
+            ) {
+              casService.startLogin(route.path);
+              return;
+            }
+            openAuthPromptModal();
+          });
           return; // Prevent navigation
         }
 

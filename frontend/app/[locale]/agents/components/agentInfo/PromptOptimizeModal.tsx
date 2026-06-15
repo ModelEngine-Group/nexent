@@ -10,6 +10,7 @@ import {
   Modal,
   Radio,
   Space,
+  Spin,
   Typography,
   Divider,
   Tooltip,
@@ -38,7 +39,7 @@ export interface PromptOptimizeModalProps {
   subAgentIds: number[];
   knowledgeBaseDisplayNames?: string[];
   onClose: () => void;
-  onReplace: (content: string) => void;
+  onReplace: (content: string, sectionType: "duty" | "constraint" | "few_shots") => void;
 }
 
 export default function PromptOptimizeModal({
@@ -65,6 +66,21 @@ export default function PromptOptimizeModal({
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isContentSelected, setIsContentSelected] = useState(false);
   const contentTextAreaRef = useRef<any>(null);
+
+  // Section header mapping: English -> Chinese
+  const headerMap: Record<string, string> = {
+    "# Duty": "#智能体角色",
+    "# Constraint": "#使用要求",
+    "# FewShots": "#示例",
+  };
+
+  const mapHeadersToChinese = (text: string) => {
+    let result = text;
+    for (const [en, zh] of Object.entries(headerMap)) {
+      result = result.split(en).join(zh);
+    }
+    return result;
+  };
 
   useEffect(() => {
     if (!open) {
@@ -149,7 +165,8 @@ export default function PromptOptimizeModal({
         sub_agent_ids: subAgentIds,
         knowledge_base_display_names: knowledgeBaseDisplayNames,
       });
-      setOptimizedContent(result.optimized_content || "");
+      const fullText = mapHeadersToChinese(result.optimized_content || "");
+      setOptimizedContent(fullText);
     } catch (error: any) {
       log.error("Optimize prompt section failed:", error);
       message.error(error?.message || t("systemPrompt.optimize.error"));
@@ -159,8 +176,8 @@ export default function PromptOptimizeModal({
   };
 
   const handleReplace = () => {
-    if (!optimizedContent.trim()) return;
-    onReplace(optimizedContent);
+    if (!optimizedContent.trim() || isOptimizing) return;
+    onReplace(optimizedContent.trim(), sectionType);
   };
 
   const modeOptions: Array<{ value: OptimizeMode; label: string; desc: string }> = [
@@ -307,7 +324,7 @@ export default function PromptOptimizeModal({
 
         {/* Submit Button */}
         <div className="flex justify-end">
-          <Button type="primary" onClick={handleOptimize} loading={isOptimizing}>
+          <Button type="primary" onClick={handleOptimize}>
             {t("systemPrompt.optimize.submit")}
           </Button>
         </div>
@@ -333,7 +350,7 @@ export default function PromptOptimizeModal({
           >
             <TextArea
               ref={contentTextAreaRef}
-              value={currentContent}
+              value={mapHeadersToChinese(currentContent)}
               readOnly
               rows={10}
               className="border-0 rounded-none font-mono text-sm"
@@ -348,12 +365,21 @@ export default function PromptOptimizeModal({
             />
           </Card>
           <Card title={t("systemPrompt.optimize.optimized")}>
-            <Paragraph
-              style={{ whiteSpace: "pre-wrap", minHeight: 200, marginBottom: 0 }}
-              className="font-mono text-sm"
-            >
-              {optimizedContent || t("systemPrompt.optimize.empty")}
-            </Paragraph>
+            {isOptimizing ? (
+              <div className="flex flex-col items-center justify-center py-8 gap-3 min-h-[200px]">
+                <Spin size="medium" />
+                <span className="text-gray-500 text-sm">
+                  {t("systemPrompt.optimize.generating")}
+                </span>
+              </div>
+            ) : (
+              <Paragraph
+                style={{ whiteSpace: "pre-wrap", minHeight: 200, marginBottom: 0 }}
+                className="font-mono text-sm"
+              >
+                {optimizedContent || t("systemPrompt.optimize.empty")}
+              </Paragraph>
+            )}
           </Card>
         </div>
       </div>

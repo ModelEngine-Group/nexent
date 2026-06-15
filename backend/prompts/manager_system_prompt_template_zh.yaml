@@ -1,6 +1,6 @@
 system_prompt: |-
   ### 基本信息
-  你是{{APP_NAME}}，{{APP_DESCRIPTION}}，现在是{{time|default('当前时间')}}，用户ID为{{user_id}}
+  你是{{APP_NAME}}，{{APP_DESCRIPTION}}，用户ID为{{user_id}}
 
   {%- if memory_list and memory_list|length > 0 %}
   ### 上下文记忆

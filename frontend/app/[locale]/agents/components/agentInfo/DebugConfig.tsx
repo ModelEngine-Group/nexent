@@ -670,25 +670,28 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       return;
     }
 
-    // Parse the optimized full prompt by section headers.
-    // Previous implementation split by blank lines, which can truncate multi-paragraph sections.
-    const pickSection = (header: string): string => {
-      const headerRe = new RegExp(`^#\\s*${header}\\s*$`, "im");
-      const match = headerRe.exec(optimized);
-      if (!match) return "";
+    const normalized = optimized
+      .replace(/\r\n/g, "\n")
+      .replace(/^#\s*智能体角色\s*$/gm, "# Duty")
+      .replace(/^#\s*使用要求\s*$/gm, "# Constraint")
+      .replace(/^#\s*示例\s*$/gm, "# FewShots");
 
-      const start = match.index + match[0].length;
-      const rest = optimized.slice(start);
-      const nextHeaderIdx = rest.search(/^#\s+.+$/m);
-      const section = nextHeaderIdx >= 0 ? rest.slice(0, nextHeaderIdx) : rest;
-      return section.replace(/^\s*\n/, "").trim();
+    const pickSection = (header: "Duty" | "Constraint" | "FewShots"): string => {
+      const headerRegex = new RegExp(`^#\\s*${header}\\s*$`, "gm");
+      const matches = [...normalized.matchAll(headerRegex)];
+      const current = matches[0];
+      if (!current) return "";
+
+      const start = current.index + current[0].length;
+      const rest = normalized.slice(start);
+      const nextHeaderMatch = rest.match(/^#\s*(Duty|Constraint|FewShots)\s*$/m);
+      const end = nextHeaderMatch?.index ?? rest.length;
+      return rest.slice(0, end).trim();
     };
 
-    const duty = pickSection("智能体角色") || pickSection("Duty") || pickSection("duty");
-    const constraint =
-      pickSection("使用要求") || pickSection("Constraint") || pickSection("constraint");
-    const fewShots =
-      pickSection("示例") || pickSection("FewShots") || pickSection("fewshots");
+    const duty = pickSection("Duty");
+    const constraint = pickSection("Constraint");
+    const fewShots = pickSection("FewShots");
 
     const updateAgentConfig = useAgentConfigStore.getState().updateAgentConfig;
 

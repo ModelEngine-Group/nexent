@@ -6,7 +6,7 @@ from consts.const import (
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import ProviderEnum
+from consts.provider import ProviderEnum, DASHSCOPE_REALTIME_BASE_URL
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from services.providers.base import AbstractModelProvider
@@ -127,14 +127,18 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Determine the correct base_url and, for embeddings, update the actual
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
-        if provider != ProviderEnum.MODELENGINE.value:
-            # Ensure proper slash between base URL and endpoint
+        if provider == ProviderEnum.DASHSCOPE.value and model["model_type"] == "embedding":
             model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
-        else:
-            # For ModelEngine embedding models, append the embeddings path
+        elif provider == ProviderEnum.MODELENGINE.value:
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
-        # The embedding dimension might differ from the provided max_tokens.
+        elif "/embeddings" in model_url:
+            # URL already contains /embeddings endpoint, use as-is
+            model_dict["base_url"] = model_url.rstrip('/')
+        else:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
+    elif model["model_type"] in ("stt", "tts") and provider == ProviderEnum.DASHSCOPE.value:
+        model_dict["base_url"] = DASHSCOPE_REALTIME_BASE_URL
     elif model["model_type"] == "rerank":
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
