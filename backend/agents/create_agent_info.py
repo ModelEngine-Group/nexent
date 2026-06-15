@@ -1,7 +1,7 @@
 ﻿import json
 import threading
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import urljoin
 
 from jinja2 import Template, StrictUndefined
@@ -74,16 +74,43 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     return overrides
 
 
-def _resolve_input_budget(model_info: Optional[dict]) -> int:
+def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
+    values = [value for value in field_sources.values() if value]
+    if not values:
+        return None
+    for preferred in ("operator", "profile", "provider_candidate", "legacy", "unknown"):
+        if preferred in values:
+            return preferred
+    return values[0]
+
+
+def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
+    data = snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
+    return {
+        "context_window_tokens": data.get("context_window_tokens"),
+        "default_output_reserve_tokens": data.get("default_output_reserve_tokens"),
+        "capability_profile_version": data.get("capability_profile_version"),
+        "capacity_source": _dominant_capacity_source(data.get("field_sources") or {}),
+        "requested_output_tokens": data.get("requested_output_tokens"),
+        "provider_input_limit_tokens": data.get("provider_input_limit_tokens"),
+        "tokenizer_family": data.get("tokenizer_family"),
+        "counting_mode": data.get("counting_mode"),
+        "unknown_capabilities": data.get("unknown_capabilities") or [],
+        "capacity_fingerprint": data.get("fingerprint"),
+    }
+
+
+def _resolve_input_budget(model_info: Optional[dict]) -> tuple[int, Optional[dict]]:
     """Resolve the context-manager input budget for a model_record_t row.
 
     Calls ModelCapacityResolver with the catalog + operator overrides. Returns
-    snapshot.provider_input_limit_tokens on success. Falls back to
-    _TOKEN_THRESHOLD_LEGACY_FALLBACK when capacity is unknown — this is the
-    migration-window behavior before all model rows are backfilled.
+    snapshot.provider_input_limit_tokens and monitoring fields on success.
+    Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
+    capacity is unknown — this is the migration-window behavior before all
+    model rows are backfilled.
     """
     if not isinstance(model_info, dict):
-        return _TOKEN_THRESHOLD_LEGACY_FALLBACK
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None
     provider_raw = model_info.get("model_factory") or ""
     provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
     model_id = model_info.get("model_name") or ""
@@ -102,20 +129,20 @@ def _resolve_input_budget(model_info: Optional[dict]) -> int:
             snapshot.capability_profile_version,
             snapshot.fingerprint,
         )
-        return snapshot.provider_input_limit_tokens
+        return snapshot.provider_input_limit_tokens, _capacity_snapshot_for_monitoring(snapshot)
     except ProviderCapabilityUnknown:
         logger.info(
             "Capacity unknown for (%s, %s); falling back to %s for token_threshold. "
             "Backfill model_record_t capacity columns or extend the capability profile catalog.",
             provider, model_id, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
         )
-        return _TOKEN_THRESHOLD_LEGACY_FALLBACK
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None
     except ResolverError as exc:
         logger.warning(
             "Capacity resolution failed for (%s, %s): %s. Falling back to %s.",
             provider, model_id, exc, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
         )
-        return _TOKEN_THRESHOLD_LEGACY_FALLBACK
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None
 
 
 def _build_internal_s3_url(file: dict) -> str:
@@ -599,10 +626,11 @@ async def create_agent_config(
         # treating model_info["max_tokens"] (a deprecated output cap) as a
         # context threshold. Falls back to a safe constant when capacity is
         # unknown during the migration window.
-        input_budget = _resolve_input_budget(model_info)
+        input_budget, capacity_snapshot = _resolve_input_budget(model_info)
     else:
         model_name = "main_model"
         input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
+        capacity_snapshot = None
 
     # Use agent-level setting for context management, default to False.
     # When ContextManager is disabled, do not attach context_components because
@@ -650,6 +678,7 @@ async def create_agent_config(
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_components=context_components,
+        capacity_snapshot=capacity_snapshot,
     )
     return agent_config
 
@@ -1107,6 +1136,7 @@ async def create_agent_run_info(
         agent_config=agent_config,
         mcp_host=mcp_host,
         history=converted_history,
-        stop_event=threading.Event()
+        stop_event=threading.Event(),
+        capacity_snapshot=agent_config.capacity_snapshot,
     )
     return agent_run_info

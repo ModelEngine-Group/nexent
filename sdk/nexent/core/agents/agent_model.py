@@ -142,6 +142,10 @@ class AgentConfig(BaseModel):
         description="Pre-built context components for system prompt assembly",
         default=None
     )
+    capacity_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
+    )
 
 
 class AgentHistory(BaseModel):
@@ -168,6 +172,10 @@ class AgentRunInfo(BaseModel):
         description="Conversation-level reusable ContextManager instance. "
                     "If provided, it will be attached to the CoreAgent instead of creating a new one.",
         default=None
+    )
+    capacity_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
     )
 
     class Config:

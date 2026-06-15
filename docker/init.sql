@@ -1744,6 +1744,16 @@ CREATE TABLE IF NOT EXISTS nexent.model_monitoring_record_t (
     input_tokens        INT4,
     output_tokens       INT4,
     total_tokens        INT4,
+    context_window_tokens INT4,
+    default_output_reserve_tokens INT4,
+    capability_profile_version VARCHAR(100),
+    capacity_source     VARCHAR(100),
+    requested_output_tokens INT4,
+    provider_input_limit_tokens INT4,
+    tokenizer_family    VARCHAR(100),
+    counting_mode       VARCHAR(20),
+    unknown_capabilities JSONB,
+    capacity_fingerprint VARCHAR(64),
     generation_rate     FLOAT,
     is_streaming        BOOLEAN         DEFAULT FALSE,
     is_success          BOOLEAN         DEFAULT TRUE,
@@ -1774,6 +1784,16 @@ COMMENT ON COLUMN nexent.model_monitoring_record_t.ttft_ms IS 'Time to first tok
 COMMENT ON COLUMN nexent.model_monitoring_record_t.input_tokens IS 'Number of input prompt tokens';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.output_tokens IS 'Number of output completion tokens';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.total_tokens IS 'Total tokens (input + output)';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.context_window_tokens IS 'Resolved total combined model context window for this request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.default_output_reserve_tokens IS 'Default output allowance reserved before input context construction';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.capability_profile_version IS 'Version of the resolved capacity profile for this request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.capacity_source IS 'Dominant source of resolved capacity fields for this request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.requested_output_tokens IS 'Output tokens requested or reserved during capacity resolution';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.provider_input_limit_tokens IS 'Resolved provider input-token limit used by context management';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.tokenizer_family IS 'Tokenizer family used for request token counting';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.counting_mode IS 'Token counting mode for the request: exact or estimated';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.unknown_capabilities IS 'Structured list of capacity capabilities unknown at resolution time';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.capacity_fingerprint IS 'Fingerprint of the resolved model capacity snapshot';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.generation_rate IS 'Token generation rate in tokens per second';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.is_streaming IS 'Whether the request used streaming response';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.is_success IS 'Whether the request completed successfully';

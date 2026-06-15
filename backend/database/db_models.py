@@ -251,6 +251,36 @@ class ModelMonitoringRecord(SimpleTableBase):
     input_tokens = Column(Integer, doc="Number of input tokens")
     output_tokens = Column(Integer, doc="Number of output tokens")
     total_tokens = Column(Integer, doc="Total tokens (input + output)")
+    context_window_tokens = Column(
+        Integer, doc="Resolved total combined model context window for this request"
+    )
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved before input context construction"
+    )
+    capability_profile_version = Column(
+        String(100), doc="Version of the resolved capacity profile for this request"
+    )
+    capacity_source = Column(
+        String(100), doc="Dominant source of resolved capacity fields for this request"
+    )
+    requested_output_tokens = Column(
+        Integer, doc="Output tokens requested or reserved during capacity resolution"
+    )
+    provider_input_limit_tokens = Column(
+        Integer, doc="Resolved provider input-token limit used by context management"
+    )
+    tokenizer_family = Column(
+        String(100), doc="Tokenizer family used for request token counting"
+    )
+    counting_mode = Column(
+        String(20), doc="Token counting mode for the request: exact or estimated"
+    )
+    unknown_capabilities = Column(
+        JSONB, doc="Structured list of capacity capabilities unknown at resolution time"
+    )
+    capacity_fingerprint = Column(
+        String(64), doc="Fingerprint of the resolved model capacity snapshot"
+    )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(
