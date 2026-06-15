@@ -8,7 +8,14 @@ from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory
 from nexent.core.agents.agent_context import ContextManagerConfig
+from nexent.core.models.capacity_resolver import (
+    ProviderCapabilityUnknown,
+    ResolverError,
+    resolve_capacity,
+)
 from nexent.memory.memory_service import search_memory_in_levels
+
+from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
@@ -37,6 +44,78 @@ from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+# Safe fallback for context-manager token_threshold when no capacity is known.
+# Used only when the resolver fails (uncataloged model with no operator-supplied
+# hard capacity). Picks a moderate value that lets agents continue while
+# admins backfill capacity columns; will be removed once enforcement phase
+# requires snapshots end to end.
+_TOKEN_THRESHOLD_LEGACY_FALLBACK = 8192
+
+_OPERATOR_OVERRIDE_FIELDS = (
+    "context_window_tokens",
+    "max_input_tokens",
+    "max_output_tokens",
+    "default_output_reserve_tokens",
+    "tokenizer_family",
+)
+
+
+def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
+    """Extract the W1 operator-override fields from a model_record_t row."""
+    if not isinstance(model_info, dict):
+        return {}
+    overrides = {}
+    for field in _OPERATOR_OVERRIDE_FIELDS:
+        value = model_info.get(field)
+        if value is not None:
+            overrides[field] = value
+    return overrides
+
+
+def _resolve_input_budget(model_info: Optional[dict]) -> int:
+    """Resolve the context-manager input budget for a model_record_t row.
+
+    Calls ModelCapacityResolver with the catalog + operator overrides. Returns
+    snapshot.provider_input_limit_tokens on success. Falls back to
+    _TOKEN_THRESHOLD_LEGACY_FALLBACK when capacity is unknown — this is the
+    migration-window behavior before all model rows are backfilled.
+    """
+    if not isinstance(model_info, dict):
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK
+    provider_raw = model_info.get("model_factory") or ""
+    provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
+    model_id = model_info.get("model_name") or ""
+    try:
+        snapshot = resolve_capacity(
+            model_id=model_id,
+            provider=provider,
+            operator_overrides=_operator_overrides_from_model_info(model_info),
+            capability_profiles=CAPABILITY_CATALOG,
+        )
+        logger.debug(
+            "Capacity resolved for (%s, %s): input_limit=%s source=%s profile=%s fingerprint=%s",
+            provider, model_id,
+            snapshot.provider_input_limit_tokens,
+            dict(snapshot.field_sources),
+            snapshot.capability_profile_version,
+            snapshot.fingerprint,
+        )
+        return snapshot.provider_input_limit_tokens
+    except ProviderCapabilityUnknown:
+        logger.info(
+            "Capacity unknown for (%s, %s); falling back to %s for token_threshold. "
+            "Backfill model_record_t capacity columns or extend the capability profile catalog.",
+            provider, model_id, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+        )
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK
+    except ResolverError as exc:
+        logger.warning(
+            "Capacity resolution failed for (%s, %s): %s. Falling back to %s.",
+            provider, model_id, exc, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+        )
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK
 
 
 def _build_internal_s3_url(file: dict) -> str:
@@ -273,7 +352,17 @@ async def create_model_config_list(tenant_id):
                         ssl_verify=record.get("ssl_verify", True),
                         model_factory=record.get("model_factory"),
                         timeout_seconds=record.get("timeout_seconds"),
-                        concurrency_limit=record.get("concurrency_limit")))
+                        concurrency_limit=record.get("concurrency_limit"),
+                        # W1 step 6: pass capacity columns through so SDK can
+                        # honor operator-configured values end to end.
+                        max_output_tokens=record.get("max_output_tokens"),
+                        max_tokens=record.get("max_tokens"),
+                        context_window_tokens=record.get("context_window_tokens"),
+                        max_input_tokens=record.get("max_input_tokens"),
+                        default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
+                        tokenizer_family=record.get("tokenizer_family"),
+                        capacity_source=record.get("capacity_source"),
+                        capability_profile_version=record.get("capability_profile_version")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -503,14 +592,17 @@ async def create_agent_config(
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
-    model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
         model_name = model_info["display_name"] if model_info is not None else "main_model"
-        if model_info is not None and model_info.get("max_tokens"):
-            model_max_tokens = model_info["max_tokens"]
+        # W1 step 6: derive input budget via ModelCapacityResolver instead of
+        # treating model_info["max_tokens"] (a deprecated output cap) as a
+        # context threshold. Falls back to a safe constant when capacity is
+        # unknown during the migration window.
+        input_budget = _resolve_input_budget(model_info)
     else:
         model_name = "main_model"
+        input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
 
     # Use agent-level setting for context management, default to False.
     # When ContextManager is disabled, do not attach context_components because
@@ -539,7 +631,7 @@ async def create_agent_config(
         )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
-        token_threshold=model_max_tokens,
+        token_threshold=input_budget,
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
