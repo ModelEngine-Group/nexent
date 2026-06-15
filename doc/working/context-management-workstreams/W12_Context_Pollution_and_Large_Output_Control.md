@@ -28,8 +28,18 @@ an artifact or inline fallback.
 - Preserve complete tool-call/result pairs even when raw results are offloaded.
 - Summaries state what was omitted and how to retrieve it.
 - Agent retrieval of artifact slices is budgeted and audited.
-- Exploratory or high-volume delegated work runs in isolated subagent context and
-  returns a bounded result plus artifact references to the parent.
+- Delegated work runs as an independent subagent with its own `agent_session`,
+  execution event log, and capacity budget. Subagent delegation is implemented as
+  a special built-in tool that executes asynchronously and returns a session ID to
+  the parent agent. The framework notifies the parent agent when subagent execution
+  completes; the parent retrieves the subagent's final answer through a query
+  mechanism. Only the subagent's final answer is exposed to the parent agent's
+  context; intermediate execution history remains in the subagent's own session. The
+  parent agent is free to continue other work or wait during subagent execution.
+  Concurrent subagent execution is supported; the parent agent may delegate multiple
+  tasks in parallel. W14 governance is not reapplied during subagent-to-parent
+  result transfer; W10 policy selection in the parent agent naturally handles
+  permission differences. **Finding:** CM-025.
 - Duplicate equivalent retrieval/tool calls are detected for W15 measurement.
 
 ## Artifact and Retrieval Contracts
@@ -112,5 +122,12 @@ transactions, two-phase commit, and a general saga/workflow platform are out of 
   fallbacks, logs, and repair records.
 - Tool-call/result pairs remain complete through offloading and compaction.
 - Subagent isolation tests prove parent prompts receive bounded outputs only.
+- Subagent delegation tests prove delegated work runs as an independent session with
+  its own event log.
+- Concurrent subagent tests prove multiple subagents can execute in parallel under
+  one parent run.
+- Final answer isolation tests prove only the subagent's final answer enters the
+  parent context.
+- Recursive delegation tests prove subagents cannot delegate further tasks.
 - W12 is done when large output is artifact-first by default, retrieval is reliable and
   governed, and prompt-growth/cost targets meet W15 thresholds.

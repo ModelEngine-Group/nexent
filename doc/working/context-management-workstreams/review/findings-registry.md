@@ -72,13 +72,18 @@ and review-artifact updates were written and consistency-checked.
 | CM-019 | Retain as High / Required guardrail | Accepted | Completed | Use W12-specific governed staging, one pending-artifact/event/finalize-outbox transaction, idempotent finalize, ready-only reads, retry/repair, and orphan cleanup. No distributed transaction or general saga platform. | W5, W12, parent plan, review artifacts |
 | CM-020 | Retain as High / Claim-gated | Accepted | Completed | Tombstones immediately block reads; W14 coordinates a fixed destination registry with per-store status, idempotent retry, verification, and completion only after every required destination succeeds. No generic workflow platform. | W5-W12, W14, parent plan, review artifacts |
 | CM-023 | Retain as High / Required guardrail | Accepted | Completed | W16 supplies a cache partition plan; W3 alone produces final payload, serialization, token count, and fingerprints, and trusted dispatch cannot modify prompt/cache content. | W3, W16, parent plan, review artifacts |
+| CM-018 | Retain as High / Required guardrail | Accepted | Completed | Split validation: structural (schema, source refs, mandatory presence, tool pairs, representation tier) blocks commit; semantic quality (retention, coverage, equivalence) routes to W15 SLO measurement. No semantic proof system. | W11, W13, W15, parent plan, review artifacts |
+| CM-021 | Retain as Medium / Required guardrail | Accepted | Completed | Structural validation blocks commit: source lineage (CM-002 contract), source existence, mandatory ContextItem presence, schema validity. Semantic coverage routes to W15 SLO. No independent summary quality platform. | W6, W13, W15, parent plan, review artifacts |
+| CM-024 | Retain as Low / Required guardrail | Accepted | Completed | Reuse CM-011 claim-scoped release checklist. Use "claim-scoped production readiness" in documentation. No new governance platform. | Parent plan, W15, review artifacts |
+| CM-017 | Retain as Medium / Scope-exclusion | Accepted | Completed | Declare finite initial conflict set in W10. Same-tier conflicts take higher specificity or recency. Incomparable conflicts return `authority_conflict_unresolved`. No exhaustive conflict ontology. | W10, parent plan, review artifacts |
+| CM-025 | Retain as Medium / Scope-exclusion | Accepted | Completed | Subagent is a normal agent with independent `agent_session_id`, own W5 event log, own W1/W2 budget, and permissions from its agent config. Inherits parent `conversation_id` with `parent_session_id` and `delegation_type = 'subagent'`. Triggered via async built-in tool. Only final answer exposed to parent. Recursive delegation prohibited. Memory scope follows ordinary agent rules. No W14 re-governance on transfer. | W4, W5, W12, parent plan, review artifacts |
 
 ### Review Progress Summary
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 15 | CM-001-CM-008, CM-011-CM-013, CM-016, CM-019-CM-020, CM-023 |
-| Pending individual review | 11 | CM-009-CM-010, CM-014-CM-015, CM-017-CM-018, CM-021-CM-022, CM-024-CM-026 |
+| Accepted and document updates completed | 20 | CM-001-CM-008, CM-011-CM-013, CM-016-CM-021, CM-023-CM-025 |
+| Pending individual review | 6 | CM-009-CM-010, CM-014-CM-015, CM-022, CM-026 |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary

@@ -94,7 +94,6 @@ and timestamps. Required outcomes include `committed`, `conflict`, `invalid`,
   delayed audit publication is visible and repairable but never blocks checkpoint
   recovery.
 - Dirty-state flush failure blocks destructive lifecycle actions and returns a typed fault.
-
 ## Required Deliverables and Phases
 
 - Deliver migrations, repository/service, serializer, CAS logic, W8 integration,

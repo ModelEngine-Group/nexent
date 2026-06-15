@@ -367,6 +367,15 @@ Every persisted derived object must expose queryable source lineage. Use explici
 contiguous ranges. A simple reverse-reference table or indexed range lookup is
 sufficient; a global lineage graph and field-level word attribution are not required.
 
+Compression and summary validation uses a two-layer approach. Structural validation
+(blocks commit): every compression result must include `source_event_range` or
+`source_event_ids` (reusing the CM-002 lineage contract), referenced source events
+must exist and not be deleted, mandatory ContextItems must have a corresponding
+representation after compression (tier may degrade but cannot disappear), and schema
+must be valid. Semantic coverage (measured, does not block commit): key
+decision/constraint/goal retention rate and source-to-summary information-loss
+classification are routed to W15 SLO measurement. **Finding:** CM-021.
+
 When a source event is physically erased or irreversibly redacted, every persisted
 derived object whose lineage includes that event is invalidated as a whole. Rebuild
 from remaining authorized history when safe. If safe reconstruction is not possible,

@@ -31,6 +31,21 @@ cache keys, distributed locks, and metric labels. Public APIs derive tenant/user
 identity from authenticated request context and must not trust caller-supplied
 ownership fields.
 
+### Subagent Identity Contract
+
+A subagent runs under its own `agent_session_id` (UUID) but inherits the parent's
+`conversation_id`. The `agent_session` table records `parent_session_id` (UUID,
+nullable) and `delegation_type` (enum: `'subagent'` or NULL) to capture the
+delegation relationship.
+
+The subagent's W4 `ContextIdentity` uses the same `tenant_id` and `user_id` as
+the parent session. Subagent authorization follows the same rules as ordinary
+agents, determined by its agent configuration.
+
+Recursive delegation is prohibited: a subagent cannot create sub-subagents.
+
+**Finding:** CM-025.
+
 ### Initial Single-Owner Contract
 
 The initial release supports exactly one immutable owning `tenant_id` and `user_id` for
@@ -119,6 +134,11 @@ to the operation and resource being executed.
 - Static checks or targeted repository tests reject new bare-ID context mutation APIs.
 - Negative integration tests prove SDK/client identity and authorization assertions
   cannot authorize model dispatch or governed persistence.
+- Subagent identity tests prove subagent sessions inherit parent tenant/user and
+  conversation_id.
+- Recursive delegation tests prove subagents cannot create sub-subagents.
+- Subagent authorization tests prove subagent permissions are determined by its own
+  agent configuration.
 
 ## Rollout and Definition of Done
 

@@ -39,6 +39,16 @@ Resolve conflicts in code before prompt assembly using this order:
 Relevance never grants authority. Retrieved content remains attributed and below
 authoritative instructions. Conflicts and exclusions emit reason-coded decisions.
 
+The initial release supports a finite conflict set. Cross-tier conflicts are resolved
+by the authority ordering above. Same-tier conflicts take the rule with higher
+specificity; when specificity is equal, the more recent rule wins. Incomparable
+conflicts that cannot be resolved by these rules return `authority_conflict_unresolved`
+and do not silently select either side. Multi-source memory conflicts are handled by
+global retrieval resolution for deduplication, lifecycle filtering, and contradiction
+detection; unresolvable conflicts are excluded from injection. All unresolved conflicts
+emit a stable reason code visible through W9 inspection and W15 measurement. An
+exhaustive conflict-resolution ontology is explicitly out of scope. **Finding:** CM-017.
+
 ## Selection Contract
 
 All strategies must first install mandatory minimum representations. Remaining budget

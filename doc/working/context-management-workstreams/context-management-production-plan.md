@@ -3,7 +3,7 @@
 - **Status:** Design complete; approved for staged implementation
 - **Date:** 2026-06-12
 - **Scope:** Context management only
-- **Target:** Production-ready, multi-tenant, multi-worker agent context platform
+- **Target:** Claim-scoped production-ready, multi-tenant, multi-worker agent context platform
 - **Implementation start:** 2026-06-15
 - **Production-readiness review:** See `review/`; all review-driven changes cite
   findings from `review/findings-registry.md`.
@@ -14,6 +14,8 @@
   claim remains conditional on the release capability matrix and accepted workload,
   reliability, recovery, security, and operability evidence. **Findings:** CM-009-CM-013,
   CM-024.
+- Use "claim-scoped production readiness" rather than unconditional "production-ready"
+  throughout this plan. **Finding:** CM-024.
 
 ## 0. Nexent Versus Other Agentic Platforms
 

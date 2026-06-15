@@ -220,3 +220,92 @@ accepted decision.
 - **Updated documents:** W3, W16, parent production plan, findings registry, W3/W16
   reviews, cross-workstream review, goal coverage, impact analysis, and architecture
   assessment.
+
+## CM-018: Minimum-Fidelity Semantic Validation
+
+- **Decision:** Retained as `High / Required guardrail`.
+- **Approved minimum:** Split validation into two layers. Structural validation
+  (blocks commit): schema validity, source-event reference existence, measurable token
+  reduction, mandatory ContextItem presence, tool-call/result pair integrity, and
+  representation tier not below declared minimum fidelity. Semantic quality
+  (measured, does not block commit): information retention, constraint/decision/goal
+  coverage, and semantic equivalence are all routed to W15 SLO measurement. W13's
+  `summary_invalid` failure is triggered only by structural validation. W11's
+  `minimum_fidelity_violation` checks only representation tier, not content semantics.
+- **Explicitly out of scope:** Semantic proof system, LLM-based automatic semantic
+  equivalence validation as a commit gate, and semantic quality metrics as hard
+  blockers.
+- **Updated documents:** W11, W13, W15, parent production plan, findings registry.
+
+## CM-021: Summary Source Coverage Validation
+
+- **Decision:** Retained as `Medium / Required guardrail`.
+- **Approved minimum:** Structural validation (blocks commit): every compression or
+  summary result must include `source_event_range` or `source_event_ids` (reusing the
+  CM-002 lineage contract), referenced source events must exist and not be deleted,
+  mandatory ContextItems must have a corresponding representation after compression
+  (tier may degrade but cannot disappear), and schema must be valid. Semantic
+  coverage (measured, does not block): key decision/constraint/goal retention rate
+  and source-to-summary information-loss classification are routed to W15 SLO.
+- **Explicitly out of scope:** Field-level information retention verification,
+  automatic semantic coverage scoring as a hard gate, and an independent summary
+  quality validation platform.
+- **Updated documents:** W6, W13, W15, parent production plan, findings registry.
+
+## CM-024: Claim-Scoped Production Readiness Terminology
+
+- **Decision:** Retained as `Low / Required guardrail`.
+- **Approved minimum:** Reuse the lightweight claim-scoped release checklist
+  established by CM-011. Use "claim-scoped production readiness" rather than
+  unconditional "production-ready" in documentation. The checklist lists each enabled
+  capability claim, linked mandatory gates and evidence versions, explicitly excluded
+  or disabled unsupported claims, and release approval identity and time. No new
+  governance platform is introduced.
+- **Explicitly out of scope:** Separate release-governance platform, new project-
+  management workflow, and removing "production-ready" from all documents (only
+  qualifying its usage is required).
+- **Updated documents:** Parent production plan, W15, findings registry.
+
+## CM-017: Authority Conflict Taxonomy
+
+- **Decision:** Retained as `Medium / Scope-exclusion`.
+- **Approved minimum:** Declare a finite initial conflict set in W10. Cross-tier
+  conflicts are resolved by authority ordering (already defined). Same-tier conflicts
+  take higher specificity or more recent time. Incomparable conflicts return
+  `authority_conflict_unresolved` and do not silently select either side. Multi-source
+  memory conflicts are handled by W10 global retrieval resolution for deduplication,
+  lifecycle filtering, and contradiction detection; unresolvable conflicts are excluded
+  from injection. All unresolved conflicts emit a reason code visible through W9
+  inspection and W15 measurement.
+- **Explicitly out of scope:** Exhaustive conflict-resolution ontology, automatic
+  conflict arbitration framework, and cross-tenant authority merging.
+- **Updated documents:** W10, parent production plan, findings registry.
+
+## CM-025: Subagent Identity and Delegation Model
+
+- **Decision:** Retained as `Medium / Scope-exclusion`, with the scope expanded from
+  "read-only delegation" to "independent agent with restricted delegation."
+- **Approved minimum:** A subagent is a normal agent whose trigger mechanism differs.
+  It runs as an independent agent with its own `agent_session_id` (UUID), its own W5
+  execution event log, its own W1/W2 capacity and budget, and its own permissions
+  defined by its agent configuration. The subagent's `agent_session` inherits the
+  parent's `conversation_id` and records `parent_session_id` pointing to the parent
+  agent's session, plus `delegation_type = 'subagent'`. Subagent delegation is
+  implemented as a special built-in tool (`delegate_task`) that executes
+  asynchronously and returns a session ID to the parent agent. The framework notifies
+  the parent agent when subagent execution completes; the parent agent retrieves the
+  subagent's final answer through a query mechanism. The parent agent is free to
+  continue other work or wait during subagent execution. Only the final answer is
+  exposed to the parent agent; intermediate execution history remains in the
+  subagent's own session. Recursive delegation is prohibited: subagents cannot create
+  sub-subagents or delegate tasks. Memory write scope follows the same rules as
+  ordinary agents, determined by the subagent's agent configuration. W14 governance
+  is not reapplied during subagent-to-parent result transfer; W10 policy selection in
+  the parent agent naturally handles permission differences.
+- **Explicitly out of scope:** Recursive delegation (sub-subagents), delegated
+  mutation capability-token framework, subagent independent identity separate from
+  parent tenant/user, and subagent access to parent session history unless explicitly
+  passed in the delegation task.
+- **Updated documents:** W4, W5, W12, parent production plan, findings registry.
+
+

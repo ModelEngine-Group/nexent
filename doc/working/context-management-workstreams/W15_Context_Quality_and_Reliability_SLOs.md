@@ -83,6 +83,10 @@ This checklist reuses W15 evidence and the existing release process. Release one
 not require a separate release-governance platform, project-management workflow, or
 calendar-based approval service.
 
+Use "claim-scoped production readiness" rather than unconditional "production-ready"
+in release documentation. This checklist reuses W15 evidence and the existing release
+process; no separate release-governance platform is required. **Finding:** CM-024.
+
 ## Required Deliverables and Phases
 
 - Deliver SLO registry/schema, metric/reason registries, benchmark orchestrator,

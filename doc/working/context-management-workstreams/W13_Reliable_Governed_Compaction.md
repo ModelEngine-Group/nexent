@@ -56,6 +56,16 @@ failures include `deadline_exceeded`, `cancelled`, `provider_unavailable`,
 - Source fingerprint is revalidated before committing a result.
 - Success requires schema validity, source coverage, minimum-fidelity retention, and
   measurable token reduction.
+
+Compaction validation is split into structural and semantic layers. Structural
+validation (blocks commit): schema validity, source-event reference existence (reusing
+the CM-002 lineage contract), mandatory ContextItem presence, tool-call/result pair
+integrity, measurable token reduction, and representation tier not below declared
+minimum fidelity. W13's `summary_invalid` failure is triggered only by structural
+validation. Semantic quality (measured, does not block commit): information retention,
+constraint/decision/goal coverage, and source-to-summary equivalence are routed to W15
+SLO measurement. **Findings:** CM-018, CM-021.
+
 - Retry/fallback counts and total deadline are hard bounded.
 - Deterministic W11 fallback is always available and records explicit loss metadata.
 - Failed compaction cannot overwrite a newer W7 checkpoint or block the run indefinitely.
