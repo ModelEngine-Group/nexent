@@ -41,6 +41,13 @@ export interface ModelOption {
   name: string;
   type: ModelType;
   maxTokens: number;
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  defaultOutputReserveTokens?: number;
+  tokenizerFamily?: string;
+  capacitySource?: string;
+  capabilityProfileVersion?: string;
   source: ModelSource;
   apiKey: string;
   apiUrl: string;
@@ -96,6 +103,13 @@ export interface SingleModelConfig {
   displayName: string;
   apiConfig: ModelApiConfig;
   dimension?: number; // Only used for embedding and multiEmbedding models
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  defaultOutputReserveTokens?: number;
+  tokenizerFamily?: string;
+  capacitySource?: string;
+  capabilityProfileVersion?: string;
 }
 
 // Model configuration interface

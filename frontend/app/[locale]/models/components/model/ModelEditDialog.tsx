@@ -18,6 +18,13 @@ import {
   ModelMaxTokensInput,
   parseMaxTokens,
 } from "./ModelMaxTokensInput";
+import {
+  buildCapacityPayload,
+  capacityFormFromModel,
+  emptyCapacityForm,
+  ModelCapacityFields,
+  validateCapacityForm,
+} from "./ModelCapacityFields";
 
 const { Option } = Select;
 
@@ -58,6 +65,7 @@ export const ModelEditDialog = ({
     modelFactory: "",
     modelAppid: "",
     accessToken: "",
+    ...emptyCapacityForm,
   });
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
@@ -89,6 +97,7 @@ export const ModelEditDialog = ({
         modelFactory: model.modelFactory || "",
         modelAppid: model.modelAppid || "",
         accessToken: model.accessToken || "",
+        ...capacityFormFromModel(model),
       });
     }
   }, [model]);
@@ -121,8 +130,17 @@ export const ModelEditDialog = ({
       : form.type;
   const isVoiceModel =
     form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS;
+  const supportsCapacityFields =
+    !isEmbeddingModel && !isRerankModel && !isVoiceModel;
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(form)
+    : null;
 
   const isFormValid = () => {
+    if (supportsCapacityFields && validateCapacityForm(form)) {
+      return false;
+    }
+
     const needsMaxTokens = !isEmbeddingModel && !isRerankModel;
 
     if (isVoiceModel) {
@@ -241,6 +259,7 @@ export const ModelEditDialog = ({
           accessToken: isVoiceModel && form.modelFactory === "volcengine" ? form.accessToken : undefined,
           timeoutSeconds: !isEmbeddingModel && !isRerankModel ? parseInt(form.timeoutSeconds) || 120 : undefined,
           concurrencyLimit: !isEmbeddingModel && !isRerankModel ? (form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined) : undefined,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         });
       } else {
         await modelService.updateSingleModel({
@@ -276,6 +295,7 @@ export const ModelEditDialog = ({
                 concurrencyLimit: form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined,
               }
             : {}),
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         });
       }
 
@@ -300,6 +320,7 @@ export const ModelEditDialog = ({
             apiKey: form.apiKey,
             modelUrl: form.url,
           },
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...(isEmbeddingModel
             ? { dimension: parseInt(form.vectorDimension) }
             : {}),
@@ -429,6 +450,19 @@ export const ModelEditDialog = ({
             visibilityToggle={false}
           />
         </div>
+
+        {supportsCapacityFields && (
+          <ModelCapacityFields
+            value={form}
+            onChange={(field, value) => handleFormChange(field, value)}
+            validationError={capacityValidationError}
+            capacitySource={model.capacitySource}
+            capabilityProfileVersion={model.capabilityProfileVersion}
+            showDeprecatedMaxTokensWarning={
+              Boolean(model.maxTokens) && !model.maxOutputTokens
+            }
+          />
+        )}
 
         {/* maxTokens */}
         {!isEmbeddingModel && !isRerankModel && (

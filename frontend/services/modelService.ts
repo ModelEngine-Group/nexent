@@ -24,6 +24,44 @@ import {
 } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
+const mapCapacityFieldsFromApi = (model: any) => ({
+  contextWindowTokens: model.context_window_tokens,
+  maxInputTokens: model.max_input_tokens,
+  maxOutputTokens: model.max_output_tokens,
+  defaultOutputReserveTokens: model.default_output_reserve_tokens,
+  tokenizerFamily: model.tokenizer_family,
+  capacitySource: model.capacity_source,
+  capabilityProfileVersion: model.capability_profile_version,
+});
+
+const buildCapacityRequestBody = (model: {
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  defaultOutputReserveTokens?: number;
+  tokenizerFamily?: string;
+  capacitySource?: string;
+}) => ({
+  ...(model.contextWindowTokens !== undefined
+    ? { context_window_tokens: model.contextWindowTokens }
+    : {}),
+  ...(model.maxInputTokens !== undefined
+    ? { max_input_tokens: model.maxInputTokens }
+    : {}),
+  ...(model.maxOutputTokens !== undefined
+    ? { max_output_tokens: model.maxOutputTokens }
+    : {}),
+  ...(model.defaultOutputReserveTokens !== undefined
+    ? { default_output_reserve_tokens: model.defaultOutputReserveTokens }
+    : {}),
+  ...(model.tokenizerFamily !== undefined
+    ? { tokenizer_family: model.tokenizerFamily }
+    : {}),
+  ...(model.capacitySource !== undefined
+    ? { capacity_source: model.capacitySource }
+    : {}),
+});
+
 // Error class
 export class ModelError extends Error {
   constructor(message: string, public code?: number) {
@@ -68,6 +106,7 @@ export const modelService = {
           expectedChunkSize: model.expected_chunk_size,
           maximumChunkSize: model.maximum_chunk_size,
           chunkingBatchSize: model.chunk_batch,
+          ...mapCapacityFieldsFromApi(model),
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,
@@ -110,6 +149,12 @@ export const modelService = {
     accessToken?: string;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -125,6 +170,7 @@ export const modelService = {
         chunk_batch: model.chunkingBatchSize,
         timeout_seconds: model.timeoutSeconds,
         concurrency_limit: model.concurrencyLimit,
+        ...buildCapacityRequestBody(model),
       };
 
       // Add STT specific fields
@@ -322,6 +368,12 @@ export const modelService = {
     accessToken?: string;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -362,7 +414,8 @@ export const modelService = {
               : {}),
             ...(model.concurrencyLimit !== undefined
               ? { concurrency_limit: model.concurrencyLimit }
-              : {})
+              : {}),
+            ...buildCapacityRequestBody(model),
           }),
         }
       );
@@ -661,6 +714,7 @@ export const modelService = {
             expectedChunkSize: model.expected_chunk_size,
             maximumChunkSize: model.maximum_chunk_size,
             chunkingBatchSize: model.chunk_batch,
+            ...mapCapacityFieldsFromApi(model),
             // STT specific fields
             modelAppid: model.model_appid,
             accessToken: model.access_token,
@@ -714,6 +768,12 @@ export const modelService = {
     accessToken?: string;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -731,6 +791,7 @@ export const modelService = {
         chunk_batch: params.chunkingBatchSize,
         timeout_seconds: params.timeoutSeconds,
         concurrency_limit: params.concurrencyLimit,
+        ...buildCapacityRequestBody(params),
       };
 
       // Add STT specific fields
@@ -784,6 +845,12 @@ export const modelService = {
     accessToken?: string;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -809,6 +876,7 @@ export const modelService = {
             ...(params.accessToken !== undefined ? { access_token: params.accessToken } : {}),
             ...(params.timeoutSeconds !== undefined ? { timeout_seconds: params.timeoutSeconds } : {}),
             ...(params.concurrencyLimit !== undefined ? { concurrency_limit: params.concurrencyLimit } : {}),
+            ...buildCapacityRequestBody(params),
           }),
         }
       );

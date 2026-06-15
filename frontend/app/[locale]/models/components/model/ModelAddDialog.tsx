@@ -34,6 +34,12 @@ import {
   ModelMaxTokensInput,
   parseMaxTokens,
 } from "./ModelMaxTokensInput";
+import {
+  buildCapacityPayload,
+  emptyCapacityForm,
+  ModelCapacityFields,
+  validateCapacityForm,
+} from "./ModelCapacityFields";
 
 const { Option } = Select;
 
@@ -76,6 +82,7 @@ const DEFAULT_FORM_STATE = {
   accessToken: "",
   // TTS specific fields
   ttsProvider: "dashscope", // ali or volcengine
+  ...emptyCapacityForm,
 };
 
 const resolveConnectivityModelType = (type: ModelType): ModelType =>
@@ -463,6 +470,10 @@ export const ModelAddDialog = ({
 
   // Check if the form is valid
   const isFormValid = () => {
+    if (supportsCapacityFields && validateCapacityForm(form)) {
+      return false;
+    }
+
     const needsMaxTokens =
       form.type !== MODEL_TYPES.EMBEDDING &&
       form.type !== MODEL_TYPES.MULTI_EMBEDDING &&
@@ -849,6 +860,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
         // Add STT specific fields
@@ -889,6 +901,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
         // Add STT specific fields
@@ -933,6 +946,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey,
           modelUrl: form.url,
         },
+        ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
       };
 
       // Add STT specific fields to config
@@ -1036,6 +1050,15 @@ export const ModelAddDialog = ({
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
   const isSTTModel = form.type === MODEL_TYPES.STT;
   const isTTSModel = form.type === MODEL_TYPES.TTS;
+  const supportsCapacityFields =
+    !form.isBatchImport &&
+    !isEmbeddingModel &&
+    !isSTTModel &&
+    !isTTSModel &&
+    form.type !== MODEL_TYPES.RERANK;
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(form)
+    : null;
 
   return (
     <Modal
@@ -1489,6 +1512,14 @@ export const ModelAddDialog = ({
               className="block mb-1 text-sm font-medium text-gray-700"
             ></label>
           </div>
+        )}
+
+        {supportsCapacityFields && (
+          <ModelCapacityFields
+            value={form}
+            onChange={(field, value) => handleFormChange(field, value)}
+            validationError={capacityValidationError}
+          />
         )}
 
         {/* Max Tokens */}
