@@ -46,7 +46,7 @@ def test_create_agent_repository_listing_api_success(mocker, mock_auth_header):
     }
 
     response = client.post(
-        "/repository/123/versions/1",
+        "/repository/agent/123/versions/1",
         headers=mock_auth_header,
     )
 
@@ -81,7 +81,7 @@ def test_create_agent_repository_listing_api_draft_version(mocker, mock_auth_hea
     }
 
     response = client.post(
-        "/repository/123/versions/0",
+        "/repository/agent/123/versions/0",
         headers=mock_auth_header,
     )
 
@@ -109,7 +109,7 @@ def test_create_agent_repository_listing_api_bad_request(mocker, mock_auth_heade
     mock_create_listing.side_effect = ValueError("version_no must be >= 0")
 
     response = client.post(
-        "/repository/123/versions/-1",
+        "/repository/agent/123/versions/-1",
         headers=mock_auth_header,
     )
 
@@ -131,7 +131,7 @@ def test_create_agent_repository_listing_api_rejects_asset_owner(mocker, mock_au
     mock_create_listing.side_effect = ValueError("租户管理员智能体无法共享")
 
     response = client.post(
-        "/repository/123/versions/1",
+        "/repository/agent/123/versions/1",
         headers=mock_auth_header,
     )
 
@@ -153,7 +153,7 @@ def test_create_agent_repository_listing_api_exception(mocker, mock_auth_header)
     mock_create_listing.side_effect = Exception("Database error")
 
     response = client.post(
-        "/repository/123/versions/1",
+        "/repository/agent/123/versions/1",
         headers=mock_auth_header,
     )
 

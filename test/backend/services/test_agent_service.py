@@ -2988,7 +2988,8 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
         "duty_prompt": "Test duty prompt",
         "constraint_prompt": "Test constraint prompt",
         "few_shots_prompt": "Test few shots prompt",
-        "enabled": True
+        "enabled": True,
+        "tenant_id": "test_tenant",
     }
     mock_search_agent_info.return_value = mock_agent_info
 
@@ -5164,6 +5165,7 @@ async def test_export_agent_includes_model_names(
         "constraint_prompt": "Test constraints",
         "few_shots_prompt": "Test examples",
         "enabled": True,
+        "tenant_id": "test_tenant",
         "model_id": 5,
         "business_logic_model_id": 4
     }
@@ -5229,6 +5231,7 @@ async def test_export_agent_with_null_model_id(
         "constraint_prompt": "Test constraints",
         "few_shots_prompt": "Test examples",
         "enabled": True,
+        "tenant_id": "test_tenant",
         "model_id": None,  # NULL in database
         "business_logic_model_id": None  # NULL in database
     }
@@ -5291,6 +5294,7 @@ async def test_export_then_import_preserves_model_names(
         "constraint_prompt": "Follow safety rules",
         "few_shots_prompt": "Example tasks",
         "enabled": True,
+        "tenant_id": "source_tenant",
         "model_id": 10,  # Model ID in source tenant
         "business_logic_model_id": 9  # Business logic model ID in source tenant
     }
@@ -5406,6 +5410,7 @@ async def test_export_agent_model_not_found(
         "constraint_prompt": "Test",
         "few_shots_prompt": "Test",
         "enabled": True,
+        "tenant_id": "test_tenant",
         "model_id": 999,  # This model doesn't exist
         "business_logic_model_id": 998  # This model doesn't exist
     }
@@ -8750,7 +8755,8 @@ def _mock_get_agent_info_impl_dependencies(
     agent_info,
 ):
     """Configure common mocks for get_agent_info_impl permission tests."""
-    mock_search_agent_info.return_value = agent_info
+    defaults = {"model_id": None}
+    mock_search_agent_info.return_value = {**defaults, **agent_info}
     mock_search_tools.return_value = []
     mock_query_sub_agents_id.return_value = []
     mock_query_external_sub_agents.return_value = []
