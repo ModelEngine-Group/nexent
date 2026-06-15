@@ -418,15 +418,18 @@ class TestSkillsComponent:
 
     def test_add_skill(self):
         comp = agent_model_module.SkillsComponent()
-        comp.add_skill("python_coding", "Write Python code", ["example1", "example2"])
+        comp.add_skill("python_coding", "Write Python code")
         assert len(comp.skills) == 1
         assert comp.skills[0]["name"] == "python_coding"
-        assert comp.skills[0]["examples"] == ["example1", "example2"]
+        assert comp.skills[0]["description"] == "Write Python code"
 
     def test_add_skill_without_examples(self):
         comp = agent_model_module.SkillsComponent()
         comp.add_skill("skill_name", "skill desc")
-        assert comp.skills[0]["examples"] == []
+        assert comp.skills[0] == {
+            "name": "skill_name",
+            "description": "skill desc",
+        }
 
 
 class TestMemoryComponent:

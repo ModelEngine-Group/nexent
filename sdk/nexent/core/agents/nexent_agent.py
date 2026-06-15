@@ -447,13 +447,15 @@ extra_body=model_config.extra_body,
             )
             agent.stop_event = self.stop_event
 
-            # Mount context manager if config provided
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config:
-                agent.context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps
-                )
+            # Mount context manager if configured
+            if ctx_manager:
+                agent.context_manager = ctx_manager
+
+            # Register context components if provided
+            context_components = getattr(agent_config, 'context_components', None)
+            if context_components and agent.context_manager:
+                for component in context_components:
+                    agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:

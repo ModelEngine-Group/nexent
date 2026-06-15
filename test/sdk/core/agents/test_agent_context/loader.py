@@ -170,16 +170,94 @@ def _ac_file(filename: str) -> str:
 # ── 4. Register stub package hierarchy ───────────────────────
 
 def _register_stub_packages():
-    """Create empty parent ModuleType entries so the dotted import chain resolves."""
-    for name in [
-        "sdk",
-        "sdk.nexent",
-        "sdk.nexent.core",
-        "sdk.nexent.core.agents",
-        "sdk.nexent.core.utils",
+    """Create parent ModuleType entries with __path__ so sub-package imports work.
+
+    If a package is already registered (e.g. pytest discovers ``test/sdk/``
+    as a real ``sdk`` package), we prepend the real SDK directory to its
+    ``__path__`` so that ``sdk.nexent.*`` resolves through the real source tree.
+    """
+    for name, pkg_dir in [
+        ("sdk",                    _SDK_ROOT),
+        ("sdk.nexent",             os.path.join(_SDK_ROOT, "nexent")),
+        ("sdk.nexent.core",        os.path.join(_SDK_ROOT, "nexent", "core")),
+        ("sdk.nexent.core.agents", _AGENTS_DIR),
+        ("sdk.nexent.core.utils",  os.path.join(_SDK_ROOT, "nexent", "core", "utils")),
     ]:
-        if name not in sys.modules:
-            sys.modules[name] = ModuleType(name)
+        if name in sys.modules:
+            mod = sys.modules[name]
+            # Prepend so the real SDK directory is searched FIRST
+            if hasattr(mod, "__path__") and pkg_dir not in mod.__path__:
+                mod.__path__.insert(0, pkg_dir)
+        else:
+            mod = ModuleType(name)
+            mod.__path__ = [pkg_dir]
+            mod.__package__ = name
+            sys.modules[name] = mod
+
+    # Stub for agent_model classes used by manager.py (lazy imports).
+    # These classes are referenced inside manager._get_strategy() and
+    # manager.build_system_prompt(). Create minimal stubs so that the
+    # test harness can exercise those code paths.
+    _agent_model_stub = ModuleType("sdk.nexent.core.agents.agent_model")
+
+    class _BaseStrategy:
+        """Minimal strategy base that passes through all components."""
+        def select_components(self, components, budget, component_budgets):
+            return components
+
+    class _FullStrategy(_BaseStrategy):
+        @staticmethod
+        def get_strategy_name():
+            return "full"
+
+    class _TokenBudgetStrategy(_BaseStrategy):
+        @staticmethod
+        def get_strategy_name():
+            return "token_budget"
+
+    class _BufferedStrategy(_BaseStrategy):
+        def __init__(self, buffer_size=5):
+            self.buffer_size = buffer_size
+
+        @staticmethod
+        def get_strategy_name():
+            return "buffered"
+
+    class _PriorityWeightedStrategy(_BaseStrategy):
+        def __init__(self, relevance_threshold=0.5):
+            self.relevance_threshold = relevance_threshold
+
+        @staticmethod
+        def get_strategy_name():
+            return "priority"
+
+    _agent_model_stub.FullStrategy             = _FullStrategy
+    _agent_model_stub.TokenBudgetStrategy      = _TokenBudgetStrategy
+    _agent_model_stub.BufferedStrategy         = _BufferedStrategy
+    _agent_model_stub.PriorityWeightedStrategy = _PriorityWeightedStrategy
+    _agent_model_stub.ContextStrategy          = _BaseStrategy
+
+    # ContextComponent stubs used by build_system_prompt / tests
+    class _ContextComponent:
+        component_type: str = ""
+        priority: int = 10
+        token_estimate: int = 0
+        _content: str = ""
+        metadata: dict = {}
+
+    class _SystemPromptComponent(_ContextComponent):
+        pass
+
+    _agent_model_stub.ContextComponent      = _ContextComponent
+    _agent_model_stub.SystemPromptComponent = _SystemPromptComponent
+    _agent_model_stub.ToolsComponent         = _ContextComponent
+    _agent_model_stub.SkillsComponent        = _ContextComponent
+    _agent_model_stub.MemoryComponent        = _ContextComponent
+    _agent_model_stub.KnowledgeBaseComponent = _ContextComponent
+    _agent_model_stub.ManagedAgentsComponent = _ContextComponent
+    _agent_model_stub.ExternalAgentsComponent = _ContextComponent
+
+    sys.modules["sdk.nexent.core.agents.agent_model"] = _agent_model_stub
 
     token_est_key = "sdk.nexent.core.utils.token_estimation"
     if token_est_key not in sys.modules:
@@ -203,9 +281,66 @@ def _load_file_module(full_name: str, filepath: str, package: str):
     return module
 
 
-_ctx_mod = _load_agent_context()
+_load_file_module("sdk.nexent.core.agents.summary_cache",
+                   _agents_file("summary_cache.py"), "sdk.nexent.core.agents")
+_load_file_module("sdk.nexent.core.agents.summary_config",
+                   _agents_file("summary_config.py"), "sdk.nexent.core.agents")
 
-# ── 5. Re-export public names (mirrors original monolithic imports) ──
+
+# ── 6. Load agent_context submodules in dependency order ────────────
+
+# Submodules must be loaded in topological (dependency) order.
+# Each module uses relative imports (from .X import ...) that we
+# satisfy by pre-loading dependencies into sys.modules first.
+#
+# Dependency graph (no circular deps):
+#   offload_store, summary_step (leaf, no intra-package deps)
+#   budget (imports from summary_step)
+#   step_renderer (imports from budget, offload_store)
+#   llm_summary (imports from step_renderer)
+#   previous_compression (imports from budget, step_renderer, llm_summary)
+#   current_compression (imports from budget, step_renderer, llm_summary)
+#   stats_export (no intra-package deps beyond summary_cache)
+#   manager (imports from all above)
+
+_AC_PREFIX = "sdk.nexent.core.agents.agent_context"
+_AC_PKG    = _AC_PREFIX
+
+# Leaf modules (no intra-package dependencies)
+_load_file_module(f"{_AC_PREFIX}.offload_store", _ac_file("offload_store.py"), _AC_PKG)
+_load_file_module(f"{_AC_PREFIX}.summary_step",   _ac_file("summary_step.py"),   _AC_PKG)
+
+# Core modules (depend on leaf modules)
+_load_file_module(f"{_AC_PREFIX}.budget",                _ac_file("budget.py"),                _AC_PKG)
+_load_file_module(f"{_AC_PREFIX}.step_renderer",         _ac_file("step_renderer.py"),         _AC_PKG)
+_load_file_module(f"{_AC_PREFIX}.llm_summary",           _ac_file("llm_summary.py"),           _AC_PKG)
+_load_file_module(f"{_AC_PREFIX}.previous_compression",  _ac_file("previous_compression.py"),  _AC_PKG)
+_load_file_module(f"{_AC_PREFIX}.current_compression",   _ac_file("current_compression.py"),   _AC_PKG)
+_load_file_module(f"{_AC_PREFIX}.stats_export",          _ac_file("stats_export.py"),          _AC_PKG)
+
+# Manager depends on all above
+_load_file_module(f"{_AC_PREFIX}.manager", _ac_file("manager.py"), _AC_PKG)
+
+# Create the agent_context package module that re-exports public names
+_ctx_mod = ModuleType(_AC_PREFIX)
+_ctx_mod.__package__ = _AC_PKG
+_ctx_mod.__path__ = [_AC_DIR]
+# Re-export key names from manager so that ``agent_context.ContextManager`` works
+_manager_mod = sys.modules[f"{_AC_PREFIX}.manager"]
+_ctx_mod.ContextManager        = _manager_mod.ContextManager
+_ctx_mod.ContextManagerConfig  = _manager_mod.ContextManagerConfig
+_ctx_mod.CompressionCallRecord = sys.modules["sdk.nexent.core.agents.summary_cache"].CompressionCallRecord
+_ctx_mod.PreviousSummaryCache  = sys.modules["sdk.nexent.core.agents.summary_cache"].PreviousSummaryCache
+_ctx_mod.CurrentSummaryCache   = sys.modules["sdk.nexent.core.agents.summary_cache"].CurrentSummaryCache
+_ctx_mod.SummaryTaskStep       = sys.modules[f"{_AC_PREFIX}.summary_step"].SummaryTaskStep
+_ctx_mod.format_summary_output = sys.modules[f"{_AC_PREFIX}.llm_summary"].format_summary_output
+_ctx_mod._is_context_length_error = sys.modules[f"{_AC_PREFIX}.llm_summary"]._is_context_length_error
+_ctx_mod.compress_history_offline = sys.modules[f"{_AC_PREFIX}.step_renderer"].compress_history_offline
+_ctx_mod.OffloadStore          = sys.modules[f"{_AC_PREFIX}.offload_store"].OffloadStore
+sys.modules[_AC_PREFIX] = _ctx_mod
+
+
+# ── 7. Re-export public names (mirrors original monolithic imports) ──
 
 ContextManager        = _ctx_mod.ContextManager
 ContextManagerConfig  = _ctx_mod.ContextManagerConfig
@@ -218,23 +353,6 @@ AgentMemory           = _manager_mod.AgentMemory
 ChatMessage           = _manager_mod.ChatMessage
 MessageRole           = sys.modules["smolagents.models"].MessageRole
 CompressionCallRecord = _ctx_mod.CompressionCallRecord
-
-# Export ContextComponent classes
-ContextComponent         = _agent_model_mod.ContextComponent
-SystemPromptComponent    = _agent_model_mod.SystemPromptComponent
-ToolsComponent           = _agent_model_mod.ToolsComponent
-SkillsComponent          = _agent_model_mod.SkillsComponent
-MemoryComponent          = _agent_model_mod.MemoryComponent
-KnowledgeBaseComponent   = _agent_model_mod.KnowledgeBaseComponent
-ManagedAgentsComponent   = _agent_model_mod.ManagedAgentsComponent
-ExternalAgentsComponent  = _agent_model_mod.ExternalAgentsComponent
-
-# Export ContextStrategy classes
-ContextStrategy          = _agent_model_mod.ContextStrategy
-FullStrategy             = _agent_model_mod.FullStrategy
-TokenBudgetStrategy      = _agent_model_mod.TokenBudgetStrategy
-BufferedStrategy         = _agent_model_mod.BufferedStrategy
-PriorityWeightedStrategy = _agent_model_mod.PriorityWeightedStrategy
 
 from stubs import _SystemPromptStep as SystemPromptStep
 
