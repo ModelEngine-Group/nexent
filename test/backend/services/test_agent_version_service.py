@@ -206,8 +206,13 @@ def mock_tools_draft():
 
 
 @pytest.fixture
-def mock_relations_draft():
+def mock_relations_draft(monkeypatch):
     """Mock relations draft data"""
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=1),
+    )
     return [
         {
             "id": 1,
@@ -279,7 +284,32 @@ def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_
     mock_insert_agent.assert_called_once()
     assert mock_insert_tool.call_count == 2
     assert mock_insert_relation.call_count == 1
+    relation_snapshot = mock_insert_relation.call_args[0][0]
+    assert relation_snapshot["selected_agent_version_no"] == 1
     assert mock_insert_skill.call_count == 1
+
+
+def test_publish_version_impl_unpublished_sub_agent(
+    monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft
+):
+    """Test publishing fails when a sub-agent has no published version"""
+    mock_query_draft = MagicMock(
+        return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", MagicMock(return_value=1))
+
+    with pytest.raises(ValueError, match="Sub-agent 2 has no published version"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+        )
 
 
 def test_publish_version_impl_no_draft(monkeypatch):
@@ -1284,6 +1314,7 @@ def test_get_version_detail_or_draft_draft_version(monkeypatch):
     assert result["version"]["version_status"] == "DRAFT"
     assert len(result["tools"]) == 1
     assert result["sub_agent_id_list"] == [2]
+    assert result["sub_agent_relations"] == [{"agent_id": 2, "version_no": None}]
     assert len(result["skills"]) == 1
 
 

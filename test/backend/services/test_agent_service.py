@@ -1435,7 +1435,7 @@ async def test_export_agent_impl_success(mock_get_current_user_info, mock_export
     # Verify function calls
     mock_get_current_user_info.assert_called_once_with("Bearer token")
     mock_export_agent_by_id.assert_called_once_with(
-        agent_id=123, tenant_id="test_tenant", user_id="test_user")
+        agent_id=123, tenant_id="test_tenant", user_id="test_user", version_no=0)
     mock_get_mcp_server.assert_called_once_with(
         "test_mcp_server", "test_tenant")
     mock_export_data_format.assert_called_once()
@@ -1515,7 +1515,7 @@ async def test_export_agent_impl_no_mcp_tools(mock_get_current_user_info, mock_e
     # Verify function calls
     mock_get_current_user_info.assert_called_once_with("Bearer token")
     mock_export_agent_by_id.assert_called_once_with(
-        agent_id=123, tenant_id="test_tenant", user_id="test_user")
+        agent_id=123, tenant_id="test_tenant", user_id="test_user", version_no=0)
     # Should not be called when no MCP tools
     mock_get_mcp_server.assert_not_called()
     mock_export_data_format.assert_called_once()
@@ -3063,6 +3063,7 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
 
     # Assert
     assert result.agent_id == 123
+    assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
     assert result.business_description == "For testing purposes"
     assert len(result.tools) == 5
@@ -3088,11 +3089,11 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
 
     # Verify function calls
     mock_search_agent_info.assert_called_once_with(
-        agent_id=123, tenant_id="test_tenant")
+        agent_id=123, tenant_id="test_tenant", version_no=0)
     mock_create_tool_config.assert_called_once_with(
-        agent_id=123, tenant_id="test_tenant", user_id="test_user")
+        agent_id=123, tenant_id="test_tenant", user_id="test_user", version_no=0)
     mock_query_sub_agents_id.assert_called_once_with(
-        main_agent_id=123, tenant_id="test_tenant")
+        main_agent_id=123, tenant_id="test_tenant", version_no=0)
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
@@ -8737,6 +8738,175 @@ async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
     assert result[0]["permission"] == PERMISSION_READ
 
 
+def _mock_get_agent_info_impl_dependencies(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+    agent_info,
+):
+    """Configure common mocks for get_agent_info_impl permission tests."""
+    mock_search_agent_info.return_value = agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = []
+    mock_query_external_sub_agents.return_value = []
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_asset_owner_agent_read_only_for_admin(
+    mock_get_user_tenant,
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """ASSET_OWNER-scoped agent detail is READ_ONLY for ADMIN viewers."""
+    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+
+    agent_info = {
+        "agent_id": 99,
+        "tenant_id": ASSET_OWNER_TENANT_ID,
+        "created_by": "admin_user",
+        "ingroup_permission": PERMISSION_EDIT,
+    }
+    _mock_get_agent_info_impl_dependencies(
+        mock_search_agent_info,
+        mock_search_tools,
+        mock_query_sub_agents_id,
+        mock_get_model_by_model_id,
+        mock_check_availability,
+        mock_query_external_sub_agents,
+        mock_skill_service,
+        agent_info,
+    )
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+
+    result = await get_agent_info_impl(
+        agent_id=99,
+        tenant_id="regular_tenant",
+        user_id="admin_user",
+    )
+
+    assert result["permission"] == PERMISSION_READ
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_asset_owner_agent_read_only_for_dev(
+    mock_get_user_tenant,
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """ASSET_OWNER-scoped agent detail is READ_ONLY for DEV even with ingroup EDIT."""
+    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+
+    agent_info = {
+        "agent_id": 99,
+        "tenant_id": ASSET_OWNER_TENANT_ID,
+        "created_by": "asset_owner_user",
+        "ingroup_permission": PERMISSION_EDIT,
+    }
+    _mock_get_agent_info_impl_dependencies(
+        mock_search_agent_info,
+        mock_search_tools,
+        mock_query_sub_agents_id,
+        mock_get_model_by_model_id,
+        mock_check_availability,
+        mock_query_external_sub_agents,
+        mock_skill_service,
+        agent_info,
+    )
+    mock_get_user_tenant.return_value = {"user_role": "DEV"}
+
+    result = await get_agent_info_impl(
+        agent_id=99,
+        tenant_id="regular_tenant",
+        user_id="dev_user",
+    )
+
+    assert result["permission"] == PERMISSION_READ
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service.query_external_sub_agents")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_asset_owner_role_gets_edit(
+    mock_get_user_tenant,
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """ASSET_OWNER role creator retains EDIT on ASSET_OWNER-scoped agent detail."""
+    from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+
+    agent_info = {
+        "agent_id": 99,
+        "tenant_id": ASSET_OWNER_TENANT_ID,
+        "created_by": "asset_owner_user",
+        "ingroup_permission": PERMISSION_READ,
+    }
+    _mock_get_agent_info_impl_dependencies(
+        mock_search_agent_info,
+        mock_search_tools,
+        mock_query_sub_agents_id,
+        mock_get_model_by_model_id,
+        mock_check_availability,
+        mock_query_external_sub_agents,
+        mock_skill_service,
+        agent_info,
+    )
+    mock_get_user_tenant.return_value = {"user_role": ASSET_OWNER_ROLE}
+
+    result = await get_agent_info_impl(
+        agent_id=99,
+        tenant_id=ASSET_OWNER_TENANT_ID,
+        user_id="asset_owner_user",
+    )
+
+    assert result["permission"] == PERMISSION_EDIT
+
+
 @pytest.mark.asyncio
 @patch("backend.services.agent_service.get_model_by_model_id")
 @patch("backend.services.agent_service.check_agent_availability")
@@ -9121,79 +9291,73 @@ def test_generate_stream_with_memory_decorated():
 # =============================================================================
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.export_agent_impl')
+@patch('backend.services.agent_service.collect_skill_zip_entries')
+@patch('backend.services.agent_service.export_agent_dict_impl')
 @patch('backend.services.agent_service.get_current_user_info')
-async def test_export_agent_with_skills_impl_no_skills(mock_get_user_info, mock_export_impl, mock_search_info):
-    """Test export_agent_with_skills_impl returns JSON when agent has no skill instances."""
+async def test_export_agent_with_skills_impl_no_skills(
+    mock_get_user_info, mock_export_dict_impl, mock_collect_skills
+):
+    """Test export_agent_with_skills_impl returns dict when agent has no skill instances."""
     from backend.services.agent_service import export_agent_with_skills_impl
-    from backend.services import agent_service as ag_svc
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
-    mock_export_impl.return_value = '{"agent_id": 1, "agent_info": {}}'
-    mock_search_info.return_value = {"name": "test_agent"}
+    mock_export_dict_impl.return_value = {"agent_id": 1, "agent_info": {}}
+    mock_collect_skills.return_value = []
 
-    # Mock skill_db.query_skill_instances_by_agent_id to return empty list
-    with patch.object(ag_svc.skill_db, 'query_skill_instances_by_agent_id', return_value=[]):
-        result = await export_agent_with_skills_impl(agent_id=1, authorization="Bearer token")
+    result = await export_agent_with_skills_impl(agent_id=1, authorization="Bearer token")
 
-    assert result == '{"agent_id": 1, "agent_info": {}}'
-    mock_export_impl.assert_called_once_with(1, "Bearer token")
+    assert result == {"agent_id": 1, "agent_info": {}}
+    mock_export_dict_impl.assert_called_once_with(
+        1, "Bearer token", version_no=0
+    )
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.collect_skill_zip_entries')
+@patch('backend.services.agent_service.export_agent_dict_impl')
+@patch('backend.services.agent_service.get_current_user_info')
+async def test_export_agent_with_skills_impl_skills_but_no_names(
+    mock_get_user_info, mock_export_dict_impl, mock_collect_skills
+):
+    """Test export_agent_with_skills_impl returns dict when skill export yields nothing."""
+    from backend.services.agent_service import export_agent_with_skills_impl
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    mock_export_dict_impl.return_value = {"agent_id": 1, "agent_info": {}}
+    mock_collect_skills.return_value = []
+
+    result = await export_agent_with_skills_impl(agent_id=1, authorization="Bearer token")
+
+    assert result == {"agent_id": 1, "agent_info": {}}
+    mock_export_dict_impl.assert_called_once()
 
 
 @pytest.mark.asyncio
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.export_agent_impl')
+@patch('backend.services.agent_service.collect_skill_zip_entries')
 @patch('backend.services.agent_service.get_current_user_info')
-async def test_export_agent_with_skills_impl_skills_but_no_names(mock_get_user_info, mock_export_impl, mock_search_info):
-    """Test export_agent_with_skills_impl returns JSON when skill instances have no names."""
-    from backend.services.agent_service import export_agent_with_skills_impl
-    from backend.services import agent_service as ag_svc
-
-    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
-    mock_export_impl.return_value = '{"agent_id": 1, "agent_info": {}}'
-    mock_search_info.return_value = {"name": "test_agent"}
-
-    # Mock skill_db to return skill instances without names
-    with patch.object(ag_svc.skill_db, 'query_skill_instances_by_agent_id', return_value=[{"skill_id": 1}]):
-        with patch.object(ag_svc.skill_db, 'get_skill_by_id', return_value=None):
-            result = await export_agent_with_skills_impl(agent_id=1, authorization="Bearer token")
-
-    assert result == '{"agent_id": 1, "agent_info": {}}'
-    mock_export_impl.assert_called_once()
-
-
-@pytest.mark.asyncio
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
-async def test_export_agent_with_skills_impl_with_zip(mock_get_user_info, mock_search_info):
+async def test_export_agent_with_skills_impl_with_zip(
+    mock_get_user_info, mock_collect_skills, mock_search_info
+):
     """Test export_agent_with_skills_impl returns ZIP when agent has skills."""
     from backend.services.agent_service import export_agent_with_skills_impl
     from backend.services import agent_service as ag_svc
+    from consts.model import SkillZipEntry
     import io
     import zipfile
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
     mock_search_info.return_value = {"name": "my_agent"}
-
-    skill_instance = {"skill_id": 100}
-    skill_info = {"name": "TestSkill", "skill_id": 100}
-
-    mock_skill_service = MagicMock()
-    mock_skill_service.export_skills_by_names.return_value = [
-        {"skill_name": "TestSkill", "skill_zip_base64": "SGVsbG8gV29ybGQ="}  # "Hello World" in base64
+    mock_collect_skills.return_value = [
+        SkillZipEntry(skill_name="TestSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")
     ]
 
-    with patch.object(ag_svc.skill_db, 'query_skill_instances_by_agent_id', return_value=[skill_instance]):
-        with patch.object(ag_svc.skill_db, 'get_skill_by_id', return_value=skill_info):
-            with patch.object(ag_svc, 'export_agent_impl', return_value='{"agent_id": 1}'):
-                with patch('services.skill_service.SkillService', return_value=mock_skill_service):
-                    result = await export_agent_with_skills_impl(agent_id=1, authorization="Bearer token")
+    with patch.object(ag_svc, 'export_agent_impl', return_value='{"agent_id": 1}'):
+        result = await export_agent_with_skills_impl(agent_id=1, authorization="Bearer token")
 
     assert result["_zip"] is True
     assert "data" in result
     assert result["filename"] == "my_agent.zip"
-    # Verify it's a valid ZIP
     zip_data = io.BytesIO(result["data"])
     with zipfile.ZipFile(zip_data, 'r') as zf:
         assert "agent.json" in zf.namelist()
@@ -9979,3 +10143,96 @@ async def test_update_agent_info_impl_example_questions_exceed_limit(mock_get_cu
         await update_agent_info_impl(request, authorization="Bearer token")
 
     assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+
+# =============================================================================
+# Tests for version_no export and repository export helpers
+# =============================================================================
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.resolve_sub_agent_version_no')
+@patch('backend.services.agent_service.query_sub_agent_relations')
+@patch('backend.services.agent_service.export_agent_by_agent_id')
+async def test_export_agent_dict_impl_uses_pinned_sub_agent_versions(
+    mock_export_agent_by_id,
+    mock_query_relations,
+    mock_resolve_version,
+):
+    """BFS export should enqueue sub-agents with their pinned version numbers."""
+    from backend.services.agent_service import export_agent_dict_impl
+    from consts.model import ExportAndImportAgentInfo
+
+    root_agent = ExportAndImportAgentInfo(
+        agent_id=1,
+        name="root",
+        display_name="Root",
+        description="desc",
+        business_description="biz",
+        max_steps=5,
+        provide_run_summary=False,
+        enabled=True,
+        tools=[],
+        managed_agents=[2],
+    )
+    child_agent = ExportAndImportAgentInfo(
+        agent_id=2,
+        name="child",
+        display_name="Child",
+        description="desc",
+        business_description="biz",
+        max_steps=5,
+        provide_run_summary=False,
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+    )
+
+    async def _export_side_effect(agent_id, tenant_id, user_id, version_no=0):
+        if agent_id == 1:
+            return root_agent
+        return child_agent
+
+    mock_export_agent_by_id.side_effect = _export_side_effect
+    mock_query_relations.side_effect = [
+        [{"selected_agent_id": 2, "selected_agent_version_no": 3}],
+        [],
+    ]
+    mock_resolve_version.return_value = 3
+
+    with patch('backend.services.agent_service.get_current_user_info', return_value=("u", "t", "en")):
+        result = await export_agent_dict_impl(agent_id=1, authorization="Bearer token", version_no=2)
+
+    assert result["agent_id"] == 1
+    assert "1" in result["agent_info"]
+    assert "2" in result["agent_info"]
+    mock_export_agent_by_id.assert_any_call(
+        agent_id=1, tenant_id="t", user_id="u", version_no=2
+    )
+    mock_export_agent_by_id.assert_any_call(
+        agent_id=2, tenant_id="t", user_id="u", version_no=3
+    )
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service._export_agent_dict_core')
+async def test_export_agent_dict_for_repository_impl(mock_export_core):
+    """Repository export helper should delegate to core export without auth header."""
+    from backend.services.agent_service import export_agent_dict_for_repository_impl
+
+    mock_export_core.return_value = {
+        "agent_id": 10,
+        "agent_info": {},
+        "mcp_info": [],
+    }
+
+    result = await export_agent_dict_for_repository_impl(
+        agent_id=10, tenant_id="tenant_a", user_id="user_a", version_no=1
+    )
+
+    assert result["agent_id"] == 10
+    mock_export_core.assert_called_once_with(
+        root_agent_id=10,
+        tenant_id="tenant_a",
+        user_id="user_a",
+        version_no=1,
+    )

@@ -1487,7 +1487,7 @@ class TestCreateAgentConfig:
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
@@ -1545,7 +1545,7 @@ class TestCreateAgentConfig:
     async def test_create_agent_config_with_sub_agents(self):
         """Test case for creating agent configuration with sub-agents"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
@@ -1566,7 +1566,9 @@ class TestCreateAgentConfig:
                 "model_id": 123,
                 "provide_run_summary": True
             }
-            mock_query_sub.return_value = ["sub_agent_1"]
+            mock_query_sub.return_value = [
+                {"selected_agent_id": "sub_agent_1", "selected_agent_version_no": None}
+            ]
             mock_create_tools.return_value = []
             mock_get_template.return_value = {
                 "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"}
@@ -1611,10 +1613,69 @@ class TestCreateAgentConfig:
                 )
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_with_pinned_sub_agent_version(self):
+        """Test sub-agent config uses pinned selected_agent_version_no from relation"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.resolve_sub_agent_version_no', return_value=3) as mock_resolve, \
+                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = [
+                {"selected_agent_id": 42, "selected_agent_version_no": 3}
+            ]
+            mock_create_tools.return_value = []
+            mock_get_template.return_value = {"system_prompt": "{{duty}}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            mock_sub_agent_config = Mock()
+            mock_sub_agent_config.name = "sub_agent"
+
+            with patch(
+                'backend.agents.create_agent_info.create_agent_config',
+                new_callable=AsyncMock,
+                return_value=mock_sub_agent_config,
+            ) as mock_recursive_create:
+                mock_agent_config.reset_mock()
+                await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query", version_no=2)
+
+                mock_resolve.assert_called_once_with(
+                    selected_agent_id=42,
+                    selected_agent_version_no=3,
+                    tenant_id="tenant_1",
+                )
+                mock_recursive_create.assert_called_once()
+                assert mock_recursive_create.call_args.kwargs["version_no"] == 3
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):
         """Test case for creating agent configuration with memory"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
@@ -1678,7 +1739,7 @@ class TestCreateAgentConfig:
             "backend.agents.create_agent_info.search_agent_info_by_agent_id"
         ) as mock_search_agent, \
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub, \
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -1756,7 +1817,7 @@ class TestCreateAgentConfig:
     async def test_create_agent_config_model_id_none(self):
         """Test case for creating agent configuration when model_id is None"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
@@ -1817,7 +1878,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -1897,7 +1958,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -1992,7 +2053,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -2087,7 +2148,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -2181,7 +2242,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -2302,7 +2363,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -2413,7 +2474,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -2513,7 +2574,7 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info.search_agent_info_by_agent_id"
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agents_id_list"
+                "backend.agents.create_agent_info.query_sub_agent_relations"
             ) as mock_query_sub,
             patch(
                 "backend.agents.create_agent_info.create_tool_config_list"
@@ -2578,7 +2639,7 @@ class TestCreateAgentConfig:
     async def test_create_agent_config_knowledge_base_summary_error(self):
         """Test case for error handling during knowledge base summary build"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
