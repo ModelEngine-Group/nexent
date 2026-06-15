@@ -31,6 +31,11 @@ isolation, secret persistence, and request fit have zero-tolerance test expectat
 - Duplicate equivalent calls, avoidable refetches, and context-thrash rate.
 - Multilingual and multimodal quality.
 
+Release 1 SLO gates cover only text modality and any explicitly supported modalities.
+Unsupported modalities are excluded from release gates. When a modality enters product
+scope, its token accounting, artifact handling, projection, redaction, and provider
+support contracts must be defined before adding its SLO gates. **Finding:** CM-026.
+
 ## Evidence Pipeline
 
 Run fixed LongMemEval, EventQA, and manual-case baselines in CI. Add generated property,

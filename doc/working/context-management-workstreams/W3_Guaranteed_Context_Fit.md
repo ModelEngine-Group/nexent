@@ -142,7 +142,9 @@ increase the W2 hard input budget.
 - Prove the minimal gateway guarantees fit before W10-W13 integrations are available.
 - Prove W16 plans cannot change fit decisions and fingerprints match the exact final
   payload dispatched by the trusted boundary.
-- Run multilingual, multimodal, and large-schema fixtures.
+- Run multilingual, multimodal, and large-schema fixtures. Release 1 multimodal
+  fixtures cover only text modality; add modality-specific fixtures when a modality
+  enters product scope. **Finding:** CM-026.
 - Negative integration tests prove SDK/client and ordinary internal callers cannot
   dispatch without valid W4, W10, W2, and W3 decisions.
 

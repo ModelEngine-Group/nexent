@@ -308,4 +308,24 @@ accepted decision.
   passed in the delegation task.
 - **Updated documents:** W4, W5, W12, parent production plan, findings registry.
 
+## CM-026: Multimodal Contract Exclusion
+
+- **Decision:** Retained as `Low / Scope-exclusion`.
+- **Approved minimum:** Remove unsupported modalities from Release 1 release gates.
+  W15 SLO gates cover only text modality and any explicitly supported modalities.
+  When a modality enters product scope, add its token accounting rules, artifact
+  handling rules, projection rules, redaction rules, and provider support declaration
+  at that time. W1's `context_window_tokens` and W2's budget formula currently apply
+  only to text tokens; multimodal inputs require separate capacity modeling.
+- **Rationale:** Nexent already has multimodal capabilities (VLM image/audio/video
+  analysis, STT, TTS, multimodal embedding), but nearly all multimodal content is
+  converted to text before entering the context management pipeline. W15's
+  "multimodal quality" metric is an undefined placeholder with no test cases,
+  metrics, or pass criteria. The actual multimodal impact points on context
+  management (image token accounting, image content redaction) can be added to the
+  corresponding W-IDs when specific product requirements emerge.
+- **Explicitly out of scope:** Release 1 multimodal context contracts, image/audio/
+  video token equivalence calculation, automatic multimodal redaction, and
+  multimodal SLO gates.
+- **Updated documents:** W15, W3, parent production plan, findings registry.
 

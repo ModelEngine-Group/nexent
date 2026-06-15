@@ -77,13 +77,14 @@ and review-artifact updates were written and consistency-checked.
 | CM-024 | Retain as Low / Required guardrail | Accepted | Completed | Reuse CM-011 claim-scoped release checklist. Use "claim-scoped production readiness" in documentation. No new governance platform. | Parent plan, W15, review artifacts |
 | CM-017 | Retain as Medium / Scope-exclusion | Accepted | Completed | Declare finite initial conflict set in W10. Same-tier conflicts take higher specificity or recency. Incomparable conflicts return `authority_conflict_unresolved`. No exhaustive conflict ontology. | W10, parent plan, review artifacts |
 | CM-025 | Retain as Medium / Scope-exclusion | Accepted | Completed | Subagent is a normal agent with independent `agent_session_id`, own W5 event log, own W1/W2 budget, and permissions from its agent config. Inherits parent `conversation_id` with `parent_session_id` and `delegation_type = 'subagent'`. Triggered via async built-in tool. Only final answer exposed to parent. Recursive delegation prohibited. Memory scope follows ordinary agent rules. No W14 re-governance on transfer. | W4, W5, W12, parent plan, review artifacts |
+| CM-026 | Retain as Low / Scope-exclusion | Accepted | Completed | Remove unsupported modalities from Release 1 gates. W15 SLO covers text only. Add modality contracts only when a modality enters scope. No Release 1 multimodal context contracts. | W15, W3, parent plan, review artifacts |
 
 ### Review Progress Summary
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 20 | CM-001-CM-008, CM-011-CM-013, CM-016-CM-021, CM-023-CM-025 |
-| Pending individual review | 6 | CM-009-CM-010, CM-014-CM-015, CM-022, CM-026 |
+| Accepted and document updates completed | 21 | CM-001-CM-008, CM-011-CM-013, CM-016-CM-021, CM-023-CM-026 |
+| Pending individual review | 5 | CM-009-CM-010, CM-014-CM-015, CM-022 |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary

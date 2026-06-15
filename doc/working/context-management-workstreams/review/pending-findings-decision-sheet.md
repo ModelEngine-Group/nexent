@@ -1,6 +1,6 @@
 # Pending Findings Decision Sheet / 待审阅发现决策表
 
-- **状态：** 部分决策完成（20/26），6 项待讨论
+- **状态：** 部分决策完成（21/26），5 项待讨论
 - **日期：** 2026-06-15
 - **审阅人：** 产品架构师 / 产品经理
 - **涉及发现：** CM-009, CM-010, CM-014, CM-015, CM-017, CM-018, CM-021, CM-022, CM-024, CM-025, CM-026（共 11 项）
@@ -162,12 +162,12 @@
 
 > [!NOTE] 决策：
 >
-> - [ ] **A. 接受推荐方案** — 从 Release 1 门禁中移除不支持的模态
+> - [X] **A. 接受推荐方案** — 从 Release 1 门禁中移除不支持的模态
 > - [ ] **B. 更激进** — 在 Release 1 中定义基础模态合约（至少覆盖图像输入）
 > - [ ] **C. 更保守** — 保留多模态测试要求但降低通过标准
 > - [ ] **D. 自定义：**
 >
-> 你的选择：
+> 你的选择：A
 
 ---
 
@@ -329,7 +329,7 @@
 | CM-024 | Low | Required guardrail | 复用 CM-011 清单 | A ✅ |
 | CM-017 | Medium | Scope-exclusion | 有限冲突集 + 显式失败 | A ✅ |
 | CM-025 | Medium | Scope-exclusion | 独立 agent + 异步工具 | D（自定义）✅ |
-| CM-026 | Low | Scope-exclusion | 移除不支持模态 | ⏳ 待讨论 |
+| CM-026 | Low | Scope-exclusion | 移除不支持模态 | A ✅ |
 | CM-014 | High | Claim-gated | 检查点失效并重建 | ⏳ 待讨论 |
 | CM-009 | High | Claim-gated | 2-3 个工作负载包络 | ⏳ 待讨论 |
 | CM-010 | Medium | Claim-gated | 按拓扑设定目标 | ⏳ 待讨论 |
