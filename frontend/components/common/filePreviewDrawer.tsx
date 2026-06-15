@@ -52,13 +52,13 @@ import {
   MarkdownRenderer,
   extractMarkdownHeadings,
   type MarkdownHeading,
-} from "@/components/ui/markdownRenderer";
+} from "@/components/common/markdownRenderer";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
 
 const PdfViewer = dynamic(
   () =>
-    import("@/components/ui/PdfViewer").then((mod) => ({
+    import("@/components/common/PdfViewer").then((mod) => ({
       default: mod.PdfViewer,
     })),
   {

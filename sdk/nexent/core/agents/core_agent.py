@@ -2,6 +2,7 @@ import json
 import ast
 import time
 import threading
+from datetime import datetime
 from textwrap import dedent
 from typing import Any, Optional, List, Dict
 from collections.abc import Generator
@@ -599,7 +600,11 @@ Additional Args:
         ```
         """
         max_steps = max_steps or self.max_steps
-        self.task = task
+        # Prepend current time to the user task instead of baking it into the
+        # system prompt. This keeps the system prefix stable so prompt/KV caches
+        # can hit across requests; only the trailing user message varies.
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.task = f"[Current time: {time_str}]\n\n{task}"
         if additional_args is not None:
             self.state.update(additional_args)
             self.task += f"""

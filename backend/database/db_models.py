@@ -763,6 +763,31 @@ class UserOAuthAccount(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID at time of linking")
 
 
+class UserCasSession(TableBase):
+    __tablename__ = "user_cas_session_t"
+    __table_args__ = (
+        Index("ix_user_cas_session_session_id", "session_id"),
+        Index("ix_user_cas_session_user_id", "user_id"),
+        Index("ix_user_cas_session_cas_user_id", "cas_user_id"),
+        {"schema": SCHEMA},
+    )
+
+    cas_session_id = Column(
+        Integer,
+        Sequence("user_cas_session_t_cas_session_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="CAS session record ID",
+    )
+    session_id = Column(String(100), nullable=False, unique=True, doc="JWT session ID")
+    user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
+    cas_user_id = Column(String(200), nullable=False, doc="User ID from CAS")
+    cas_session_index = Column(String(500), doc="CAS SessionIndex or service ticket")
+    status = Column(String(30), nullable=False, default="active", doc="active/revoked")
+    expires_at = Column(TIMESTAMP(timezone=False), nullable=False, doc="Session expiration time")
+    revoked_at = Column(TIMESTAMP(timezone=False), doc="Revocation time")
+
+
 class SkillInfo(TableBase):
     """
     Skill information table - stores skill metadata and content.

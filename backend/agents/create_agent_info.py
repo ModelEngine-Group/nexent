@@ -3,7 +3,6 @@ import threading
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin
-from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
@@ -485,7 +484,6 @@ async def create_agent_config(
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
-    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
 
     render_kwargs = {
@@ -500,7 +498,6 @@ async def create_agent_config(
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
         "knowledge_base_summary": knowledge_base_summary,
-        "time": time_str,
         "user_id": user_id,
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
@@ -529,7 +526,6 @@ async def create_agent_config(
             few_shots=few_shots_prompt,
             app_name=app_name,
             app_description=app_description,
-            time_str=time_str,
             user_id=user_id,
             language=language,
             is_manager=is_manager,

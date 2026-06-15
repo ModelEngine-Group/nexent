@@ -273,6 +273,68 @@ Provider enablement rules:
 
 For local Docker, a GitHub callback example is `http://localhost:3000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain such as `https://nexent.example.com/api/user/oauth/callback?provider=github` and register the exact same URL in the OAuth provider console.
 
+### CAS Login Configuration
+
+CAS SSO does not require the `supabase` component. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
+
+For Docker, configure CAS in `docker/.env`:
+
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=http://localhost:8080/cas
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://localhost:3000
+
+# disabled: disable the CAS login entry and automatic redirects
+# button: show CAS as an optional login button
+# force: redirect unauthenticated Nexent users to CAS automatically
+CAS_LOGIN_MODE=force
+
+# Empty means use <cas:user>; set userName to read <cas:attributes><cas:userName>
+CAS_USER_ATTRIBUTE=
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=role
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+
+# Empty means Nexent logout will not call the CAS Server logout endpoint.
+# /logout is resolved against CAS_SERVER_URL.
+CAS_LOGOUT_URL=/logout
+CAS_SSL_VERIFY=true
+CAS_CA_BUNDLE=
+```
+
+Common CAS URLs:
+
+| Purpose | URL |
+|---------|-----|
+| Nexent login entry | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS silent renewal callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS single logout callback | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+For Apereo CAS JSON Service Registry, create a service registration file such as `Nexent-10001.json` in the service registry directory configured by your CAS deployment. The `id` must be globally unique. This is a local Docker example:
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:3000/api/user/cas/logout_callback"
+}
+```
+
+In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
+
 ### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
 
 If you need to use any of the following features, configure the `NORTHBOUND_EXTERNAL_URL` environment variable:

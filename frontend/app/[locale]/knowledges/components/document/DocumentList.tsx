@@ -18,8 +18,8 @@ import {
   Glasses,
   CircleOff,
 } from "lucide-react";
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
-import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 
 import {
   UI_CONFIG,

@@ -17,7 +17,7 @@ import {
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button, message as antdMessage } from "antd";
-import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer, CodeBlock } from "@/components/common/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
   ChatMessageType,
