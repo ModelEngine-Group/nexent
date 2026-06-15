@@ -25,7 +25,7 @@ W6 does not:
 - Append or mutate W5 events.
 - Decide final token budgets or representation upgrades; W10 and W3 own selection.
 - Generate compressed representations; W11 and W13 own reduction and compaction.
-- Persist recovery checkpoints; W7 owns checkpoints.
+- Persist recovery compression snapshots; W5 owns compression snapshots.
 - Persist long-term memories; W10 and memory services decide and perform writes.
 
 ## Source and Derived-State Invariants
@@ -137,7 +137,7 @@ Every projection runs the same ordered stages:
   unless product policy explicitly hides them.
 - Resume, model-context, and Working Memory projections apply active lineage.
 - A `restore.applied` event records the restored covered `event_seq` and may reference
-  a W7 checkpoint. Current state is reconstructed from the active source prefix through
+  a W5 `compression.snapshot` event. Current state is reconstructed from the active source prefix through
   that sequence, then events after the restore event are applied. The checkpoint may
   accelerate reconstruction but is never required. Events between the restored
   boundary and restore event remain audit history but are excluded from active state
@@ -251,7 +251,7 @@ Rules:
 
 ### `working_memory_projection`
 
-**Consumer:** Agent runtime, W7 checkpoints, W9 inspection/editing, and W10.
+**Consumer:** Agent runtime, W5 compression snapshots, W9 inspection/editing, and W10.
 
 **Produces:** One versioned structured state object plus source-linked `ContextItem`s.
 
@@ -347,15 +347,14 @@ Rules:
 
 ## Storage and Materialization
 
-Start with on-demand projection from W5 plus W7 checkpoint acceleration. Do not create a
+Start with on-demand projection from W5 plus `compression.snapshot` acceleration. Do not create a
 database table for every projection before profiling.
 
 Materialize only when a measured latency/load requirement justifies it:
 
 - `chat_projection` may be materialized into existing conversation tables through the
   W5 compatibility projector.
-- `working_memory_projection` is persisted inside W7 checkpoints and rebuilt from W5
-  when missing or invalid.
+- `working_memory_projection` is persisted inside W5 `compression.snapshot` events and rebuilt from W5 when missing or invalid.
 - Other projections default to on-demand or short-lived cache.
 
 Every materialized result stores `agent_session_id`, `through_event_seq`,
@@ -389,13 +388,13 @@ return the object as unavailable rather than preserving or editing old derived c
 2. W6 builds resume/Working Memory/model-context candidates through the committed head.
 3. W10/W3 select, reduce, and fit the final model request.
 4. Runtime events append to W5.
-5. W6 chat projection updates compatibility tables; W7 checkpoints active state at
-   configured boundaries.
+5. W6 chat projection updates compatibility tables; W5 appends `compression.snapshot` events at configured boundaries.
 
 ### Resume or Worker Restart
 
-1. W7 loads and validates the latest checkpoint through W8.
-2. W6 replays events after the checkpoint through the requested event head.
+1. W5 locates the latest `compression.snapshot` event for the session.
+2. W6 loads the snapshot payload (summary, Working Memory, token accounting) and
+   replays events after the snapshot's covered range through the requested event head.
 3. W6 returns reconstructed Working Memory, resume state, and model-context candidates.
 4. Runtime continues without trusting frontend-provided history.
 
@@ -476,7 +475,7 @@ At minimum define:
 
 1. Implement `working_memory_projection` and its conflict/supersession rules.
 2. Implement `resume_projection`, including interrupted tool/run handling.
-3. Integrate W7 checkpoint load/replay and W8 validation.
+3. Integrate W5 `compression.snapshot` load/replay and W8 validation.
 4. Change durable run preparation to use backend projections instead of caller history.
 5. Validate restart and cross-worker continuation.
 
@@ -492,7 +491,7 @@ At minimum define:
 
 - New backend projection registry, event reader, lineage resolver, and projector modules
 - W5 event-log repository and compatibility projector
-- W7 checkpoint repository and W8 validator
+- W5 compression snapshot events and W8 validator
 - `backend/services/conversation_management_service.py`
 - `backend/services/agent_service.py`
 - `backend/agents/create_agent_info.py`
@@ -539,7 +538,7 @@ W6 is complete when:
 - Durable run preparation and restart recovery use backend projections rather than
   trusting caller-provided history.
 - Working Memory and resume state rebuild from W5 alone, optionally accelerated by a
-  valid W7 checkpoint.
+  valid W5 `compression.snapshot` event.
 - W10/W3 receive bounded `ContextItem` candidates instead of raw complete history.
 - Audit can reconstruct the complete authorized event sequence, including inactive
   restore/reset history.

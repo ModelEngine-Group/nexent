@@ -8,7 +8,7 @@ restore, reset, and context inspection over immutable execution history.
 ## API Surface
 
 W9 owns authorized lifecycle orchestration and public/backend API behavior. It does not
-rewrite W5 history, implement W7/W8 internals, or define compaction algorithms; it
+rewrite W5 history, implement W8 internals, or define compaction algorithms; it
 coordinates those services and records their outcomes.
 
 Provide backend APIs and matching SDK methods:
@@ -16,7 +16,7 @@ Provide backend APIs and matching SDK methods:
 | Operation | Required behavior |
 | --- | --- |
 | `compact` | Create a governed compacted representation, optionally using focused instructions |
-| `checkpoint` | Flush and persist a named recovery boundary |
+| `flush_snapshot` | Flush in-memory state as a `compression.snapshot` event to W5 |
 | `restore` | Append lifecycle events that make a checkpoint the new active derived-state baseline without deleting later history |
 | `reset_context` | Reset selected derived state without deleting source history |
 | `inspect_context` | Return authorized items, representations, budgets, and decision reasons |
@@ -40,11 +40,10 @@ when supplied an idempotency key and emits pre/post lifecycle events.
   run reaches a committed terminal/recovery state and clears W5 `active_run_id`.
 - Read-only `inspect_context` may run concurrently. Runtime-internal compaction executed
   as part of the active run is not a W9 manual lifecycle mutation.
-- Restore and reset cannot silently destroy dirty state; W7 writeback completes first.
+- Restore and reset cannot silently destroy dirty state; a `compression.snapshot` event is appended to W5 first.
 - Restore and reset change derived active state through new lifecycle events; they do
   not delete or rewrite later source events.
-- A `restore.applied` event records the restored covered `event_seq` and may reference
-  a checkpoint. Projectors can rebuild the source prefix from W5 when the checkpoint is
+- A `restore.applied` event records the restored covered `event_seq` and may reference a `compression.snapshot` event. Projectors can rebuild the source prefix from W5 when the checkpoint is
   unavailable, then apply events after the restore event; events between the restored
   boundary and restore event remain auditable but inactive.
 - Manual compaction instructions are untrusted user input governed by W10/W14.
@@ -94,16 +93,16 @@ and are rejected, not queued or applied, while an active run exists.
 ## Required Deliverables and Phases
 
 - Deliver API/SDK schemas, lifecycle service/state machine, operation store,
-  authorization matrix, hooks, W5/W7/W8 integration, UI/operator controls, and runbooks.
+  authorization matrix, hooks, W5/W8 integration, UI/operator controls, and runbooks.
 - Phase through inspect/checkpoint, restore/reset, Working Memory edits, compact, then
   frontend controls after contract and failure-path stabilization.
 
 ## Implementation Plan
 
 1. Define request/response/error schemas and authorization matrix.
-2. Add lifecycle service orchestrating W5 events, W7 checkpoints, and W8 validation.
+2. Add lifecycle service orchestrating W5 events, compression snapshots, and W8 validation.
 3. Enforce W5 single-active-run checks for every mutating lifecycle operation.
-4. Implement checkpoint and inspect first, then restore/reset, then compact.
+4. Implement flush_snapshot and inspect first, then restore/reset, then compact.
 5. Add `resolve_ambiguous_effect` with authorization, idempotency, and durable W5 events.
 6. Add Working Memory edit operations with optimistic version checks.
 7. Add pre/post hooks and typed lifecycle events.

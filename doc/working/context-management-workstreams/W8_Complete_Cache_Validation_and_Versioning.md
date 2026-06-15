@@ -2,18 +2,18 @@
 
 ## Objective
 
-Prevent stale summaries, Working Memory, retrieval results, and checkpoints from being
+Prevent stale summaries, Working Memory, and retrieval results from being
 reused after any relevant history, model, policy, schema, prompt, restore/reset, or
 lifecycle change.
 
 ## Validity Contract
 
 W8 owns canonical fingerprints, validation, and invalidation delivery. It does not
-create projections/checkpoints or decide policy content; W6, W7, W10, and W14 provide
+create projections or decide policy content; W6, W10, and W14 provide
 the versioned inputs that W8 validates.
 
 Replace boundary-only fingerprints in `sdk/nexent/core/agents/agent_context.py` with a
-complete canonical fingerprint. A checkpoint is valid only when all inputs match:
+complete canonical fingerprint. A derived view or cached projection is valid only when all inputs match:
 
 - Hash of the complete covered event range using canonical serialization.
 - W5 session identity and covered start/end event sequence.
@@ -66,7 +66,7 @@ Validation errors never degrade to cache hits.
 
 ## Required Deliverables and Phases
 
-- Deliver canonical serializer/hasher, version registry, `CheckpointValidator`,
+- Deliver canonical serializer/hasher, version registry, `DerivedStateValidator`,
   invalidation publisher/worker, explain tool, metrics, and migration for old caches.
 - Phase through shadow validation, reject-invalid/read-rebuild behavior, targeted
   invalidation, then deletion of boundary-only validation paths.
@@ -75,7 +75,7 @@ Validation errors never degrade to cache hits.
 
 1. Define canonical serialization and version registry in an ADR.
 2. Implement streaming complete-prefix hashing over W5 events.
-3. Extend W7 checkpoint records with digest inputs and invalidation reason.
+3. Extend derived-state records with digest inputs and invalidation reason.
 4. Centralize validation in `CheckpointValidator`; callers cannot bypass it.
 5. Add targeted invalidation events/jobs for deletion, redaction, and policy changes.
 6. Emit hit, miss, invalid, rebuild, and reason-code metrics.
@@ -85,7 +85,7 @@ Validation errors never degrade to cache hits.
 
 - `sdk/nexent/core/agents/agent_context.py`
 - `sdk/nexent/core/agents/summary_cache.py`
-- W5 event-log and W7 checkpoint repositories
+- W5 event-log repository
 - Policy/version registries from W10 and W14
 - Monitoring and lifecycle services
 
@@ -94,9 +94,9 @@ Validation errors never degrade to cache hits.
 - Mutation tests change each covered event field and every version input.
 - Restore/reset and model/prompt switch tests prove invalidation.
 - Append-only incremental tests prove valid prefixes remain reusable.
-- Deletion/redaction tests invalidate all affected projections and checkpoints.
+- Deletion/redaction tests invalidate all affected projections and compression snapshots.
 - Erasure tests prove range- and explicit-ID lineage locate affected derived objects
   and prevent their reuse after payload deletion.
 - Canonicalization tests are stable across processes and supported runtime versions.
-- W8 is done when no checkpoint or derived cache can be used without centralized
+- W8 is done when no derived view or cached projection can be used without centralized
   complete validation and every invalidation is observable by stable reason code.

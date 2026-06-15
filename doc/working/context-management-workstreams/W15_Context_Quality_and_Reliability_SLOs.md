@@ -21,7 +21,7 @@ isolation, secret persistence, and request fit have zero-tolerance test expectat
 - Fit success, mandatory-minimum overflow, and provider overflow recovery.
 - Summary/category retention and complete tool-pair retention.
 - Compression ratio, latency, cost, and prompt-cache reuse.
-- Restart, failover, replay, checkpoint concurrency, restore, and reset correctness.
+- Restart, failover, replay, compression snapshot concurrency, restore, and reset correctness.
 - Tenant isolation, redaction, retention, and deletion propagation.
 - Memory-write precision, confirmation compliance, retrieval recall/reranking, stale
   rejection, correction/conflict handling, and decision trace completeness.

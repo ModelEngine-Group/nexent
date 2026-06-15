@@ -308,6 +308,19 @@ accepted decision.
   passed in the delegation task.
 - **Updated documents:** W4, W5, W12, parent production plan, findings registry.
 
+## CM-014: Checkpoint Schema Migration
+
+- **Decision:** N/A — rendered obsolete by architecture simplification.
+- **Rationale:** W7 (independent checkpoint subsystem) is retired. Checkpoint
+  functionality is merged into W5 as `compression.snapshot` events. Since compression
+  snapshots are W5 events, their schema migration is fully covered by the CM-005
+  event-schema compatibility contract (current + previous reader/upcaster). No
+  separate checkpoint schema migration mechanism is needed.
+- **Impact:** W7 file deleted. W5 updated with `compression.snapshot` event type,
+  recovery flow, and dirty-state flush. All W7 references in other W-IDs updated.
+- **Updated documents:** W5, W6, W8, W9, W13, parent production plan, README,
+  findings registry.
+
 ## CM-026: Multimodal Contract Exclusion
 
 - **Decision:** Retained as `Low / Scope-exclusion`.

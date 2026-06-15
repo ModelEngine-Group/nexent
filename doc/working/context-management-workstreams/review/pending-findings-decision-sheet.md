@@ -1,6 +1,6 @@
 # Pending Findings Decision Sheet / 待审阅发现决策表
 
-- **状态：** 部分决策完成（21/26），5 项待讨论
+- **状态：** 部分决策完成（22/26），4 项待讨论
 - **日期：** 2026-06-15
 - **审阅人：** 产品架构师 / 产品经理
 - **涉及发现：** CM-009, CM-010, CM-014, CM-015, CM-017, CM-018, CM-021, CM-022, CM-024, CM-025, CM-026（共 11 项）
@@ -194,12 +194,9 @@
 
 > [!NOTE] 决策：
 >
-> - [ ] **A. 接受推荐方案** — 检查点失效并重建，不构建 upcaster
-> - [ ] **B. 更激进** — 与 CM-005 对齐，也构建 current + previous 检查点 upcaster
-> - [ ] **C. 更保守** — 检查点 schema 变更时清空所有检查点，完全依赖事件重放
-> - [ ] **D. 自定义：**
+> - [X] **D. 自定义：**
 >
-> 你的选择：
+> 你的选择：D — W7 退休，检查点功能合并到 W5 作为 `compression.snapshot` 事件类型。检查点 schema 迁移由 CM-005 事件 schema 兼容性合约完全覆盖。CM-014 变为 N/A。
 
 ---
 
@@ -330,7 +327,7 @@
 | CM-017 | Medium | Scope-exclusion | 有限冲突集 + 显式失败 | A ✅ |
 | CM-025 | Medium | Scope-exclusion | 独立 agent + 异步工具 | D（自定义）✅ |
 | CM-026 | Low | Scope-exclusion | 移除不支持模态 | A ✅ |
-| CM-014 | High | Claim-gated | 检查点失效并重建 | ⏳ 待讨论 |
+| CM-014 | High | Claim-gated | N/A — W7 退休，合并到 W5 | D（自定义）✅ |
 | CM-009 | High | Claim-gated | 2-3 个工作负载包络 | ⏳ 待讨论 |
 | CM-010 | Medium | Claim-gated | 按拓扑设定目标 | ⏳ 待讨论 |
 | CM-015 | Low | Measure-triggered | 增量哈希 + 度量 | ⏳ 待讨论 |

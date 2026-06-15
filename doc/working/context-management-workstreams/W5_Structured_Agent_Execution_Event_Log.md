@@ -10,7 +10,7 @@ compatibility projection.
 
 W5 stores what happened: runs, model actions, tool calls/results, artifacts, errors,
 answers, context-item lifecycle, Working Memory updates, and memory decisions. W6
-decides what each consumer sees. W7 persists recovery checkpoints. Hidden/private
+decides what each consumer sees. W5 also persists `compression.snapshot` events for recovery acceleration. Hidden/private
 chain-of-thought is explicitly not required and is not persisted by default. Branching
 and forking execution history are not supported by this design.
 
@@ -22,7 +22,7 @@ and forking execution history are not supported by this design.
 | `agent_event_index` | Ordered event envelope and run/step relationships |
 | `agent_event_data` | Typed, schema-versioned event payload |
 | `agent_artifact` | Large or binary output stored outside inline events |
-| `context_checkpoint` | Event-boundary recovery record, implemented with W7 |
+| `compression.snapshot` | Event-boundary recovery record, stored as a W5 event type |
 
 ### Table Design
 
@@ -158,10 +158,74 @@ when policy permits, but erased payload content must not be copied into the proo
 Define a stable registry for user input, run lifecycle, model action, tool call, tool
 result, artifact, error/retry/cancellation, final answer, Working Memory update,
 memory candidate/write/conflict decision, context-item creation/representation/recall/
-eviction/restoration, writeback stage/validation/commit/rejection, checkpoint, and
-lifecycle boundary. The `run.started` payload stores immutable model, agent, and
-configuration snapshots needed to replay that run without a dedicated run table.
-Payload schemas use typed models and stable reason codes.
+eviction/restoration, writeback stage/validation/commit/rejection,
+compression.snapshot, and lifecycle boundary. The `run.started` payload stores
+immutable model, agent, and configuration snapshots needed to replay that run without
+a dedicated run table. Payload schemas use typed models and stable reason codes.
+
+### `compression.snapshot` Event Type
+
+A `compression.snapshot` event captures the result of context compression as a durable
+event within the execution event log. It replaces the former independent checkpoint
+subsystem (W7) and serves as the recovery acceleration point for restart, failover,
+and worker handoff.
+
+Payload schema:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `summary_text` | string | Compressed history summary covering events before this snapshot |
+| `working_memory` | structured object | Current Working Memory state (goal, constraints, decisions, open items, entities, tool state) |
+| `covered_event_range` | `{start_seq, end_seq}` | Inclusive event sequence range covered by this snapshot |
+| `token_accounting` | `{summary_tokens, working_memory_tokens, recent_events_tokens}` | Token counts at snapshot time |
+| `selected_representations` | list | ContextItem representation references active at snapshot time |
+| `policy_version` | string | Context/memory policy version used for compression |
+| `model_version` | string | Model ID and version used for compression |
+| `schema_version` | string | Follows CM-005 event-schema compatibility contract |
+| `projection_version` | string | W6 projection version active at snapshot time |
+| `creation_reason` | enum | `periodic`, `lifecycle_boundary`, `manual_compact`, `dirty_state_flush` |
+
+A `compression.snapshot` event is appended like any other W5 event. It is immutable
+after commit. Subsequent compression produces a new `compression.snapshot` event that
+covers an extended range; old snapshots remain in the event log as audit history but
+are superseded for recovery purposes by the latest snapshot.
+
+If the snapshot payload exceeds the inline event size limit, large fields (e.g.,
+Working Memory) are stored as W12 artifacts and referenced by pointer.
+
+### Recovery from Compression Snapshot
+
+Worker restart, failover, and load-balancer routing changes use the following
+recovery flow:
+
+1. **Find the latest `compression.snapshot` event** for the session by querying
+   `agent_event_data` for the most recent event of type `compression.snapshot`.
+2. **Load its payload**: summary text, Working Memory, token accounting, and
+   covered event range.
+3. **Replay events after the snapshot**: read all W5 events with `event_seq`
+   greater than the snapshot's `covered_event_range.end_seq` and apply them to
+   reconstruct the current state.
+4. **Resume execution** from the reconstructed state.
+
+If no `compression.snapshot` exists (e.g., first run, or all snapshots were erased),
+recovery replays the entire event log from the beginning. This is always correct but
+slower for long sessions.
+
+Recovery never treats an in-flight tool call as completed or automatically reinvokes
+it. Unresolved `ambiguous_effect` state blocks continuation until W9 records an
+explicit resolution.
+
+A `compression.snapshot` affected by physical erasure is invalidated as a whole.
+Recovery falls back to the previous snapshot or full event replay. If safe
+reconstruction is impossible, recovery fails explicitly with
+`recovery_unsafe_after_erasure`.
+
+### Dirty-State Flush
+
+Dirty context state (in-memory Working Memory, pending compression results) must be
+committed as a `compression.snapshot` event before worker handoff, shutdown, reset,
+restore, eviction, or compaction can discard the only in-memory copy. Flush failure
+blocks destructive lifecycle actions and returns a typed fault.
 
 ### Initial Event-Schema Compatibility Contract
 

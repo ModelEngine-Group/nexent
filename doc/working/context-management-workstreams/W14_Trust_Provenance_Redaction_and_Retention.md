@@ -12,7 +12,7 @@ W14 owns governance metadata, classification, redaction, confirmation, retention
 deletion propagation, and validated writeback. It does not decide context relevance or
 token fit; W10 and W3 consume W14-governed inputs.
 
-Every context item, event, artifact, checkpoint, and memory carries source, owner,
+Every context item, event, artifact, compression snapshot, and memory carries source, owner,
 permissions, trust level, timestamps, expiry/retention class, lifecycle status, and
 policy version. Long-term memory additionally includes source event IDs, source type,
 confidence, created/confirmed time, validity interval, supersession link, and approval.
@@ -34,7 +34,7 @@ reason-coded failure record may identify the destination and source reference bu
 contain the rejected payload.
 
 Deletion creates an auditable
-tombstone and propagates to events where legally permitted, projections, checkpoints,
+tombstone and propagates to events where legally permitted, projections, compression snapshots,
 artifacts, caches, and long-term memory; derived state becomes invalid immediately.
 The W5 runtime role remains append-only. Physical event deletion or redaction uses a
 separate privileged governance path that produces an auditable proof record without
@@ -52,7 +52,7 @@ For physical erasure or irreversible redaction:
 1. Erase or irreversibly redact the governed payload without copying it into proof metadata.
 2. Mark the owning session `partial_after_erasure`.
 3. Locate every persisted derived object whose lineage includes the erased event.
-4. Invalidate each affected summary, checkpoint, Working Memory version,
+4. Invalidate each affected summary, compression snapshot, Working Memory version,
    representation, artifact summary/pointer, cache, and long-term memory as a whole.
 5. Rebuild from remaining authorized events when safe; otherwise keep the object
    unavailable and reject unsafe restore/resume.
@@ -69,7 +69,7 @@ The operation reports `in_progress`, not `completed`, until all required destina
 are verified.
 
 W14 coordinates a fixed initial destination registry: W5 event payloads, conversation
-projections, W7 checkpoints, W8 caches/derived state, W12 artifacts/object storage,
+projections, compression snapshots, W8 caches/derived state, W12 artifacts/object storage,
 long-term memory, and explicitly declared persistent log/search/backup destinations.
 For each destination, a simple durable status record progresses from `pending` to
 `completed`, or to `failed` and back through idempotent retry. The owning storage
@@ -104,7 +104,7 @@ redaction proof metadata, and policy version. Required failures include
 
 ## Governed Persistence Boundary
 
-Events, memories, summaries, artifacts, checkpoints, projections, caches, and other
+Events, memories, summaries, artifacts, compression snapshots, projections, caches, and other
 governed durable state are written only through trusted server-side persistence
 interfaces. Each write requires a current W4 authorization decision, applicable W10
 policy decision, and W14 `GovernedPayload` with classification, redaction, provenance,
@@ -138,7 +138,7 @@ microservice, service mesh, or signed capability-token platform.
 
 1. Approve classification, trust, retention, and temporal-memory schemas.
 2. Implement shared authorization/provenance and redaction services.
-3. Apply redaction before W5 events, W12 artifacts, checkpoints, memory, logs, and traces.
+3. Apply redaction before W5 events, W12 artifacts, compression snapshots, memory, logs, and traces.
 4. Add confirmation/no-write flows to W10 Memory Policy Engine.
 5. Add lifecycle filtering, supersession, and conflict metadata to memory retrieval.
 6. Implement the fixed-destination deletion coordinator, per-destination status,

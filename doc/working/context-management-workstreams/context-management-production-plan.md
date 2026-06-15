@@ -28,7 +28,7 @@ This comparison evaluates Nexent's current implementation as of June 10, 2026. I
 | Context compression and budgeting | Incremental summaries, summary caches, fallback truncation, context components, and debugger traces already exist. | Token-capacity semantics are incorrect, final fit is not guaranteed, and large components or tool outputs are not reduced progressively. | Prevents context-length failures while improving answer quality, latency, and token cost during long runs. | [W1](#w1)-[W3](#w3), [W10](#w10)-[W13](#w13), and [W16](#w16). |
 | Durable session and execution state | User prompts, final answers, and some visible progress are persisted, while summary state remains process-local. | Unlike mature durable agent runtimes, Nexent cannot reliably reconstruct, resume, replay, or recover complete agent execution. | Enables dependable long-running agents, multi-worker failover, debugging, audit, and user-controlled session recovery. | [W5](#w5)-[W9](#w9). |
 | Long-term memory | Mem0 is integrated across four authorization scopes and provides a useful retrieval foundation. | Memory lacks a platform-level policy engine, temporal validity, conflict resolution, evidence links, and measurable lifecycle governance. | Produces more trustworthy personalization and prevents stale or contradictory memories from influencing decisions. | [W14](#w14)-[W15](#w15), plus introduce a Memory Policy Engine and temporal-memory metadata. |
-| Authoritative Working Memory | No first-class structured layer currently represents the agent's active goals, decisions, constraints, and task state. | Unlike Letta and LangGraph, important working state is buried in transcripts or transient runtime objects. | Gives agents a compact, editable, recoverable source of truth without repeatedly replaying full history. | Implement Working Memory as a typed derived view from the execution event log under [W5](#w5)-[W7](#w7) and expose it through [W9](#w9). |
+| Authoritative Working Memory | No first-class structured layer currently represents the agent's active goals, decisions, constraints, and task state. | Unlike Letta and LangGraph, important working state is buried in transcripts or transient runtime objects. | Gives agents a compact, editable, recoverable source of truth without repeatedly replaying full history. | Implement Working Memory as a typed derived view from the execution event log under [W5](#w5)-[W6](#w6) and expose it through [W9](#w9). |
 | Context and memory governance | Authorization scopes and feature switches exist. | Trust labels, provenance, redaction, retention, deletion propagation, and decision traces are incomplete. | Reduces privacy and security risk and makes persisted context suitable for enterprise production use. | [W4](#w4), [W8](#w8), and [W14](#w14)-[W15](#w15). |
 | Platform productization | Nexent already combines zero-code configuration, multi-tenancy, tools, skills, knowledge, memory, and orchestration. | Stronger state and context primitives are not yet exposed as a coherent operator and developer control plane. | Converts Nexent's broad integration advantage into a differentiated, production-grade agent platform. | Deliver the complete [W1](#w1)-[W16](#w16) roadmap while preserving existing platform workflows. |
 
@@ -39,16 +39,16 @@ This comparison evaluates Nexent's current implementation as of June 10, 2026. I
 | Compared with | Nexent current status | Gap between Nexent and platform | Value of closing the gap | Actions to take |
 | --- | --- | --- | --- | --- |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code/sub-agents) | Nexent supports multi-agent execution and context compression, but delegated work still shares too much main-run context and has limited lifecycle control. | Claude Code isolates subagent contexts, returns bounded summaries, exposes compaction hooks, and maintains persistent project guidance. | Prevents delegated work from polluting the parent context and gives users predictable control over long sessions. | Isolate subagent contexts and offload outputs through [W12](#w12); add compaction hooks and inspection through [W9](#w9) and [W13](#w13); govern persistent guidance through [W10](#w10) and [W14](#w14). |
-| [Codex](https://developers.openai.com/codex/learn/best-practices) | Nexent persists chat-facing records but lacks a complete durable execution history and first-class resume, restore, and context-status controls. | Codex treats session history and lifecycle operations as core product capabilities and uses progressive disclosure to control context growth. | Enables reliable continuation, recovery from earlier states, transparent context control, and efficient long-running work. | Build the execution event log, derived views, checkpoints, and lifecycle APIs through [W5](#w5)-[W9](#w9); add progressive loading and output control through [W10](#w10)-[W12](#w12). |
+| [Codex](https://developers.openai.com/codex/learn/best-practices) | Nexent persists chat-facing records but lacks a complete durable execution history and first-class resume, restore, and context-status controls. | Codex treats session history and lifecycle operations as core product capabilities and uses progressive disclosure to control context growth. | Enables reliable continuation, recovery from earlier states, transparent context control, and efficient long-running work. | Build the execution event log, derived views, compression snapshots, and lifecycle APIs through [W5](#w5)-[W9](#w9); add progressive loading and output control through [W10](#w10)-[W12](#w12). |
 | [OpenCode](https://opencode.ai/docs/config/) | Nexent has automatic compression and fallback truncation, but operational controls are fragmented and large outputs can dominate context. | OpenCode exposes straightforward controls for reserved capacity, tool-output pruning, session export, and extension hooks. | Makes context behavior easier to operate, debug, customize, and keep within budget. | Add capacity reserves through [W2](#w2); output pruning and artifact offloading through [W12](#w12); session export through [W9](#w9); define a small extension-hook API around [W10](#w10) and [W13](#w13). |
 
 ### 0.3 State, Memory, and Agent Frameworks
 
 | Compared with | Nexent current status | Gap between Nexent and platform | Value of closing the gap | Actions to take |
 | --- | --- | --- | --- | --- |
-| [LangGraph](https://docs.langchain.com/oss/python/langgraph/persistence) | Nexent's summaries and caches primarily live in process and are not sufficient to reconstruct each execution step. | LangGraph provides typed per-step checkpoints, versioned threads, replay, time travel, and fault recovery. | Enables multi-worker recovery, deterministic debugging, and resuming from a known-good execution state. | Implement typed execution events and durable checkpoints through [W5](#w5), [W7](#w7), and [W8](#w8); expose replay and restore through [W9](#w9). |
-| [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/sessions/) | Nexent stores chat records and some visible progress, but lacks one canonical session protocol for all run items. | The Agents SDK models tools, handoffs, approvals, and run events as rich session items with pluggable storage. | Simplifies integrations and preserves enough structured evidence for reliable resume, audit, and alternative derived views. | Define canonical run-item schemas and pluggable event-log storage through [W5](#w5)-[W7](#w7); expose a minimal session interface through [W9](#w9). |
-| [Letta](https://docs.letta.com/guides/core-concepts/stateful-agents/) | Nexent has long-term memory but no authoritative, editable Working Memory representation for active task state. | Letta provides explicit in-context memory blocks, archival memory, shared blocks, and context visualization. | Keeps goals, constraints, decisions, and task progress compact, inspectable, and recoverable across runs. | Create typed Working Memory derived views through [W5](#w5)-[W7](#w7); add inspect/edit APIs through [W9](#w9); enforce shared-state authorization through [W4](#w4) and [W14](#w14). |
+| [LangGraph](https://docs.langchain.com/oss/python/langgraph/persistence) | Nexent's summaries and caches primarily live in process and are not sufficient to reconstruct each execution step. | LangGraph provides typed per-step checkpoints, versioned threads, replay, time travel, and fault recovery. | Enables multi-worker recovery, deterministic debugging, and resuming from a known-good execution state. | Implement typed execution events and compression snapshots through [W5](#w5) and [W8](#w8); expose replay and restore through [W9](#w9). |
+| [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/sessions/) | Nexent stores chat records and some visible progress, but lacks one canonical session protocol for all run items. | The Agents SDK models tools, handoffs, approvals, and run events as rich session items with pluggable storage. | Simplifies integrations and preserves enough structured evidence for reliable resume, audit, and alternative derived views. | Define canonical run-item schemas and pluggable event-log storage through [W5](#w5)-[W6](#w6); expose a minimal session interface through [W9](#w9). |
+| [Letta](https://docs.letta.com/guides/core-concepts/stateful-agents/) | Nexent has long-term memory but no authoritative, editable Working Memory representation for active task state. | Letta provides explicit in-context memory blocks, archival memory, shared blocks, and context visualization. | Keeps goals, constraints, decisions, and task progress compact, inspectable, and recoverable across runs. | Create typed Working Memory derived views through [W5](#w5)-[W6](#w6); add inspect/edit APIs through [W9](#w9); enforce shared-state authorization through [W4](#w4) and [W14](#w14). |
 | [Zep / Graphiti](https://help.getzep.com/graphiti/getting-started/overview) | Nexent retrieves scoped long-term memories but does not formally model when facts are valid, superseded, conflicting, or evidence-backed. | Zep/Graphiti maintains temporal facts, relationships, validity intervals, and supersession. | Prevents stale facts from silently overriding newer evidence and improves explainability of memory-driven behavior. | Extend [W14](#w14) with temporal metadata, evidence links, conflict detection, and supersession rules; evaluate a graph backend only after these contracts are stable. |
 | [Mem0](https://docs.mem0.ai/) | Mem0 is already integrated as Nexent's long-term-memory provider across four scopes. | Nexent lacks a provider-independent policy layer governing extraction, retrieval, update, conflict handling, retention, and quality. | Preserves the existing investment while making memory behavior trustworthy, measurable, and replaceable. | Keep Mem0 as a provider; add a Memory Policy Engine fed by [W5](#w5)-[W6](#w6), governed by [W14](#w14), and measured through [W15](#w15). |
 | [LlamaIndex](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/memory/) | Nexent has useful context and memory components, but their storage, retrieval, derived-view generation, and policy responsibilities are tightly coupled. | LlamaIndex offers composable memory, storage, retrieval, and summary primitives. | Makes context algorithms easier to test, replace, and evolve without weakening platform-wide governance. | Define stable store, retriever, derived-view generator, reducer, and policy interfaces while implementing [W6](#w6), [W10](#w10), and [W11](#w11). |
@@ -72,7 +72,7 @@ review adds claim-scoped constraints, not three unconditional platform workstrea
   side-effect-safe resume.
 - Storage operating requirements stay with the concrete storage paths and deployment
   topology that introduce them.
-- Schema evolution begins as a shared W5/W7 compatibility contract.
+- Schema evolution begins as the W5 event-schema compatibility contract (CM-005).
 
 The foundational additions are not cosmetic. They affect the correctness and delivery
 gates of most other workstreams.
@@ -90,7 +90,7 @@ The completed design establishes five coordinated engineering modules:
 | Module | W-IDs | Design result |
 | --- | --- | --- |
 | Model Capacity and Request Safety | W1-W3 | One capacity resolver, per-request safe-input budgets, and a mandatory final-fit gateway before provider dispatch. |
-| Durable Session State and Lifecycle | W4-W9 | Fully qualified identity, typed event-log source of truth, purpose-specific projections, durable checkpoints, complete validation, and authorized lifecycle APIs. |
+| Durable Session State and Lifecycle | W4-W6, W8-W9 | Fully qualified identity, typed event-log source of truth with compression snapshots, purpose-specific projections, complete validation, and authorized lifecycle APIs. |
 | Context Shaping and Compaction | W10-W13 | One enforceable policy engine, minimum-fidelity representations, artifact offload/retrieval, and bounded governed compaction. |
 | Governance and Privacy | W14 | Shared provenance, redaction, retention, deletion-lineage, and validated writeback contracts across persisted context. |
 | Quality and Efficiency | W15-W16 | Versioned SLO/evidence gates and deterministic cache-aware final assembly. |
@@ -108,7 +108,7 @@ The modules below are intended as assignable ownership boundaries. Cross-module 
 | Module | Workstreams | Suggested primary owners | Primary responsibility |
 | --- | --- | --- | --- |
 | Model Capacity and Request Safety | W1-W3 | Model integration and agent-runtime engineers | Capacity contracts, token budgeting, and guaranteed request fit. |
-| Durable Session State and Lifecycle | W4-W9 | Backend platform, data, and distributed-systems engineers | Identity isolation, execution event log, checkpoints, replay, and session operations. |
+| Durable Session State and Lifecycle | W4-W6, W8-W9 | Backend platform, data, and distributed-systems engineers | Identity isolation, execution event log with compression snapshots, replay, and session operations. |
 | Context Shaping and Compaction | W10-W13 | Agent-runtime and context-algorithm engineers | Context policy, reduction, artifact offloading, and compaction reliability. |
 | Governance and Privacy | W14 | Security, privacy, and platform-governance engineers | Provenance, trust boundaries, redaction, retention, and deletion. |
 | Quality and Efficiency | W15-W16 | Quality infrastructure and performance engineers | Context SLOs, release gates, observability, and prompt-cache efficiency. |
@@ -121,11 +121,11 @@ The table is grouped by assignable engineering module. Modules and workstreams a
 | Model Capacity and Request Safety | High | [W2](#w2) | Output and safety capacity reserve | Context construction can consume all model capacity. | Reserve output separately; when required provider behavior is unknown, reserve an additional 10% of the context window. | Protects answer quality and reduces overflow risk. |
 | Model Capacity and Request Safety | Blocker | [W3](#w3) | Guaranteed context fit | Nexent can still call the model after compression leaves context oversized. | Add a mandatory deterministic final-fit pipeline before every model call. | Eliminates preventable context-length failures. |
 | Durable Session State and Lifecycle | Blocker | [W4](#w4) | Tenant and user isolation | Context state is keyed only by `conversation_id`. | Qualify all conversation/session state by tenant, user, and conversation. | Prevents cross-user or cross-tenant leakage. |
-| Durable Session State and Lifecycle | Blocker | [W5](#w5) | Structured agent execution event log | Current persistence is a UI transcript, not replayable agent state. | Persist session-ordered typed runs, steps, tool calls/results, artifacts, errors, and checkpoints. | Enables state reconstruction and audit; ambiguous side effects stop for explicit resolution unless the optional effect-reconciliation package is delivered. |
+| Durable Session State and Lifecycle | Blocker | [W5](#w5) | Structured agent execution event log | Current persistence is a UI transcript, not replayable agent state. | Persist session-ordered typed runs, steps, tool calls/results, artifacts, errors, and compression snapshots. | Enables state reconstruction, restart recovery, and audit; ambiguous side effects stop for explicit resolution unless the optional effect-reconciliation package is delivered. |
 | Durable Session State and Lifecycle | Blocker | [W6](#w6) | Separate raw history from active context | Persisting richer progress without purpose-specific derived views would flood model context. | Derive purpose-specific chat, resume, model-context, memory, and audit derived views from the execution event log. | Preserves rich evidence without increasing prompt size. |
-| Durable Session State and Lifecycle | Blocker | [W7](#w7) | Durable multi-worker context state | Summary caches disappear on restart and cannot move across workers. | Persist versioned context checkpoints with optimistic concurrency. | Enables horizontal scaling and failover recovery. |
+| Durable Session State and Lifecycle | — | ~~W7~~ | ~~Durable multi-worker context state~~ | — | Retired: checkpoint functionality merged into W5 as `compression.snapshot` events. | Recovery and restart handled through W5 event replay from latest compression snapshot. |
 | Durable Session State and Lifecycle | Blocker | [W8](#w8) | Complete cache validation and versioning | Boundary-only fingerprints can reuse stale summaries. | Hash the complete covered prefix and include model, policy, schema, prompt, and lifecycle versions. | Prevents stale or incorrect resumed context. |
-| Durable Session State and Lifecycle | High | [W9](#w9) | Full session lifecycle APIs | Nexent lacks first-class compact, checkpoint, restore, reset, and inspect operations. | Add durable lifecycle APIs and compaction hooks over immutable execution-event history. | Makes long-running sessions controllable and recoverable. |
+| Durable Session State and Lifecycle | High | [W9](#w9) | Full session lifecycle APIs | Nexent lacks first-class compact, flush_snapshot, restore, reset, and inspect operations. | Add durable lifecycle APIs and compaction hooks over immutable execution-event history. | Makes long-running sessions controllable and recoverable. |
 | Context Shaping and Compaction | High | [W10](#w10) | Unified enforceable context and memory policy | Context injection and memory decisions are distributed across inconsistent strategies and paths. | Apply one validated policy engine to context selection, memory writes/retrieval, authority, conflicts, and no-write rules. | Makes context and memory behavior predictable, trustworthy, and configurable. |
 | Context Shaping and Compaction | High | [W11](#w11) | Progressive component reduction | Oversized tools, skills, memory, or instructions may be dropped whole. | Add component-specific shorten, rerank, summarize, and minimum-representation reducers. | Retains critical capabilities under pressure. |
 | Context Shaping and Compaction | High | [W12](#w12) | Context-pollution and large-output control | Tool results and intermediate steps can dominate the main context. | Offload large outputs to artifacts, retain bounded summaries, and isolate subagent contexts. | Improves long-session reliability and lowers token cost. |
@@ -248,7 +248,7 @@ The persisted message units are UI-oriented and lack the structure needed for re
 
 - No durable run ID, step ID, parent-child relationship, or replay sequence.
 - No typed tool-call request/result relationship.
-- No context checkpoint or compression-summary version.
+- No compression snapshot or compression-summary version.
 - No stable event schema for replay.
 - No concurrency/version field for distributed workers.
 - No policy for redaction, retention, or large-output offloading.
@@ -286,7 +286,7 @@ Recommended durable entities:
 | `agent_event_index` | Session-ordered event IDs plus run, step, parent, and idempotency relationships. |
 | `agent_event_data` | Typed schema-versioned payloads for user input, model action, tool call/result, error, final answer, and cancellation. |
 | `agent_artifact` | Large tool outputs, files, logs, and binary references stored outside prompt context. |
-| `context_checkpoint` | Versioned summary, compressed boundaries, policy/model/schema versions, and token accounting. |
+| `compression.snapshot` (W5 event) | Versioned summary, Working Memory state, covered event range, policy/model/schema versions, and token accounting. Stored as a W5 event, not a separate table. |
 
 Compatibility decision: the current integer `conversation_id` remains Nexent's public
 chat identifier. A new internal UUID `agent_session_id` maps one-to-one to an owned
@@ -305,7 +305,7 @@ Persist by default:
 - Tool-result summaries plus artifact pointers for large raw results.
 - Errors, retries, cancellation, and max-step termination.
 - Citations, attachments, token usage, latency, and cost.
-- Context checkpoints and compact progress/decision summaries.
+- Compression snapshots and compact progress/decision summaries.
 
 Do not persist by default:
 
@@ -313,7 +313,7 @@ Do not persist by default:
 - Secrets, credentials, raw authorization headers, or unredacted sensitive tool parameters.
 - Unlimited raw tool output inline in the relational event table.
 
-Visible reasoning content can remain available for UI replay when product policy allows it, but it should not be required for agent resume. Resume should depend on structured actions, observations, decisions, and checkpoints.
+Visible reasoning content can remain available for UI replay when product policy allows it, but it should not be required for agent resume. Resume should depend on structured actions, observations, decisions, and compression snapshots.
 
 #### Required Memory-Control Capabilities
 
@@ -331,7 +331,7 @@ Production-grade memory requires the following control capabilities. They are im
 | Explainable memory decisions | Record why a memory was stored, rejected, retrieved, excluded, superseded, reduced, or injected, without exposing hidden chain-of-thought. | [W5](#w5)-[W6](#w6), [W15](#w15) |
 | Confirmation and no-write controls | Require confirmation for sensitive, tenant-shared, high-impact, or low-confidence writes; support ephemeral and explicit no-write classifications. | [W10](#w10), [W14](#w14) |
 
-Working Memory must not become an independent source of truth that can drift from execution history. The durable execution event log and checkpoints remain authoritative; Redis may be used as an optional hot cache, while object storage is reserved for large artifacts or snapshots.
+Working Memory must not become an independent source of truth that can drift from execution history. The durable execution event log (including compression snapshots) remains authoritative; object storage is reserved for large artifacts.
 
 #### ClawVM Adoption Assessment
 
@@ -342,7 +342,7 @@ ClawVM's central insight is that context management should be an enforceable har
 | Typed pages with stable identity, scope, provenance, and minimum fidelity | Adopt. This gives context policy a deterministic unit of selection, reduction, restoration, and audit. Use the product-neutral term `ContextItem` rather than exposing OS terminology in public APIs. | [W5](#w5), [W6](#w6), [W10](#w10), [W11](#w11), [W14](#w14) |
 | Full, compressed, structured, and pointer representations | Adopt. Precomputing lower-fidelity forms prevents emergency compaction from depending on another LLM call and enables graceful degradation. Generation cost and staleness must be measured. | [W3](#w3), [W6](#w6), [W11](#w11), [W12](#w12) |
 | Two-phase selection: install required minima, then spend remaining budget on upgrades | Adopt. This cleanly separates structural safety from quality optimization. Start with deterministic priority/recency/recompute-cost scoring; do not block launch on an optimal knapsack solver. | [W3](#w3), [W10](#w10), [W11](#w11), [W15](#w15) |
-| Lifecycle-complete, validated, non-destructive writeback | Adopt as a blocker-level persistence contract. Dirty state must be staged, validated, and committed before compaction, reset, restore, eviction, shutdown, or worker handoff can destroy the only copy. Conversation/session ownership transfer is outside the initial release. | [W5](#w5), [W7](#w7), [W8](#w8), [W9](#w9), [W14](#w14) |
+| Lifecycle-complete, validated, non-destructive writeback | Adopt as a blocker-level persistence contract. Dirty state must be committed as a `compression.snapshot` event before compaction, reset, restore, eviction, shutdown, or worker handoff can destroy the only copy. Conversation/session ownership transfer is outside the initial release. | [W5](#w5), [W8](#w8), [W9](#w9), [W14](#w14) |
 | Observable context-fault model and deterministic replay | Adopt. Explicit fault classes and reason codes make context failures testable and operationally actionable. Add replay-oracle comparison later for policy tuning. | [W5](#w5), [W9](#w9), [W15](#w15) |
 | Claimed zero policy-controllable faults | Treat as evidence for the architecture, not as a transferable guarantee. The paper primarily evaluates deterministic replay and structural faults; semantic correctness, live cross-session behavior, and end-user quality remain open. | Require Nexent-specific live, replay, semantic-quality, and multi-tenant evidence under [W15](#w15). |
 
@@ -377,7 +377,7 @@ Core invariants:
 3. A worker restart or routing change does not lose resumable context.
 4. Raw durable history is separate from the bounded context sent to a model.
 5. Every dropped, summarized, or offloaded context item is observable.
-6. Context checkpoints are invalidated when their covered data or policy changes.
+6. Compression snapshots are invalidated when their covered data or policy changes.
 7. Working Memory is a rebuildable, versioned derived view rather than an independent source of truth.
 8. Retrieved memory never becomes authoritative solely because it is relevant or injected as a system message.
 9. Memory writes, conflicts, lifecycle changes, exclusions, and prompt-injection decisions are explainable.
@@ -504,8 +504,8 @@ Core invariants:
 **Solution:**
 
 - Introduce `ContextIdentity(tenant_id, user_id, conversation_id)`.
-- Use the identity for in-memory caches, durable checkpoints, locks, and metrics.
-- Require identity authorization before checkpoint read/write.
+- Use the identity for in-memory caches, compression snapshots, locks, and metrics.
+- Require identity authorization before compression snapshot read/write.
 - Treat `tenant_id` and `user_id` as immutable single-owner fields for each conversation
   and W5 session. Reject conversation sharing, membership, and ownership transfer;
   shared agents and tenant-shared memories do not grant session access.
@@ -517,13 +517,13 @@ Core invariants:
 **Acceptance criteria:**
 
 - Collision tests prove identical conversation IDs across tenants/users never share summaries or components.
-- Security tests reject unauthorized checkpoint access.
+- Security tests reject unauthorized compression snapshot access.
 
 <a id="w5"></a>
 
 ##### W5. Build the Structured Agent Execution Event Log
 
-**Problem:** Existing persistence is a user-facing transcript, not a replayable agent-state model. Advanced context management cannot reliably reconstruct tool progress, failures, or checkpoint boundaries from it.
+**Problem:** Existing persistence is a user-facing transcript, not a replayable agent-state model. Advanced context management cannot reliably reconstruct tool progress, failures, or compression boundaries from it.
 
 **Solution:**
 
@@ -546,7 +546,7 @@ Core invariants:
   before continuation. A retry explicitly accepts possible duplicate external effects.
 - Persist typed Working Memory update, memory-candidate, memory-write-decision, and conflict-resolution events.
 - Persist context-item creation, representation change, recall, eviction, restoration, writeback staging, validation, commit, rejection, and lifecycle-boundary events with stable reason codes.
-- Persist context checkpoints against execution event sequences.
+- Append `compression.snapshot` events at configured boundaries within the execution event log.
 - Build an outbox-backed, idempotent compatibility projector that continues populating
   the existing conversation tables/UI during migration. Required projection-outbox
   rows commit atomically with their W5 source event; W5 owns retry and repair.
@@ -600,27 +600,29 @@ resolution. **Finding:** CM-001.
 
 <a id="w7"></a>
 
-##### W7. Persist Context State for Multi-Worker Operation
+##### ~~W7. Persist Context State for Multi-Worker Operation~~ (Retired)
 
-**Problem:** Summary caches and context managers live only in a process-local dictionary. Restart, failover, and load-balancer routing discard state.
+**Status:** Retired. Checkpoint functionality is merged into W5 as `compression.snapshot`
+events.
 
-**Solution:**
+**Original problem:** Summary caches and context managers live only in a process-local
+dictionary. Restart, failover, and load-balancer routing discard state.
 
-- Persist `context_checkpoint` records containing summary text, covered event sequence, fingerprints, token counts, and policy/model/schema versions.
-- Persist Working Memory version, source event sequence, and policy version with each checkpoint.
-- Use optimistic concurrency with `checkpoint_version` and compare-and-swap.
-- Use W5's single-active-run contract as the initial same-session ownership guardrail.
-  Reject restore/reset/manual compact while a run is active; do not implement fencing
-  tokens until concurrent same-session lifecycle mutation is approved.
-- Optionally cache checkpoints in Redis, while the database remains durable.
-- Add TTL/archival policies for inactive checkpoints.
+**Resolution:** Instead of an independent checkpoint subsystem with its own table, CAS
+logic, Redis cache, and schema migration (CM-014), compression results are stored as
+`compression.snapshot` events within the W5 execution event log. Recovery finds the
+latest `compression.snapshot` event and replays subsequent events. This eliminates:
 
-**Proof and benefit:** Durable checkpoints enable horizontal scaling, restart recovery, deterministic resume, and cheaper incremental compression.
+- Independent checkpoint table and CAS concurrency control
+- Redis checkpoint cache layer
+- W8 checkpoint-specific validation (compression snapshots are validated like any other event)
+- CM-014 checkpoint schema migration (covered by CM-005 event-schema compatibility)
+- W7 publication outbox for cross-system consistency
 
-**Acceptance criteria:**
+**Recovery flow:** Find latest `compression.snapshot` → load payload → replay subsequent
+events → resume. If no snapshot exists, replay entire event log.
 
-- A session resumes with the same effective context after worker restart.
-- Concurrent runs cannot silently overwrite newer checkpoints.
+**See:** W5 `compression.snapshot` event type, recovery flow, and dirty-state flush.
 
 <a id="w8"></a>
 
@@ -631,10 +633,10 @@ resolution. **Finding:** CM-001.
 **Solution:**
 
 - Hash the complete covered event prefix using canonical serialization.
-- Include W5 session identity, covered event sequence, context policy version, summary prompt/schema version, agent version, model ID, and tokenizer version in checkpoint validity.
+- Include W5 session identity, covered event sequence, context policy version, summary prompt/schema version, agent version, model ID, and tokenizer version in derived-state validity.
 - Invalidate Working Memory and memory-retrieval derived views when source events, lifecycle state, authority rules, or memory-policy versions change.
 - Store the covered start/end event sequence.
-- Invalidate checkpoints after history edits or redactions.
+- Invalidate derived state after history edits or redactions.
 - Mark sessions `partial_after_erasure` after physical event erasure and prevent
   complete-replay claims.
 
@@ -648,18 +650,18 @@ resolution. **Finding:** CM-001.
 
 ##### W9. Add Full Session Lifecycle APIs
 
-**Problem:** Nexent lacks first-class compact, checkpoint, restore, reset, and context-inspection operations.
+**Problem:** Nexent lacks first-class compact, flush_snapshot, restore, reset, and context-inspection operations.
 
 **Solution:**
 
-- Add APIs and SDK methods: `compact`, `checkpoint`, `restore`, `reset_context`, and `inspect_context`.
+- Add APIs and SDK methods: `compact`, `flush_snapshot`, `restore`, `reset_context`, and `inspect_context`.
 - Reject mutating lifecycle operations with `operation_conflicts_with_active_run` while
   a session run is active. Read-only inspection remains allowed; runtime-internal
   compaction remains part of its owning run.
 - Keep raw execution events immutable; restore/reset append lifecycle events that
   select a new active derived-state baseline without deleting later history.
 - Define deterministic linear-history restore semantics: projectors start from the
-  referenced checkpoint and apply events after `restore.applied`.
+  referenced compression snapshot and apply events after `restore.applied`.
 - Support manual focused compaction instructions.
 - Add lifecycle events and hooks around compaction and restore.
 - Add authorized inspect, restore, and edit operations for Working Memory and memory decisions.
@@ -668,7 +670,7 @@ resolution. **Finding:** CM-001.
 
 **Acceptance criteria:**
 
-- Restore reproduces the checkpoint's active-context derived view.
+- Restore reproduces the compression snapshot's active-context derived view.
 
 #### 2.3.3 Context Shaping and Compaction
 
@@ -792,7 +794,7 @@ resolution. **Finding:** CM-001.
   fails; allow only retry, ephemeral process-local handling, operation failure, and a
   sanitized reason-coded failure record.
 - Configure retention by event/artifact type and tenant policy.
-- Add deletion propagation across the execution event log, checkpoints, artifacts, and memories.
+- Add deletion propagation across the execution event log, compression snapshots, artifacts, and memories.
 - Tombstone authorized deletion targets immediately so reads, restore, retrieval, and
   prompt injection deny them while deletion is in progress. Track and retry a fixed
   per-store destination list, and claim completion only after every required
@@ -924,8 +926,8 @@ trigger.
    generic cross-store transaction. W5 events and required compatibility-projection
    outbox rows commit in one relational transaction; W5 events are immediately
    authoritative while compatibility views may lag and are repaired idempotently. A
-   committed W7 checkpoint is independently loadable after W8 validation; its W5
-   lifecycle event is asynchronous audit publication retried and repaired by W7.
+committed `compression.snapshot` event is immediately loadable as part of the W5
+event log; no separate publication or cross-system repair is needed.
    W12 uses governed non-readable staging, one pending-artifact/event/finalize-outbox
    transaction, idempotent finalize, ready-only reads, retry/repair, and orphan cleanup.
    W14 immediately tombstones authorized deletion targets and coordinates a fixed
@@ -972,10 +974,10 @@ trigger.
   declarations, ambiguity states, and reconciliation only when this product claim is
   approved. Until then, the minimum CM-001 guardrail conservatively marks every
   interrupted tool call ambiguous and stops for explicit resolution.
-- **Production-scale topology:** concrete W5/W7/W12/W14 paths own correctness and
+- **Production-scale topology:** concrete W5/W12/W14 paths own correctness and
   repair; deployment/SRE approval owns topology-specific capacity, backup, DR, and
   RPO/RTO evidence. Do not create a single storage mega-workstream.
-- **Advanced schema migration:** begin with the shared W5/W7 compatibility contract.
+- **Advanced schema migration:** begin with the W5 event-schema compatibility contract (CM-005).
   A separate migration workstream is optional when multi-team or high-volume migration
   needs emerge.
 
@@ -1058,7 +1060,7 @@ Exit gate:
 Deliver:
 
 - Structured execution event log and artifact store.
-- Durable versioned context checkpoints.
+- Compression snapshot events within W5 for restart recovery.
 - Tenant/user/conversation-qualified identity.
 - Backend-owned history derived views.
 - Authoritative Working Memory derived view and memory-candidate events.
@@ -1068,8 +1070,7 @@ Deliver:
   no automatic reinvocation of an interrupted tool call.
 - Single-active-run enforcement and rejection of conflicting lifecycle mutations.
 - Path-specific publication and repair behavior: W5 owns atomic
-  event/compatibility-outbox creation and idempotent projection repair; W7 owns atomic
-  checkpoint/publication-outbox creation and idempotent lifecycle-event publication.
+event/compatibility-outbox creation and idempotent projection repair.
 - Documented `current + previous` canonical-reader/upcaster contract for durable events;
   its implementation and supported-version tests gate the first production event-
   schema upgrade, not the initial single-version deployment. Checkpoint compatibility
@@ -1106,7 +1107,7 @@ Exit gate:
 
 Deliver:
 
-- Compact/checkpoint/restore/reset/inspect APIs.
+- Compact/flush_snapshot/restore/reset/inspect APIs.
 - Lifecycle hooks and manual focused compaction.
 - Dedicated compaction-model policy, fault handling, and circuit breaker.
 
@@ -1142,7 +1143,7 @@ The July 10 planning target aims to demonstrate W1-W8 end to end:
 
 - Model capacity has correct semantics and every serialized request is guaranteed to fit.
 - Context state is tenant-isolated and survives worker restart or failover.
-- The structured execution event log, active-context derived view, durable checkpoints, and complete cache validation operate together.
+- The structured execution event log with compression snapshots, active-context derived view, and complete cache validation operate together.
 - Authoritative Working Memory survives restart and can be rebuilt from execution events.
 - Existing UI chat behavior remains compatible.
 - Capacity, isolation, replay, restart, concurrency, and cache-invalidation tests pass in CI.
@@ -1179,12 +1180,10 @@ gantt
 ```mermaid
 flowchart LR
     W1["W1 Token capacity"] --> W2["W2 Reserves"] --> W3["W3 Guaranteed fit"]
-    W5["W5 Execution event log"] --> W6["W6 Derived views"] --> W7["W7 Durable checkpoints"]
-    W7 --> W8["W8 Cache validity"] --> W9["W9 Lifecycle APIs"]
-    W4["W4 Identity"] --> W7
+    W5["W5 Execution event log<br/>+ compression snapshots"] --> W6["W6 Derived views"] --> W8["W8 Cache validity"] --> W9["W9 Lifecycle APIs"]
+    W4["W4 Identity"] --> W5
     W10["W10 Policy"] --> W11["W11 Reducers"] --> W12["W12 Pollution control"] --> W3
-    W14["W14 Trust / redaction"] -. governs .-> W7
-    W14 -. governs .-> W12
+    W14["W14 Trust / redaction"] -. governs .-> W12
     W14 -. governs .-> W5
     W14 -. governs .-> W6
     W15["W15 Measurement and release gate"] -. measures .-> W3
@@ -1192,9 +1191,8 @@ flowchart LR
     W15 -. measures .-> W12
     W5 --> C1["Optional effect reconciliation"] --> W9
     W5 --> C2["Shared schema compatibility"] --> W6
-    W7 --> C2
     W15 -. gates approved claims .-> C1
-    W15 -. gates approved topology .-> W7
+    W15 -. gates approved topology .-> W5
 ```
 
 ### 3.4 Required Test Portfolio
@@ -1205,7 +1203,7 @@ flowchart LR
 | Tenant isolation | Same IDs across tenants/users cannot share state. |
 | Single-owner scope | Sharing and ownership-transfer requests are rejected; shared resources grant no session access; audited operator actions leave the owner unchanged. |
 | Restart/failover | Resume reproduces effective context on another worker. |
-| Concurrency | A durable session rejects a second active run and rejects restore/reset/manual compact until the active run reaches a committed terminal/recovery state; checkpoint CAS still prevents stale overwrite. |
+| Concurrency | A durable session rejects a second active run and rejects restore/reset/manual compact until the active run reaches a committed terminal/recovery state; W5 sequence lock prevents stale overwrite. |
 | Event-log replay | Runs and derived views reconstruct from durable events. |
 | Cache invalidation | Any covered history or policy mutation invalidates stale summaries. |
 | Retention quality | Key decisions, pending work, tool outcomes, and constraints survive compression. |
