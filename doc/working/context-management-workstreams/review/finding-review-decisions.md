@@ -83,7 +83,8 @@ accepted decision.
   is pending. W7 owns retry and repair for that path.
 - **Explicitly out of scope:** Universal saga/workflow platforms, distributed
   transactions, two-phase commit, and one shared repair framework for all storage
-  paths. Object-storage publication and deletion propagation remain CM-019/CM-020.
+  paths. Object-storage publication and deletion propagation are separately governed
+  by the accepted CM-019/CM-020 path-specific contracts.
 - **Updated documents:** W5, W7, parent production plan, findings registry, W5/W7
   reviews, cross-workstream review, impact analysis, goal coverage, and architecture
   assessment.
@@ -153,3 +154,69 @@ accepted decision.
 - **Updated documents:** W1, W2, W3, W16, parent production plan, findings registry,
   W1/W2/W3/W16 reviews, cross-workstream review, goal coverage, impact analysis, and
   architecture assessment.
+
+## CM-008: Independent Minimal Hard-Fit Gateway
+
+- **Decision:** Retained as `High / Required guardrail`.
+- **Approved minimum:** Ship W3's independent minimal hard-fit gateway first. It may
+  reject, use existing bounded representations, remove or deterministically truncate
+  optional content, preserve complete tool pairs, and fail on mandatory overflow.
+  W10-W13 later improve retained quality but cannot become prerequisites for hard fit.
+- **Explicitly out of scope:** Blocking W3 on the complete policy/reducer/artifact/
+  compaction stack or building a separate fit orchestration platform.
+- **Updated documents:** W3, parent production plan, findings registry, W3 review,
+  cross-workstream review, goal coverage, impact analysis, and architecture assessment.
+
+## CM-012: Fail-Closed Governance Processing
+
+- **Decision:** Retained as `Critical / Required guardrail`.
+- **Approved minimum:** Unknown classification or classification/redaction failure
+  forbids raw governed persistence, inline fallback, logs, and traces. Callers may
+  retry, retain content only as ephemeral process-local state, fail the operation, or
+  append a sanitized reason-coded failure record without the rejected payload.
+- **Explicitly out of scope:** A new DLP platform, temporary raw persistence for later
+  cleanup, and raw diagnostic/proof records.
+- **Updated documents:** W5, W12, W14, parent production plan, findings registry,
+  W5/W12/W14 reviews, goal coverage, impact analysis, and architecture assessment.
+
+## CM-019: Path-Specific Artifact Publication
+
+- **Decision:** Retained as `High / Required guardrail`.
+- **Approved minimum:** W12 uploads governed bytes to non-readable staging, then one
+  relational transaction creates the pending artifact, W5 reference event, and
+  finalize outbox. A W12-owned worker idempotently finalizes the immutable object and
+  marks it ready; only ready artifacts are readable. Retry/repair and orphan cleanup
+  remain W12-owned.
+- **Explicitly out of scope:** Distributed transactions, two-phase commit, universal
+  saga/workflow platforms, and one repair framework for every storage path.
+- **Updated documents:** W5, W12, parent production plan, findings registry, W12
+  review, cross-workstream review, goal coverage, impact analysis, and architecture
+  assessment.
+
+## CM-020: Fixed-Destination Deletion Propagation
+
+- **Decision:** Retained as `High / Claim-gated`.
+- **Approved minimum:** An authorized tombstone immediately blocks reads, restore,
+  retrieval, and prompt injection. W14 coordinates a fixed initial destination
+  registry; each storage adapter owns idempotent deletion and verification with
+  `pending`, `completed`, and retryable `failed` status. The operation cannot report
+  `completed` until every required destination verifies deletion.
+- **Explicitly out of scope:** A generic workflow/orchestration platform, one universal
+  storage adapter, and claiming immediate physical deletion from backups that instead
+  enforce inaccessible-until-expiry handling.
+- **Updated documents:** W8, W14, parent production plan, findings registry, W8/W14
+  reviews, cross-workstream review, goal coverage, impact analysis, and architecture
+  assessment.
+
+## CM-023: Single Final Payload Owner
+
+- **Decision:** Retained as `High / Required guardrail`.
+- **Approved minimum:** W16 produces only a deterministic cache partition plan. W3
+  alone assembles and serializes the final provider payload, verifies fit, and computes
+  stable-prefix/full-prompt fingerprints from that exact payload. Trusted dispatch
+  sends it unchanged except for transport-only metadata.
+- **Explicitly out of scope:** A second serializer, pre-fit prompt fingerprints, and a
+  separate prompt-assembly service.
+- **Updated documents:** W3, W16, parent production plan, findings registry, W3/W16
+  reviews, cross-workstream review, goal coverage, impact analysis, and architecture
+  assessment.

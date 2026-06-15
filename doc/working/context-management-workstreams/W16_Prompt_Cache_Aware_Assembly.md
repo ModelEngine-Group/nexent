@@ -7,9 +7,10 @@ observable, and resistant to unnecessary per-request changes.
 
 ## Assembly Contract
 
-W16 owns deterministic partitioning and cache-aware assembly metadata. It does not
-change authority, selection, fit, or privacy decisions and must degrade correctly when
-a provider has no prompt-cache capability.
+W16 owns deterministic partition planning and allowed cache-directive advice. It does
+not own final provider payload assembly or fingerprints, does not change authority,
+selection, fit, or privacy decisions, and must degrade correctly when a provider has no
+prompt-cache capability.
 
 W16 consumes the selected W1 capability profile. Cache directives are emitted only
 when that approved profile explicitly declares the provider/model cache mode. Unknown
@@ -39,18 +40,19 @@ Define a prefix-change reason registry: system prompt version, tool schema versi
 policy version, agent version, ordering change, provider serialization change, and
 unexpected nondeterminism.
 
-## Assembly Interface and Manifest
+## Partition-Plan Interface and Final Manifest
 
 ```text
-assemble_cache_aware_prompt(provider, selected_representations, policy_version)
-  -> PromptAssemblyResult
+partition_for_cache(provider, selected_representations, policy_version)
+  -> CachePartitionPlan
 ```
 
-The result contains final ordered provider messages/components, partition boundaries,
-stable-prefix bytes/fingerprint, full-prompt fingerprint, expected token counts,
-cache directives when supported, and prefix-change reasons. It is passed to W3 for
-final serialization/fit verification; W16 never dispatches requests or changes
-authority/selection decisions.
+The plan contains partition assignments, deterministic ordering rules, allowed cache
+directives when supported, and anticipated prefix-change reasons. W3 consumes the plan
+and alone produces the final ordered provider payload, exact serialized token count,
+stable-prefix fingerprint, full-prompt fingerprint, and final prefix-change manifest
+from the exact payload accepted for dispatch. W16 never fingerprints a pre-fit payload,
+dispatches requests, or changes authority/selection decisions.
 
 ## Canonicalization and Provider Rules
 
@@ -64,8 +66,8 @@ authority/selection decisions.
 
 ## Required Deliverables and Phases
 
-- Deliver partition/assembly schema, canonical ordering/serializer integration,
-  provider cache adapters, prefix manifest/fingerprints, change-reason detector,
+- Deliver partition-plan schema, canonical ordering/serializer integration,
+  provider cache adapters, final-manifest interpretation, change-reason detector,
   metrics, dashboards, and repeated-turn benchmark suite.
 - Phase through prefix inventory/measurement, deterministic assembly, provider cache
   directives, dashboards, then optimization against W15 targets.
@@ -73,10 +75,10 @@ authority/selection decisions.
 ## Implementation Plan
 
 1. Inventory current prompt assembly and identify stable/dynamic boundaries.
-2. Define canonical serializer and ordering shared with W3 token verification.
+2. Define partition and ordering rules consumed by W3's canonical serializer.
 3. Refactor assembly into explicit partitions without changing authority order.
 4. Remove avoidable timestamps and unstable serialization from stable prefixes.
-5. Add prefix fingerprints and provider cache-usage extraction.
+5. Add W3-produced final-payload fingerprints and provider cache-usage extraction.
 6. Add dashboards and regression benchmarks for repeated-turn workloads.
 7. Document provider-specific cache behavior and safe invalidation.
 
@@ -92,6 +94,8 @@ authority/selection decisions.
 ## Tests and Definition of Done
 
 - Determinism tests produce byte-identical stable prefixes for unchanged configuration.
+- Integration tests prove W3 computes fingerprints from the exact final dispatched
+  payload and the trusted dispatch path does not modify prompt/cache content.
 - Change tests attribute every prefix invalidation to a known reason.
 - Repeated-turn benchmarks show measurable cached-input reuse on supported providers.
 - Regression tests prove authority ordering, privacy, and fit remain unchanged.

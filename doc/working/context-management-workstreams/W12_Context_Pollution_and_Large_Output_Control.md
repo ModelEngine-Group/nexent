@@ -19,7 +19,8 @@ Artifacts are immutable; updates create new versions.
 Pointer resolution must validate W4 identity, authorization, lifecycle status, hash,
 and backend availability. Failures emit distinct typed faults: denied, deleted/expired,
 not found, hash mismatch, and backend error. Raw secrets are redacted before artifact
-storage under W14.
+storage under W14. If classification or redaction fails, raw content is never stored as
+an artifact or inline fallback.
 
 ## Runtime Behavior
 
@@ -42,20 +43,35 @@ An artifact record contains immutable ID/version, owner scope, source event, med
 type, size, content hash, storage location, bounded summary, retention/lifecycle state,
 and redaction metadata. References expose no storage credentials. Required failures
 include `artifact_denied`, `artifact_deleted_or_expired`, `artifact_not_found`,
-`artifact_hash_mismatch`, `slice_invalid`, and `artifact_backend_error`.
+`artifact_not_ready`, `artifact_hash_mismatch`, `slice_invalid`,
+`artifact_governance_failed`, and `artifact_backend_error`.
 
 The artifact's bounded summary and references retain queryable source-event lineage.
 Physical erasure of a source event or artifact invalidates the associated bounded
 summary and pointers as whole derived objects; no deleted payload is retained in proof
 metadata.
 
-## Offload Decision and Failure Behavior
+## Offload Publication and Failure Behavior
 
 - Evaluate byte/token/type thresholds before content enters W5 inline detail or active context.
-- Successful offload atomically publishes the artifact reference and source event/outbox.
-- Failed offload follows typed per-policy behavior: bounded inline fallback, retryable
-  failure, or run failure; raw oversized content is never silently injected.
+- First obtain a complete W14 `GovernedPayload`. Governance failure permits only a
+  sanitized reason-coded failure event, retry, ephemeral process-local handling, or run
+  failure; it never permits raw persistence.
+- Upload governed bytes with an idempotency key and content hash to a non-readable
+  staging object.
+- In one relational transaction, create a `pending` artifact record, append the W5
+  source/reference event, and create an artifact-finalize outbox row.
+- A W12-owned worker idempotently finalizes the immutable object and marks the artifact
+  `ready`; only `ready` artifacts are readable.
+- Failed finalize leaves an explicit `pending` or `failed` result for retry/repair.
+  Orphan and expired staging objects are cleaned by a W12-owned job.
+- Failed offload follows typed per-policy behavior: governed bounded inline fallback,
+  retryable failure, or run failure; raw oversized content is never silently injected.
 - Retrieval is range-limited, budgeted, audited, and returns bounded slices.
+
+The initial artifact lifecycle is `pending -> ready`, `pending -> failed`, and
+`ready -> deleted`. This is a path-specific outbox/finalize contract; distributed
+transactions, two-phase commit, and a general saga/workflow platform are out of scope.
 
 ## Required Deliverables and Phases
 
@@ -66,13 +82,15 @@ metadata.
 
 ## Implementation Plan
 
-1. Define artifact schemas, storage adapter, pointer format, and lifecycle policy.
+1. Define artifact schemas/status, staging/final storage adapter, pointer format, and
+   lifecycle policy.
 2. Add artifact offloading at tool-result ingestion before active-context insertion.
 3. Implement deterministic bounded summarization and metadata extraction.
-4. Add authorized pointer-resolution API/tool with range/slice support.
-5. Enable observation limits with per-tool override and explicit truncation metadata.
-6. Add isolated subagent-result contract and parent-context boundary.
-7. Integrate pointers with W11 representations and W3 fit stages.
+4. Add artifact-finalize outbox worker, retry/repair status, and staging-orphan cleanup.
+5. Add authorized pointer-resolution API/tool with range/slice support.
+6. Enable observation limits with per-tool override and explicit truncation metadata.
+7. Add isolated subagent-result contract and parent-context boundary.
+8. Integrate pointers with W11 representations and W3 fit stages.
 
 ## Repository Touchpoints
 
@@ -88,6 +106,10 @@ metadata.
 - Multi-megabyte outputs have bounded active-context impact.
 - Authorized agents retrieve exact offloaded details and slices.
 - Pointer denial, expiry, missing backend, and corruption emit distinct faults.
+- Publication fault tests prove staging/upload, database commit, finalize, and cleanup
+  retries cannot expose a non-ready artifact or lose repair work.
+- Governance-failure tests prove raw content is absent from artifacts, events,
+  fallbacks, logs, and repair records.
 - Tool-call/result pairs remain complete through offloading and compaction.
 - Subagent isolation tests prove parent prompts receive bounded outputs only.
 - W12 is done when large output is artifact-first by default, retrieval is reliable and

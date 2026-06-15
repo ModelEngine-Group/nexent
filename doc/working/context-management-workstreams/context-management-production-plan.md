@@ -463,6 +463,10 @@ Core invariants:
 **Solution:**
 
 - Add a `ContextFitPipeline` before every main and compaction model call.
+- First ship a minimal independent hard-fit gateway that can reject, use existing
+  bounded representations, remove/truncate optional content deterministically, preserve
+  complete tool pairs, and fail on mandatory overflow. W10-W13 later improve retained
+  quality without becoming prerequisites for hard fit.
 - Restrict production provider credentials and dispatch capability to one trusted
   server-side path that requires current W4 authorization, W10 policy, W2 budget, and
   the exact final W3 fit result; remove or deny direct dispatch paths.
@@ -476,6 +480,9 @@ Core invariants:
 - Refuse or safely degrade if mandatory context alone exceeds capacity.
 - Assemble in two phases: first install every mandatory item's minimum representation, then use remaining capacity to upgrade selected items to higher-fidelity representations.
 - Retry once on provider context-length errors using provider-reported evidence.
+- W16 supplies only a cache partition plan. W3 alone assembles and serializes the final
+  provider payload, then computes token counts and cache fingerprints from that exact
+  payload; trusted dispatch cannot modify prompt content or cache directives.
 
 **Proof and benefit:** Prevents avoidable provider failures and turns context fit from a best-effort warning into a runtime contract.
 
@@ -529,6 +536,8 @@ Core invariants:
 - Store `event_type`, schema version, validated detail, and governance metadata in the
   atomically appended event-data row.
 - Persist tool calls and results as typed events with redacted payloads.
+- Fail closed before event persistence when classification/redaction cannot produce a
+  complete governed payload; a sanitized failure event never contains rejected content.
 - Classify every committed tool-call start without a committed terminal result as
   `ambiguous_effect` during recovery; never invoke it automatically.
 - Record an authorized explicit `retry`, `skip`, or `confirm_completed` resolution
@@ -728,6 +737,9 @@ resolution. **Finding:** CM-001.
 - Store large outputs in `agent_artifact`.
 - Keep a bounded summary, metadata, and retrievable artifact pointer in context.
 - Require artifact pointers to resolve deterministically and record a typed fault when resolution, authorization, or backend access fails.
+- Publish artifacts through governed non-readable staging, one relational
+  pending-artifact/event/finalize-outbox transaction, idempotent finalize, and orphan
+  cleanup. Only `ready` artifacts are readable.
 - Enable safe observation limits by default.
 - Preserve complete tool-call/result pairs.
 - Run exploratory or high-volume delegated work in isolated subagent contexts.
@@ -774,8 +786,15 @@ resolution. **Finding:** CM-001.
 - Require confirmation for sensitive, tenant-shared, high-impact, or low-confidence writes; support explicit ephemeral and no-write classifications.
 - Filter stale, superseded, rejected, and deleted memories before retrieval injection.
 - Redact secrets and sensitive tool parameters before persistence.
+- Reject raw persistence, fallback, logs, and traces when classification or redaction
+  fails; allow only retry, ephemeral process-local handling, operation failure, and a
+  sanitized reason-coded failure record.
 - Configure retention by event/artifact type and tenant policy.
 - Add deletion propagation across the execution event log, checkpoints, artifacts, and memories.
+- Tombstone authorized deletion targets immediately so reads, restore, retrieval, and
+  prompt injection deny them while deletion is in progress. Track and retry a fixed
+  per-store destination list, and claim completion only after every required
+  destination verifies deletion.
 - Require queryable source-event lineage for persisted derived objects. Physical
   erasure invalidates affected objects as a whole; rebuild from remaining authorized
   events when safe, otherwise reject restore/resume.
@@ -841,7 +860,8 @@ resolution. **Finding:** CM-001.
 **Solution:**
 
 - Order stable system instructions and tool schemas before dynamic context.
-- Use deterministic serialization and component ordering.
+- Supply deterministic cache partition/order plans to W3; W3 owns final serialization
+  and computes fingerprints from the exact dispatched payload.
 - Track provider cached-input tokens and prefix-change causes.
 - Avoid changing timestamps or user-specific dynamic text inside stable prefixes when unnecessary.
 
@@ -860,8 +880,8 @@ workstreams or block the entire program. The secondary over-engineering review
 classifies each finding by the minimum required delivery response. The review found
 26 findings: 4 Critical, 10 High, 7 Medium, and 5 Low. Of these, 14 require minimal
 guardrails, 5 are claim-gated, 3 are measure-triggered, and 4 are handled by explicit
-scope exclusion. The goal-coverage assessment marks 2 goals Fully Covered, 15
-Partially Covered, and 1 Not Covered before the constraints below are applied.
+scope exclusion. After the accepted decisions are applied, the goal-coverage assessment
+marks 7 goals Fully Covered, 10 Partially Covered, and 1 Not Covered.
 
 No finding authorizes an unconditional new workstream or generalized platform. Teams
 must use the minimum response in `review/findings-registry.md`; advanced mechanisms
@@ -881,8 +901,10 @@ trigger.
    marks the session `partial_after_erasure`, invalidates affected objects as a whole,
    and rejects restore/resume when remaining history cannot rebuild safely. A global
    lineage graph, field-level summary editing, and general erasure-replay engine are
-   not required. Sensitive payload persistence must reject or restrict unknown/failed
-   classification. **Findings:** CM-002, CM-012.
+   not required. Unknown classification or classification/redaction failure forbids raw
+   governed persistence, fallback, logs, and traces; only retry, ephemeral process-local
+   handling, operation failure, and sanitized reason-coded records are allowed.
+   **Findings:** CM-002, CM-012.
 3. The initial release permits exactly one active run per durable session. Restore,
    reset, manual compact, Working Memory mutation, and other conflicting lifecycle
    operations return `operation_conflicts_with_active_run` until the run reaches a
@@ -902,8 +924,12 @@ trigger.
    authoritative while compatibility views may lag and are repaired idempotently. A
    committed W7 checkpoint is independently loadable after W8 validation; its W5
    lifecycle event is asynchronous audit publication retried and repaired by W7.
-   Object-storage and deletion propagation remain CM-019/CM-020. A universal saga
-   platform is not required.
+   W12 uses governed non-readable staging, one pending-artifact/event/finalize-outbox
+   transaction, idempotent finalize, ready-only reads, retry/repair, and orphan cleanup.
+   W14 immediately tombstones authorized deletion targets and coordinates a fixed
+   per-store destination registry; each adapter deletes/verifies idempotently, and
+   completion requires every required destination. Universal saga, distributed
+   transaction, and generic workflow platforms are not required.
    **Findings:** CM-006, CM-019, CM-020.
 6. Before the first production event-schema upgrade, W5 supports reading the current
    and immediately previous event version through one canonical reader/upcaster. The
@@ -933,6 +959,10 @@ trigger.
    **Findings:** CM-013, CM-016-CM-018, CM-021.
 10. Decision traces reuse W14 governance and add bounded labels, sampling, and
     retention. **Finding:** CM-022.
+11. W3 first ships an independent minimal hard-fit gateway; W10-W13 later improve
+    quality without becoming fit prerequisites. W16 supplies only a cache partition
+    plan, while W3 alone assembles, serializes, counts, and fingerprints the exact final
+    payload sent unchanged by trusted dispatch. **Findings:** CM-008, CM-023.
 
 #### Conditional Capability Packages
 

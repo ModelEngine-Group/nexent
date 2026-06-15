@@ -9,7 +9,8 @@ cost model and durable-version compatibility rules.
 
 - **CM-014 (Medium):** Historical checkpoint/projection schema compatibility is incomplete.
 - **CM-015 (Low):** Rehashing complete event ranges can become O(history) per checkpoint.
-- **CM-020 (High):** Deletion/redaction invalidation delivery needs cross-store repair semantics.
+- **CM-020 (High):** The accepted tombstone blocks reads immediately while W14's fixed
+  destination registry tracks, retries, and verifies cross-store deletion.
 
 ## Recommendations
 

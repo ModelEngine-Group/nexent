@@ -9,8 +9,11 @@ delegated-context authorization are not transactionally or operationally complet
 
 - **CM-009 (High):** Artifact size, rate, retention, and retrieval workload are unspecified.
 - **CM-010 (Medium):** Artifact availability and recovery objectives are absent.
-- **CM-012 (Critical):** Failed redaction/classification must not allow raw artifact fallback.
-- **CM-019 (High):** Atomic artifact/event publication is infeasible across typical stores.
+- **CM-012 (Critical):** The accepted fail-closed behavior makes raw artifact or inline
+  fallback impossible after governance failure.
+- **CM-019 (High):** The accepted W12-specific path uses governed non-readable staging,
+  a pending-artifact/event/finalize-outbox transaction, idempotent finalize, ready-only
+  reads, retry/repair, and orphan cleanup.
 - **CM-025 (Medium):** Delegated work lacks capability and mutation boundaries.
 - **CM-026 (Low):** Binary/multimodal contracts are incomplete.
 
@@ -21,4 +24,5 @@ delegated-context authorization are not transactionally or operationally complet
 - Make raw fallback impossible after governance failure.
 - Restrict delegated work and unsupported media types until explicit contracts exist.
 
-**Readiness:** Blocked for production until cross-store and governance failure behavior is defined.
+**Readiness:** Implementation-ready for artifact publication and governance failure
+behavior; production-scale and delegated/multimodal claims remain gated.

@@ -19,7 +19,8 @@ effects.
 - **CM-006 (High):** The accepted W5 path atomically creates source events and required
   compatibility-projection outbox rows, then uses W5-owned idempotent retry and repair.
 - **CM-009 (High):** Event rates, session size, retention, and replay workload are absent.
-- **CM-012 (Critical):** Classification/redaction failure must never fall back to raw persistence.
+- **CM-012 (Critical):** The accepted fail-closed boundary forbids raw persistence,
+  fallback, logs, and traces after classification/redaction failure.
 - **CM-022 (Low):** Lifecycle and decision event volume may be excessive.
 
 ## Recommendations
@@ -31,4 +32,5 @@ effects.
 - Benchmark simple session serialization before adding more complex storage structures.
 - Bound payloads, traces, and retention by workload class.
 
-**Readiness:** Feasible, but production claim is blocked by critical contracts.
+**Readiness:** Implementation-ready for the accepted contracts; production-scale claims
+still depend on CM-009 and bounded trace governance.

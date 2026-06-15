@@ -9,7 +9,8 @@ and degrade according to an explicit provider capability registry.
 
 - **CM-016 (High):** Cache directives now require an approved capability profile;
   unknown cache capability disables directives and unknown metrics remain proxy-only.
-- **CM-023 (High):** Cache fingerprints may be computed before W3 changes the final payload.
+- **CM-023 (High):** The accepted boundary makes W16 produce only a partition plan;
+  W3 computes fingerprints from the exact final dispatched payload.
 
 ## Recommendations
 
@@ -17,4 +18,4 @@ and degrade according to an explicit provider capability registry.
 - Make W3/W16 one final assembly contract with provider-versioned serialization.
 - Treat unavailable cache metrics as clearly labeled proxy evidence.
 
-**Readiness:** Implementation-ready after assembly ownership is unified.
+**Readiness:** Implementation-ready with W3 as the single final payload owner.

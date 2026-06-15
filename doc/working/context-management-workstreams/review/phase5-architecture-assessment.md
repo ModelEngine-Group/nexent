@@ -15,8 +15,9 @@
 
 Yes. The source-of-truth model, projection separation, policy control point, checkpoint
 role, and final-fit invariant are sound. Release-one identity is now explicitly
-single-owner; implementation must stage W3 and define remaining durable compatibility
-and repair.
+single-owner; W3 now has an independent minimum stage and the accepted contracts assign
+artifact publication, deletion, and final-payload ownership. Remaining work centers on
+durable checkpoint compatibility and production evidence.
 
 ### 2. Can this design operate at production scale?
 
@@ -29,13 +30,14 @@ measure-triggered observation and does not itself block initial implementation.
 
 1. Unsafe automatic continuation around ambiguous external effects. **CM-001**
 2. Lifecycle concurrency without fencing. **CM-003**
-3. Fail-open sensitive persistence or incomplete deletion. **CM-012, CM-020**
-4. Object-storage artifact publication remains unresolved; W5/W7 multi-record
-   publication now has accepted path-owned repair contracts. **CM-006, CM-019**
-5. Checkpoint evolution remains unresolved; W5 event evolution now has the accepted
+3. Checkpoint evolution remains unresolved; W5 event evolution now has the accepted
    claim-gated current-plus-previous contract. **CM-005, CM-014**
-6. Production claims without numeric evidence or clear capability scope.
+4. Production claims without numeric evidence or clear capability scope.
    Calendar-based approval is now prohibited by CM-011. **CM-009, CM-010, CM-024**
+
+CM-012 fail-open persistence, CM-019 artifact publication, CM-020 deletion propagation,
+and CM-023 final-payload ownership are now bounded by accepted minimum contracts. They
+remain implementation and evidence obligations, not unresolved architecture decisions.
 
 CM-016 provider/model capability uncertainty is now bounded by approved versioned
 profiles, conservative 10% uncertainty reserve behavior, and rejection of unknown hard

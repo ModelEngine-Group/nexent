@@ -71,7 +71,10 @@ Required constraints:
 The split between index and data keeps replay scans and relationship queries small.
 Both rows must be inserted atomically, so an indexed event can never exist without its
 typed payload. Large or binary payloads are stored in `agent_artifact` and referenced
-from `detail`.
+from `detail`. Before this transaction, the trusted W14 governance boundary must return
+a complete `GovernedPayload`. Classification or redaction failure cannot fall back to
+raw event persistence; only a sanitized reason-coded failure event without the rejected
+payload may be appended.
 
 ### Compatibility with Current Nexent Conversations
 
@@ -218,8 +221,9 @@ append_event(identity, agent_session_id, run_id, step_id, parent_event_id,
 `AppendResult` contains `event_id`, committed `event_seq`, duplicate status, and
 projection-outbox status. Required failures include `session_not_found`,
 `identity_not_authorized`, `event_schema_invalid`, `parent_session_mismatch`,
-`payload_too_large`, `sequence_conflict`, and `append_storage_failed`. Retrying the
-same idempotency key returns the original committed result.
+`payload_too_large`, `governance_processing_failed`, `sequence_conflict`, and
+`append_storage_failed`. Retrying the same idempotency key returns the original
+committed result.
 Starting a second run for the session returns `active_run_conflict`.
 The backend registry, not an untrusted caller, selects the enabled writer
 `schema_version`; an append requesting another version returns `event_schema_invalid`.

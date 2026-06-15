@@ -61,6 +61,8 @@ Validation errors never degrade to cache hits.
 - Direct read paths must call the centralized validator; bypasses are test failures.
 - Deletion/redaction/policy changes publish targeted invalidation work with durable
   retries; lazy validation remains the correctness backstop.
+- An authorized W14 deletion tombstone makes matching read candidates immediately
+  invalid even while destination-specific physical deletion remains in progress.
 
 ## Required Deliverables and Phases
 

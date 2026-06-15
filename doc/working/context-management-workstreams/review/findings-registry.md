@@ -64,16 +64,21 @@ and review-artifact updates were written and consistency-checked.
 | CM-005 | Retain as High / Claim-gated | Accepted | Completed | Before the first production event-schema upgrade, support current and previous versions through one W5 canonical reader/upcaster and reader-first deployment. | W5, W6, parent plan, review artifacts |
 | CM-006 | Retain as High / Required guardrail | Accepted | Completed | W5 and W7 atomically create their source record with path-owned outbox work, then own idempotent retry and repair. No universal saga or distributed transaction platform. | W5, W7, parent plan, review artifacts |
 | CM-007 | Retain as Medium / Scope-exclusion | Accepted | Completed | Use immutable single-owner conversations/sessions and reject sharing, membership, and ownership transfer. Shared resources and operator policy do not change ownership. | W4, W5, W7, W9, parent plan, review artifacts |
+| CM-008 | Retain as High / Required guardrail | Accepted | Completed | Ship an independent minimal W3 hard-fit gateway first; W10-W13 later improve retained quality without becoming hard-fit prerequisites. | W3, parent plan, review artifacts |
 | CM-011 | Retain as Medium / Required guardrail | Accepted | Completed | Treat every schedule date as a planning target; a reached date cannot override failed or insufficient-evidence mandatory gates. Reuse W15 evidence with one lightweight claim-scoped release checklist. No new governance platform. | W15, parent plan, review artifacts |
+| CM-012 | Retain as Critical / Required guardrail | Accepted | Completed | Classification/redaction failure forbids raw governed persistence, fallback, logs, and traces; allow only retry, ephemeral handling, failure, and sanitized reason-coded records. | W5, W12, W14, parent plan, review artifacts |
 | CM-013 | Retain as Critical / Required guardrail | Accepted | Completed | Use two trusted server-side boundaries: production model dispatch verifies W4/W10/W2/W3 inputs, and governed persistence verifies W4/W10/W14 inputs. Treat SDK/client assertions as untrusted and deny direct paths. No separate enforcement platform. | W2, W3, W4, W10, W14, parent plan, review artifacts |
 | CM-016 | Retain as High / Required guardrail | Accepted | Completed | Use a small approved versioned capability profile for supported deployments. Reject unknown hard capacity; when required behavior is incomplete, reserve an additional 10% of the context window; disable unknown cache directives. | W1, W2, W3, W16, parent plan, review artifacts |
+| CM-019 | Retain as High / Required guardrail | Accepted | Completed | Use W12-specific governed staging, one pending-artifact/event/finalize-outbox transaction, idempotent finalize, ready-only reads, retry/repair, and orphan cleanup. No distributed transaction or general saga platform. | W5, W12, parent plan, review artifacts |
+| CM-020 | Retain as High / Claim-gated | Accepted | Completed | Tombstones immediately block reads; W14 coordinates a fixed destination registry with per-store status, idempotent retry, verification, and completion only after every required destination succeeds. No generic workflow platform. | W5-W12, W14, parent plan, review artifacts |
+| CM-023 | Retain as High / Required guardrail | Accepted | Completed | W16 supplies a cache partition plan; W3 alone produces final payload, serialization, token count, and fingerprints, and trusted dispatch cannot modify prompt/cache content. | W3, W16, parent plan, review artifacts |
 
 ### Review Progress Summary
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 10 | CM-001-CM-007, CM-011, CM-013, CM-016 |
-| Pending individual review | 16 | CM-008-CM-010, CM-012, CM-014-CM-015, CM-017-CM-026 |
+| Accepted and document updates completed | 15 | CM-001-CM-008, CM-011-CM-013, CM-016, CM-019-CM-020, CM-023 |
+| Pending individual review | 11 | CM-009-CM-010, CM-014-CM-015, CM-017-CM-018, CM-021-CM-022, CM-024-CM-026 |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary
