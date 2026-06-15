@@ -87,8 +87,14 @@ and review-artifact updates were written and consistency-checked.
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 24 | CM-001-CM-014, CM-016-CM-021, CM-023-CM-026 |
-| Pending individual review | 2 | CM-015, CM-022 |
+| CM-015 | Retain as Low / Measure-triggered | Accepted | Completed | Remove content hashing from W8. Replace with O(1) metadata-based validation: compression.snapshot validity via partial_after_erasure + version fields; W6 materialized cache via snapshot validity + event count + version fields; physical erasure via one-time partial_after_erasure flag. No Merkle trees or segmented hashing needed. | W8, parent plan, review artifacts |
+
+### Review Progress Summary
+
+| Progress state | Count | Findings |
+| --- | ---: | --- |
+| Accepted and document updates completed | 25 | CM-001-CM-015, CM-016-CM-021, CM-023-CM-026 |
+| Pending individual review | 1 | CM-022 |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary

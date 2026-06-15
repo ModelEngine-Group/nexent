@@ -308,6 +308,31 @@ accepted decision.
   passed in the delegation task.
 - **Updated documents:** W4, W5, W12, parent production plan, findings registry.
 
+## CM-015: Complete-Prefix Hashing Cost
+
+- **Decision:** Retained as `Low / Measure-triggered`, with scope reduced by W7 retirement.
+- **Approved minimum:** Remove content hashing from W8 validation. Replace with
+  metadata-based validation at three specific points, all O(1):
+  1. **compression.snapshot validation:** `partial_after_erasure` flag + version field
+     comparison (policy_version, model_version, projection_version).
+  2. **W6 materialized projection cache validation:** snapshot validity + event count
+     since snapshot + version fields.
+  3. **Physical erasure propagation:** `partial_after_erasure` one-time flag that
+     invalidates all historical snapshots without per-snapshot hash computation.
+  Content hashing (traversing event payloads to compute a digest) is removed from
+  the context management layer. Storage-layer integrity is handled by database
+  checksums, not by W8. No Merkle tree, segmented hashing, or hash caching
+  structures are needed.
+- **Rationale:** W7 retirement eliminates the primary O(history) hashing consumer
+  (independent checkpoint validation). compression.snapshot events are W5 events
+  with inherent sequence consistency, so they do not need content hash verification.
+  W6 defaults to on-demand projection (no caching); materialized caches, when
+  enabled, use metadata fingerprints (O(1)) rather than content hashes.
+- **Explicitly out of scope:** Content hashing of event payloads, Merkle tree
+  structures, segmented hashing, hash caching layers, and storage-layer integrity
+  verification (belongs to database infrastructure).
+- **Updated documents:** W8, parent production plan, findings registry.
+
 ## CM-010: Numeric Availability and Recovery Targets
 
 - **Decision:** Retained as `Medium / Claim-gated`, with deferred target definition.
