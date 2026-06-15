@@ -188,6 +188,20 @@ class ModelRecord(TableBase):
         Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
     concurrency_limit = Column(
         Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
+    context_window_tokens = Column(
+        Integer, doc="Total combined input/output context window in tokens, when the provider uses a combined window. Nullable.")
+    max_input_tokens = Column(
+        Integer, doc="Provider hard input-token limit when distinct from the combined window. Nullable.")
+    max_output_tokens = Column(
+        Integer, doc="Provider-supported or operator-configured completion-output cap. Replaces the ambiguous LLM meaning of max_tokens. Nullable.")
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved per request before constructing input context. Nullable.")
+    tokenizer_family = Column(
+        String(100), doc="Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.")
+    capacity_source = Column(
+        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.")
+    capability_profile_version = Column(
+        String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
