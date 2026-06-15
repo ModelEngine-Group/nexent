@@ -79,14 +79,15 @@ and review-artifact updates were written and consistency-checked.
 | CM-025 | Retain as Medium / Scope-exclusion | Accepted | Completed | Subagent is a normal agent with independent `agent_session_id`, own W5 event log, own W1/W2 budget, and permissions from its agent config. Inherits parent `conversation_id` with `parent_session_id` and `delegation_type = 'subagent'`. Triggered via async built-in tool. Only final answer exposed to parent. Recursive delegation prohibited. Memory scope follows ordinary agent rules. No W14 re-governance on transfer. | W4, W5, W12, parent plan, review artifacts |
 | CM-026 | Retain as Low / Scope-exclusion | Accepted | Completed | Remove unsupported modalities from Release 1 gates. W15 SLO covers text only. Add modality contracts only when a modality enters scope. No Release 1 multimodal context contracts. | W15, W3, parent plan, review artifacts |
 
+| CM-009 | Retain as High / Claim-gated | Accepted | Completed | Do not pre-define workload envelopes. After W1-W16 implementation, use W15 measurement infrastructure to collect real performance data and define envelopes based on observed data. No production-scale claim until envelopes are defined. | W5, W15, parent plan, review artifacts |
 | CM-014 | N/A — obsolete | Resolved | Completed | W7 retired; checkpoint functionality merged into W5 as `compression.snapshot` events. Schema migration fully covered by CM-005 event-schema compatibility contract. | W5, W6, W8, W9, W13, parent plan, README, review artifacts |
 
 ### Review Progress Summary
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 22 | CM-001-CM-008, CM-011-CM-014, CM-016-CM-021, CM-023-CM-026 |
-| Pending individual review | 4 | CM-009-CM-010, CM-015, CM-022 |
+| Accepted and document updates completed | 23 | CM-001-CM-009, CM-011-CM-014, CM-016-CM-021, CM-023-CM-026 |
+| Pending individual review | 3 | CM-010, CM-015, CM-022 |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary

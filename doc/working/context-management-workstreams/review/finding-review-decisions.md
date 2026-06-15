@@ -308,6 +308,27 @@ accepted decision.
   passed in the delegation task.
 - **Updated documents:** W4, W5, W12, parent production plan, findings registry.
 
+## CM-009: Representative Workload Model
+
+- **Decision:** Retained as `High / Claim-gated`, with deferred envelope definition.
+- **Approved minimum:** Do not pre-define workload envelopes before implementation.
+  After W1-W16 functional implementation is complete, use W15 measurement
+  infrastructure to collect real performance data (event-append latency, session
+  length distribution, replay latency, payload size distribution, concurrent run
+  patterns). Define workload envelopes based on observed data before making any
+  production-scale claim. Until envelopes are defined, do not claim production-scale
+  readiness.
+- **Rationale:** Pre-defining envelopes without real data risks either
+  over-engineering (envelopes set too high) or premature limitation (envelopes set
+  too low). This aligns with CM-004 (measure before optimizing), CM-015 (measure
+  before adding advanced structures), and CM-011 (evidence-based gates). W15's
+  SLO framework and evidence pipeline are designed to produce this data naturally
+  during implementation and testing.
+- **Explicitly out of scope:** Pre-defined workload envelopes, general workload
+  modeling framework, automatic workload discovery, and capacity commitments before
+  real measurement data exists.
+- **Updated documents:** W5, W15, parent production plan, findings registry.
+
 ## CM-014: Checkpoint Schema Migration
 
 - **Decision:** N/A — rendered obsolete by architecture simplification.
