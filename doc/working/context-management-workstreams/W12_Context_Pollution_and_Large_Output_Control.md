@@ -7,6 +7,10 @@ the main prompt while preserving reliable, authorized retrieval when details are
 
 ## Artifact Contract
 
+W12 owns artifact offload, bounded summaries/pointers, and authorized retrieval. It
+does not decide final context selection, retention policy, or secret-handling policy;
+W10/W3, W14, and shared redaction services govern those decisions.
+
 Large or binary output is stored as `agent_artifact`; the event log and active context
 retain a bounded summary, metadata, content hash, authorization scope, retention policy,
 and deterministic artifact pointer. Inline-size and token thresholds are policy-driven.
@@ -26,6 +30,39 @@ storage under W14.
 - Exploratory or high-volume delegated work runs in isolated subagent context and
   returns a bounded result plus artifact references to the parent.
 - Duplicate equivalent retrieval/tool calls are detected for W15 measurement.
+
+## Artifact and Retrieval Contracts
+
+```text
+offload_output(identity, source_event, content, policy) -> ArtifactReference
+resolve_artifact(identity, artifact_reference, slice_request) -> ArtifactSliceResult
+```
+
+An artifact record contains immutable ID/version, owner scope, source event, media
+type, size, content hash, storage location, bounded summary, retention/lifecycle state,
+and redaction metadata. References expose no storage credentials. Required failures
+include `artifact_denied`, `artifact_deleted_or_expired`, `artifact_not_found`,
+`artifact_hash_mismatch`, `slice_invalid`, and `artifact_backend_error`.
+
+The artifact's bounded summary and references retain queryable source-event lineage.
+Physical erasure of a source event or artifact invalidates the associated bounded
+summary and pointers as whole derived objects; no deleted payload is retained in proof
+metadata.
+
+## Offload Decision and Failure Behavior
+
+- Evaluate byte/token/type thresholds before content enters W5 inline detail or active context.
+- Successful offload atomically publishes the artifact reference and source event/outbox.
+- Failed offload follows typed per-policy behavior: bounded inline fallback, retryable
+  failure, or run failure; raw oversized content is never silently injected.
+- Retrieval is range-limited, budgeted, audited, and returns bounded slices.
+
+## Required Deliverables and Phases
+
+- Deliver artifact schema/repository, object-storage adapter, offload decider, bounded
+  summarizer, pointer format, retrieval API/tool, lifecycle jobs, and dashboards.
+- Phase through shadow threshold measurement, tool-result offload, retrieval/pointers,
+  delegated-output isolation, then default-safe observation limits.
 
 ## Implementation Plan
 
@@ -55,4 +92,3 @@ storage under W14.
 - Subagent isolation tests prove parent prompts receive bounded outputs only.
 - W12 is done when large output is artifact-first by default, retrieval is reliable and
   governed, and prompt-growth/cost targets meet W15 thresholds.
-

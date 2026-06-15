@@ -1,0 +1,34 @@
+# Phase 2: W5 Review
+
+## Assessment
+
+W5 is the strongest foundational specification, but it is also the largest operational
+risk. It enables state reconstruction, not automatically safe continuation of external
+effects.
+
+## Findings and Risks
+
+- **CM-001 (Critical):** Tool side effects can be ambiguous after crash or timeout.
+- **CM-002 (High):** Physical erasure makes historical replay partial.
+- **CM-004 (Low):** Per-session sequence allocation is a measure-triggered scale
+  observation; CM-003 removes same-session active-run concurrency and no current
+  evidence justifies an advanced allocation mechanism.
+- **CM-005 (High, claim-gated):** The accepted minimum supports current and immediately
+  previous event versions through one W5 canonical reader/upcaster before the first
+  production event-schema upgrade.
+- **CM-006 (High):** The accepted W5 path atomically creates source events and required
+  compatibility-projection outbox rows, then uses W5-owned idempotent retry and repair.
+- **CM-009 (High):** Event rates, session size, retention, and replay workload are absent.
+- **CM-012 (Critical):** Classification/redaction failure must never fall back to raw persistence.
+- **CM-022 (Low):** Lifecycle and decision event volume may be excessive.
+
+## Recommendations
+
+- State explicitly that ambiguous effects stop unless reconciliation is approved.
+- Implement the accepted W5 canonical event upcaster before the first production event-
+  schema upgrade; implement the accepted W5 event/projection-outbox repair path and
+  post-erasure replay status.
+- Benchmark simple session serialization before adding more complex storage structures.
+- Bound payloads, traces, and retention by workload class.
+
+**Readiness:** Feasible, but production claim is blocked by critical contracts.

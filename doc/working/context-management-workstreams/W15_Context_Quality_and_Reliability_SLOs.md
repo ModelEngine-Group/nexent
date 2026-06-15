@@ -7,6 +7,10 @@ with release-blocking CI gates, production dashboards, alerts, and replayable ev
 
 ## SLO Framework
 
+W15 owns measurement definitions, evidence, release gates, dashboards, alerts, and
+diagnostic replay. It does not silently change runtime policy or implementation;
+measured regressions create reviewed work for the owning W-ID.
+
 Each SLO must define metric, population, target, error budget, measurement method,
 minimum sample size, owner, dashboard, alert, and release-gate behavior. Separate
 correctness/safety gates from optimization targets. Safety gates such as tenant
@@ -17,7 +21,7 @@ isolation, secret persistence, and request fit have zero-tolerance test expectat
 - Fit success, mandatory-minimum overflow, and provider overflow recovery.
 - Summary/category retention and complete tool-pair retention.
 - Compression ratio, latency, cost, and prompt-cache reuse.
-- Restart, failover, replay, checkpoint concurrency, restore, and fork correctness.
+- Restart, failover, replay, checkpoint concurrency, restore, and reset correctness.
 - Tenant isolation, redaction, retention, and deletion propagation.
 - Memory-write precision, confirmation compliance, retrieval recall/reranking, stale
   rejection, correction/conflict handling, and decision trace completeness.
@@ -39,6 +43,54 @@ exclusions, conflicts, reductions, final assembly, lifecycle writeback, and stab
 reason codes. Add deterministic trace replay and an optional offline oracle that
 classifies policy-controllable versus physically unavoidable faults.
 
+## SLO Definition Contract
+
+Every SLO is stored as a versioned record containing:
+
+```text
+name, owner, population, metric_query, unit, target, comparison,
+error_budget, minimum_sample_size, evaluation_window, exclusions,
+dashboard, alert_policy, release_gate, evidence_version
+```
+
+Correctness/security gates fail closed when evidence is missing. Optimization targets
+may warn before blocking according to approved policy. Metric labels must be
+bounded-cardinality and tenant-safe; raw prompt/event content is never a label.
+
+## Gate and Evidence Behavior
+
+- CI produces a signed/versioned evidence bundle containing inputs, configuration,
+  model/policy versions, results, regressions, and decision traces.
+- Release evaluation returns `pass`, `fail`, or `insufficient_evidence`; the last is a
+  failure for mandatory gates.
+- Calendar dates and delivery milestones are planning targets only; reaching them never
+  overrides a `fail` or `insufficient_evidence` mandatory gate.
+- Production alerts link to runbooks and replayable authorized traces.
+- Baseline updates require review and cannot be performed automatically by the code
+  change being evaluated.
+
+## Claim-Scoped Release Checklist
+
+Before approving a release, record one lightweight checklist that:
+
+1. Lists the capability claims enabled by the release.
+2. Links each claim to its mandatory gates and evidence version.
+3. Confirms no mandatory gate is `fail` or `insufficient_evidence`.
+4. Explicitly disables or excludes every unsupported or insufficient-evidence claim.
+5. Records the release approver and approval time.
+
+This checklist reuses W15 evidence and the existing release process. Release one does
+not require a separate release-governance platform, project-management workflow, or
+calendar-based approval service.
+
+## Required Deliverables and Phases
+
+- Deliver SLO registry/schema, metric/reason registries, benchmark orchestrator,
+  evidence store, baseline comparator, gate service, dashboards, alerts, replay/trace
+  inspection, and runbooks.
+- Phase through current baselines, non-blocking CI evidence, approved release gates,
+  production alerts, then recurring incident drills and SLO review.
+
 ## Implementation Plan
 
 1. Baseline current behavior before W1-W14 changes.
@@ -48,6 +100,7 @@ classifies policy-controllable versus physically unavoidable faults.
 5. Add production dashboards, alerts, and incident runbooks.
 6. Implement deterministic replay and decision-trace inspection.
 7. Require workstream PRs to attach relevant SLO evidence.
+8. Add the lightweight claim-scoped checklist to release approval.
 
 ## Repository Touchpoints
 
@@ -66,6 +119,8 @@ classifies policy-controllable versus physically unavoidable faults.
 - Metrics/trace schema tests enforce units, labels, reason codes, and privacy.
 - Replay tests reproduce selection/writeback decisions from recorded evidence.
 - Dashboard/alert smoke tests and incident drills are documented.
+- Gate tests prove a reached planning date cannot override a failed or
+  insufficient-evidence mandatory gate.
 - W15 is done when agreed SLOs are measured in CI and production, regressions block
-  release as designed, and operators can diagnose failures from authorized traces.
-
+  release as designed, claim-scoped release checklists are recorded, and operators can
+  diagnose failures from authorized traces.

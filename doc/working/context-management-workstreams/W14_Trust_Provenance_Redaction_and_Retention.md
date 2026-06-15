@@ -8,6 +8,10 @@ propagation across all context stores and derived state.
 
 ## Metadata Contract
 
+W14 owns governance metadata, classification, redaction, confirmation, retention,
+deletion propagation, and validated writeback. It does not decide context relevance or
+token fit; W10 and W3 consume W14-governed inputs.
+
 Every context item, event, artifact, checkpoint, and memory carries source, owner,
 permissions, trust level, timestamps, expiry/retention class, lifecycle status, and
 policy version. Long-term memory additionally includes source event IDs, source type,
@@ -25,14 +29,83 @@ redactors for tool arguments and headers plus secret-pattern detection as defens
 depth. Store redaction metadata, never the removed secret. Deletion creates an auditable
 tombstone and propagates to events where legally permitted, projections, checkpoints,
 artifacts, caches, and long-term memory; derived state becomes invalid immediately.
+The W5 runtime role remains append-only. Physical event deletion or redaction uses a
+separate privileged governance path that produces an auditable proof record without
+granting ordinary event writers update/delete access.
+
+### Erasure-Lineage Contract
+
+Every persisted derived object must expose queryable lineage to its source W5 events:
+explicit `source_event_ids` for sparse or selected inputs or a `source_event_range` for
+a complete contiguous range. A simple reverse-reference table or indexed range lookup
+is sufficient; a global lineage graph and field-level attribution are not required.
+
+For physical erasure or irreversible redaction:
+
+1. Erase or irreversibly redact the governed payload without copying it into proof metadata.
+2. Mark the owning session `partial_after_erasure`.
+3. Locate every persisted derived object whose lineage includes the erased event.
+4. Invalidate each affected summary, checkpoint, Working Memory version,
+   representation, artifact summary/pointer, cache, and long-term memory as a whole.
+5. Rebuild from remaining authorized events when safe; otherwise keep the object
+   unavailable and reject unsafe restore/resume.
+
+Deletion proof records contain target identity, affected scope, timestamps, actor,
+reason code, and per-destination result only. They never retain the erased content.
 
 ## Validated Writeback Journal
 
 Lifecycle writeback stages typed append, merge, and set-with-version operations. Before
 commit, validate schema, provenance, scope, authority, policy, version, and
 non-destructiveness. Commit deterministically or reject with a stable reason code.
-Dirty state cannot be discarded at compaction, reset, fork, shutdown, eviction, or
+Dirty state cannot be discarded at compaction, reset, restore, shutdown, eviction, or
 worker handoff before journal resolution.
+
+## Governance Service Contracts
+
+```text
+classify_and_redact(identity, payload, destination, policy_version) -> GovernedPayload
+request_deletion(identity, target, reason, idempotency_key) -> DeletionOperation
+commit_writeback(expected_version, staged_operations) -> WritebackResult
+```
+
+`GovernedPayload` contains sanitized content, classification, provenance, retention,
+redaction proof metadata, and policy version. Required failures include
+`classification_required`, `redaction_failed`, `write_prohibited`,
+`confirmation_required`, `scope_violation`, `stale_version`, and
+`deletion_propagation_incomplete`.
+
+## Governed Persistence Boundary
+
+Events, memories, summaries, artifacts, checkpoints, projections, caches, and other
+governed durable state are written only through trusted server-side persistence
+interfaces. Each write requires a current W4 authorization decision, applicable W10
+policy decision, and W14 `GovernedPayload` with classification, redaction, provenance,
+lineage, retention, and policy metadata required for that destination.
+
+SDK/client claims that content is authorized, classified, redacted, or governed are
+untrusted. Missing, stale, mismatched, or incomplete governance inputs fail closed
+before persistence. This boundary is an interface and permission contract within the
+existing storage paths; release one does not require a separate policy-enforcement
+microservice, service mesh, or signed capability-token platform.
+
+## Deletion and Writeback State Machines
+
+- Deletion progresses through requested, authorized, tombstoned, propagating,
+  invalidating, rebuilding, verified, and completed/failed; every destination produces
+  proof status.
+- Writeback progresses through staged, validated, committed, or rejected. Partial
+  commits are repaired or rolled back according to an ADR; they are never hidden.
+- Ordinary runtime roles cannot physically mutate W5 events. Privileged deletion paths
+  are separately authorized, audited, and verified.
+
+## Required Deliverables and Phases
+
+- Deliver classification/provenance schemas, redaction service, secret fixtures,
+  confirmation flows, deletion orchestrator/proof report, writeback journal, retention
+  jobs, policy integration, dashboards, and incident runbooks.
+- Phase through classify/redact-before-write, confirmation/no-write enforcement,
+  lifecycle filtering, deletion propagation, then retention/expiry automation.
 
 ## Implementation Plan
 
@@ -42,7 +115,10 @@ worker handoff before journal resolution.
 4. Add confirmation/no-write flows to W10 Memory Policy Engine.
 5. Add lifecycle filtering, supersession, and conflict metadata to memory retrieval.
 6. Implement deletion-propagation orchestrator and proof report.
-7. Implement validated writeback journal and retention/expiry jobs.
+7. Add queryable source-lineage lookup and `partial_after_erasure` session state.
+8. Implement validated writeback journal and retention/expiry jobs.
+9. Restrict governed storage writes to trusted persistence interfaces and remove or
+   deny raw/direct write paths.
 
 ## Repository Touchpoints
 
@@ -59,7 +135,11 @@ worker handoff before journal resolution.
 - Authority/prompt-injection tests keep untrusted retrieval below instructions.
 - Temporal tests cover stale, superseded, corrected, rejected, and expired memories.
 - Deletion tests prove complete propagation and produce an auditable report.
+- Erasure tests locate all persisted descendants by source lineage, invalidate whole
+  objects, rebuild only from remaining authorized history, and reject unsafe recovery.
 - Writeback tests reject stale-version, unauthorized, destructive, and invalid operations.
+- Negative integration tests prove SDK/client and ordinary internal callers cannot
+  persist raw or self-declared-governed payloads.
 - W14 is done when governance metadata and policy apply end to end, secret tests pass,
-  and deletion/retention/writeback behavior is demonstrably complete.
-
+  direct raw persistence is denied, and deletion/retention/writeback behavior is
+  demonstrably complete.

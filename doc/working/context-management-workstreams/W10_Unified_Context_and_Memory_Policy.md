@@ -8,6 +8,10 @@ request.
 
 ## Policy Domains
 
+W10 owns policy resolution, authority/conflict decisions, selection decisions, and
+memory-operation permission. It does not serialize final prompts, reduce content, or
+persist events/memory; W3, W11-W12, W5, and memory services execute approved decisions.
+
 Define `ContextPolicy` with a nested `MemoryPolicy`. The policy covers:
 
 - Component injection, mandatory status, minimum fidelity, and total/per-type budgets.
@@ -43,6 +47,40 @@ is spent deterministically on admissible upgrades. Injection flags in
 per-component budgets are hard constraints. The same memory policy governs automatic
 and tool-driven writes, retrieval, update, expiry, and deletion.
 
+## Policy Service Contracts
+
+```text
+resolve_policy(identity, agent_config, request_overrides) -> ResolvedPolicy
+select_context(resolved_policy, context_items, safe_input_budget) -> SelectionDecision
+decide_memory_operation(resolved_policy, candidate_or_query) -> MemoryDecision
+```
+
+`ResolvedPolicy` contains immutable merged rules, sources, version, validation report,
+and fingerprint. Decisions contain selected/excluded IDs, conflicts, required
+confirmation, target scope/destination, budgets, and stable reasons. Required failures
+include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible`,
+`authority_conflict_unresolved`, and `memory_operation_denied`.
+
+## Merge and Bypass Rules
+
+- Merge precedence is platform, tenant, agent, user configuration, then permitted
+  request override; lower layers cannot weaken higher-layer security/privacy rules.
+- Selection and memory decisions are pure and deterministic for identical inputs.
+- Runtime callers receive decisions, not mutable policy objects.
+- Every context strategy, automatic memory flow, and memory tool call must pass through
+  the service; bypass detection is release-blocking.
+- SDK/client-supplied policy decisions are untrusted. The trusted model-dispatch and
+  governed-persistence boundaries require a current immutable server-resolved decision
+  bound to the operation, identity, resource, and policy version; missing or mismatched
+  decisions fail closed.
+
+## Required Deliverables and Phases
+
+- Deliver schemas, version registry, resolver, validators, authority/conflict engine,
+  selection engine, Memory Policy Engine, decision events/traces, and inspection API.
+- Phase through shadow decisions, context-selection enforcement, memory-read
+  enforcement, memory-write/confirmation enforcement, then removal of bypass paths.
+
 ## Implementation Plan
 
 1. Define policy schemas, merge precedence, validation, and versioning ADR.
@@ -53,6 +91,8 @@ and tool-driven writes, retrieval, update, expiry, and deletion.
 5. Add global cross-scope retrieval resolution.
 6. Emit policy decisions and expose authorized inspection through W9.
 7. Remove or deprecate runtime paths that bypass policy.
+8. Enforce server-resolved policy decisions at model dispatch and governed persistence
+   boundaries.
 
 ## Repository Touchpoints
 
@@ -70,7 +110,8 @@ and tool-driven writes, retrieval, update, expiry, and deletion.
   confirmation requirement, scope, and no-write classification.
 - Determinism tests produce identical decisions for identical inputs and policy version.
 - Bypass tests prove every context and memory path invokes the engine.
+- Negative integration tests prove caller-supplied, stale, or mismatched decisions
+  cannot authorize dispatch or persistence.
 - Invalid policy fixtures fail before run start with actionable errors.
 - W10 is done when one versioned policy explains and enforces every context selection
   and memory lifecycle decision.
-

@@ -7,6 +7,10 @@ component to an admissible minimum representation instead of dropping it whole.
 
 ## Representation Model
 
+W11 owns admissible lower-fidelity representations and reduction validation. It does
+not choose policy priority, final prompt membership, artifact authorization, or
+compaction scheduling; W10, W3, W12, and W13 own those decisions.
+
 Each W6 `ContextItem` may have versioned representations:
 
 | Representation | Use |
@@ -18,8 +22,9 @@ Each W6 `ContextItem` may have versioned representations:
 
 Each item declares a minimum-fidelity invariant. A reducer may only produce admissible
 representations and must refuse a downgrade that violates the invariant. Representation
-generation records source fingerprint, generator version, token count, loss metadata,
-and staleness status.
+generation records source fingerprint, queryable source-event lineage inherited from
+the source `ContextItem`, generator version, token count, loss metadata, and staleness
+status.
 
 ## Component Reducers
 
@@ -31,6 +36,38 @@ and staleness status.
 - Agent definitions: retain routing metadata; load full cards only after selection.
 - System instructions: preserve mandatory security and behavior sections.
 - History/observations: preserve recent complete steps and tool-call/result integrity.
+
+## Reducer Contract
+
+```text
+reduce(context_item, target_representation, budget, policy_version) -> ReductionResult
+```
+
+`ReductionResult` contains the representation, source fingerprint, token count,
+generator/version, admissibility result, loss metadata, and stable decisions. Required
+failures include `unsupported_item_type`, `minimum_fidelity_violation`,
+`reducer_failed`, `representation_stale`, `pointer_unresolvable`, and
+`target_budget_impossible`.
+
+Reducers never select which items enter the prompt; W10/W3 request admissible
+representations. Semantic reducers may call models only through W13/W3-governed paths.
+Deterministic structured/pointer fallbacks must exist for every mandatory item type.
+
+## Representation Lifecycle
+
+- A representation is valid only for its source fingerprint and generator/policy versions.
+- Updating or deleting source content invalidates descendants through W8/W14.
+- Physical source erasure invalidates each affected representation as a whole; reducers
+  do not attempt field-level deletion from generated text.
+- Cached representations are immutable; regeneration creates a new version.
+- Loss metadata identifies omitted categories and whether they are recoverable.
+
+## Required Deliverables and Phases
+
+- Deliver representation schema/store, reducer registry/interface, admissibility
+  validator, reducers per component type, pointer integration, inspection, and metrics.
+- Phase through deterministic structured/pointer forms, semantic compressed forms,
+  W10/W3 integration, then precomputation/caching based on measured demand.
 
 ## Implementation Plan
 
@@ -59,4 +96,3 @@ and staleness status.
 - Determinism and token-accounting tests cover each reducer.
 - W11 is done when every supported component type has an admissible reduction chain,
   no mandatory minimum is silently dropped, and W3 can consume reducer outputs.
-
