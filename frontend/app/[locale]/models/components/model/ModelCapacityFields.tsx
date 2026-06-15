@@ -1,4 +1,5 @@
-import { Alert, AutoComplete, Input, Tag, Tooltip } from "antd";
+import { useEffect, useState } from "react";
+import { Alert, AutoComplete, Collapse, Input, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 export type CapacitySource =
@@ -150,6 +151,17 @@ export const ModelCapacityFields = ({
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
+  const hasValues = hasCapacityValues(value);
+  const shouldAutoOpen = Boolean(
+    hasValues || source || capabilityProfileVersion || validationError
+  );
+  const [isOpen, setIsOpen] = useState(shouldAutoOpen);
+
+  useEffect(() => {
+    if (shouldAutoOpen) {
+      setIsOpen(true);
+    }
+  }, [shouldAutoOpen]);
 
   const renderNumberInput = (
     field: keyof ModelCapacityFormState,
@@ -171,7 +183,7 @@ export const ModelCapacityFields = ({
     </div>
   );
 
-  return (
+  const content = (
     <div className="space-y-3">
       {(source || capabilityProfileVersion) && (
         <div className="flex flex-wrap items-center gap-2">
@@ -195,6 +207,14 @@ export const ModelCapacityFields = ({
           type="warning"
           showIcon
           message={t("model.dialog.capacity.deprecatedMaxTokens")}
+        />
+      )}
+
+      {!source && !hasValues && (
+        <Alert
+          type="info"
+          showIcon
+          message={t("model.dialog.capacity.emptyHint")}
         />
       )}
 
@@ -243,5 +263,32 @@ export const ModelCapacityFields = ({
         <Alert type="error" showIcon message={t(validationError)} />
       )}
     </div>
+  );
+
+  return (
+    <Collapse
+      ghost
+      activeKey={isOpen ? ["capacity"] : []}
+      onChange={(keys) => setIsOpen(Array.isArray(keys) && keys.includes("capacity"))}
+      items={[
+        {
+          key: "capacity",
+          label: (
+            <div>
+              <div className="text-sm font-medium text-gray-700">
+                {t("model.dialog.capacity.title")}
+              </div>
+              <div className="text-xs font-normal text-gray-500">
+                {source || hasValues
+                  ? t("model.dialog.capacity.description")
+                  : t("model.dialog.capacity.emptySummary")}
+              </div>
+            </div>
+          ),
+          children: content,
+        },
+      ]}
+      className="model-capacity-fields"
+    />
   );
 };
