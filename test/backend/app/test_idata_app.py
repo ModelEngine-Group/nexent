@@ -517,10 +517,10 @@ class TestIdataAppRouter:
     def test_routes_registered(self):
         """Test that all routes are registered."""
         app = _build_app()
-        routes = [route.path for route in app.routes]
+        paths = app.openapi()["paths"]
 
-        assert "/idata/knowledge-space" in routes
-        assert "/idata/datasets" in routes
+        assert "/idata/knowledge-space" in paths
+        assert "/idata/datasets" in paths
 
     def test_router_methods(self):
         """Test that routes have correct HTTP methods."""

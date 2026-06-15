@@ -274,8 +274,8 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
     def test_router_inclusion(self):
         """The main northbound router should be included."""
-        routes = [route.path for route in app.routes]
-        self.assertIn("/dummy", routes)
+        paths = app.openapi()["paths"]
+        self.assertIn("/dummy", paths)
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""
