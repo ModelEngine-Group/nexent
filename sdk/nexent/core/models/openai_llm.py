@@ -28,6 +28,7 @@ class OpenAIModel(OpenAIServerModel):
 ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
+                 max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
                  timeout_seconds: Optional[float] = None, *args, **kwargs):
         """
@@ -45,10 +46,14 @@ ssl_verify=True, model_factory: Optional[str] = None,
             extra_body: Optional dict merged into every chat.completions.create
                        request body. Defaults to None so production behaviour
                        is unchanged for callers that do not opt in.
-            max_tokens: Per-call completion output cap. Defaults to None so
-                       production keeps the provider default (unbounded /
-                       model max). Benchmarks set this explicitly (e.g. 4096)
-                       to bound degenerate generation loops on long contexts.
+            max_output_tokens: Per-call completion output cap. Preferred name
+                       per W1 ADR. Defaults to None so production keeps the
+                       provider default (unbounded / model max). Benchmarks set
+                       this explicitly (e.g. 4096) to bound degenerate generation
+                       loops on long contexts.
+            max_tokens: DEPRECATED alias for max_output_tokens retained during
+                       the W1 migration. If max_output_tokens is supplied it
+                       wins; otherwise max_tokens is copied into it.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -60,7 +65,16 @@ ssl_verify=True, model_factory: Optional[str] = None,
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
         self.extra_body = extra_body or None
-        self.max_tokens = max_tokens
+        if max_output_tokens is None and max_tokens is not None:
+            logger.debug(
+                "OpenAIModel received legacy max_tokens=%s; treating as max_output_tokens. "
+                "Update callers to pass max_output_tokens directly.",
+                max_tokens,
+            )
+            max_output_tokens = max_tokens
+        self.max_output_tokens = max_output_tokens
+        # Legacy alias kept readable for any caller still reading .max_tokens.
+        self.max_tokens = max_output_tokens
 
         # Create http_client based on ssl_verify parameter and timeout
         if not ssl_verify or timeout_seconds is not None:
@@ -180,8 +194,9 @@ ssl_verify=True, model_factory: Optional[str] = None,
 
         # Bound completion length unless the caller passed their own override
         # via kwargs (which already landed in completion_kwargs above).
-        if self.max_tokens is not None and "max_tokens" not in completion_kwargs:
-            completion_kwargs["max_tokens"] = self.max_tokens
+        # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
+        if self.max_output_tokens is not None and "max_tokens" not in completion_kwargs:
+            completion_kwargs["max_tokens"] = self.max_output_tokens
 
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)

@@ -183,7 +183,7 @@ class NexentAgent:
             model_factory=model_config.model_factory,
             display_name=model_config.cite_name,
 extra_body=model_config.extra_body,
-            max_tokens=model_config.max_tokens,
+            max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
         )
         model.stop_event = self.stop_event
