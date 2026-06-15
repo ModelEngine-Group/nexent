@@ -138,6 +138,14 @@ class ModelRequest(BaseModel):
     access_token: Optional[str] = None
     timeout_seconds: Optional[int] = None
     concurrency_limit: Optional[int] = None
+    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
+    context_window_tokens: Optional[int] = None
+    max_input_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    default_output_reserve_tokens: Optional[int] = None
+    tokenizer_family: Optional[str] = None
+    capacity_source: Optional[str] = None
+    capability_profile_version: Optional[str] = None
 
 
 class ProviderModelRequest(BaseModel):
