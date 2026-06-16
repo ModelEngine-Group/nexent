@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { Alert, AutoComplete, Collapse, Input, Tag, Tooltip } from "antd";
+import { Alert, AutoComplete, Input, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 export type CapacitySource =
@@ -185,16 +184,6 @@ export const ModelCapacityFields = ({
   const hasValues = hasCapacityValues(value);
   const requiredSet = new Set<keyof ModelCapacityFormState>(requiredFields);
   const isAddMode = formMode === "add";
-  const shouldAutoOpen = Boolean(
-    hasValues || source || capabilityProfileVersion || validationError
-  );
-  const [isOpen, setIsOpen] = useState(shouldAutoOpen);
-
-  useEffect(() => {
-    if (shouldAutoOpen) {
-      setIsOpen(true);
-    }
-  }, [shouldAutoOpen]);
 
   const renderNumberInput = (
     field: keyof ModelCapacityFormState,
@@ -246,7 +235,10 @@ export const ModelCapacityFields = ({
         />
       )}
 
-      {!source && !hasValues && !isAddMode && (
+      {/* The empty hint suggested "fill later if needed", which contradicts
+          required-field asterisks. Only render it when there are no required
+          fields, so edit dialogs with required capacity stay self-consistent. */}
+      {!source && !hasValues && !isAddMode && requiredSet.size === 0 && (
         <Alert
           type="info"
           showIcon
@@ -332,38 +324,8 @@ export const ModelCapacityFields = ({
     </div>
   );
 
-  // In add mode the capacity fields are part of required input; render as a
-  // flat section so context_window/max_input red asterisks are unmissable.
-  // No header text — capacity controls speak for themselves alongside the
-  // rest of the model form. Edit mode keeps the existing collapsible panel.
-  if (isAddMode) {
-    return <div className="space-y-2">{content}</div>;
-  }
-
-  return (
-    <Collapse
-      ghost
-      activeKey={isOpen ? ["capacity"] : []}
-      onChange={(keys) => setIsOpen(Array.isArray(keys) && keys.includes("capacity"))}
-      items={[
-        {
-          key: "capacity",
-          label: (
-            <div>
-              <div className="text-sm font-medium text-gray-700">
-                {t("model.dialog.capacity.title")}
-              </div>
-              <div className="text-xs font-normal text-gray-500">
-                {source || hasValues
-                  ? t("model.dialog.capacity.description")
-                  : t("model.dialog.capacity.emptySummary")}
-              </div>
-            </div>
-          ),
-          children: content,
-        },
-      ]}
-      className="model-capacity-fields"
-    />
-  );
+  // Both add and edit modes render as a flat panel. Required-field
+  // asterisks (context_window, max_output_tokens) must be unmissable, and
+  // hiding the controls behind a Collapse hides those asterisks.
+  return <div className="space-y-2">{content}</div>;
 };

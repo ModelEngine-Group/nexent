@@ -472,7 +472,7 @@ export const ModelAddDialog = ({
   const isFormValid = () => {
     if (
       supportsCapacityFields &&
-      validateCapacityForm(form, ["contextWindowTokens", "maxInputTokens"])
+      validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
     ) {
       return false;
     }
@@ -1067,7 +1067,7 @@ export const ModelAddDialog = ({
     !isTTSModel &&
     form.type !== MODEL_TYPES.RERANK;
   const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(form, ["contextWindowTokens", "maxInputTokens"])
+    ? validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
     : null;
 
   return (
@@ -1530,7 +1530,7 @@ export const ModelAddDialog = ({
             onChange={(field, value) => handleFormChange(field, value)}
             validationError={capacityValidationError}
             formMode="add"
-            requiredFields={["contextWindowTokens", "maxInputTokens"]}
+            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
           />
         )}
 

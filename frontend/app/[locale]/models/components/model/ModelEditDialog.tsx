@@ -133,11 +133,14 @@ export const ModelEditDialog = ({
   const supportsCapacityFields =
     !isEmbeddingModel && !isRerankModel && !isVoiceModel;
   const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(form)
+    ? validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
     : null;
 
   const isFormValid = () => {
-    if (supportsCapacityFields && validateCapacityForm(form)) {
+    if (
+      supportsCapacityFields &&
+      validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
+    ) {
       return false;
     }
 
@@ -469,6 +472,7 @@ export const ModelEditDialog = ({
             validationError={capacityValidationError}
             capacitySource={model.capacitySource}
             capabilityProfileVersion={model.capabilityProfileVersion}
+            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
             // The deprecation warning only makes sense when the form still
             // has no max_output_tokens after capacityFormFromModel ran.
             // capacityFormFromModel auto-promotes legacy max_tokens into
@@ -705,7 +709,10 @@ export const ProviderConfigEditDialog = ({
   const supportsCapacityFields =
     !hideCapacityFields && !isEmbeddingModel && !isRerankModel && !isVoiceModel
   const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(capacityForm)
+    ? validateCapacityForm(capacityForm, [
+        "contextWindowTokens",
+        "maxOutputTokens",
+      ])
     : null
 
   const handleCapacityChange = (field: keyof typeof capacityForm, value: string) => {
@@ -758,6 +765,7 @@ export const ProviderConfigEditDialog = ({
             validationError={capacityValidationError}
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
+            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
             showDeprecatedMaxTokensWarning={
               Boolean(initialMaxTokens) &&
               !initialCapacity?.maxOutputTokens &&
