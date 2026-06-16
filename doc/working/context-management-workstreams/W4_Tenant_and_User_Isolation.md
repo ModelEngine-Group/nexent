@@ -103,11 +103,13 @@ to the operation and resource being executed.
 1. Add `ContextIdentity` to backend and SDK boundary models.
 2. Replace string key construction in `AgentRunManager`.
 3. Require identity in context-manager creation, cleanup, and run registration.
-4. Add identity columns and composite indexes to W5 persistence schemas.
+4. Verify W5 persistence schemas include identity columns and composite indexes;
+   coordinate with W5 implementation to ensure alignment.
 5. Add an authorization service used by compression snapshot, artifact, and lifecycle operations.
-6. Remove or deprecate internal mutation APIs that accept only `conversation_id`;
-   public conversation APIs may retain it but must resolve and authorize the full
-   identity from request context.
+6. Mark internal mutation APIs that accept only `conversation_id` as deprecated
+   with a notice that they will be removed in the next version. Public conversation
+   APIs may retain `conversation_id` as a parameter but must resolve and authorize
+   the full identity from request context.
 7. Add structured security audit events for denied access.
 8. Require model dispatch and governed persistence boundaries to reject missing, stale,
    mismatched, or caller-supplied authorization decisions.
