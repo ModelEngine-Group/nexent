@@ -38,16 +38,20 @@ an over-engineered release-one requirement:
 | CM-024 | Low | Required guardrail | Parent plan | “Production-ready” is used broadly while several capabilities are explicitly conditional or unsupported. | Keep a lightweight release capability checklist; do not create a separate governance platform. |
 | CM-025 | Medium | Scope-exclusion | W4, W12 | Isolated subagents and delegated work lack identity propagation, delegated authorization, mutation, and parent/child ownership rules. | Limit release-one delegated work to bounded/read-only behavior; add delegated mutation capabilities only if approved. |
 | CM-026 | Low | Scope-exclusion | W3, W12, W15 | Multimodal testing is required without a modality contract for token accounting, artifacts, projection, redaction, or supported providers. | Remove unsupported modalities from release gates; add contracts only when a modality enters scope. |
+| CM-027 | Medium | Required guardrail | W2 | `soft_limit_ratio` policy field is defined as a decimal in `(0, 1]` but no default value is specified, leaving the compaction trigger point undefined at implementation time. | Set default `soft_limit_ratio = 0.8`; allow per-tenant override via `tenant_config_t`; do not introduce per-agent override in release one. |
+| CM-028 | Medium | Required guardrail | W2 | Spec says `requested_output_tokens` may be overridden "per agent or per request" but does not specify location. Per-agent override implies a new DB column and agent-edit UI; per-request override implies a new request-body field. Treating one sentence as one task hides two distinct contracts. | Specify two contracts in the spec: per-agent on a new `ag_tenant_agent_t.requested_output_tokens` column with an agent-edit UI input; per-request as an optional integer on the agent-run API body. Decide which is in W2 scope vs deferred. |
+| CM-029 | High | Required guardrail | W2, W13 | Every model dispatch — primary, compaction, summary — needs its own W1 capacity snapshot and W2 budget snapshot keyed on that model's identity. Spec does not state this rule, so W13 could reuse the main run's snapshot for the compaction model and misjudge the compaction budget. Same defect class as W1 KL-1 (assuming one model's parameters apply to all calls). | Add an explicit rule to W2 spec: snapshots are per-model, never shared across model identities; W13 invokes the W1→W2 chain with the compaction model's `model_record_t` as input; reviewer of W13 must verify this. |
+| CM-030 | High | Required guardrail | W2 | Implementation Plan Step 5 reads "Pass requested output tokens to the provider call consistently." The word "consistently" hides whether this is a one-line rename of the existing `max_tokens` parameter or the CM-013 trusted-dispatch enforcement contract that rejects caller-supplied overrides. The two interpretations have very different code scope and security implications. | Clarify in spec that Step 5 is CM-013 enforcement: trusted dispatch verifies the W2 snapshot's `requested_output_tokens` is the value sent to `chat.completions.create`; caller overrides via kwargs are rejected or coerced to the snapshot value; add server-side assertion in the dispatch wrapper. |
 
 ## Severity Summary
 
 | Severity | Count |
 | --- | ---: |
 | Critical | 4 |
-| High | 10 |
-| Medium | 7 |
+| High | 12 |
+| Medium | 9 |
 | Low | 5 |
-| **Total** | **26** |
+| **Total** | **30** |
 
 ## Reviewed Finding Decisions
 
