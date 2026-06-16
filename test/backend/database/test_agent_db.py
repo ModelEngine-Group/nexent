@@ -77,6 +77,12 @@ db_models_mock.AgentInfo = MagicMock()
 db_models_mock.ToolInstance = MagicMock()
 db_models_mock.AgentRelation = MagicMock()
 
+# Mock database.agent_version_db before agent_db imports it
+agent_version_db_mock = MagicMock()
+agent_version_db_mock.query_current_version_no = MagicMock(return_value=3)
+sys.modules['database.agent_version_db'] = agent_version_db_mock
+sys.modules['backend.database.agent_version_db'] = agent_version_db_mock
+
 # 将模拟的db_models模块添加到sys.modules中
 sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
@@ -87,6 +93,8 @@ from backend.database.agent_db import (
     search_agent_id_by_agent_name,
     search_blank_sub_agent_by_main_agent_id,
     query_sub_agents_id_list,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
     create_agent,
     update_agent,
     delete_agent_by_id,
@@ -131,8 +139,9 @@ class MockAgent:
         self.created_by = None
 
 class MockAgentRelation:
-    def __init__(self):
+    def __init__(self, selected_agent_version_no=None):
         self.selected_agent_id = 2
+        self.selected_agent_version_no = selected_agent_version_no
 
 @pytest.fixture
 def mock_session():
@@ -277,6 +286,69 @@ def test_query_sub_agents_id_list(monkeypatch, mock_session):
     result = query_sub_agents_id_list(1, "tenant1")
 
     assert result == [2]
+
+
+def test_query_sub_agent_relations(monkeypatch, mock_session):
+    """Test querying sub-agent relations including pinned version"""
+    session, query = mock_session
+    mock_relation = MockAgentRelation(selected_agent_version_no=2)
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_relation]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_sub_agent_relations(1, "tenant1", version_no=1)
+
+    assert len(result) == 1
+    assert result[0]["selected_agent_id"] == 2
+    assert result[0]["selected_agent_version_no"] == 2
+
+
+def test_resolve_sub_agent_version_no_pinned(monkeypatch):
+    """Test resolve uses pinned version when set"""
+    result = resolve_sub_agent_version_no(
+        selected_agent_id=2,
+        selected_agent_version_no=5,
+        tenant_id="tenant1",
+    )
+    assert result == 5
+
+
+def test_resolve_sub_agent_version_no_fallback(monkeypatch):
+    """Test resolve falls back to child current_version_no when pin is NULL"""
+    monkeypatch.setattr(
+        "backend.database.agent_db.query_current_version_no",
+        MagicMock(return_value=3),
+    )
+    result = resolve_sub_agent_version_no(
+        selected_agent_id=2,
+        selected_agent_version_no=None,
+        tenant_id="tenant1",
+    )
+    assert result == 3
+
+
+def test_resolve_sub_agent_version_no_fallback_to_draft(monkeypatch):
+    """Test resolve falls back to draft when child has no published version"""
+    monkeypatch.setattr(
+        "backend.database.agent_db.query_current_version_no",
+        MagicMock(return_value=None),
+    )
+    result = resolve_sub_agent_version_no(
+        selected_agent_id=2,
+        selected_agent_version_no=None,
+        tenant_id="tenant1",
+    )
+    assert result == 0
+
 
 def test_create_agent_success(monkeypatch, mock_session):
     """测试成功创建agent"""
