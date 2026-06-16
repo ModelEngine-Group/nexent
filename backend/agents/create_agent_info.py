@@ -484,6 +484,8 @@ async def create_agent_config(
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
+    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
@@ -496,29 +498,9 @@ async def create_agent_config(
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
         "knowledge_base_summary": knowledge_base_summary,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "user_id": user_id,
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
-
-    context_components = build_context_components(
-        duty=duty_prompt,
-        constraint=constraint_prompt,
-        few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        time_str=time_str,
-        user_id=user_id,
-        language=language,
-        is_manager=is_manager,
-        tools=render_kwargs["tools"],
-        skills=skills,
-        managed_agents=render_kwargs["managed_agents"],
-        external_a2a_agents=render_kwargs["external_a2a_agents"],
-        memory_list=memory_list,
-        memory_search_query=last_user_query,
-        knowledge_base_summary=knowledge_base_summary,
-    )
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_max_tokens = 10000
