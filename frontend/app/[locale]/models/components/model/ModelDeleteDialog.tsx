@@ -1571,6 +1571,10 @@ export const ModelDeleteDialog = ({
                 contextWindowTokens: selectedSingleModel.context_window_tokens,
                 maxInputTokens: selectedSingleModel.max_input_tokens,
                 maxOutputTokens: selectedSingleModel.max_output_tokens,
+                // Legacy max_tokens is promoted to maxOutputTokens by
+                // capacityFormFromModel; pass it through so the deprecation
+                // warning auto-resolves when the user opens the dialog.
+                maxTokens: selectedSingleModel.max_tokens,
                 defaultOutputReserveTokens:
                   selectedSingleModel.default_output_reserve_tokens,
                 tokenizerFamily: selectedSingleModel.tokenizer_family,

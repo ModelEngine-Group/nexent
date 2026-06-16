@@ -18,6 +18,8 @@ export interface ModelCapacityFormState {
   tokenizerFamily: string;
 }
 
+export type ModelCapacityFormMode = "add" | "edit";
+
 interface ModelCapacityFieldsProps {
   value: ModelCapacityFormState;
   onChange: (field: keyof ModelCapacityFormState, value: string) => void;
@@ -25,6 +27,14 @@ interface ModelCapacityFieldsProps {
   capacitySource?: CapacitySource | null;
   capabilityProfileVersion?: string | null;
   showDeprecatedMaxTokensWarning?: boolean;
+  /**
+   * 'add' shows a flat panel with the four user-facing fields
+   * (context_window, max_input, max_output, tokenizer) and supports required
+   * markers. 'edit' shows all five fields inside a collapsible panel. Default 'edit'.
+   */
+  formMode?: ModelCapacityFormMode;
+  /** Field names that should render a red asterisk and be enforced by validation. */
+  requiredFields?: Array<keyof ModelCapacityFormState>;
 }
 
 const TOKENIZER_FAMILY_OPTIONS = [
@@ -70,7 +80,8 @@ export const isPositiveIntegerOrEmpty = (value: string): boolean =>
   value.trim() === "" || /^[1-9]\d*$/.test(value.trim());
 
 export const validateCapacityForm = (
-  value: ModelCapacityFormState
+  value: ModelCapacityFormState,
+  requiredFields: Array<keyof ModelCapacityFormState> = []
 ): string | null => {
   const numericValues = [
     value.contextWindowTokens,
@@ -80,6 +91,12 @@ export const validateCapacityForm = (
   ];
   if (!numericValues.every(isPositiveIntegerOrEmpty)) {
     return "model.dialog.capacity.error.positiveInteger";
+  }
+
+  for (const field of requiredFields) {
+    if (value[field].trim() === "") {
+      return "model.dialog.capacity.error.requiredMissing";
+    }
   }
 
   const contextWindowTokens = toOptionalPositiveInt(value.contextWindowTokens);
@@ -112,10 +129,16 @@ export const hasCapacityValues = (value: ModelCapacityFormState): boolean =>
 
 export const buildCapacityPayload = (value: ModelCapacityFormState) => {
   if (!hasCapacityValues(value)) return {};
+  const maxOutputTokens = toOptionalPositiveInt(value.maxOutputTokens);
   return {
     contextWindowTokens: toOptionalPositiveInt(value.contextWindowTokens),
     maxInputTokens: toOptionalPositiveInt(value.maxInputTokens),
-    maxOutputTokens: toOptionalPositiveInt(value.maxOutputTokens),
+    maxOutputTokens,
+    // Mirror max_output_tokens into the deprecated max_tokens column so
+    // legacy readers stay consistent. W1 step 4 makes them aliases server-side;
+    // keeping both columns populated avoids a brittle dependency on the
+    // Pydantic validator firing on every code path.
+    ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
     defaultOutputReserveTokens: toOptionalPositiveInt(
       value.defaultOutputReserveTokens
     ),
@@ -128,12 +151,18 @@ export const capacityFormFromModel = (model: {
   contextWindowTokens?: number;
   maxInputTokens?: number;
   maxOutputTokens?: number;
+  /** Legacy alias — auto-promoted to maxOutputTokens when the new field is empty. */
+  maxTokens?: number;
   defaultOutputReserveTokens?: number;
   tokenizerFamily?: string;
 }): ModelCapacityFormState => ({
   contextWindowTokens: model.contextWindowTokens?.toString() || "",
   maxInputTokens: model.maxInputTokens?.toString() || "",
-  maxOutputTokens: model.maxOutputTokens?.toString() || "",
+  // W1 step 4 deprecates max_tokens. Promote legacy value into the new field
+  // for display so the user sees the value and the deprecation warning
+  // resolves on save (the saved value lands in max_output_tokens column).
+  maxOutputTokens:
+    model.maxOutputTokens?.toString() || model.maxTokens?.toString() || "",
   defaultOutputReserveTokens:
     model.defaultOutputReserveTokens?.toString() || "",
   tokenizerFamily: model.tokenizerFamily || "",
@@ -146,12 +175,16 @@ export const ModelCapacityFields = ({
   capacitySource,
   capabilityProfileVersion,
   showDeprecatedMaxTokensWarning,
+  formMode = "edit",
+  requiredFields = [],
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
   const hasValues = hasCapacityValues(value);
+  const requiredSet = new Set<keyof ModelCapacityFormState>(requiredFields);
+  const isAddMode = formMode === "add";
   const shouldAutoOpen = Boolean(
     hasValues || source || capabilityProfileVersion || validationError
   );
@@ -173,6 +206,9 @@ export const ModelCapacityFields = ({
         <Tooltip title={t(tooltipKey)}>
           <span>{t(labelKey)}</span>
         </Tooltip>
+        {requiredSet.has(field) && (
+          <span className="text-red-500 ml-1">*</span>
+        )}
       </label>
       <Input
         type="number"
@@ -210,7 +246,7 @@ export const ModelCapacityFields = ({
         />
       )}
 
-      {!source && !hasValues && (
+      {!source && !hasValues && !isAddMode && (
         <Alert
           type="info"
           showIcon
@@ -234,11 +270,12 @@ export const ModelCapacityFields = ({
           "model.dialog.capacity.maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens.tooltip"
         )}
-        {renderNumberInput(
-          "defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
-        )}
+        {!isAddMode &&
+          renderNumberInput(
+            "defaultOutputReserveTokens",
+            "model.dialog.capacity.defaultOutputReserveTokens",
+            "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
+          )}
       </div>
 
       <div>
@@ -246,6 +283,9 @@ export const ModelCapacityFields = ({
           <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
             <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
           </Tooltip>
+          {requiredSet.has("tokenizerFamily") && (
+            <span className="text-red-500 ml-1">*</span>
+          )}
         </label>
         <AutoComplete
           allowClear
@@ -264,6 +304,25 @@ export const ModelCapacityFields = ({
       )}
     </div>
   );
+
+  // In add mode the capacity fields are part of required input; render as a
+  // flat labelled section so context_window/max_input red asterisks are
+  // unmissable. Edit mode keeps the existing collapsible panel.
+  if (isAddMode) {
+    return (
+      <div className="space-y-2">
+        <div>
+          <div className="text-sm font-medium text-gray-700">
+            {t("model.dialog.capacity.title")}
+          </div>
+          <div className="text-xs font-normal text-gray-500">
+            {t("model.dialog.capacity.description")}
+          </div>
+        </div>
+        {content}
+      </div>
+    );
+  }
 
   return (
     <Collapse

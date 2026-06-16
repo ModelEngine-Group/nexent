@@ -830,6 +830,7 @@
   "model.dialog.capacity.error.positiveInteger": "Capacity numeric fields must be positive integers or empty.",
   "model.dialog.capacity.error.outputExceedsWindow": "Max output tokens cannot exceed the context window.",
   "model.dialog.capacity.error.reserveExceedsOutput": "Output reserve cannot exceed max output tokens.",
+  "model.dialog.capacity.error.requiredMissing": "Context window and max input tokens are required.",
   "model.dialog.capacity.deprecatedMaxTokens": "max_tokens is deprecated; use max_output_tokens.",
   "model.dialog.capacity.source.operator": "Operator",
   "model.dialog.capacity.source.profile": "Profile",

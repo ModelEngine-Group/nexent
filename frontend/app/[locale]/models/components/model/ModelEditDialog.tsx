@@ -458,8 +458,15 @@ export const ModelEditDialog = ({
             validationError={capacityValidationError}
             capacitySource={model.capacitySource}
             capabilityProfileVersion={model.capabilityProfileVersion}
+            // The deprecation warning only makes sense when the form still
+            // has no max_output_tokens after capacityFormFromModel ran.
+            // capacityFormFromModel auto-promotes legacy max_tokens into
+            // the form's maxOutputTokens, so this stays true only when
+            // neither column is populated on the model record.
             showDeprecatedMaxTokensWarning={
-              Boolean(model.maxTokens) && !model.maxOutputTokens
+              Boolean(model.maxTokens) &&
+              !model.maxOutputTokens &&
+              !form.maxOutputTokens
             }
           />
         )}
@@ -615,6 +622,8 @@ interface ProviderConfigInitialCapacity {
   contextWindowTokens?: number
   maxInputTokens?: number
   maxOutputTokens?: number
+  /** Legacy alias passed through so capacityFormFromModel can auto-migrate it. */
+  maxTokens?: number
   defaultOutputReserveTokens?: number
   tokenizerFamily?: string
   capacitySource?: string
@@ -739,7 +748,9 @@ export const ProviderConfigEditDialog = ({
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
             showDeprecatedMaxTokensWarning={
-              Boolean(initialMaxTokens) && !initialCapacity?.maxOutputTokens
+              Boolean(initialMaxTokens) &&
+              !initialCapacity?.maxOutputTokens &&
+              !capacityForm.maxOutputTokens
             }
           />
         )}

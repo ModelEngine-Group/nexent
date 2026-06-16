@@ -470,11 +470,17 @@ export const ModelAddDialog = ({
 
   // Check if the form is valid
   const isFormValid = () => {
-    if (supportsCapacityFields && validateCapacityForm(form)) {
+    if (
+      supportsCapacityFields &&
+      validateCapacityForm(form, ["contextWindowTokens", "maxInputTokens"])
+    ) {
       return false;
     }
 
+    // Capacity panel replaces the legacy max_tokens field for LLM/VLM types.
+    // Only voice and rerank-style types still rely on the standalone max_tokens.
     const needsMaxTokens =
+      !supportsCapacityFields &&
       form.type !== MODEL_TYPES.EMBEDDING &&
       form.type !== MODEL_TYPES.MULTI_EMBEDDING &&
       form.type !== MODEL_TYPES.STT;
@@ -530,11 +536,9 @@ export const ModelAddDialog = ({
         return form.apiKey.trim() !== "" && form.name.trim() !== "";
       }
     }
-    return (
-      form.name.trim() !== "" &&
-      form.url.trim() !== "" &&
-      isValidMaxTokens(form.maxTokens)
-    );
+    // LLM/VLM final case: capacity validation already enforced above; no
+    // standalone max_tokens to check.
+    return form.name.trim() !== "" && form.url.trim() !== "";
   };
 
   // Verify model connectivity
@@ -607,15 +611,21 @@ export const ModelAddDialog = ({
         connectivity = result.connectivity;
       } else {
         // For other model types (LLM, Embedding, VLM, Rerank, etc.)
+        // For LLM/VLM the legacy form.maxTokens field is gone; use the new
+        // capacity panel's maxOutputTokens value as the connectivity-probe budget.
+        const resolvedMaxTokens =
+          form.type === MODEL_TYPES.EMBEDDING
+            ? Number.parseInt(form.vectorDimension, 10)
+            : supportsCapacityFields
+              ? Number.parseInt(form.maxOutputTokens || "0", 10) ||
+                parseMaxTokens(form.maxTokens)
+              : parseMaxTokens(form.maxTokens);
         const config = {
           modelName: form.name,
           modelType: modelType,
           baseUrl: form.url,
           apiKey: form.apiKey.trim() || "sk-no-api-key",
-          maxTokens:
-            form.type === MODEL_TYPES.EMBEDDING
-              ? Number.parseInt(form.vectorDimension, 10)
-              : parseMaxTokens(form.maxTokens),
+          maxTokens: resolvedMaxTokens,
           embeddingDim:
             form.type === MODEL_TYPES.EMBEDDING
               ? Number.parseInt(form.vectorDimension, 10)
@@ -1057,7 +1067,7 @@ export const ModelAddDialog = ({
     !isTTSModel &&
     form.type !== MODEL_TYPES.RERANK;
   const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(form)
+    ? validateCapacityForm(form, ["contextWindowTokens", "maxInputTokens"])
     : null;
 
   return (
@@ -1519,11 +1529,13 @@ export const ModelAddDialog = ({
             value={form}
             onChange={(field, value) => handleFormChange(field, value)}
             validationError={capacityValidationError}
+            formMode="add"
+            requiredFields={["contextWindowTokens", "maxInputTokens"]}
           />
         )}
 
-        {/* Max Tokens */}
-        {!isEmbeddingModel && !isSTTModel && (
+        {/* Max Tokens (legacy; only for non-LLM types still using the standalone field) */}
+        {!isEmbeddingModel && !isSTTModel && !supportsCapacityFields && (
           <div>
             <label
               htmlFor="maxTokens"
