@@ -128,6 +128,8 @@ upstream HTTP calls.
 
 ## Implementation Plan
 
+### Backend (items 1-3)
+
 1. Add `backend/services/model_capacity_suggestion_service.py` containing
    `suggest_capacity` (pure) and `_normalize_model_name`, `_pick_provider`,
    `_fuzzy_catalog_match` helpers.
@@ -135,31 +137,110 @@ upstream HTTP calls.
    `backend/apps/model_managment_app.py`.
 3. Add `ModelCapacitySuggestionRequest` and `...Response` Pydantic models in
    `backend/consts/model.py`.
-4. Frontend: after `model_name` field blur (and after `base_url` change),
-   debounce 300 ms and call the endpoint. On a non-`none` response, populate
-   `ModelCapacityFields` form state as **placeholders** (visually distinct
-   from typed values; a small "suggested" chip next to each populated
-   input).
-5. Operator clicks "Use suggestion" → values become real form input,
-   `capacity_source` flips to `'operator'`. Or operator types over → same
-   result. Empty fields fall back to `ProviderCapabilityUnknown` at request
-   time as before.
-6. Add `match_explanation` and `match_kind` to the model edit dialog so
-   operators understand why a suggestion appeared.
+
+### Frontend service layer (item 4)
+
+4. Add `modelService.suggestCapacity(model_name, base_url, provider_hint)`
+   in `frontend/services/modelService.ts` returning a typed
+   `SuggestCapacityResponse`. Snake-case body in, camelCase response out
+   (mirror existing `mapCapacityFieldsFromApi` style).
+
+### Frontend form state machine (items 5-7)
+
+5. In `ModelCapacityFields.tsx`, add three states per capacity input:
+   `empty | suggested | operator`. A `suggested` value renders with a small
+   "suggested" chip next to the label and grey/dimmed text styling; user
+   typing or clicking "Use suggestion" promotes the field to `operator`
+   styling (existing). Reject suggestion writes when state is already
+   `operator` to prevent overwriting user input.
+6. In `ModelAddDialog.tsx` (and `ModelEditDialog.tsx` for the add-like
+   flow if any), debounce 300 ms after `model_name` blur or `base_url`
+   change; call `suggestCapacity`. On a non-`none` response, populate the
+   fields as `suggested`. On `none`, leave form as-is and **do not** show
+   an error — the empty path is the existing behavior.
+7. Render `match_explanation` and `match_kind` as a small dismissable
+   `Alert` ("Suggestion from openai/gpt-4o@1 catalog entry") above the
+   capacity grid. Use existing i18n keys; add `model.dialog.capacity.suggestion.*`.
+
+### Frontend coverage of all model-add paths (item 8)
+
+8. **Apply suggestion logic to all three add paths**:
+   - `ModelAddDialog` (single-model flow) — primary target
+   - Provider browser flow (when user enables a model from
+     `ModelDeleteDialog` provider list) — call suggestion when an
+     existing model record is missing capacity values, surface as an
+     "Add capacity" prompt
+   - `ProviderConfigEditDialog` (per-model gear icon) — show
+     "Suggestion available" badge if model_record has null capacity
+     fields, click → fill in via the same API
+
+### Error and fallback handling (item 9)
+
+9. Suggestion endpoint failure modes:
+   - HTTP 5xx / network error → log to console, **silently fall back** to
+     existing empty-form behavior. Never block the add flow.
+   - 200 with `match_kind: "none"` → no UI; identical to empty state.
+   - 200 with `provider_discovery` match where capacity values are
+     `provider_candidate` → render with yellow border (not green) so the
+     operator knows it's lower-confidence than catalog matches.
+
+### Localization (item 10)
+
+10. Add locale strings to en/zh:
+    - `model.dialog.capacity.suggestion.title`
+    - `model.dialog.capacity.suggestion.matchExact`
+    - `model.dialog.capacity.suggestion.matchFuzzy`
+    - `model.dialog.capacity.suggestion.matchProviderDiscovery`
+    - `model.dialog.capacity.suggestion.useSuggestion` (button text)
+    - `model.dialog.capacity.suggestion.candidateWarning` (lower-confidence note)
 
 ## Repository Touchpoints
 
+Backend:
 - `backend/services/model_capacity_suggestion_service.py` (new)
-- `backend/apps/model_managment_app.py`
-- `backend/consts/model.py`
+- `backend/apps/model_managment_app.py` (new route)
+- `backend/consts/model.py` (request/response Pydantic)
 - `backend/services/model_health_service.py` (extend
   `_infer_model_factory` to cover LLM via shared host map)
+
+Frontend — **all three model-management dialogs**, not just Add:
 - `frontend/app/[locale]/models/components/model/ModelAddDialog.tsx`
+  (primary suggestion flow)
 - `frontend/app/[locale]/models/components/model/ModelEditDialog.tsx`
+  (suggestion when editing custom OpenAI-API-Compatible model with no
+  catalog match)
+- `frontend/app/[locale]/models/components/model/ProviderConfigEditDialog`
+  (suggestion when editing provider-categorized model via the gear icon —
+  same dialog component sourced from `ModelEditDialog.tsx`)
+- `frontend/app/[locale]/models/components/model/ModelDeleteDialog.tsx`
+  (provider browser flow: when user enables a model from the provider
+  list, surface suggestion if backend returns capacity hints)
 - `frontend/app/[locale]/models/components/model/ModelCapacityFields.tsx`
-  (add suggested-placeholder rendering)
+  (suggested-placeholder rendering, `suggested` vs `operator` state)
 - `frontend/services/modelService.ts` (add `suggestCapacity`)
 - Locale files for explanation strings
+
+## Operational Dependencies
+
+W17 requires a coordinated deploy across backend + web containers. There
+is no DB migration.
+
+| Component | Action | Trigger |
+| --- | --- | --- |
+| `nexent-runtime` / `nexent-northbound` / `nexent-config` / `nexent-mcp` | Image rebuild + `compose up --force-recreate` (流程 A in `nexent 代码改动生效流程.md`) | Backend route + service added |
+| `nexent-web` | Image rebuild + `compose up --force-recreate` (流程 D) | Frontend dialog + service changes |
+| `nexent-postgresql` | No change | No schema migration |
+| `consts.const` | Add `CAPACITY_SUGGESTION_ENABLED` env var | New feature flag |
+| Tenant config | Optional: per-tenant override `capacity_suggestion_enabled` in `tenant_config_t` to support staged rollout by tenant | Phase 2/3 rollout |
+| Monitoring | Add `match_kind` and latency metrics for the new endpoint to dashboards | Phase 2 observation |
+
+**Rollout sequence**: enable env var globally for staging → enable per-tenant
+for one internal tenant via `tenant_config_t` → measure 1 week → enable
+globally for paid tenants → measure 1 week → enable for all.
+
+**Rollback**: set `CAPACITY_SUGGESTION_ENABLED=false`. Frontend hides
+suggestion UI; backend route stops being called. No data migration needed
+since W17 never persists provider_candidate values automatically.
 
 ## Tests and Release Evidence
 
