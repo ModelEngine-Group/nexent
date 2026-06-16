@@ -73,7 +73,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list
+from database.agent_version_db import query_version_list, query_current_version_no
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -1067,6 +1067,12 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     )
     agent_info["is_available"] = is_available
     agent_info["unavailable_reasons"] = unavailable_reasons
+
+    # Set current_version_no from draft record (version_no=0)
+    # This ensures the returned data always has the current published version info
+    if version_no > 0:
+        draft_version_no = query_current_version_no(agent_id, tenant_id)
+        agent_info["current_version_no"] = draft_version_no
 
     return agent_info
 

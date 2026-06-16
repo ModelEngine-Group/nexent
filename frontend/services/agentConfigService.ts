@@ -200,7 +200,7 @@ export const fetchPublishedAgentList = async () => {
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
       permission: agent.permission,
-      published_version_no: agent.published_version_no,
+      current_version_no: agent.current_version_no,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
     }));
