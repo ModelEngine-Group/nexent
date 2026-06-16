@@ -14,6 +14,24 @@ component reducers and artifact offloading arrive through W11 and W12. The initi
 gateway does not depend on those richer stages: hard fit is delivered first, and later
 workstreams may improve retained quality without weakening or replacing the invariant.
 
+### Current Dispatch Path Analysis
+
+All production model calls already converge on a single chokepoint:
+`openai_llm.py:186` (`self.client.chat.completions.create(stream=True)`). Nine call
+paths flow through this chokepoint: agent main loop, max-steps handler, VLM
+image/audio/video analysis, long-context analysis, and three compression paths.
+
+However, two production bypass paths exist that skip the chokepoint:
+
+| ID | File | Issue |
+|----|------|-------|
+| B1 | `backend/utils/llm_utils.py:100` | System prompt generation manually constructs completion kwargs and calls `client.chat.completions.create` directly, bypassing `OpenAIModel.__call__` |
+| B2 | `backend/services/conversation_management_service.py:282` | Title generation calls `llm.generate(messages)` which routes to the smolagents parent class `generate` method, bypassing nexent's `__call__` override |
+
+Non-production direct calls (health checks in `openai_llm.py:350` and
+`openai_vlm.py:72`, benchmark code in `eval_utils.py:169`) are low-risk and out of
+scope for bypass elimination.
+
 ## Pipeline Contract
 
 Input: capacity snapshot, safe input budget, policy version, mandatory `ContextItem`
@@ -118,17 +136,32 @@ increase the W2 hard input budget.
 7. Accept W16 cache partition plans and compute cache metadata only from the final
    serialized payload.
 8. Connect W10-W13 quality-enhancing stages without weakening the hard invariant.
-9. Restrict production provider credentials/capability to the trusted dispatch path and
-   remove or deny every direct production dispatch path.
+9. Eliminate production dispatch bypasses and restrict provider credentials to the
+   trusted path:
+   - **9a. Fix B1** (`backend/utils/llm_utils.py:100`): Replace manual
+     `_prepare_completion_kwargs` + direct `client.chat.completions.create` with a
+     call to `llm(messages)` so it flows through `OpenAIModel.__call__`. This also
+     gains monitoring, observer, and extra_body integration for free.
+   - **9b. Fix B2** (`backend/services/conversation_management_service.py:282`):
+     Replace `llm.generate(messages)` with `llm(messages)` to route through the
+     trusted `__call__` path instead of the smolagents parent `generate` method.
+   - **9c. Credential isolation** (architecture layer): Ensure only requests that
+     have passed W3 fit verification can access production provider API keys.
+     Options include injecting credentials at the trusted dispatch layer rather than
+     storing them on `OpenAIModel` instances, or adding a fit-verification gate in
+     `__call__`. This is a broader architectural change to be designed alongside
+     the W3 gateway implementation.
 
 ## Repository Touchpoints
 
 - `sdk/nexent/core/agents/agent_context.py`
 - `sdk/nexent/core/agents/agent_model.py`
 - `sdk/nexent/core/agents/nexent_agent.py`
-- `sdk/nexent/core/models/openai_llm.py`
+- `sdk/nexent/core/models/openai_llm.py` — primary chokepoint (line 186)
 - `sdk/nexent/core/utils/token_estimation.py`
 - `sdk/nexent/monitor/agent_observability.py`
+- `backend/utils/llm_utils.py` — bypass B1 (step 9a)
+- `backend/services/conversation_management_service.py` — bypass B2 (step 9b)
 
 ## Tests
 
@@ -147,6 +180,13 @@ increase the W2 hard input budget.
   enters product scope. **Finding:** CM-026.
 - Negative integration tests prove SDK/client and ordinary internal callers cannot
   dispatch without valid W4, W10, W2, and W3 decisions.
+- Bypass elimination tests prove that all production `chat.completions.create` calls
+  flow through the single chokepoint (`openai_llm.py:186`). Specifically:
+  - System prompt generation (`llm_utils.py`) routes through `OpenAIModel.__call__`.
+  - Title generation (`conversation_management_service.py`) routes through
+    `OpenAIModel.__call__` and does not invoke the smolagents parent `generate` method.
+  - Static analysis or repository search confirms no remaining direct production
+    provider dispatch paths outside the chokepoint and health-check exceptions.
 
 ## Rollout and Definition of Done
 
