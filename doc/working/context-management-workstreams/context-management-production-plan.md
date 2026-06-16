@@ -62,7 +62,7 @@ Nexent should position itself as a production-grade **Context and Memory Control
 
 Nexent already has a capable context compression engine: incremental summaries, summary caches, fallback truncation, context components, layered long-term memory, benchmarks, and debugger traces. The remaining work is primarily about making context state correct, durable, isolated, controllable, and measurable.
 
-This plan contains 16 implementation-ready workstreams. The production-readiness
+This plan contains 15 implementation-ready workstreams. The production-readiness
 review adds claim-scoped constraints, not three unconditional platform workstreams:
 
 - The original 14 production-readiness improvements.
@@ -89,8 +89,8 @@ The completed design establishes five coordinated engineering modules:
 
 | Module | W-IDs | Design result |
 | --- | --- | --- |
-| Model Capacity and Request Safety | W1-W15 | One capacity resolver, per-request safe-input budgets, and a mandatory final-fit gateway before provider dispatch. |
-| Durable Session State and Lifecycle | W3-W5, W6-W7 | Fully qualified identity, typed event-log source of truth with compression snapshots, purpose-specific projections, complete validation, and authorized lifecycle APIs. |
+| Model Capacity and Request Safety | W1, W2, W15 | One capacity resolver, per-request safe-input budgets, and a mandatory final-fit gateway before provider dispatch. |
+| Durable Session State and Lifecycle | W3-W7 | Fully qualified identity, typed event-log source of truth with compression snapshots, purpose-specific projections, complete validation, and authorized lifecycle APIs. |
 | Context Shaping and Compaction | W8-W12 | One enforceable policy engine, minimum-fidelity representations, artifact offload/retrieval, and bounded governed compaction. |
 | Governance and Privacy | W11 | Shared provenance, redaction, retention, deletion-lineage, and validated writeback contracts across persisted context. |
 | Quality and Efficiency | W13-W14 | Versioned SLO/evidence gates and deterministic cache-aware final assembly. |
@@ -107,8 +107,8 @@ The modules below are intended as assignable ownership boundaries. Cross-module 
 
 | Module | Workstreams | Suggested primary owners | Primary responsibility |
 | --- | --- | --- | --- |
-| Model Capacity and Request Safety | W1-W15 | Model integration and agent-runtime engineers | Capacity contracts, token budgeting, and guaranteed request fit. |
-| Durable Session State and Lifecycle | W3-W5, W6-W7 | Backend platform, data, and distributed-systems engineers | Identity isolation, execution event log with compression snapshots, replay, and session operations. |
+| Model Capacity and Request Safety | W1, W2, W15 | Model integration and agent-runtime engineers | Capacity contracts, token budgeting, and guaranteed request fit. |
+| Durable Session State and Lifecycle | W3-W7 | Backend platform, data, and distributed-systems engineers | Identity isolation, execution event log with compression snapshots, replay, and session operations. |
 | Context Shaping and Compaction | W8-W12 | Agent-runtime and context-algorithm engineers | Context policy, reduction, artifact offloading, and compaction reliability. |
 | Governance and Privacy | W11 | Security, privacy, and platform-governance engineers | Provenance, trust boundaries, redaction, retention, and deletion. |
 | Quality and Efficiency | W13-W14 | Quality infrastructure and performance engineers | Context SLOs, release gates, observability, and prompt-cache efficiency. |
@@ -265,7 +265,7 @@ Here, a **session** is the user-visible interaction container. The **execution e
 | Run | One user-triggered agent execution within a session. |
 | Execution event log | The append-only ordered record of actions, tool calls, results, errors, and answers produced during runs. |
 | Derived view | A rebuildable, purpose-specific selection and transformation of execution events. |
-| Checkpoint | A versioned recovery snapshot tied to a known execution-event boundary. |
+| Compression Snapshot | A versioned recovery snapshot tied to a known execution-event boundary, stored as a W4 event. |
 | Artifact | A large output, file, log, or binary stored outside the active model context. |
 | Working Memory | Structured current goals, constraints, decisions, and task state used by the agent. |
 
@@ -358,7 +358,7 @@ flowchart LR
     R --> LOG["Execution Event Log"]
     LOG --> CP
 
-    CP <--> CK["Context Checkpoints"]
+    CP <--> CS["Compression Snapshots"]
     CP <--> MEM["Long-Term Memory / Mem0"]
     X --> ART["Artifact Store"]
     ART --> CP
@@ -368,7 +368,7 @@ flowchart LR
     SLO -. "reviewed updates" .-> CP
 ```
 
-The Control Plane is intentionally shown as one architectural component; its internal policy, authority, budgeting, retrieval, reduction, and derived-view responsibilities are specified in W4-W13. The diagram emphasizes three closed loops: runtime execution, durable context/memory state, and human-reviewed governance improvement.
+The Control Plane is intentionally shown as one architectural component; its internal policy, authority, budgeting, retrieval, reduction, and derived-view responsibilities are specified in W3-W13. The diagram emphasizes three closed loops: runtime execution, durable context/memory state, and human-reviewed governance improvement.
 
 Core invariants:
 
@@ -472,6 +472,10 @@ Core invariants:
 - Restrict production provider credentials and dispatch capability to one trusted
   server-side path that requires current W3 authorization, W8 policy, W2 budget, and
   the exact final W15 fit result; remove or deny direct dispatch paths.
+- Eliminate production dispatch bypasses:
+  - Fix B1: `backend/utils/llm_utils.py:100` (system prompt generation bypass)
+  - Fix B2: `backend/services/conversation_management_service.py:282` (title generation bypass)
+  - Implement credential isolation (architecture layer)
 - Apply deterministic stages until the request fits:
   1. Remove expired/non-required components.
   2. Replace large tool outputs with summaries and artifact pointers.
@@ -744,7 +748,12 @@ events → resume. If no snapshot exists, replay entire event log.
 - Publish artifacts through governed non-readable staging, one relational
   pending-artifact/event/finalize-outbox transaction, idempotent finalize, and orphan
   cleanup. Only `ready` artifacts are readable.
-- Enable safe observation limits by default.
+- Configure offload thresholds per tool type via agent configuration. Outputs
+  exceeding the threshold are stored as artifacts with pointers; the original
+  content is preserved for retrieval. This is an offload decision, not a
+  truncation — full content remains accessible through the artifact pointer.
+  Context space decisions (whether to include full content, pointer only, or
+  summary) are made by W8 policy selection and W15 final fit, not by W10.
 - Preserve complete tool-call/result pairs.
 - Run exploratory or high-volume delegated work in isolated subagent contexts.
 
@@ -759,7 +768,7 @@ events → resume. If no snapshot exists, replay entire event log.
 
 ##### W12. Make Compaction Execution Reliable and Governed
 
-**Problem:** Compression synchronously uses the active model without a dedicated timeout, model policy, cost limit, or circuit breaker.
+**Problem:** Compression synchronously uses the active model without a dedicated timeout, model policy, cost limit, or circuit breaker. Current implementation in `agent_context.py` has 21 gaps (16 critical) compared to W12 requirements.
 
 **Solution:**
 
@@ -767,6 +776,12 @@ events → resume. If no snapshot exists, replay entire event log.
 - Add timeout, cancellation, bounded provider-aware retries, rate-limit policy, cost ceiling, and circuit breaker.
 - Detect no-progress compaction and prevent infinite retry loops.
 - Make hard truncation deterministic when semantic compaction is unavailable.
+- Use W2 `CapacityReservePolicy.soft_limit_ratio` as the primary trigger for compaction.
+- Implement fallback model selection: primary → fallback → W9 deterministic hard reduction.
+- Ensure measurable progress: compressed output token count must be strictly less than source token count.
+- Subagent sessions can trigger their own compaction through W12 using their own `CompactionPolicy`.
+
+**Current State:** The existing `ContextManager` class in `agent_context.py` provides functional but incomplete compression. W12 includes a detailed gap analysis mapping current capabilities against requirements.
 
 **Proof and benefit:** Keeps the main agent available during compaction-provider degradation and prevents uncontrolled latency or spend.
 
@@ -872,6 +887,7 @@ events → resume. If no snapshot exists, replay entire event log.
   and computes fingerprints from the exact dispatched payload.
 - Track provider cached-input tokens and prefix-change causes.
 - Avoid changing timestamps or user-specific dynamic text inside stable prefixes when unnecessary.
+- Subagent sessions apply W14 cache optimization independently using their own agent configuration.
 
 **Proof and benefit:** Improves latency and cost on providers supporting prompt caching while making prompt changes easier to diagnose.
 
@@ -1007,12 +1023,12 @@ section 2.4 defines the claim-scoped readiness gates. **Findings:** CM-011, CM-0
 
 | Phase | Schedule target | Included W-IDs | Mapping rationale and phase outcome |
 | --- | --- | --- | --- |
-| Phase 0: Baseline and Design Freeze | June 10-12 | [W1](#w1)-[W14](#w16) specifications; formal review; W13 groundwork | Completes implementation-ready designs, review constraints, baseline definitions, and shared contracts. |
-| Phase 1: Correct Capacity and Guarantee Fit | June 15-26 | [W1](#w1), [W2](#w2), [W15](#w3) | Fixes model-capacity semantics, reserves output space, and guarantees every model request fits. |
-| Phase 2: Durable Event Log and Context State | June 15-July 10 | [W3](#w4)-[W6](#w8) | Builds isolated replayable state with minimal schema compatibility and path-specific consistency. Ambiguous side effects stop for explicit resolution. |
-| Phase 3: Policy, Reduction, and Pollution Control | June 29-July 17 | [W8](#w10), [W9](#w11), [W10](#w12), [W11](#w14) | Improves the quality and safety of the context selected from the durable foundation. W10 also hardens W15 by controlling oversized outputs before final fit. |
-| Phase 4: Session Product and Compaction Operations | July 13-24 | [W7](#w9), [W12](#w13) | Productizes the durable state and compaction foundation as controllable session lifecycle operations. |
-| Phase 5: Efficiency and Release Hardening | July 20-August 7 target | [W13](#w15)-[W14](#w16) plus approved optional-package evidence | Completes release gates for the exact enabled capability claims and prompt-cache efficiency. |
+| Phase 0: Baseline and Design Freeze | June 10-12 | [W1](#w1)-[W15](#w15) specifications; formal review; W13 groundwork | Completes implementation-ready designs, review constraints, baseline definitions, and shared contracts. |
+| Phase 1: Foundation | June 15-26 | [W1](#w1), [W2](#w2), [W3](#w3) | Establishes correct capacity semantics, output reservation, and tenant isolation. |
+| Phase 2: Event Infrastructure | June 15-July 10 | [W4](#w4)-[W6](#w6) | Builds the durable event log, history projections, and metadata-based cache validation. |
+| Phase 3: Lifecycle and Policy | June 29-July 17 | [W7](#w7)-[W11](#w11) | Implements session lifecycle APIs, unified policy, progressive reduction, output control, and trust/redaction. |
+| Phase 4: Compaction and Assembly | July 13-24 | [W12](#w12), [W14](#w14) | Implements reliable compaction with fallback models and cache-aware prompt assembly. |
+| Phase 5: Quality and Fit | July 20-August 7 target | [W13](#w13), [W15](#w15) plus approved optional-package evidence | Defines SLOs, establishes baselines, and guarantees context fit before every model call. |
 
 The July 10 milestone targets the implementation outputs of W1-W6. It is not a
 production-readiness gate. Phases 3-5 overlap intentionally; August 7 is the earliest
@@ -1039,102 +1055,124 @@ Exit gate:
 - Baseline definitions, enabled capability claims, and minimum shared contracts
   approved.
 
-#### Phase 1: Correct Capacity and Guarantee Fit
+#### Phase 1: Foundation
 
-**Schedule target:** June 15-26 **Workstreams:** W1, W2, W15
+**Schedule target:** June 15-26 **Workstreams:** W1, W2, W3
 
 Deliver:
 
 - Database/API/frontend migration for token-capacity fields.
 - `ModelCapacityResolver` and tokenizer adapter interface.
-- Approved versioned capability profiles for supported production provider/model
-  deployments.
+- Approved versioned capability profiles for supported production provider/model deployments.
 - Safe-input-budget calculation.
-- Mandatory final-fit pipeline and overflow recovery.
+- `ContextIdentity(tenant_id, user_id, conversation_id)` introduction.
+- Tenant/user isolation for all context state.
 
 Exit gate:
 
-- No known model call can exceed calculated safe input capacity.
+- Model capacity correctly configured with separate input/output limits.
+- Per-request safe input budget calculated and enforced.
+- Context state isolated by tenant/user/conversation.
 - Legacy `max_tokens` is no longer used as context window.
 
-#### Phase 2: Durable Event Log and Context State
+#### Phase 2: Event Infrastructure
 
-**Schedule target:** June 15-July 10 **Workstreams:** W3-W6
+**Schedule target:** June 15-July 10 **Workstreams:** W4, W5, W6
 
 Deliver:
 
-- Structured execution event log and artifact store.
-- Compression snapshot events within W4 for restart recovery.
-- Tenant/user/conversation-qualified identity.
+- Structured execution event log (`agent_session`, `agent_event`, `agent_event_data` tables).
+- Event taxonomy and schema evolution contract (CM-005).
+- `compression.snapshot` event type for recovery acceleration.
+- 7 projection types (chat, resume, audit, working_memory, model_context, memory_candidate, memory).
+- Projection priority and ContextItem scope definitions.
+- O(1) metadata-based cache validation (CM-015).
 - Backend-owned history derived views.
-- Authoritative Working Memory derived view and memory-candidate events.
 - Existing UI compatibility adapter.
-- Explicit ambiguous-effect stop/resolution behavior.
-- Authorized and idempotent `retry`, `skip`, and `confirm_completed` resolution flow;
-  no automatic reinvocation of an interrupted tool call.
-- Single-active-run enforcement and rejection of conflicting lifecycle mutations.
-- Path-specific publication and repair behavior: W4 owns atomic
-event/compatibility-outbox creation and idempotent projection repair.
-- Documented `current + previous` canonical-reader/upcaster contract for durable events;
-  its implementation and supported-version tests gate the first production event-
-  schema upgrade, not the initial single-version deployment. Checkpoint compatibility
-  remains separately governed by CM-014.
 
 Exit gate:
 
-- Restart, multi-worker, collision, state replay, cache-invalidation, and introduced
-  cross-store-path repair tests pass. Supported-version tests additionally gate any
-  production event-schema upgrade.
-- The July 10 foundation target is demonstrated end to end without claiming automatic
-  side-effect-safe resume or production-scale readiness.
+- All agent execution events persisted to event log.
+- Projections correctly separate raw history from active context.
+- Cache validation uses metadata-based approach (no content hashing).
+- Restart, multi-worker, collision, state replay, and cache-invalidation tests pass.
 
-#### Phase 3: Policy, Reduction, and Pollution Control
+#### Phase 3: Lifecycle and Policy
 
-**Schedule target:** June 29-July 17 **Workstreams:** W8, W9, W10, W11
+**Schedule target:** June 29-July 17 **Workstreams:** W7, W8, W9, W10, W11
 
 Deliver:
 
-- Unified context policy engine.
-- Unified Memory Policy Engine, deterministic authority ordering, and global memory retrieval resolution.
-- Progressive reducers for every component type.
-- Large-output offloading and artifact retrieval.
-- Trust, provenance, redaction, deletion, and retention policies.
+- Session lifecycle APIs (`flush_snapshot`, `restore`, `reset`, `compact`, `inspect`).
+- Subagent conflict check and `resolve_ambiguous_effect` API.
+- Unified context and memory policy with 8-layer authority ordering.
+- Subagent policy independence.
+- Progressive component reduction (7 reducer types).
+- Deterministic vs semantic reducer caching distinction.
+- Context pollution control with artifact offload (threshold-based, not truncation).
+- Subagent artifact isolation.
+- Trust, provenance, redaction, and retention policies.
+- Subagent governance.
 
 Exit gate:
 
-- Mandatory context is preserved under pressure.
+- Session lifecycle APIs functional with subagent conflict handling.
+- Context policy enforcement working with 8-layer authority.
+- Progressive reduction preserving critical information.
+- Large outputs offloaded to artifacts (not truncated).
+- Redaction and provenance tracking operational.
+- Mandatory context preserved under pressure.
 - Secret and deletion-propagation tests pass.
 
-#### Phase 4: Session Product and Compaction Operations
+#### Phase 4: Compaction and Assembly
 
-**Schedule target:** July 13-24 **Workstreams:** W7, W12
+**Schedule target:** July 13-24 **Workstreams:** W12, W14
 
 Deliver:
 
-- Compact/flush_snapshot/restore/reset/inspect APIs.
-- Lifecycle hooks and manual focused compaction.
-- Dedicated compaction-model policy, fault handling, and circuit breaker.
+- Reliable governed compaction with `CompactionPolicy`.
+- Primary and fallback compaction models.
+- Timeout, retry, and circuit breaker for compaction.
+- Measurable progress validation (compressed < source).
+- Subagent compression independence.
+- Cache-aware prompt assembly with stable/dynamic content separation.
+- Cache partition planning.
+- Subagent cache optimization.
 
 Exit gate:
 
+- Compaction reliable with fallback model and circuit breaker.
+- Compression progress measurable (token reduction).
+- Prompt assembly optimized for cache reuse.
+- Subagent sessions handle compaction and caching independently.
 - Long-running sessions can be inspected, restored, reset, and compacted without state corruption.
 
-#### Phase 5: Efficiency and Release Hardening
+#### Phase 5: Quality and Fit
 
-**Schedule target:** July 20-August 7 **Workstreams:** W13-W14 and approved optional packages
+**Schedule target:** July 20-August 7 **Workstreams:** W13, W15 and approved optional packages
 
 Deliver:
 
+- Context quality and reliability SLOs (fit rate, retention, latency, cost).
+- Baseline measurements established before W1-W12 changes.
+- Performance baseline test coordination across all workstreams.
+- Guaranteed context fit with `ContextFitPipeline`.
+- Hard-fit gateway implementation.
+- Dispatch bypass elimination (B1: `llm_utils.py:100`, B2: `conversation_management_service.py:282`).
+- Credential isolation (architecture layer).
 - Stable-prefix prompt assembly and cached-token metrics.
 - Full CI benchmark gates and production dashboards.
-- Memory-specific SLOs and unified telemetry specification for context/memory
-  decision traces (OpenTelemetry-style, external observability infrastructure).
+- Unified telemetry specification for context/memory decision traces (OpenTelemetry-style, external observability infrastructure).
 - Scope-appropriate load, fault, multilingual, and cost testing.
 - Optional effect-reconciliation, production-topology, or advanced-migration evidence
   only for capability claims approved for this release.
 
 Exit gate:
 
+- SLOs defined and baseline measurements established.
+- Context fit guaranteed before every model call.
+- No dispatch bypasses remaining.
+- Quality metrics tracked and reported.
 - Numeric gates pass for the exact providers, topology, and capabilities approved for
   the release.
 
@@ -1164,19 +1202,23 @@ gantt
     dateFormat  YYYY-MM-DD
     axisFormat  %b %d
 
-    section Model and Context Squad
-    Phase 0 - W1-W14 design and review                 :done, p0, 2026-06-10, 3d
-    Phase 1 - W1-W15 capacity and guaranteed fit        :p1, 2026-06-15, 12d
-    Phase 3 - W8-W10 and W11 context control          :p3, 2026-06-29, 19d
+    section Foundation Squad
+    Phase 0 - W1-W15 design and review                 :done, p0, 2026-06-10, 3d
+    Phase 1 - W1-W3 capacity, reserve, identity        :p1, 2026-06-15, 12d
 
-    section Durable Platform Squad
-    Phase 2 - W3-W6 durable execution event log and context state   :p2, 2026-06-15, 26d
+    section Event Infrastructure Squad
+    Phase 2 - W4-W6 event log, projections, validation :p2, 2026-06-15, 26d
     Optional capability packages when approved         :p17, 2026-06-15, 54d
     Core Context Foundation target                     :milestone, m1, 2026-07-10, 0d
-    Phase 4 - W7 and W12 session and compaction ops    :p4, 2026-07-13, 12d
 
-    section Quality and Release Squad
-    Phase 5 - W13-W14 release hardening and efficiency :p5, 2026-07-20, 19d
+    section Lifecycle and Policy Squad
+    Phase 3 - W7-W11 lifecycle, policy, reduction      :p3, 2026-06-29, 19d
+
+    section Compaction and Assembly Squad
+    Phase 4 - W12, W14 compaction and cache assembly   :p4, 2026-07-13, 12d
+
+    section Quality and Fit Squad
+    Phase 5 - W13, W15 SLOs and guaranteed fit         :p5, 2026-07-20, 19d
     Earliest production-readiness evidence review      :milestone, m2, 2026-08-07, 0d
 ```
 
@@ -1184,14 +1226,24 @@ gantt
 
 ```mermaid
 flowchart LR
-    W1["W1 Token capacity"] --> W2["W2 Reserves"] --> W15["W15 Guaranteed fit"]
-    W4["W4 Execution event log<br/>+ compression snapshots"] --> W5["W5 Derived views"] --> W6["W6 Cache validity"] --> W7["W7 Lifecycle APIs"]
-    W3["W3 Identity"] --> W4
-    W8["W8 Policy"] --> W9["W9 Reducers"] --> W10["W10 Pollution control"] --> W15
-    W11["W11 Trust / redaction"] -. governs .-> W10
+    W1["W1 Token capacity"] --> W2["W2 Reserves"]
+    W3["W3 Identity"] --> W4["W4 Execution event log<br/>+ compression snapshots"]
+    W4 --> W5["W5 Derived views"]
+    W5 --> W6["W6 Cache validity"]
+    W6 --> W7["W7 Lifecycle APIs"]
+    W7 --> W8["W8 Policy"]
+    W8 --> W9["W9 Reducers"]
+    W9 --> W10["W10 Pollution control"]
+    W10 --> W11["W11 Trust / redaction"]
+    W11 --> W12["W12 Reliable compaction"]
+    W2 --> W14["W14 Cache-aware assembly"]
+    W14 --> W15["W15 Guaranteed fit"]
+    W12 --> W13["W13 Quality SLOs"]
+    W13 --> W15
     W11 -. governs .-> W4
     W11 -. governs .-> W5
-    W13["W13 Measurement and release gate"] -. measures .-> W15
+    W11 -. governs .-> W10
+    W13 -. measures .-> W15
     W13 -. measures .-> W7
     W13 -. measures .-> W10
     W4 --> C1["Optional effect reconciliation"] --> W7
