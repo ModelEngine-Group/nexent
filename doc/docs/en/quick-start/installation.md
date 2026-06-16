@@ -335,6 +335,51 @@ For Apereo CAS JSON Service Registry, create a service registration file such as
 
 In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
 
+#### CAS Integration with ModelEngine
+
+When integrating with ModelEngine through the CAS protocol, deploy Nexent with the following configuration:
+
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=https://<ModelEngine IP>:5443/SSOSvr
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://<Nexent IP>:3000
+CAS_LOGIN_MODE=force
+CAS_USER_ATTRIBUTE=userName
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=userType
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+CAS_LOGOUT_URL=/logout?service=http://<Nexent IP>:3000
+CAS_SSL_VERIFY=false
+CAS_CA_BUNDLE=
+```
+
+You also need to add a CAS client service registration file in the OMS container. Use the following steps as a reference:
+
+```bash
+# Create the registration file, paste the JSON content into it, and save it.
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:3000/api/user/cas/logout_callback"
+}
+
+# Run the following command to copy the registration file into the container.
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+```
+
 ### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
 
 If you need to use any of the following features, configure the `NORTHBOUND_EXTERNAL_URL` environment variable:
