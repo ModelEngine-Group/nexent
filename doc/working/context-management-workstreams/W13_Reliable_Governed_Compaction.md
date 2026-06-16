@@ -5,6 +5,72 @@
 Make semantic compaction a bounded, observable, independently governed service that
 cannot take down or indefinitely delay the main agent run.
 
+## Current State and Gap Analysis
+
+The current implementation in `sdk/nexent/core/agents/agent_context.py` provides a
+functional but incomplete compression system. This section maps the current
+capabilities against W13 requirements to identify gaps.
+
+### Current Architecture
+
+```
+CoreAgent._step_stream()
+  → ContextManager.compress_if_needed(model, memory, ...)
+    → [Trigger: _effective_tokens > token_threshold]
+    → [Two-phase: Previous (60%) + Current (40%)]
+    → [Compression path: L1 Full → L2 Trimmed → L3 Hard truncation]
+    → [Error handling: context-length retry (1 attempt) → fallback to L3]
+    → [Cache: PreviousSummaryCache / CurrentSummaryCache with anchor fingerprint]
+```
+
+### Current Strengths (Already Aligned with W13)
+
+| Capability | Current Implementation | W13 Alignment |
+|-----------|----------------------|---------------|
+| Deterministic fallback | L3 hard truncation (no LLM call) | ✅ W11 deterministic fallback |
+| Incremental compression | Cache-valid path compresses only new content | ✅ Reduces LLM calls |
+| Cache mechanism | Anchor fingerprint matching | ⚠️ Partial (not W8-style) |
+| Cost tracking | `CompressionCallRecord` (input/output tokens, chars, cache hit) | ⚠️ No latency measurement |
+| Two-phase compression | Previous/Current separation | ✅ Avoids single-pass overload |
+
+### Critical Gaps
+
+| W13 Requirement | Current Status | Gap Severity |
+|----------------|---------------|-------------|
+| Independent compaction model | ❌ Uses main execution model | Critical |
+| CompactionPolicy strategy object | ❌ No policy object | Critical |
+| W1/W2 capacity settings | ❌ Direct `token_threshold` usage | Critical |
+| Deadline/timeout | ❌ No timeout mechanism | Critical |
+| Cancellation propagation | ❌ No cancellation mechanism | Critical |
+| Provider-aware retry limits | ❌ Only retries on context-length error (1 attempt) | Critical |
+| Rate-limit handling | ❌ No rate-limit handling | Critical |
+| Concurrency limit | ❌ No concurrency control | Critical |
+| Circuit breaker | ❌ No circuit breaker | Critical |
+| Per-operation cost ceiling | ❌ No cost ceiling | Critical |
+| Per-session cost ceiling | ❌ No cost ceiling | Critical |
+| Summary prompt/schema versioning | ✅ Has `summary_system_prompt` and `summary_json_schema` | Partial |
+| Validation rules | ⚠️ JSON parse only, no schema validation | Partial |
+| W3 final fit integration | ❌ Not integrated | Critical |
+| Invalid/no-progress summary rejection | ❌ No progress check | Critical |
+| Unbounded retry loop prevention | ⚠️ Only 1 retry on context-length error | Partial |
+| Execution state machine | ❌ No state machine | Critical |
+| W5 lifecycle event persistence | ❌ Not persisted | Critical |
+| Source fingerprint revalidation | ⚠️ Uses anchor fingerprint, not W8-style | Partial |
+| Structural validation (CM-018, CM-021) | ❌ No structural validation | Critical |
+| Semantic quality measurement (W15) | ❌ No measurement | Critical |
+
+### Migration Strategy
+
+The current `ContextManager` class is the primary refactoring target. W13 should:
+
+1. Extract `_generate_summary` and `_do_generate_summary` into a dedicated compaction
+   service with timeout, cancellation, and circuit breaker.
+2. Replace direct `token_threshold` usage with W1/W2 capacity snapshots.
+3. Add `CompactionPolicy` configuration object to `ContextManagerConfig`.
+4. Integrate W3 final fit for all compaction model calls.
+5. Add execution state machine around the compression pipeline.
+6. Persist compression results as W5 `compression.snapshot` events.
+
 ## Compaction Policy
 
 W13 owns semantic-compaction execution, validation, bounded retries, fallback, and
@@ -24,6 +90,31 @@ Define a versioned `CompactionPolicy` containing:
 The main execution model is not implicitly the compaction model. All compaction calls
 pass W3 final fit. Invalid or non-progress summaries are rejected and cannot trigger
 unbounded retry loops.
+
+### Compression Trigger Conditions
+
+W13 executes compaction but does not define when to trigger it. Trigger conditions are
+defined by W2 `CapacityReservePolicy.soft_limit_ratio`. The current implementation uses
+two-phase thresholds:
+
+- Previous phase: `prev_tokens > token_threshold * 0.6`
+- Current phase: `curr_tokens > token_threshold * 0.4`
+
+W13 should respect the W2 soft-limit ratio as the primary trigger, with the two-phase
+thresholds as implementation details within the compaction service.
+
+### Fallback Model Selection Strategy
+
+When the primary compaction model fails, W13 uses a fallback model before falling back
+to deterministic W11 hard reduction. Fallback model selection:
+
+1. If primary model fails with `provider_unavailable` or `rate_limited`, use the
+   configured fallback model from `CompactionPolicy`.
+2. If fallback model also fails, use deterministic W11 hard reduction.
+3. Fallback model should be a cheaper/faster model than the primary (e.g., smaller
+   context window, lower cost per token, faster response time).
+4. The fallback model is configured in `CompactionPolicy.fallback_model` and validated
+   at policy resolution time.
 
 Runtime-internal compaction may execute as part of the one active run. A user/operator
 manual compaction request is a W9 lifecycle mutation and is rejected while any run is
@@ -70,6 +161,15 @@ SLO measurement. **Findings:** CM-018, CM-021.
 - Deterministic W11 fallback is always available and records explicit loss metadata.
 - Failed compaction cannot overwrite a newer `compression.snapshot` or block the run indefinitely.
 
+## Subagent Compression Independence
+
+Subagent sessions can trigger their own compaction through W13 using their own
+`CompactionPolicy`. The parent agent's compaction does not affect subagent sessions.
+Each subagent session maintains its own compression state, cache, and cost accounting
+independently. When a subagent session produces a `compression.snapshot` event, it is
+scoped to the subagent's `agent_session` and does not interact with the parent
+session's compression state.
+
 ## Required Deliverables and Phases
 
 - Deliver policy/schema, operation store/state machine, service/executor, validators,
@@ -83,7 +183,12 @@ SLO measurement. **Findings:** CM-018, CM-021.
 1. Define policy, state machine, failure taxonomy, and cost-accounting contract.
 2. Extract compaction execution behind a dedicated service interface.
 3. Add timeout, cancellation, bounded retries, fallback model, and circuit breaker.
-4. Validate summary schema, source coverage, and measurable progress.
+4. Validate summary schema, source coverage, and measurable progress:
+   - Schema validity: summary must conform to `summary_json_schema`.
+   - Source coverage: summary must reference source events via CM-002 lineage contract.
+   - Measurable progress: compressed output token count must be strictly less than
+     source token count. If compression produces equal or greater token count, reject
+     with `no_progress` and trigger deterministic W11 fallback.
 5. Implement deterministic hard reduction using W11 representations.
 6. Persist lifecycle events and expose status through W9 inspection.
 7. Add dashboards for latency, retries, fallback, failures, cost, and reduction.
@@ -106,5 +211,8 @@ SLO measurement. **Findings:** CM-018, CM-021.
   corrupt checkpoint order.
 - Manual compaction requests are rejected with `operation_conflicts_with_active_run`
   while a session run is active; runtime-internal compaction remains owned by that run.
+- Performance baseline tests measure compaction trigger latency, compression execution
+  latency (LLM call duration), and validation latency (lower priority, after
+  functional implementation is stable).
 - W13 is done when compaction-provider degradation cannot cause uncontrolled run
   failure, latency, retries, or spend, and every outcome is durable and observable.
