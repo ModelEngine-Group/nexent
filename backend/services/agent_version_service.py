@@ -879,8 +879,8 @@ async def list_published_agents_impl(
             agent_info['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
             agent_info['sub_agent_relations'] = _build_sub_agent_relations(relations_snapshot)
 
-            # Add published version info
-            agent_info['published_version_no'] = current_version_no
+            # Add current version info
+            agent_info['current_version_no'] = current_version_no
 
             # Check agent availability using the shared function
             _, unavailable_reasons = check_agent_availability(
@@ -934,7 +934,7 @@ async def list_published_agents_impl(
                 "is_new": agent.get("is_new", False),
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
-                "published_version_no": agent.get("published_version_no"),
+                "current_version_no": agent.get("current_version_no"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
             })
