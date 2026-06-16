@@ -30,7 +30,7 @@ RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
   "version": "0.1.0",\
   "private": true,\
   "scripts": {\
-    "start": "NODE_ENV=production HOSTNAME=localhost node server.js"\
+    "start": "NODE_ENV=production HOSTNAME=0.0.0.0 node server.js"\
   },\
   "dependencies": {\
     "next": "15.5.7",\

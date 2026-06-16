@@ -2,9 +2,8 @@
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag, Segmented } from "antd";
+import { Table, Button, Popconfirm, message, Tag, Segmented, Tooltip } from "antd";
 import { Edit, Trash2, RefreshCw } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
@@ -361,7 +360,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-auto">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Segmented
@@ -398,8 +397,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           total: total,
         }}
         onChange={handlePageChange}
-        scroll={{ x: true }}
-        className="flex-1"
+        scroll={{ y: "calc(100vh - 580px)" }}
+        className="flex-1 [&_.ant-table]:h-full"
       />
 
       <ModelAddDialog

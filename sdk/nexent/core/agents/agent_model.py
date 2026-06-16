@@ -12,7 +12,7 @@ PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..utils.observer import MessageObserver
 
@@ -44,14 +44,47 @@ class ModelConfig(BaseModel):
         ),
         default=None,
     )
-    max_tokens: Optional[int] = Field(
+    max_output_tokens: Optional[int] = Field(
         description=(
             "Per-call completion output cap forwarded to chat.completions.create. "
-            "Defaults to None so production keeps the provider's own default "
-            "(typically the model's max output). Benchmarks set this explicitly "
-            "(e.g. 4096) to bound pathological generation loops where a model "
-            "regurgitates context."
+            "Preferred name over the deprecated max_tokens. Defaults to None so "
+            "production keeps the provider's own default (typically the model's "
+            "max output). Benchmarks set this explicitly (e.g. 4096) to bound "
+            "pathological generation loops where a model regurgitates context."
         ),
+        default=None,
+    )
+    max_tokens: Optional[int] = Field(
+        description=(
+            "DEPRECATED W1 alias for max_output_tokens. Retained so existing "
+            "callers and persisted ModelRecord rows keep working during the "
+            "migration window. If only max_tokens is set, the validator copies "
+            "it into max_output_tokens; if both are set, max_output_tokens wins."
+        ),
+        default=None,
+    )
+    context_window_tokens: Optional[int] = Field(
+        description="Total combined input/output context window in tokens, when the provider uses a combined window. Resolved by ModelCapacityResolver per W1 ADR.",
+        default=None,
+    )
+    max_input_tokens: Optional[int] = Field(
+        description="Provider hard input-token limit when distinct from the combined window. Resolved by ModelCapacityResolver per W1 ADR.",
+        default=None,
+    )
+    default_output_reserve_tokens: Optional[int] = Field(
+        description="Default output allowance reserved per request before constructing input context. Resolved by ModelCapacityResolver per W1 ADR.",
+        default=None,
+    )
+    tokenizer_family: Optional[str] = Field(
+        description="Tokenizer-family identifier resolved via tokenizer_registry. None forces estimated counting mode.",
+        default=None,
+    )
+    capacity_source: Optional[str] = Field(
+        description="Source of the persisted capacity value: operator | profile | provider_candidate | legacy | unknown.",
+        default=None,
+    )
+    capability_profile_version: Optional[str] = Field(
+        description="Version of the approved provider/model capability profile selected by the resolver, e.g. 'openai/gpt-4o@1'.",
         default=None,
     )
     timeout_seconds: Optional[float] = Field(
@@ -62,6 +95,15 @@ class ModelConfig(BaseModel):
         description="Maximum concurrent requests for this model. If None, no limit.",
         default=None,
     )
+
+    @model_validator(mode="after")
+    def _backfill_max_output_from_legacy_max_tokens(self) -> "ModelConfig":
+        if self.max_output_tokens is None and self.max_tokens is not None:
+            self.max_output_tokens = self.max_tokens
+        elif self.max_output_tokens is not None and self.max_tokens is None:
+            # Keep legacy attribute populated so callers reading it keep working.
+            self.max_tokens = self.max_output_tokens
+        return self
 
 
 class ToolConfig(BaseModel):
@@ -100,6 +142,10 @@ class AgentConfig(BaseModel):
         description="Pre-built context components for system prompt assembly",
         default=None
     )
+    capacity_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
+    )
 
 
 class AgentHistory(BaseModel):
@@ -126,6 +172,10 @@ class AgentRunInfo(BaseModel):
         description="Conversation-level reusable ContextManager instance. "
                     "If provided, it will be attached to the CoreAgent instead of creating a new one.",
         default=None
+    )
+    capacity_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
     )
 
     class Config:

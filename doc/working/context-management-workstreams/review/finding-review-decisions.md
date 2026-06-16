@@ -433,3 +433,111 @@ accepted decision.
   multimodal SLO gates.
 - **Updated documents:** W15, W3, parent production plan, findings registry.
 
+## CM-027: W2 `soft_limit_ratio` Default Value
+
+- **Decision:** Accepted as `Medium / Required guardrail`.
+- **Approved minimum:** Default `soft_limit_ratio = 0.8` (80%). Leaves 20% headroom
+  for the compaction call itself, which can briefly grow context, while staying
+  conservative enough that hard-limit rejection should be rare. Operators may
+  override per-tenant via `tenant_config_t`; per-agent override is not introduced
+  in release one.
+- **Rationale:** Without a spec-level default, implementations diverge and operators
+  have no shared expectation of when compaction triggers. The 0.8 value aligns with
+  the Anthropic agent SDK default and the 0.75-0.85 range used by Codex and OpenCode.
+- **Explicitly out of scope:** Per-agent override mechanism, dynamic learning of
+  the ratio from request history, and per-request runtime override.
+- **Updated documents:** W2, findings registry.
+
+## CM-028: W2 `requested_output_tokens` Override Location
+
+- **Decision:** Accepted as `Medium / Required guardrail`.
+- **Approved minimum:** Specify two distinct contracts:
+  - **Per-agent override**: persisted on a new `ag_tenant_agent_t.requested_output_tokens`
+    column; agent-edit UI gains a numeric input with placeholder showing the resolved
+    model-level default; validates `≤ max_output_tokens` from the resolved W1 capacity.
+  - **Per-request override**: optional integer field on the agent-run API request
+    body. Same validation. Documented in OpenAPI but no UI.
+  W2 spec must state which path is in W2 scope and which is deferred; the
+  implementation plan must reflect the chosen scope.
+- **Rationale:** The one-sentence "may be overridden per agent or request" hides
+  two contracts with very different code and UX implications. Treating them as
+  one task reproduces the W1 step 7 "one sentence becomes 8 bugs" pattern.
+- **Explicitly out of scope:** Per-tool-call override, runtime negotiation between
+  caller and model server, and policy-driven dynamic ceilings.
+- **Updated documents:** W2, findings registry.
+
+## CM-029: Per-Model Snapshot for Secondary Model Dispatch
+
+- **Decision:** Accepted as `High / Required guardrail`.
+- **Approved minimum:** W2 spec must state explicitly: snapshots are per-model and
+  never shared across model identities. W13 (and any future secondary-model
+  dispatch) invokes the W1→W2 chain with the secondary model's `model_record_t`
+  as input, producing its own snapshots independent of the main run's snapshots.
+  W13 review must verify this rule when W13 is implementation-readied.
+- **Rationale:** Without this rule, W13 would reuse the main run's W2 snapshot for
+  the compaction model call and misjudge the compaction budget. This is the same
+  defect class as CM-031 — assuming one model's parameters apply to all calls.
+- **Explicitly out of scope:** Snapshot caching across requests, shared snapshots
+  for sequential primary calls with the same model, and snapshot serialization for
+  cross-process reuse.
+- **Updated documents:** W2, W13, findings registry.
+
+## CM-030: W2 Step 5 Trusted-Dispatch Enforcement Clarification
+
+- **Decision:** Accepted as `High / Required guardrail`.
+- **Approved minimum:** Clarify in W2 Implementation Plan Step 5 that
+  "consistently" refers to the CM-013 trusted-dispatch enforcement contract: the
+  trusted server-side dispatch verifies the W2 snapshot's `requested_output_tokens`
+  is the value sent to `chat.completions.create` as `max_tokens`; caller overrides
+  via kwargs are rejected or coerced to the snapshot value. Add a server-side
+  assertion in the SDK or backend dispatch wrapper and a negative test that
+  caller-supplied `max_tokens` is rejected.
+- **Rationale:** The word "consistently" admits two interpretations — a rename of
+  the existing parameter or the CM-013 enforcement contract. The interpretations
+  have very different security and code-scope implications; the spec must commit
+  to one.
+- **Explicitly out of scope:** Provider-side enforcement (out of Nexent's control),
+  caller-token-signing protocols, and per-call audit log of every kwarg passed
+  through OpenAIModel.
+- **Updated documents:** W2, findings registry.
+
+## CM-031: Catalog Miss for Default `model_factory` (post-acceptance)
+
+- **Decision:** Accepted as `Medium / Required guardrail`. Originally tracked as
+  KL-1 in the W1 ADR Known Limitations section; renumbered to CM-031 on 2026-06-16
+  for consistency with the design-phase finding namespace.
+- **Approved minimum:** Open W17 to add `POST /api/v1/models/suggest-capacity`
+  with fuzzy catalog match and extended `_infer_model_factory` covering LLM/VLM.
+  Until W17 ships, document the SQL `UPDATE` workaround for setting
+  `model_record_t.model_factory` directly. Do not modify the catalog data model
+  or change the resolver to be lenient about provider keys; W1's exact-match
+  contract is preserved.
+- **Rationale:** Discovered post-acceptance on 2026-06-15 during the glm-5.1
+  end-to-end test. The W1 catalog has eight verified entries, but the default
+  `model_factory='OpenAI-API-Compatible'` from the manual-add UI matches none of
+  them. `_infer_model_factory` would convert dashscope URLs to `'dashscope'` but
+  is only called inside the embedding branch.
+- **Explicitly out of scope:** Auto-persisting `provider_candidate` values,
+  weakening W1's exact-match catalog contract, and replacing the catalog with a
+  general capability discovery service.
+- **Updated documents:** W1 ADR Known Limitations, W17, parent production plan
+  (§1.4 EN / §1.3 ZH), findings registry.
+
+## CM-032: Provider-Level Batch Dialog Cannot Host Per-Model Capacity (post-acceptance)
+
+- **Decision:** Accepted as `Low / Required guardrail`. Originally tracked as KL-2
+  in the W1 ADR Known Limitations section; renumbered to CM-032 on 2026-06-16 for
+  consistency.
+- **Approved minimum:** Hide capacity controls in the provider-level batch dialog
+  (`hideCapacityFields={true}` already shipped 2026-06-16). The per-model gear
+  icon path exposes capacity normally. Document that batch capacity provisioning,
+  if desired, is a future workstream and not in W1 scope.
+- **Rationale:** The provider-level "Edit Config" dialog applies one configuration
+  to every model from one provider; capacity values are per-model and meaningless
+  as a batch operation. Operators expecting batch capacity provisioning here need
+  to know it is intentionally absent.
+- **Explicitly out of scope:** Batch capacity provisioning UX, multi-row capacity
+  editing grid, and per-model capacity import from CSV.
+- **Updated documents:** W1 ADR Known Limitations, frontend
+  `ModelEditDialog.tsx` (already shipped), findings registry.
+

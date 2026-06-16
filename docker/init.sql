@@ -179,6 +179,13 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "access_token" varchar(100) COLLATE "pg_catalog"."default" DEFAULT '',
   "concurrency_limit" INTEGER DEFAULT NULL,
   "timeout_seconds" INTEGER DEFAULT 120,
+  "context_window_tokens" INTEGER DEFAULT NULL,
+  "max_input_tokens" INTEGER DEFAULT NULL,
+  "max_output_tokens" INTEGER DEFAULT NULL,
+  "default_output_reserve_tokens" INTEGER DEFAULT NULL,
+  "tokenizer_family" varchar(100) COLLATE "pg_catalog"."default" DEFAULT NULL,
+  "capacity_source" varchar(100) COLLATE "pg_catalog"."default" DEFAULT NULL,
+  "capability_profile_version" varchar(100) COLLATE "pg_catalog"."default" DEFAULT NULL,
   CONSTRAINT "nexent_models_t_pk" PRIMARY KEY ("model_id")
 );
 ALTER TABLE "model_record_t" OWNER TO "root";
@@ -206,6 +213,13 @@ COMMENT ON COLUMN "model_record_t"."model_appid" IS 'Application ID for model au
 COMMENT ON COLUMN "model_record_t"."access_token" IS 'Access token for model authentication.';
 COMMENT ON COLUMN "model_record_t"."concurrency_limit" IS 'Maximum concurrent requests for this model. Default is NULL (unlimited).';
 COMMENT ON COLUMN "model_record_t"."timeout_seconds" IS 'Request timeout in seconds for this model. Default is 120 seconds.';
+COMMENT ON COLUMN "model_record_t"."context_window_tokens" IS 'Total combined input/output context window in tokens, when the provider uses a combined window. Nullable.';
+COMMENT ON COLUMN "model_record_t"."max_input_tokens" IS 'Provider hard input-token limit when distinct from the combined window. Nullable.';
+COMMENT ON COLUMN "model_record_t"."max_output_tokens" IS 'Provider-supported or operator-configured completion-output cap. Replaces the ambiguous LLM meaning of max_tokens. Nullable.';
+COMMENT ON COLUMN "model_record_t"."default_output_reserve_tokens" IS 'Default output allowance reserved per request before constructing input context. Nullable.';
+COMMENT ON COLUMN "model_record_t"."tokenizer_family" IS 'Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.';
+COMMENT ON COLUMN "model_record_t"."capacity_source" IS 'Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.';
+COMMENT ON COLUMN "model_record_t"."capability_profile_version" IS 'Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
 
 INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable');
@@ -721,6 +735,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
     version_no INTEGER DEFAULT 0 NOT NULL,
+    selected_agent_version_no INTEGER,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -753,6 +768,7 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_id IS 'Selected agen
 COMMENT ON COLUMN nexent.ag_agent_relation_t.parent_agent_id IS 'Parent agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.tenant_id IS 'Tenant ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_version_no IS 'Pinned version of selected_agent_id. NULL = use child current published version at runtime (legacy/draft).';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.created_by IS 'Creator ID, audit field';
@@ -1266,7 +1282,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     config_schemas JSON,
     config_values JSON,
     source VARCHAR(30) DEFAULT 'official',
-    tenant_id VARCHAR(100),
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1730,6 +1745,16 @@ CREATE TABLE IF NOT EXISTS nexent.model_monitoring_record_t (
     input_tokens        INT4,
     output_tokens       INT4,
     total_tokens        INT4,
+    context_window_tokens INT4,
+    default_output_reserve_tokens INT4,
+    capability_profile_version VARCHAR(100),
+    capacity_source     VARCHAR(100),
+    requested_output_tokens INT4,
+    provider_input_limit_tokens INT4,
+    tokenizer_family    VARCHAR(100),
+    counting_mode       VARCHAR(20),
+    unknown_capabilities JSONB,
+    capacity_fingerprint VARCHAR(64),
     generation_rate     FLOAT,
     is_streaming        BOOLEAN         DEFAULT FALSE,
     is_success          BOOLEAN         DEFAULT TRUE,
@@ -1760,6 +1785,16 @@ COMMENT ON COLUMN nexent.model_monitoring_record_t.ttft_ms IS 'Time to first tok
 COMMENT ON COLUMN nexent.model_monitoring_record_t.input_tokens IS 'Number of input prompt tokens';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.output_tokens IS 'Number of output completion tokens';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.total_tokens IS 'Total tokens (input + output)';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.context_window_tokens IS 'Resolved total combined model context window for this request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.default_output_reserve_tokens IS 'Default output allowance reserved before input context construction';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.capability_profile_version IS 'Version of the resolved capacity profile for this request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.capacity_source IS 'Dominant source of resolved capacity fields for this request';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.requested_output_tokens IS 'Output tokens requested or reserved during capacity resolution';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.provider_input_limit_tokens IS 'Resolved provider input-token limit used by context management';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.tokenizer_family IS 'Tokenizer family used for request token counting';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.counting_mode IS 'Token counting mode for the request: exact or estimated';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.unknown_capabilities IS 'Structured list of capacity capabilities unknown at resolution time';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.capacity_fingerprint IS 'Fingerprint of the resolved model capacity snapshot';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.generation_rate IS 'Token generation rate in tokens per second';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.is_streaming IS 'Whether the request used streaming response';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.is_success IS 'Whether the request completed successfully';

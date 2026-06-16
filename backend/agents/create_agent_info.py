@@ -1,14 +1,21 @@
 ﻿import json
 import threading
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import urljoin
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory
 from nexent.core.agents.agent_context import ContextManagerConfig
+from nexent.core.models.capacity_resolver import (
+    ProviderCapabilityUnknown,
+    ResolverError,
+    resolve_capacity,
+)
 from nexent.memory.memory_service import search_memory_in_levels
+
+from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
@@ -22,7 +29,11 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.image_service import get_video_understanding_model, get_vlm_model
-from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
+from database.agent_db import (
+    search_agent_info_by_agent_id,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+)
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
@@ -37,6 +48,105 @@ from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+# Safe fallback for context-manager token_threshold when no capacity is known.
+# Used only when the resolver fails (uncataloged model with no operator-supplied
+# hard capacity). Picks a moderate value that lets agents continue while
+# admins backfill capacity columns; will be removed once enforcement phase
+# requires snapshots end to end.
+_TOKEN_THRESHOLD_LEGACY_FALLBACK = 8192
+
+_OPERATOR_OVERRIDE_FIELDS = (
+    "context_window_tokens",
+    "max_input_tokens",
+    "max_output_tokens",
+    "default_output_reserve_tokens",
+    "tokenizer_family",
+)
+
+
+def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
+    """Extract the W1 operator-override fields from a model_record_t row."""
+    if not isinstance(model_info, dict):
+        return {}
+    overrides = {}
+    for field in _OPERATOR_OVERRIDE_FIELDS:
+        value = model_info.get(field)
+        if value is not None:
+            overrides[field] = value
+    return overrides
+
+
+def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
+    values = [value for value in field_sources.values() if value]
+    if not values:
+        return None
+    for preferred in ("operator", "profile", "provider_candidate", "legacy", "unknown"):
+        if preferred in values:
+            return preferred
+    return values[0]
+
+
+def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
+    data = snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
+    return {
+        "context_window_tokens": data.get("context_window_tokens"),
+        "default_output_reserve_tokens": data.get("default_output_reserve_tokens"),
+        "capability_profile_version": data.get("capability_profile_version"),
+        "capacity_source": _dominant_capacity_source(data.get("field_sources") or {}),
+        "requested_output_tokens": data.get("requested_output_tokens"),
+        "provider_input_limit_tokens": data.get("provider_input_limit_tokens"),
+        "tokenizer_family": data.get("tokenizer_family"),
+        "counting_mode": data.get("counting_mode"),
+        "unknown_capabilities": data.get("unknown_capabilities") or [],
+        "capacity_fingerprint": data.get("fingerprint"),
+    }
+
+
+def _resolve_input_budget(model_info: Optional[dict]) -> tuple[int, Optional[dict]]:
+    """Resolve the context-manager input budget for a model_record_t row.
+
+    Calls ModelCapacityResolver with the catalog + operator overrides. Returns
+    snapshot.provider_input_limit_tokens and monitoring fields on success.
+    Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
+    capacity is unknown — this is the migration-window behavior before all
+    model rows are backfilled.
+    """
+    if not isinstance(model_info, dict):
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None
+    provider_raw = model_info.get("model_factory") or ""
+    provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
+    model_id = model_info.get("model_name") or ""
+    try:
+        snapshot = resolve_capacity(
+            model_id=model_id,
+            provider=provider,
+            operator_overrides=_operator_overrides_from_model_info(model_info),
+            capability_profiles=CAPABILITY_CATALOG,
+        )
+        logger.debug(
+            "Capacity resolved for (%s, %s): input_limit=%s source=%s profile=%s fingerprint=%s",
+            provider, model_id,
+            snapshot.provider_input_limit_tokens,
+            dict(snapshot.field_sources),
+            snapshot.capability_profile_version,
+            snapshot.fingerprint,
+        )
+        return snapshot.provider_input_limit_tokens, _capacity_snapshot_for_monitoring(snapshot)
+    except ProviderCapabilityUnknown:
+        logger.info(
+            "Capacity unknown for (%s, %s); falling back to %s for token_threshold. "
+            "Backfill model_record_t capacity columns or extend the capability profile catalog.",
+            provider, model_id, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+        )
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None
+    except ResolverError as exc:
+        logger.warning(
+            "Capacity resolution failed for (%s, %s): %s. Falling back to %s.",
+            provider, model_id, exc, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+        )
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None
 
 
 def _build_internal_s3_url(file: dict) -> str:
@@ -273,7 +383,17 @@ async def create_model_config_list(tenant_id):
                         ssl_verify=record.get("ssl_verify", True),
                         model_factory=record.get("model_factory"),
                         timeout_seconds=record.get("timeout_seconds"),
-                        concurrency_limit=record.get("concurrency_limit")))
+                        concurrency_limit=record.get("concurrency_limit"),
+                        # W1 step 6: pass capacity columns through so SDK can
+                        # honor operator-configured values end to end.
+                        max_output_tokens=record.get("max_output_tokens"),
+                        max_tokens=record.get("max_tokens"),
+                        context_window_tokens=record.get("context_window_tokens"),
+                        max_input_tokens=record.get("max_input_tokens"),
+                        default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
+                        tokenizer_family=record.get("tokenizer_family"),
+                        capacity_source=record.get("capacity_source"),
+                        capability_profile_version=record.get("capability_profile_version")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -315,13 +435,16 @@ async def create_agent_config(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
-    sub_agent_id_list = query_sub_agents_id_list(
+    sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
-    for sub_agent_id in sub_agent_id_list:
-        # Get the current published version for this sub-agent (from draft version 0)
-        sub_agent_version_no = query_current_version_no(
-            agent_id=sub_agent_id, tenant_id=tenant_id) or 0
+    for rel in sub_agent_relations:
+        sub_agent_id = rel['selected_agent_id']
+        sub_agent_version_no = resolve_sub_agent_version_no(
+            selected_agent_id=sub_agent_id,
+            selected_agent_version_no=rel.get('selected_agent_version_no'),
+            tenant_id=tenant_id,
+        )
         sub_agent_config = await create_agent_config(
             agent_id=sub_agent_id,
             tenant_id=tenant_id,
@@ -503,14 +626,18 @@ async def create_agent_config(
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
-    model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
         model_name = model_info["display_name"] if model_info is not None else "main_model"
-        if model_info is not None and model_info.get("max_tokens"):
-            model_max_tokens = model_info["max_tokens"]
+        # W1 step 6: derive input budget via ModelCapacityResolver instead of
+        # treating model_info["max_tokens"] (a deprecated output cap) as a
+        # context threshold. Falls back to a safe constant when capacity is
+        # unknown during the migration window.
+        input_budget, capacity_snapshot = _resolve_input_budget(model_info)
     else:
         model_name = "main_model"
+        input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
+        capacity_snapshot = None
 
     # Use agent-level setting for context management, default to False.
     # When ContextManager is disabled, do not attach context_components because
@@ -539,7 +666,7 @@ async def create_agent_config(
         )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
-        token_threshold=model_max_tokens,
+        token_threshold=input_budget,
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
@@ -558,6 +685,7 @@ async def create_agent_config(
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_components=context_components,
+        capacity_snapshot=capacity_snapshot,
     )
     return agent_config
 
@@ -1015,6 +1143,7 @@ async def create_agent_run_info(
         agent_config=agent_config,
         mcp_host=mcp_host,
         history=converted_history,
-        stop_event=threading.Event()
+        stop_event=threading.Event(),
+        capacity_snapshot=agent_config.capacity_snapshot,
     )
     return agent_run_info

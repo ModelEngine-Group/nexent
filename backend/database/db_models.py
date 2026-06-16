@@ -188,6 +188,20 @@ class ModelRecord(TableBase):
         Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
     concurrency_limit = Column(
         Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
+    context_window_tokens = Column(
+        Integer, doc="Total combined input/output context window in tokens, when the provider uses a combined window. Nullable.")
+    max_input_tokens = Column(
+        Integer, doc="Provider hard input-token limit when distinct from the combined window. Nullable.")
+    max_output_tokens = Column(
+        Integer, doc="Provider-supported or operator-configured completion-output cap. Replaces the ambiguous LLM meaning of max_tokens. Nullable.")
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved per request before constructing input context. Nullable.")
+    tokenizer_family = Column(
+        String(100), doc="Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.")
+    capacity_source = Column(
+        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.")
+    capability_profile_version = Column(
+        String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -237,6 +251,36 @@ class ModelMonitoringRecord(SimpleTableBase):
     input_tokens = Column(Integer, doc="Number of input tokens")
     output_tokens = Column(Integer, doc="Number of output tokens")
     total_tokens = Column(Integer, doc="Total tokens (input + output)")
+    context_window_tokens = Column(
+        Integer, doc="Resolved total combined model context window for this request"
+    )
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved before input context construction"
+    )
+    capability_profile_version = Column(
+        String(100), doc="Version of the resolved capacity profile for this request"
+    )
+    capacity_source = Column(
+        String(100), doc="Dominant source of resolved capacity fields for this request"
+    )
+    requested_output_tokens = Column(
+        Integer, doc="Output tokens requested or reserved during capacity resolution"
+    )
+    provider_input_limit_tokens = Column(
+        Integer, doc="Resolved provider input-token limit used by context management"
+    )
+    tokenizer_family = Column(
+        String(100), doc="Tokenizer family used for request token counting"
+    )
+    counting_mode = Column(
+        String(20), doc="Token counting mode for the request: exact or estimated"
+    )
+    unknown_capabilities = Column(
+        JSONB, doc="Structured list of capacity capabilities unknown at resolution time"
+    )
+    capacity_fingerprint = Column(
+        String(64), doc="Fingerprint of the resolved model capacity snapshot"
+    )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(
@@ -570,6 +614,10 @@ class AgentRelation(TableBase):
     tenant_id = Column(String(100), doc="Tenant ID")
     version_no = Column(Integer, default=0, nullable=False,
                         doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    selected_agent_version_no = Column(
+        Integer, nullable=True,
+        doc="Pinned version of selected_agent_id. NULL = runtime fallback to child current_version_no",
+    )
 
 
 class PartnerMappingId(TableBase):
@@ -698,6 +746,38 @@ class AgentVersion(TableBase):
                     doc="Version status: RELEASED / DISABLED / ARCHIVED")
     is_a2a = Column(Boolean, default=False,
                     doc="Whether this version is published as an A2A Server agent")
+
+
+class AgentRepository(TableBase):
+    """
+    Agent repository (marketplace) table. Frozen snapshot of a published agent tree for sharing.
+    """
+    __tablename__ = "ag_agent_repository_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    agent_repository_id = Column(BigInteger, Sequence("ag_agent_repository_t_agent_repository_id_seq", schema=SCHEMA),
+                                 primary_key=True, nullable=False, doc="Agent repository listing ID, unique primary key")
+    publisher_tenant_id = Column(String(100), nullable=False, doc="Publisher tenant ID")
+    publisher_user_id = Column(String(100), nullable=False, doc="Publisher user ID")
+    agent_id = Column(Integer, nullable=False,
+                      doc="Root agent ID from ag_tenant_agent_t; upsert key")
+    source_version_no = Column(Integer, nullable=False,
+                               doc="Published version number frozen at share time")
+    name = Column(String(100), nullable=False,
+                  doc="Root agent programmatic name for display and search")
+    display_name = Column(String(100), doc="Root agent display name")
+    description = Column(Text, doc="Root agent description")
+    author = Column(String(100), doc="Agent author")
+    category_id = Column(Integer, doc="Optional marketplace category ID")
+    tags = Column(ARRAY(Text), doc="Marketplace tags")
+    tool_count = Column(Integer,
+                        doc="Total tool count across all agents in the bundle (display only)")
+    version_label = Column(String(100),
+                           doc="Repository entry version label for display (e.g. v1.0)")
+    agent_info_json = Column(JSONB, nullable=False,
+                             doc="Frozen ExportAndImportDataFormat snapshot with optional skills")
+    status = Column(String(30), default="NOT_SHARED",
+                    doc="Listing status: NOT_SHARED (未共享) / PENDING_REVIEW (待审核) / REJECTED (审核驳回) / SHARED (已共享)")
 
 
 class UserTokenInfo(TableBase):

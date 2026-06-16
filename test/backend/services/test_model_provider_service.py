@@ -212,6 +212,45 @@ from backend.services.model_provider_service import (
 
 
 # ============================================================================
+# Test helpers
+# ============================================================================
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _patch_provider_module_constant(module_basename: str, attr: str, value):
+    """Patch a constant on every sys.modules entry that exposes a provider
+    module under both `services.providers.<basename>` and
+    `backend.services.providers.<basename>` keys.
+
+    Production code imports providers via the non-`backend.` path
+    (`from services.providers.silicon_provider import ...`) while many tests
+    import via the `backend.` path. When both keys are loaded by an earlier
+    test, they reference distinct module objects with independent name
+    bindings for constants such as SILICON_GET_URL, so a mock.patch that
+    targets only one path silently misses. This helper patches every loaded
+    path so the test is order-independent.
+    """
+    candidate_paths = (
+        f"services.providers.{module_basename}",
+        f"backend.services.providers.{module_basename}",
+    )
+    patches = []
+    for path in candidate_paths:
+        module = sys.modules.get(path)
+        if module is not None and hasattr(module, attr):
+            patcher = mock.patch.object(module, attr, value)
+            patcher.start()
+            patches.append(patcher)
+    try:
+        yield
+    finally:
+        for patcher in reversed(patches):
+            patcher.stop()
+
+
+# ============================================================================
 # Test-cases for SiliconModelProvider.get_models
 # ============================================================================
 
@@ -221,12 +260,12 @@ async def test_get_models_llm_success():
     """Silicon provider should append chat tag/type for LLM models."""
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
-    # Patch HTTP client & constant inside the provider module
+    # Patch HTTP client & constant inside the provider module.
+    # SILICON_GET_URL is patched on every loaded path (see helper docstring).
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         # Prepare mocked http client / response behaviour
@@ -266,9 +305,8 @@ async def test_get_models_embedding_success():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         mock_client_instance = mock.AsyncMock()
@@ -305,9 +343,8 @@ async def test_get_models_unknown_type():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
         result = await SiliconModelProvider().get_models(provider_config)
 
@@ -322,9 +359,8 @@ async def test_get_models_exception():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         mock_client_instance = mock.AsyncMock()
@@ -399,6 +435,54 @@ async def test_prepare_model_dict_llm():
             "connect_status": "not_detected",
         }
         assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
+    """Provider capacity candidates remain UI hints until an operator saves them."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "gpt-4"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/gpt-4",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "openai",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+            "api_key": "test-key",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "display_name": "openai/gpt-4",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+
+        model = {
+            "id": "openai/gpt-4",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "context_window_tokens": 128000,
+            "max_output_tokens": 16384,
+            "tokenizer_family": "o200k_base",
+            "capacity_source": "provider_candidate",
+        }
+
+        result = await prepare_model_dict(
+            "openai",
+            model,
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        assert "context_window_tokens" not in result
+        assert "max_output_tokens" not in result
+        assert "tokenizer_family" not in result
+        assert "capacity_source" not in result
 
 
 @pytest.mark.asyncio
@@ -1873,9 +1957,8 @@ async def test_silicon_get_models_empty_list():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         mock_client_instance = mock.AsyncMock()

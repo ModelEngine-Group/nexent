@@ -50,6 +50,7 @@ not duplicate or weaken the delegated contract.
 | [W11](W11_Trust_Provenance_Redaction_and_Retention.md) | Trust, Provenance, Redaction, and Retention | Governance and Privacy | Governs W4-W10 |
 | [W13](W13_Context_Quality_and_Reliability_SLOs.md) | Context Quality and Reliability SLOs | Quality and Efficiency | Measures all workstreams |
 | [W14](W14_Prompt_Cache_Aware_Assembly.md) | Prompt-Cache-Aware Assembly | Quality and Efficiency | W15, W8, W9 |
+| [W17](W17_Capacity_Suggestion_On_Model_Add.md) | Capacity Suggestion on Model Add | Model Capacity and Request Safety | W1 catalog; resolves CM-031 |
 
 ## Shared Engineering Rules
 
