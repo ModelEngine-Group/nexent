@@ -646,22 +646,25 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                 "rerank_model": rerank_model,
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
+            selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "llm_model": get_llm_model(tenant_id=tenant_id),
+                "llm_model": get_llm_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name == "AnalyzeImageTool":
+            selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
                 # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-                "vlm_model": get_vlm_model(tenant_id=tenant_id),
+                "vlm_model": get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
+            selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "vlm_model": get_video_understanding_model(tenant_id=tenant_id),
+                "vlm_model": get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }

@@ -33,6 +33,7 @@ from database.attachment_db import (
     list_files,
     upload_fileobj,
 )
+from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
@@ -441,10 +442,17 @@ async def list_files_impl(prefix: str, limit: Optional[int] = None):
     return files
 
 
-def get_llm_model(tenant_id: str):
-    # Get the tenant config
-    main_model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
+    if model_id:
+        main_model_config = get_model_by_model_id(int(model_id), tenant_id)
+        if not main_model_config:
+            raise ValueError(f"Model not found: {model_id}")
+        if main_model_config.get("model_type") != "llm":
+            raise ValueError(f"Selected model {model_id} is not an LLM model")
+    else:
+        # Get the tenant config
+        main_model_config = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     timeout_seconds = main_model_config.get(
         "timeout_seconds") if main_model_config else None
     long_text_to_text_model = OpenAILongContextModel(
@@ -455,6 +463,8 @@ def get_llm_model(tenant_id: str):
         max_context_tokens=main_model_config.get("max_tokens"),
         ssl_verify=main_model_config.get("ssl_verify", True),
         timeout_seconds=timeout_seconds,
+        model_factory=main_model_config.get("model_factory"),
+        display_name=main_model_config.get("display_name"),
     )
     return long_text_to_text_model
 
