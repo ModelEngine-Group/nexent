@@ -354,15 +354,18 @@ def get_embedding_model(
         tenant_id: Tenant ID
         model_name: Optional display name of the embedding model to use.
                    If provided, will find the model by display_name in the tenant's model list.
+        model_type: Optional model type filter. When model_name is omitted, queries tenant
+                   model records by this type; when model_type is also omitted, prefers
+                   embedding models, then multi_embedding models.
 
     Returns:
         Tuple of (embedding model instance or None, model_id or None)
     """
     if model_name:
         try:
-            normalized_model_type = _normalize_model_type(model_type)
-            if normalized_model_type:
-                model = get_model_by_display_name(model_name, tenant_id, normalized_model_type)
+            model_type = _normalize_model_type(model_type)
+            if model_type:
+                model = get_model_by_display_name(model_name, tenant_id, model_type)
             else:
                 model = get_model_by_display_name(model_name, tenant_id)
 
@@ -373,8 +376,25 @@ def get_embedding_model(
             return _create_embedding_model(model), model.get("model_id")
         except Exception as e:
             logger.warning(f"Failed to get embedding model by name {model_name}: {e}")
+    else:
+        try:
+            if model_type:
+                records = get_model_records({"model_type": model_type}, tenant_id)
+            else:
+                records = get_model_records({"model_type": "embedding"}, tenant_id)
+                if not records:
+                    records = get_model_records({"model_type": "multi_embedding"}, tenant_id)
 
-    # No default fallback - return None, None when no model is specified or found
+            if records:
+                model = records[0]
+                if model.get("model_type") in ["embedding", "multi_embedding"]:
+                    return _create_embedding_model(model), model.get("model_id")
+                logger.warning(
+                    f"Resolved model is not an embedding model: {model.get('model_type')}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to get default embedding model for tenant {tenant_id}: {e}")
+
     return None, None
 
 

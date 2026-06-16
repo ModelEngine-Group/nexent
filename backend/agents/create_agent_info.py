@@ -22,7 +22,11 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.image_service import get_video_understanding_model, get_vlm_model
-from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
+from database.agent_db import (
+    search_agent_info_by_agent_id,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+)
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
@@ -315,13 +319,16 @@ async def create_agent_config(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
-    sub_agent_id_list = query_sub_agents_id_list(
+    sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
-    for sub_agent_id in sub_agent_id_list:
-        # Get the current published version for this sub-agent (from draft version 0)
-        sub_agent_version_no = query_current_version_no(
-            agent_id=sub_agent_id, tenant_id=tenant_id) or 0
+    for rel in sub_agent_relations:
+        sub_agent_id = rel['selected_agent_id']
+        sub_agent_version_no = resolve_sub_agent_version_no(
+            selected_agent_id=sub_agent_id,
+            selected_agent_version_no=rel.get('selected_agent_version_no'),
+            tenant_id=tenant_id,
+        )
         sub_agent_config = await create_agent_config(
             agent_id=sub_agent_id,
             tenant_id=tenant_id,
