@@ -1,4 +1,4 @@
-# W12: Context Pollution and Large Output Control
+# W10: Context Pollution and Large Output Control
 
 ## Objective
 
@@ -7,19 +7,19 @@ the main prompt while preserving reliable, authorized retrieval when details are
 
 ## Artifact Contract
 
-W12 owns artifact offload, bounded summaries/pointers, and authorized retrieval. It
+W10 owns artifact offload, bounded summaries/pointers, and authorized retrieval. It
 does not decide final context selection, retention policy, or secret-handling policy;
-W10/W3, W14, and shared redaction services govern those decisions.
+W8/W15, W11, and shared redaction services govern those decisions.
 
 Large or binary output is stored as `agent_artifact`; the event log and active context
 retain a bounded summary, metadata, content hash, authorization scope, retention policy,
 and deterministic artifact pointer. Inline-size and token thresholds are policy-driven.
 Artifacts are immutable; updates create new versions.
 
-Pointer resolution must validate W4 identity, authorization, lifecycle status, hash,
+Pointer resolution must validate W3 identity, authorization, lifecycle status, hash,
 and backend availability. Failures emit distinct typed faults: denied, deleted/expired,
 not found, hash mismatch, and backend error. Raw secrets are redacted before artifact
-storage under W14. If classification or redaction fails, raw content is never stored as
+storage under W11. If classification or redaction fails, raw content is never stored as
 an artifact or inline fallback.
 
 ## Runtime Behavior
@@ -37,10 +37,10 @@ an artifact or inline fallback.
   context; intermediate execution history remains in the subagent's own session. The
   parent agent is free to continue other work or wait during subagent execution.
   Concurrent subagent execution is supported; the parent agent may delegate multiple
-  tasks in parallel. W14 governance is not reapplied during subagent-to-parent
-  result transfer; W10 policy selection in the parent agent naturally handles
+  tasks in parallel. W11 governance is not reapplied during subagent-to-parent
+  result transfer; W8 policy selection in the parent agent naturally handles
   permission differences. **Finding:** CM-025.
-- Duplicate equivalent retrieval/tool calls are detected for W15 measurement.
+- Duplicate equivalent retrieval/tool calls are detected for W13 measurement.
 
 ## Subagent Artifact Isolation
 
@@ -72,18 +72,18 @@ metadata.
 
 ## Offload Publication and Failure Behavior
 
-- Evaluate byte/token/type thresholds before content enters W5 inline detail or active context.
-- First obtain a complete W14 `GovernedPayload`. Governance failure permits only a
+- Evaluate byte/token/type thresholds before content enters W4 inline detail or active context.
+- First obtain a complete W11 `GovernedPayload`. Governance failure permits only a
   sanitized reason-coded failure event, retry, ephemeral process-local handling, or run
   failure; it never permits raw persistence.
 - Upload governed bytes with an idempotency key and content hash to a non-readable
   staging object.
-- In one relational transaction, create a `pending` artifact record, append the W5
+- In one relational transaction, create a `pending` artifact record, append the W4
   source/reference event, and create an artifact-finalize outbox row.
-- A W12-owned worker idempotently finalizes the immutable object and marks the artifact
+- A W10-owned worker idempotently finalizes the immutable object and marks the artifact
   `ready`; only `ready` artifacts are readable.
 - Failed finalize leaves an explicit `pending` or `failed` result for retry/repair.
-  Orphan and expired staging objects are cleaned by a W12-owned job.
+  Orphan and expired staging objects are cleaned by a W10-owned job.
 - Failed offload follows typed per-policy behavior: governed bounded inline fallback,
   retryable failure, or run failure; raw oversized content is never silently injected.
 - Retrieval is range-limited, budgeted, audited, and returns bounded slices.
@@ -112,13 +112,13 @@ transactions, two-phase commit, and a general saga/workflow platform are out of 
    content is preserved for retrieval. This is an offload decision, not a
    truncation — full content remains accessible through the artifact pointer.
    Context space decisions (whether to include full content, pointer only, or
-   summary) are made by W10 policy selection and W3 final fit, not by W12.
+   summary) are made by W8 policy selection and W15 final fit, not by W10.
 7. Add isolated subagent-result contract and parent-context boundary.
-8. Integrate pointers with W11 representations and W3 fit stages.
+8. Integrate pointers with W9 representations and W15 fit stages.
 
 ## Repository Touchpoints
 
-- W5 event/artifact persistence
+- W4 event/artifact persistence
 - Tool execution and observer paths in `sdk/nexent/core/`
 - `sdk/nexent/core/agents/agent_context.py`
 - `sdk/nexent/core/agents/summary_config.py`
@@ -146,5 +146,5 @@ transactions, two-phase commit, and a general saga/workflow platform are out of 
 - Performance baseline tests measure artifact offload latency at tool-result ingestion
   and artifact retrieval latency during context assembly (lower priority, after
   functional implementation is stable).
-- W12 is done when large output is artifact-first by default, retrieval is reliable and
-  governed, and prompt-growth/cost targets meet W15 thresholds.
+- W10 is done when large output is artifact-first by default, retrieval is reliable and
+  governed, and prompt-growth/cost targets meet W13 thresholds.

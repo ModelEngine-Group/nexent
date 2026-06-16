@@ -1,4 +1,4 @@
-# W14: Trust, Provenance, Redaction, and Retention
+# W11: Trust, Provenance, Redaction, and Retention
 
 ## Objective
 
@@ -8,9 +8,9 @@ propagation across all context stores and derived state.
 
 ## Metadata Contract
 
-W14 owns governance metadata, classification, redaction, confirmation, retention,
+W11 owns governance metadata, classification, redaction, confirmation, retention,
 deletion propagation, and validated writeback. It does not decide context relevance or
-token fit; W10 and W3 consume W14-governed inputs.
+token fit; W8 and W15 consume W11-governed inputs.
 
 Every context item, event, artifact, compression snapshot, and memory carries source, owner,
 permissions, trust level, timestamps, expiry/retention class, lifecycle status, and
@@ -36,13 +36,13 @@ contain the rejected payload.
 Deletion creates an auditable
 tombstone and propagates to events where legally permitted, projections, compression snapshots,
 artifacts, caches, and long-term memory; derived state becomes invalid immediately.
-The W5 runtime role remains append-only. Physical event deletion or redaction uses a
+The W4 runtime role remains append-only. Physical event deletion or redaction uses a
 separate privileged governance path that produces an auditable proof record without
 granting ordinary event writers update/delete access.
 
 ### Erasure-Lineage Contract
 
-Every persisted derived object must expose queryable lineage to its source W5 events:
+Every persisted derived object must expose queryable lineage to its source W4 events:
 explicit `source_event_ids` for sparse or selected inputs or a `source_event_range` for
 a complete contiguous range. A simple reverse-reference table or indexed range lookup
 is sufficient; a global lineage graph and field-level attribution are not required.
@@ -68,12 +68,12 @@ descendants as unavailable immediately, even while physical deletion is in progr
 The operation reports `in_progress`, not `completed`, until all required destinations
 are verified.
 
-W14 coordinates a fixed initial destination registry: W5 event payloads, conversation
-projections, compression snapshots, W8 caches/derived state, W12 artifacts/object storage,
+W11 coordinates a fixed initial destination registry: W4 event payloads, conversation
+projections, compression snapshots, W6 caches/derived state, W10 artifacts/object storage,
 long-term memory, and explicitly declared persistent log/search/backup destinations.
 For each destination, a simple durable status record progresses from `pending` to
 `completed`, or to `failed` and back through idempotent retry. The owning storage
-adapter performs and verifies its deletion; W14 aggregates status and proof.
+adapter performs and verifies its deletion; W11 aggregates status and proof.
 
 Backup destinations that cannot delete immediately must be inaccessible to normal
 restore/read paths and report their expiry/purge deadline. A deletion operation becomes
@@ -106,8 +106,8 @@ redaction proof metadata, and policy version. Required failures include
 
 Events, memories, summaries, artifacts, compression snapshots, projections, caches, and other
 governed durable state are written only through trusted server-side persistence
-interfaces. Each write requires a current W4 authorization decision, applicable W10
-policy decision, and W14 `GovernedPayload` with classification, redaction, provenance,
+interfaces. Each write requires a current W3 authorization decision, applicable W8
+policy decision, and W11 `GovernedPayload` with classification, redaction, provenance,
 lineage, retention, and policy metadata required for that destination.
 
 SDK/client claims that content is authorized, classified, redacted, or governed are
@@ -120,10 +120,10 @@ microservice, service mesh, or signed capability-token platform.
 
 ## Subagent Governance
 
-Subagent sessions apply W14 governance internally using their own agent
+Subagent sessions apply W11 governance internally using their own agent
 configuration. The subagent's final answer is already a governed output. When it
-enters the parent context, the parent's W10 policy selection governs integration;
-W14 does not re-redact already-redacted content.
+enters the parent context, the parent's W8 policy selection governs integration;
+W11 does not re-redact already-redacted content.
 
 ## Deletion and Writeback State Machines
 
@@ -132,7 +132,7 @@ W14 does not re-redact already-redacted content.
   destination produces `pending`, `completed`, or retryable `failed` proof status.
 - Writeback progresses through staged, validated, committed, or rejected. Partial
   commits are repaired or rolled back according to an ADR; they are never hidden.
-- Ordinary runtime roles cannot physically mutate W5 events. Privileged deletion paths
+- Ordinary runtime roles cannot physically mutate W4 events. Privileged deletion paths
   are separately authorized, audited, and verified.
 
 ## Required Deliverables and Phases
@@ -147,8 +147,8 @@ W14 does not re-redact already-redacted content.
 
 1. Approve classification, trust, retention, and temporal-memory schemas.
 2. Implement shared authorization/provenance and redaction services.
-3. Apply redaction before W5 events, W12 artifacts, compression snapshots, memory, logs, and traces.
-4. Add confirmation/no-write flows to W10 Memory Policy Engine.
+3. Apply redaction before W4 events, W10 artifacts, compression snapshots, memory, logs, and traces.
+4. Add confirmation/no-write flows to W8 Memory Policy Engine.
 5. Add lifecycle filtering, supersession, and conflict metadata to memory retrieval.
 6. Implement the fixed-destination deletion coordinator, per-destination status,
    idempotent retry, read blocking, and proof report.
@@ -159,7 +159,7 @@ W14 does not re-redact already-redacted content.
 
 ## Repository Touchpoints
 
-- W5-W12 storage and policy modules
+- W4-W10 storage and policy modules
 - `sdk/nexent/memory/`
 - `sdk/nexent/core/tools/store_memory_tool.py`
 - `sdk/nexent/core/tools/search_memory_tool.py`
@@ -182,6 +182,6 @@ W14 does not re-redact already-redacted content.
   persist raw or self-declared-governed payloads.
 - Performance baseline tests measure redaction latency per event write and deletion
   propagation latency (lower priority, after functional implementation is stable).
-- W14 is done when governance metadata and policy apply end to end, secret tests pass,
+- W11 is done when governance metadata and policy apply end to end, secret tests pass,
   direct raw persistence is denied, and deletion/retention/writeback behavior is
   demonstrably complete.

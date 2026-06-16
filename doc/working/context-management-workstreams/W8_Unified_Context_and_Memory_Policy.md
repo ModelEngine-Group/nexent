@@ -1,4 +1,4 @@
-# W10: Unified Context and Memory Policy
+# W8: Unified Context and Memory Policy
 
 ## Objective
 
@@ -8,9 +8,9 @@ request.
 
 ## Policy Domains
 
-W10 owns policy resolution, authority/conflict decisions, selection decisions, and
+W8 owns policy resolution, authority/conflict decisions, selection decisions, and
 memory-operation permission. It does not serialize final prompts, reduce content, or
-persist events/memory; W3, W11-W12, W5, and memory services execute approved decisions.
+persist events/memory; W15, W9-W10, W4, and memory services execute approved decisions.
 
 Define `ContextPolicy` with a nested `MemoryPolicy`. The policy covers:
 
@@ -46,7 +46,7 @@ conflicts that cannot be resolved by these rules return `authority_conflict_unre
 and do not silently select either side. Multi-source memory conflicts are handled by
 global retrieval resolution for deduplication, lifecycle filtering, and contradiction
 detection; unresolvable conflicts are excluded from injection. All unresolved conflicts
-emit a stable reason code visible through W9 inspection and W15 measurement. An
+emit a stable reason code visible through W7 inspection and W13 measurement. An
 exhaustive conflict-resolution ontology is explicitly out of scope. **Finding:** CM-017.
 
 ## Selection Contract
@@ -73,10 +73,10 @@ include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible
 
 ## Subagent Policy Independence
 
-Subagent sessions resolve their own W10 policy based on their agent configuration.
+Subagent sessions resolve their own W8 policy based on their agent configuration.
 The parent agent's policy does not apply to the subagent's internal context selection
 or memory operations. When a subagent returns its final answer to the parent, the
-parent's W10 policy governs how that result is integrated into the parent's context.
+parent's W8 policy governs how that result is integrated into the parent's context.
 
 ## Merge and Bypass Rules
 
@@ -106,7 +106,7 @@ parent's W10 policy governs how that result is integrated into the parent's cont
 4. Route `store_memory` and `search_memory` tools plus automatic memory flows through
    the Memory Policy Engine.
 5. Add global cross-scope retrieval resolution.
-6. Emit policy decisions and expose authorized inspection through W9.
+6. Emit policy decisions and expose authorized inspection through W7.
 7. Mark runtime paths that bypass policy as deprecated with a notice that they will
    be removed in the next version.
 8. Enforce server-resolved policy decisions at model dispatch and governed persistence
@@ -132,6 +132,6 @@ parent's W10 policy governs how that result is integrated into the parent's cont
   cannot authorize dispatch or persistence.
 - Invalid policy fixtures fail before run start with actionable errors.
 - Performance baseline tests measure policy resolution and context selection latency
-  to ensure W10 does not become a bottleneck on the model request hot path.
-- W10 is done when one versioned policy explains and enforces every context selection
+  to ensure W8 does not become a bottleneck on the model request hot path.
+- W8 is done when one versioned policy explains and enforces every context selection
   and memory lifecycle decision.

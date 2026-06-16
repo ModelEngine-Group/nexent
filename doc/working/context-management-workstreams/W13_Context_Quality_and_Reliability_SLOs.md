@@ -1,4 +1,4 @@
-# W15: Context Quality and Reliability SLOs
+# W13: Context Quality and Reliability SLOs
 
 ## Objective
 
@@ -7,7 +7,7 @@ with release-blocking CI gates, production dashboards, alerts, and replayable ev
 
 ## SLO Framework
 
-W15 owns measurement definitions, evidence, release gates, dashboards, alerts, and
+W13 owns measurement definitions, evidence, release gates, dashboards, alerts, and
 diagnostic replay. It does not silently change runtime policy or implementation;
 measured regressions create reviewed work for the owning W-ID.
 
@@ -43,8 +43,8 @@ load, chaos, security, multilingual, and multimodal suites. Persist benchmark in
 policy/model versions, and results so regressions are reproducible.
 Production metrics use bounded-cardinality labels and tenant-safe aggregation.
 
-Decision trace output from W6 (projection decisions), W10 (policy/memory decisions),
-and W3 (fit/reduction decisions) uses OpenTelemetry-style spans, attributes, and
+Decision trace output from W5 (projection decisions), W8 (policy/memory decisions),
+and W15 (fit/reduction decisions) uses OpenTelemetry-style spans, attributes, and
 events. Traces are collected and stored by external observability infrastructure, not
 by product-internal data persistence. In normal production operation, traces are
 either disabled or emit only summary-level spans with reason codes. Detailed traces
@@ -89,12 +89,12 @@ Before approving a release, record one lightweight checklist that:
 4. Explicitly disables or excludes every unsupported or insufficient-evidence claim.
 5. Records the release approver and approval time.
 
-This checklist reuses W15 evidence and the existing release process. Release one does
+This checklist reuses W13 evidence and the existing release process. Release one does
 not require a separate release-governance platform, project-management workflow, or
 calendar-based approval service.
 
 Use "claim-scoped production readiness" rather than unconditional "production-ready"
-in release documentation. This checklist reuses W15 evidence and the existing release
+in release documentation. This checklist reuses W13 evidence and the existing release
 process; no separate release-governance platform is required. **Finding:** CM-024.
 
 ## Required Deliverables and Phases
@@ -104,15 +104,15 @@ process; no separate release-governance platform is required. **Finding:** CM-02
   inspection, and runbooks.
 - Phase through current baselines, non-blocking CI evidence, approved release gates,
   production alerts, then recurring incident drills and SLO review.
-- W15 coordinates performance baseline tests across W5, W6, W10, W11, W12, W13, and
-  W14. These baselines are lower priority (after functional implementation is stable)
-  but W15 defines the measurement standards and targets.
+- W13 coordinates performance baseline tests across W4, W5, W8, W9, W10, W12, and
+  W11. These baselines are lower priority (after functional implementation is stable)
+  but W13 defines the measurement standards and targets.
 
 ## Implementation Plan
 
-1. Establish baseline measurements of current system behavior before W1-W14
+1. Establish baseline measurements of current system behavior before W1-W11
    implementation starts. This baseline is required to quantify improvement after
-   W1-W14 implementation.
+   W1-W11 implementation.
 2. Approve SLO definitions, targets, owners, and release policy.
 3. Standardize metrics, trace schemas, and reason-code registry.
 4. Add CI benchmark orchestration and baseline comparison.
@@ -141,6 +141,6 @@ process; no separate release-governance platform is required. **Finding:** CM-02
 - Dashboard/alert smoke tests and incident drills are documented.
 - Gate tests prove a reached planning date cannot override a failed or
   insufficient-evidence mandatory gate.
-- W15 is done when agreed SLOs are measured in CI and production, regressions block
+- W13 is done when agreed SLOs are measured in CI and production, regressions block
   release as designed, claim-scoped release checklists are recorded, and operators can
   diagnose failures from authorized traces.

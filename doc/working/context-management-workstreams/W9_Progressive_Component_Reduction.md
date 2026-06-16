@@ -1,4 +1,4 @@
-# W11: Progressive Component Reduction
+# W9: Progressive Component Reduction
 
 ## Objective
 
@@ -7,11 +7,11 @@ component to an admissible minimum representation instead of dropping it whole.
 
 ## Representation Model
 
-W11 owns admissible lower-fidelity representations and reduction validation. It does
+W9 owns admissible lower-fidelity representations and reduction validation. It does
 not choose policy priority, final prompt membership, artifact authorization, or
-compaction scheduling; W10, W3, W12, and W13 own those decisions.
+compaction scheduling; W8, W15, W10, and W12 own those decisions.
 
-Each W6 `ContextItem` may have versioned representations:
+Each W5 `ContextItem` may have versioned representations:
 
 | Representation | Use |
 | --- | --- |
@@ -49,17 +49,17 @@ failures include `unsupported_item_type`, `minimum_fidelity_violation`,
 `reducer_failed`, `representation_stale`, `pointer_unresolvable`, and
 `target_budget_impossible`.
 
-Reducers never select which items enter the prompt; W10/W3 request admissible
-representations. Semantic reducers may call models only through W13/W3-governed paths.
+Reducers never select which items enter the prompt; W8/W15 request admissible
+representations. Semantic reducers may call models only through W12/W15-governed paths.
 Deterministic structured/pointer fallbacks must exist for every mandatory item type.
 
 Validation of reduction results is split into two layers. Structural validation
 (blocks commit): schema validity, source-event reference existence, mandatory
 ContextItem presence (item may degrade in tier but cannot disappear), tool-call/result
 pair integrity, and representation tier not below the item's declared minimum fidelity.
-W11's `minimum_fidelity_violation` checks only representation tier, not content
+W9's `minimum_fidelity_violation` checks only representation tier, not content
 semantics. Semantic quality (measured, does not block commit): information retention,
-constraint/decision/goal coverage, and semantic equivalence are routed to W15 SLO
+constraint/decision/goal coverage, and semantic equivalence are routed to W13 SLO
 measurement. A semantic proof system or LLM-based automatic semantic equivalence
 validation as a commit gate is explicitly out of scope. **Finding:** CM-018.
 
@@ -68,12 +68,12 @@ validation as a commit gate is explicitly out of scope. **Finding:** CM-018.
 Subagent sessions use their own reducer chain based on their agent configuration.
 The parent agent's reducers do not apply to the subagent's internal context
 reduction. When a subagent returns its final answer to the parent, the parent's
-W10/W11 pipeline governs how that result is represented in the parent's context.
+W8/W9 pipeline governs how that result is represented in the parent's context.
 
 ## Representation Lifecycle
 
 - A representation is valid only for its source fingerprint and generator/policy versions.
-- Updating or deleting source content invalidates descendants through W8/W14.
+- Updating or deleting source content invalidates descendants through W6/W11.
 - Physical source erasure invalidates each affected representation as a whole; reducers
   do not attempt field-level deletion from generated text.
 - Cached representations are immutable; regeneration creates a new version.
@@ -84,7 +84,7 @@ W10/W11 pipeline governs how that result is represented in the parent's context.
 - Deliver representation schema/store, reducer registry/interface, admissibility
   validator, reducers per component type, pointer integration, inspection, and metrics.
 - Phase through deterministic structured/pointer forms, semantic compressed forms,
-  W10/W3 integration, then precomputation/caching based on measured demand.
+  W8/W15 integration, then precomputation/caching based on measured demand.
 
 ## Implementation Plan
 
@@ -93,8 +93,8 @@ W10/W11 pipeline governs how that result is represented in the parent's context.
 3. Generate lower-fidelity forms on demand for deterministic reducers (structured,
    pointer). Cache lower-fidelity forms for semantic reducers (compressed) at
    creation or material update, since regeneration involves LLM calls.
-4. Integrate representation selection into W10 policy and W3 final-fit pipeline.
-5. Add pointer resolution and fault handling with W12.
+4. Integrate representation selection into W8 policy and W15 final-fit pipeline.
+5. Add pointer resolution and fault handling with W10.
 6. Emit reduction decisions, lost-content metadata, generation cost, and staleness.
 7. Add operator inspection for representation chains.
 
@@ -103,7 +103,7 @@ W10/W11 pipeline governs how that result is represented in the parent's context.
 - `sdk/nexent/core/agents/agent_model.py`
 - `sdk/nexent/core/agents/agent_context.py`
 - `sdk/nexent/core/agents/summary_config.py`
-- W6 context-item/projector modules
+- W5 context-item/projector modules
 - Tool, skill, knowledge, memory, and agent-definition assembly paths
 
 ## Tests and Definition of Done
@@ -115,5 +115,5 @@ W10/W11 pipeline governs how that result is represented in the parent's context.
 - Determinism and token-accounting tests cover each reducer.
 - Performance baseline tests measure reducer latency for each component type
   (lower priority, after functional implementation is stable).
-- W11 is done when every supported component type has an admissible reduction chain,
-  no mandatory minimum is silently dropped, and W3 can consume reducer outputs.
+- W9 is done when every supported component type has an admissible reduction chain,
+  no mandatory minimum is silently dropped, and W15 can consume reducer outputs.
