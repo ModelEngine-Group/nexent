@@ -42,6 +42,15 @@ an artifact or inline fallback.
   permission differences. **Finding:** CM-025.
 - Duplicate equivalent retrieval/tool calls are detected for W15 measurement.
 
+## Subagent Artifact Isolation
+
+Subagent artifacts are scoped to the subagent's `agent_session`. The parent agent
+cannot directly access subagent artifacts; only the subagent's final answer (which
+may reference subagent artifacts) is exposed to the parent context. If the parent
+agent needs details from a subagent's artifacts, the subagent must include the
+relevant information in its final answer or provide artifact pointers that the
+parent can resolve through authorized retrieval.
+
 ## Artifact and Retrieval Contracts
 
 ```text
@@ -98,7 +107,12 @@ transactions, two-phase commit, and a general saga/workflow platform are out of 
 3. Implement deterministic bounded summarization and metadata extraction.
 4. Add artifact-finalize outbox worker, retry/repair status, and staging-orphan cleanup.
 5. Add authorized pointer-resolution API/tool with range/slice support.
-6. Enable observation limits with per-tool override and explicit truncation metadata.
+6. Configure offload thresholds per tool type via agent configuration. Outputs
+   exceeding the threshold are stored as artifacts with pointers; the original
+   content is preserved for retrieval. This is an offload decision, not a
+   truncation — full content remains accessible through the artifact pointer.
+   Context space decisions (whether to include full content, pointer only, or
+   summary) are made by W10 policy selection and W3 final fit, not by W12.
 7. Add isolated subagent-result contract and parent-context boundary.
 8. Integrate pointers with W11 representations and W3 fit stages.
 
@@ -129,5 +143,8 @@ transactions, two-phase commit, and a general saga/workflow platform are out of 
 - Final answer isolation tests prove only the subagent's final answer enters the
   parent context.
 - Recursive delegation tests prove subagents cannot delegate further tasks.
+- Performance baseline tests measure artifact offload latency at tool-result ingestion
+  and artifact retrieval latency during context assembly (lower priority, after
+  functional implementation is stable).
 - W12 is done when large output is artifact-first by default, retrieval is reliable and
   governed, and prompt-growth/cost targets meet W15 thresholds.
