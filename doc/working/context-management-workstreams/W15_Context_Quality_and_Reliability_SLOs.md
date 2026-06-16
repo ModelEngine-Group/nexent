@@ -104,10 +104,15 @@ process; no separate release-governance platform is required. **Finding:** CM-02
   inspection, and runbooks.
 - Phase through current baselines, non-blocking CI evidence, approved release gates,
   production alerts, then recurring incident drills and SLO review.
+- W15 coordinates performance baseline tests across W5, W6, W10, W11, W12, W13, and
+  W14. These baselines are lower priority (after functional implementation is stable)
+  but W15 defines the measurement standards and targets.
 
 ## Implementation Plan
 
-1. Baseline current behavior before W1-W14 changes.
+1. Establish baseline measurements of current system behavior before W1-W14
+   implementation starts. This baseline is required to quantify improvement after
+   W1-W14 implementation.
 2. Approve SLO definitions, targets, owners, and release policy.
 3. Standardize metrics, trace schemas, and reason-code registry.
 4. Add CI benchmark orchestration and baseline comparison.
