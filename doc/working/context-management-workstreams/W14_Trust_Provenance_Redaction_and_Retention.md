@@ -118,6 +118,15 @@ microservice, service mesh, or signed capability-token platform.
 
 ## Deletion and Writeback State Machines
 
+## Subagent Governance
+
+Subagent sessions apply W14 governance internally using their own agent
+configuration. The subagent's final answer is already a governed output. When it
+enters the parent context, the parent's W10 policy selection governs integration;
+W14 does not re-redact already-redacted content.
+
+## Deletion and Writeback State Machines
+
 - Deletion progresses through requested, authorized, tombstoned, propagating,
   invalidating, rebuilding, verified, and completed/failed; every fixed-registry
   destination produces `pending`, `completed`, or retryable `failed` proof status.
@@ -145,8 +154,8 @@ microservice, service mesh, or signed capability-token platform.
    idempotent retry, read blocking, and proof report.
 7. Add queryable source-lineage lookup and `partial_after_erasure` session state.
 8. Implement validated writeback journal and retention/expiry jobs.
-9. Restrict governed storage writes to trusted persistence interfaces and remove or
-   deny raw/direct write paths.
+9. Mark raw/direct write paths as deprecated with a notice that they will be
+   removed in the next version.
 
 ## Repository Touchpoints
 
@@ -171,6 +180,8 @@ microservice, service mesh, or signed capability-token platform.
 - Writeback tests reject stale-version, unauthorized, destructive, and invalid operations.
 - Negative integration tests prove SDK/client and ordinary internal callers cannot
   persist raw or self-declared-governed payloads.
+- Performance baseline tests measure redaction latency per event write and deletion
+  propagation latency (lower priority, after functional implementation is stable).
 - W14 is done when governance metadata and policy apply end to end, secret tests pass,
   direct raw persistence is denied, and deletion/retention/writeback behavior is
   demonstrably complete.
