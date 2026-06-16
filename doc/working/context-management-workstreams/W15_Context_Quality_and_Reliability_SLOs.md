@@ -21,27 +21,37 @@ isolation, secret persistence, and request fit have zero-tolerance test expectat
 - Fit success, mandatory-minimum overflow, and provider overflow recovery.
 - Summary/category retention and complete tool-pair retention.
 - Compression ratio, latency, cost, and prompt-cache reuse.
-- Restart, failover, replay, checkpoint concurrency, restore, and reset correctness.
+- Restart, failover, replay, compression snapshot concurrency, restore, and reset correctness.
 - Tenant isolation, redaction, retention, and deletion propagation.
 - Memory-write precision, confirmation compliance, retrieval recall/reranking, stale
-  rejection, correction/conflict handling, and decision trace completeness.
+  rejection, and correction/conflict handling.
 - Working Memory retention through compression and lifecycle operations.
 - Minimum-fidelity violations, bootstrap restoration failures, and dirty-state flush misses.
 - Recall outcomes by no-match, denied, backend error, and pointer-resolution failure.
 - Duplicate equivalent calls, avoidable refetches, and context-thrash rate.
 - Multilingual and multimodal quality.
 
+Release 1 SLO gates cover only text modality and any explicitly supported modalities.
+Unsupported modalities are excluded from release gates. When a modality enters product
+scope, its token accounting, artifact handling, projection, redaction, and provider
+support contracts must be defined before adding its SLO gates. **Finding:** CM-026.
+
 ## Evidence Pipeline
 
 Run fixed LongMemEval, EventQA, and manual-case baselines in CI. Add generated property,
 load, chaos, security, multilingual, and multimodal suites. Persist benchmark inputs,
-policy/model versions, decision traces, and results so regressions are reproducible.
+policy/model versions, and results so regressions are reproducible.
 Production metrics use bounded-cardinality labels and tenant-safe aggregation.
 
-Add an authorized decision trace showing candidates, writes, retrieval selections,
-exclusions, conflicts, reductions, final assembly, lifecycle writeback, and stable
-reason codes. Add deterministic trace replay and an optional offline oracle that
-classifies policy-controllable versus physically unavoidable faults.
+Decision trace output from W6 (projection decisions), W10 (policy/memory decisions),
+and W3 (fit/reduction decisions) uses OpenTelemetry-style spans, attributes, and
+events. Traces are collected and stored by external observability infrastructure, not
+by product-internal data persistence. In normal production operation, traces are
+either disabled or emit only summary-level spans with reason codes. Detailed traces
+(including content snippets) are enabled only during active debugging or benchmark
+runs. A unified telemetry/observability specification document consolidates all
+decision trace requirements; this document is low priority, to be implemented after
+core functionality. **Finding:** CM-022.
 
 ## SLO Definition Contract
 
@@ -60,7 +70,7 @@ bounded-cardinality and tenant-safe; raw prompt/event content is never a label.
 ## Gate and Evidence Behavior
 
 - CI produces a signed/versioned evidence bundle containing inputs, configuration,
-  model/policy versions, results, regressions, and decision traces.
+  model/policy versions, results, and regressions.
 - Release evaluation returns `pass`, `fail`, or `insufficient_evidence`; the last is a
   failure for mandatory gates.
 - Calendar dates and delivery milestones are planning targets only; reaching them never
@@ -82,6 +92,10 @@ Before approving a release, record one lightweight checklist that:
 This checklist reuses W15 evidence and the existing release process. Release one does
 not require a separate release-governance platform, project-management workflow, or
 calendar-based approval service.
+
+Use "claim-scoped production readiness" rather than unconditional "production-ready"
+in release documentation. This checklist reuses W15 evidence and the existing release
+process; no separate release-governance platform is required. **Finding:** CM-024.
 
 ## Required Deliverables and Phases
 
@@ -112,11 +126,12 @@ calendar-based approval service.
 - `backend/utils/monitoring.py`
 - `backend/apps/monitoring_app.py`
 - Frontend monitoring UI and CI configuration
+- New unified telemetry/observability specification document (low priority, post-core)
 
 ## Tests and Definition of Done
 
 - Gate-behavior tests prove qualifying regressions fail releases.
-- Metrics/trace schema tests enforce units, labels, reason codes, and privacy.
+- Metrics schema tests enforce units, labels, and privacy.
 - Replay tests reproduce selection/writeback decisions from recorded evidence.
 - Dashboard/alert smoke tests and incident drills are documented.
 - Gate tests prove a reached planning date cannot override a failed or

@@ -8,11 +8,13 @@ need stronger cross-store semantics.
 ## Findings and Risks
 
 - **CM-002 (High):** Physical erasure changes replay completeness.
-- **CM-012 (Critical):** Unknown/failed classification and redaction behavior must be fail-closed.
+- **CM-012 (Critical):** The accepted contract fails closed before persistence, fallback,
+  logs, and traces, permitting only sanitized failure records.
 - **CM-013 (Critical):** The accepted governed-persistence boundary rejects raw/direct
   writes and untrusted SDK/client governance assertions.
 - **CM-017 (Medium):** Memory conflict and supersession types are not fully bounded.
-- **CM-020 (High):** Deletion propagation lacks per-store repair and completion contracts.
+- **CM-020 (High):** The accepted contract immediately tombstones targets and uses a
+  fixed destination registry with per-store retry, verification, and completion status.
 - **CM-022 (Low):** Governance and proof traces can duplicate sensitive data.
 
 ## Recommendations
@@ -22,4 +24,5 @@ need stronger cross-store semantics.
 - Keep governed writes behind trusted server-side persistence interfaces.
 - Track per-store deletion proof, retries, incomplete state, and repair ownership.
 
-**Readiness:** Critical production blocker until fail-closed and deletion contracts are explicit.
+**Readiness:** Implementation-ready for fail-closed persistence and deletion
+coordination; complete-deletion claims remain evidence-gated.

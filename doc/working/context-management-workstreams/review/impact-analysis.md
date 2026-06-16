@@ -10,18 +10,18 @@ This analysis is the required gate before modifying
 | Impact | Findings | Parent-plan treatment |
 | --- | --- | --- |
 | Narrow replay/resume claim | CM-001, CM-003 | State replay is supported; ambiguous effects stop unless reconciliation is approved. |
-| Define erasure consequence | CM-002, CM-012 | Physical erasure permits partial post-erasure replay; governance failures fail closed. |
+| Define erasure consequence and fail-closed persistence | CM-002, CM-012 | Physical erasure permits partial post-erasure replay; classification/redaction failure cannot persist or log raw fallback content. |
 | Limit lifecycle concurrency | CM-003 | Serialize/reject conflicting operations until fencing is supported. |
 | Make scale evidence conditional | CM-004, CM-009-CM-011, CM-015 | CM-011 now makes dates planning targets and requires a lightweight claim-scoped checklist; production scale still requires workload and numeric evidence. CM-004 does not block initial implementation and triggers optimization only after approved thresholds are crossed. |
 | Add durable compatibility contract | CM-005, CM-014 | W5 owns the accepted current-plus-previous canonical event reader/upcaster and reader-first deployment; checkpoint compatibility remains a separate CM-014 decision. |
-| Clarify publication and cross-store correctness | CM-006, CM-019, CM-020 | CM-006 assigns atomic source/outbox creation and repair ownership to W5/W7; object-storage and deletion paths remain separately governed by CM-019/CM-020. |
+| Clarify publication and cross-store correctness | CM-006, CM-019, CM-020 | W5/W7 retain path-owned outboxes; W12 uses governed staging plus pending/finalize outbox and ready-only reads; W14 immediately tombstones deletion targets and coordinates fixed per-store status, retry, and verification. |
 | Reject unsupported release-one modes | CM-007, CM-025, CM-026 | Immutable single-owner session scope now rejects sharing/transfer; delegated mutation and unsupported modalities remain separate exclusions. |
 | Bound provider/model capability assumptions | CM-016 | Supported deployments use approved versioned profiles; unknown hard capacity rejects production dispatch, incomplete required behavior adds a 10% context-window reserve, and unknown cache directives are disabled. |
-| Stage final fit | CM-008 | Minimal W3 gateway precedes strengthened W10-W13 quality behavior. |
+| Stage final fit | CM-008 | Independent minimal W3 hard fit precedes strengthened W10-W13 quality behavior, which cannot become a hard-fit prerequisite. |
 | Define trusted enforcement | CM-013 | Accepted server-side model-dispatch and governed-persistence boundaries fail closed on invalid inputs; SDK/client assertions and direct paths are untrusted. |
 | Narrow semantic guarantees | CM-017, CM-018, CM-021 | Declare conflict scope; structurally validate and semantically measure. |
 | Bound observability | CM-022 | Reuse W14 governance for traces and evidence. |
-| Unify final assembly | CM-023 | W3/W16 share one exact dispatched-payload contract. |
+| Unify final assembly | CM-023 | W16 supplies a cache partition plan; W3 alone serializes and fingerprints the exact final dispatched payload. |
 | Clarify production claim | CM-024 | Use claim-scoped release capability matrix. |
 
 ## Scope Decision

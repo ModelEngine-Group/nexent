@@ -68,16 +68,43 @@ and review-artifact updates were written and consistency-checked.
 | CM-005 | Retain as High / Claim-gated | Accepted | Completed | Before the first production event-schema upgrade, support current and previous versions through one W5 canonical reader/upcaster and reader-first deployment. | W5, W6, parent plan, review artifacts |
 | CM-006 | Retain as High / Required guardrail | Accepted | Completed | W5 and W7 atomically create their source record with path-owned outbox work, then own idempotent retry and repair. No universal saga or distributed transaction platform. | W5, W7, parent plan, review artifacts |
 | CM-007 | Retain as Medium / Scope-exclusion | Accepted | Completed | Use immutable single-owner conversations/sessions and reject sharing, membership, and ownership transfer. Shared resources and operator policy do not change ownership. | W4, W5, W7, W9, parent plan, review artifacts |
+| CM-008 | Retain as High / Required guardrail | Accepted | Completed | Ship an independent minimal W3 hard-fit gateway first; W10-W13 later improve retained quality without becoming hard-fit prerequisites. | W3, parent plan, review artifacts |
 | CM-011 | Retain as Medium / Required guardrail | Accepted | Completed | Treat every schedule date as a planning target; a reached date cannot override failed or insufficient-evidence mandatory gates. Reuse W15 evidence with one lightweight claim-scoped release checklist. No new governance platform. | W15, parent plan, review artifacts |
+| CM-012 | Retain as Critical / Required guardrail | Accepted | Completed | Classification/redaction failure forbids raw governed persistence, fallback, logs, and traces; allow only retry, ephemeral handling, failure, and sanitized reason-coded records. | W5, W12, W14, parent plan, review artifacts |
 | CM-013 | Retain as Critical / Required guardrail | Accepted | Completed | Use two trusted server-side boundaries: production model dispatch verifies W4/W10/W2/W3 inputs, and governed persistence verifies W4/W10/W14 inputs. Treat SDK/client assertions as untrusted and deny direct paths. No separate enforcement platform. | W2, W3, W4, W10, W14, parent plan, review artifacts |
 | CM-016 | Retain as High / Required guardrail | Accepted | Completed | Use a small approved versioned capability profile for supported deployments. Reject unknown hard capacity; when required behavior is incomplete, reserve an additional 10% of the context window; disable unknown cache directives. | W1, W2, W3, W16, parent plan, review artifacts |
+| CM-019 | Retain as High / Required guardrail | Accepted | Completed | Use W12-specific governed staging, one pending-artifact/event/finalize-outbox transaction, idempotent finalize, ready-only reads, retry/repair, and orphan cleanup. No distributed transaction or general saga platform. | W5, W12, parent plan, review artifacts |
+| CM-020 | Retain as High / Claim-gated | Accepted | Completed | Tombstones immediately block reads; W14 coordinates a fixed destination registry with per-store status, idempotent retry, verification, and completion only after every required destination succeeds. No generic workflow platform. | W5-W12, W14, parent plan, review artifacts |
+| CM-023 | Retain as High / Required guardrail | Accepted | Completed | W16 supplies a cache partition plan; W3 alone produces final payload, serialization, token count, and fingerprints, and trusted dispatch cannot modify prompt/cache content. | W3, W16, parent plan, review artifacts |
+| CM-018 | Retain as High / Required guardrail | Accepted | Completed | Split validation: structural (schema, source refs, mandatory presence, tool pairs, representation tier) blocks commit; semantic quality (retention, coverage, equivalence) routes to W15 SLO measurement. No semantic proof system. | W11, W13, W15, parent plan, review artifacts |
+| CM-021 | Retain as Medium / Required guardrail | Accepted | Completed | Structural validation blocks commit: source lineage (CM-002 contract), source existence, mandatory ContextItem presence, schema validity. Semantic coverage routes to W15 SLO. No independent summary quality platform. | W6, W13, W15, parent plan, review artifacts |
+| CM-024 | Retain as Low / Required guardrail | Accepted | Completed | Reuse CM-011 claim-scoped release checklist. Use "claim-scoped production readiness" in documentation. No new governance platform. | Parent plan, W15, review artifacts |
+| CM-017 | Retain as Medium / Scope-exclusion | Accepted | Completed | Declare finite initial conflict set in W10. Same-tier conflicts take higher specificity or recency. Incomparable conflicts return `authority_conflict_unresolved`. No exhaustive conflict ontology. | W10, parent plan, review artifacts |
+| CM-025 | Retain as Medium / Scope-exclusion | Accepted | Completed | Subagent is a normal agent with independent `agent_session_id`, own W5 event log, own W1/W2 budget, and permissions from its agent config. Inherits parent `conversation_id` with `parent_session_id` and `delegation_type = 'subagent'`. Triggered via async built-in tool. Only final answer exposed to parent. Recursive delegation prohibited. Memory scope follows ordinary agent rules. No W14 re-governance on transfer. | W4, W5, W12, parent plan, review artifacts |
+| CM-026 | Retain as Low / Scope-exclusion | Accepted | Completed | Remove unsupported modalities from Release 1 gates. W15 SLO covers text only. Add modality contracts only when a modality enters scope. No Release 1 multimodal context contracts. | W15, W3, parent plan, review artifacts |
+
+| CM-009 | Retain as High / Claim-gated | Accepted | Completed | Do not pre-define workload envelopes. After W1-W16 implementation, use W15 measurement infrastructure to collect real performance data and define envelopes based on observed data. No production-scale claim until envelopes are defined. | W5, W15, parent plan, review artifacts |
+| CM-010 | Retain as Medium / Claim-gated | Accepted | Completed | Do not pre-define numeric targets. After W1-W16 implementation, use W15 measurement infrastructure to collect real recovery/availability data per topology. Define targets based on observed data. No production-scale claim until targets are defined. | W15, parent plan, review artifacts |
+| CM-014 | N/A — obsolete | Resolved | Completed | W7 retired; checkpoint functionality merged into W5 as `compression.snapshot` events. Schema migration fully covered by CM-005 event-schema compatibility contract. | W5, W6, W8, W9, W13, parent plan, README, review artifacts |
 
 ### Review Progress Summary
 
 | Progress state | Count | Findings |
 | --- | ---: | --- |
-| Accepted and document updates completed | 10 | CM-001-CM-007, CM-011, CM-013, CM-016 |
-| Pending individual review | 16 | CM-008-CM-010, CM-012, CM-014-CM-015, CM-017-CM-026 |
+| CM-015 | Retain as Low / Measure-triggered | Accepted | Completed | Remove content hashing from W8. Replace with O(1) metadata-based validation: compression.snapshot validity via partial_after_erasure + version fields; W6 materialized cache via snapshot validity + event count + version fields; physical erasure via one-time partial_after_erasure flag. No Merkle trees or segmented hashing needed. | W8, parent plan, review artifacts |
+
+### Review Progress Summary
+
+| Progress state | Count | Findings |
+| --- | ---: | --- |
+| CM-022 | Retain as Low / Measure-triggered | Accepted | Completed | Consolidate decision trace requirements into a single unified telemetry spec (low priority). Use OpenTelemetry-style spans/attributes/events. External observability infrastructure collects and stores traces, not product database. Production: disabled or summary-level. Debug: detailed traces enabled on demand. | W5, W6, W15, parent plan, review artifacts |
+
+### Review Progress Summary
+
+| Progress state | Count | Findings |
+| --- | ---: | --- |
+| Accepted and document updates completed | 26 | CM-001-CM-026 |
+| Pending individual review | 0 | — |
 | **Total** | **26** | **CM-001-CM-026** |
 
 ## Delivery Classification Summary

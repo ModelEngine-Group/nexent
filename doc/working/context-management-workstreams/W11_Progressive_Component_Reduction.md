@@ -53,6 +53,16 @@ Reducers never select which items enter the prompt; W10/W3 request admissible
 representations. Semantic reducers may call models only through W13/W3-governed paths.
 Deterministic structured/pointer fallbacks must exist for every mandatory item type.
 
+Validation of reduction results is split into two layers. Structural validation
+(blocks commit): schema validity, source-event reference existence, mandatory
+ContextItem presence (item may degrade in tier but cannot disappear), tool-call/result
+pair integrity, and representation tier not below the item's declared minimum fidelity.
+W11's `minimum_fidelity_violation` checks only representation tier, not content
+semantics. Semantic quality (measured, does not block commit): information retention,
+constraint/decision/goal coverage, and semantic equivalence are routed to W15 SLO
+measurement. A semantic proof system or LLM-based automatic semantic equivalence
+validation as a commit gate is explicitly out of scope. **Finding:** CM-018.
+
 ## Representation Lifecycle
 
 - A representation is valid only for its source fingerprint and generator/policy versions.

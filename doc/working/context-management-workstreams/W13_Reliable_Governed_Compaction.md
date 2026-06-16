@@ -9,7 +9,7 @@ cannot take down or indefinitely delay the main agent run.
 
 W13 owns semantic-compaction execution, validation, bounded retries, fallback, and
 operation lifecycle. It does not define context authority, representation
-admissibility, or checkpoint truth; W10, W11, W7, and W8 provide those contracts.
+admissibility, or compression snapshot truth; W10, W11, and W8 provide those contracts.
 
 Define a versioned `CompactionPolicy` containing:
 
@@ -34,7 +34,7 @@ same-session lifecycle mutation and therefore does not require fencing tokens.
 
 Use explicit states such as requested, running, succeeded, retryable-failure,
 fallback-running, deterministic-fallback, cancelled, and failed. Persist lifecycle
-events through W5 and checkpoints through W7. A successful result must validate schema,
+events and compression results through W5. A successful result must validate schema,
 token reduction, required-information retention, and source coverage before commit.
 
 ## Service Contract
@@ -56,14 +56,24 @@ failures include `deadline_exceeded`, `cancelled`, `provider_unavailable`,
 - Source fingerprint is revalidated before committing a result.
 - Success requires schema validity, source coverage, minimum-fidelity retention, and
   measurable token reduction.
+
+Compaction validation is split into structural and semantic layers. Structural
+validation (blocks commit): schema validity, source-event reference existence (reusing
+the CM-002 lineage contract), mandatory ContextItem presence, tool-call/result pair
+integrity, measurable token reduction, and representation tier not below declared
+minimum fidelity. W13's `summary_invalid` failure is triggered only by structural
+validation. Semantic quality (measured, does not block commit): information retention,
+constraint/decision/goal coverage, and source-to-summary equivalence are routed to W15
+SLO measurement. **Findings:** CM-018, CM-021.
+
 - Retry/fallback counts and total deadline are hard bounded.
 - Deterministic W11 fallback is always available and records explicit loss metadata.
-- Failed compaction cannot overwrite a newer W7 checkpoint or block the run indefinitely.
+- Failed compaction cannot overwrite a newer `compression.snapshot` or block the run indefinitely.
 
 ## Required Deliverables and Phases
 
 - Deliver policy/schema, operation store/state machine, service/executor, validators,
-  model adapters, retry/fallback/circuit breaker, cost accounting, W5/W7 integration,
+  model adapters, retry/fallback/circuit breaker, cost accounting, W5 integration,
   inspection, dashboards, and runbooks.
 - Phase through observe-only validation, isolated service execution, bounded fallback,
   lifecycle/API integration, then automated compaction triggers.
@@ -84,7 +94,7 @@ failures include `deadline_exceeded`, `cancelled`, `provider_unavailable`,
 - `sdk/nexent/core/agents/summary_config.py`
 - `sdk/nexent/core/agents/summary_cache.py`
 - Model provider and monitoring layers
-- W5 event writer, W7 checkpoint writer, and W9 lifecycle hooks
+- W5 event writer and W9 lifecycle hooks
 
 ## Tests and Definition of Done
 

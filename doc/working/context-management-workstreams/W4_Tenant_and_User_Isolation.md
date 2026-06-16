@@ -3,19 +3,19 @@
 ## Objective
 
 Eliminate bare-conversation context state and require a fully qualified identity for
-caches, checkpoints, locks, metrics, lifecycle operations, and authorization.
+caches, compression snapshots, locks, metrics, lifecycle operations, and authorization.
 
 ## Current State and Threat Model
 
 `backend/agents/agent_run_manager.py` qualifies active runs by user and conversation,
 but keys reusable `ContextManager` instances and run counts only by `conversation_id`.
 Identical IDs across tenants or users can therefore collide. Durable sessions,
-checkpoints, and artifacts would multiply the impact unless identity is fixed first.
+compression snapshots, and artifacts would multiply the impact unless identity is fixed first.
 
 ## Identity Contract
 
 W4 owns identity resolution, authorization, and identity-qualified keying. It does not
-define event schemas, checkpoint contents, or lifecycle behavior; W5, W7, and W9 consume
+define event schemas, compression snapshot contents, or lifecycle behavior; W5 and W9 consume
 the authorized identity contract.
 
 Introduce immutable branchless `ContextIdentity`:
@@ -31,6 +31,21 @@ cache keys, distributed locks, and metric labels. Public APIs derive tenant/user
 identity from authenticated request context and must not trust caller-supplied
 ownership fields.
 
+### Subagent Identity Contract
+
+A subagent runs under its own `agent_session_id` (UUID) but inherits the parent's
+`conversation_id`. The `agent_session` table records `parent_session_id` (UUID,
+nullable) and `delegation_type` (enum: `'subagent'` or NULL) to capture the
+delegation relationship.
+
+The subagent's W4 `ContextIdentity` uses the same `tenant_id` and `user_id` as
+the parent session. Subagent authorization follows the same rules as ordinary
+agents, determined by its agent configuration.
+
+Recursive delegation is prohibited: a subagent cannot create sub-subagents.
+
+**Finding:** CM-025.
+
 ### Initial Single-Owner Contract
 
 The initial release supports exactly one immutable owning `tenant_id` and `user_id` for
@@ -40,7 +55,7 @@ give another user an independent copy creates a new conversation/session; it doe
 change the original owner's durable identity.
 
 Shared agents, tenant-shared memories, and other independently governed resources do
-not grant access to a conversation, session, event, checkpoint, artifact, projection,
+not grant access to a conversation, session, event, compression snapshot, artifact, projection,
 or lifecycle operation. Explicit administrator/operator privileges, when separately
 defined, are audited policy exceptions and never change session ownership.
 
@@ -88,8 +103,8 @@ to the operation and resource being executed.
 1. Add `ContextIdentity` to backend and SDK boundary models.
 2. Replace string key construction in `AgentRunManager`.
 3. Require identity in context-manager creation, cleanup, and run registration.
-4. Add identity columns and composite indexes to W5/W7 persistence schemas.
-5. Add an authorization service used by checkpoint, artifact, and lifecycle operations.
+4. Add identity columns and composite indexes to W5 persistence schemas.
+5. Add an authorization service used by compression snapshot, artifact, and lifecycle operations.
 6. Remove or deprecate internal mutation APIs that accept only `conversation_id`;
    public conversation APIs may retain it but must resolve and authorize the full
    identity from request context.
@@ -105,7 +120,7 @@ to the operation and resource being executed.
 - `backend/apps/conversation_management_app.py`
 - `backend/services/conversation_management_service.py`
 - `backend/database/conversation_db.py`
-- New event-log, checkpoint, artifact, and lifecycle modules from W5-W9
+- New event-log, artifact, and lifecycle modules from W5-W9
 
 ## Tests
 
@@ -119,6 +134,11 @@ to the operation and resource being executed.
 - Static checks or targeted repository tests reject new bare-ID context mutation APIs.
 - Negative integration tests prove SDK/client identity and authorization assertions
   cannot authorize model dispatch or governed persistence.
+- Subagent identity tests prove subagent sessions inherit parent tenant/user and
+  conversation_id.
+- Recursive delegation tests prove subagents cannot create sub-subagents.
+- Subagent authorization tests prove subagent permissions are determined by its own
+  agent configuration.
 
 ## Rollout and Definition of Done
 
