@@ -46,7 +46,9 @@ from database.agent_db import (
     delete_related_agent,
     insert_related_agent,
     query_all_agent_info_by_tenant_id,
+    query_sub_agent_relations,
     query_sub_agents_id_list,
+    resolve_sub_agent_version_no,
     search_agent_id_by_agent_name,
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
@@ -984,14 +986,13 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
             user_role = str(user_tenant_record.get("user_role") or "").upper()
             can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
 
-            # Permission logic (same as agent list):
-            # - If creator or can_edit_all: PERMISSION_EDIT
-            # - Otherwise: use ingroup_permission, default to PERMISSION_READ if None
-            if can_edit_all or str(agent_info.get("created_by")) == str(user_id):
-                agent_info["permission"] = PERMISSION_EDIT
-            else:
-                ingroup_permission = agent_info.get("ingroup_permission")
-                agent_info["permission"] = ingroup_permission if ingroup_permission is not None else PERMISSION_READ
+            # Permission logic (same as agent list, including ASSET_OWNER read-only override)
+            agent_info["permission"] = resolve_agent_list_permission(
+                user_role=user_role,
+                agent=agent_info,
+                user_id=user_id,
+                can_edit_all=can_edit_all,
+            )
         except Exception as e:
             logger.warning(f"Failed to calculate agent permission: {str(e)}")
 
@@ -1413,76 +1414,216 @@ async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
         # Silently fail to maintain agent deletion process
 
 
-async def export_agent_impl(agent_id: int, authorization: str = Header(None)) -> str:
+async def _export_agent_dict_core(
+    root_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+) -> dict:
+    """Build ExportAndImportDataFormat dict for an agent tree at the given version."""
+    export_agent_dict = {}
+    search_list: deque = deque([(root_agent_id, version_no)])
+    visited: set = set()
+
+    mcp_info_set = set()
+
+    while search_list:
+        current_agent_id, current_version_no = search_list.popleft()
+        visit_key = (current_agent_id, current_version_no)
+        if visit_key in visited:
+            continue
+        visited.add(visit_key)
+
+        agent_info = await export_agent_by_agent_id(
+            agent_id=current_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=current_version_no,
+        )
+
+        for tool in agent_info.tools:
+            if tool.source == "mcp" and tool.usage:
+                mcp_info_set.add(tool.usage)
+
+        relations = query_sub_agent_relations(
+            main_agent_id=current_agent_id,
+            tenant_id=tenant_id,
+            version_no=current_version_no,
+        )
+        for rel in relations:
+            child_id = rel["selected_agent_id"]
+            child_version = resolve_sub_agent_version_no(
+                child_id,
+                rel.get("selected_agent_version_no"),
+                tenant_id,
+            )
+            search_list.append((child_id, child_version))
+
+        export_agent_dict[str(agent_info.agent_id)] = agent_info
+
+    mcp_info_list = []
+    for mcp_server_name in mcp_info_set:
+        mcp_url = get_mcp_server_by_name_and_tenant(mcp_server_name, tenant_id)
+        mcp_info_list.append(
+            MCPInfo(mcp_server_name=mcp_server_name, mcp_url=mcp_url))
+
+    export_data = ExportAndImportDataFormat(
+        agent_id=root_agent_id,
+        agent_info=export_agent_dict,
+        mcp_info=mcp_info_list,
+    )
+    return export_data.model_dump()
+
+
+async def export_agent_dict_impl(
+    agent_id: int,
+    authorization: str = Header(None),
+    version_no: int = 0,
+) -> dict:
     """
     Export the configuration information of the specified agent and all its sub-agents.
 
     Args:
         agent_id (int): The ID of the agent to export.
         authorization (str): User authentication information, obtained from the Header.
+        version_no (int): Version to export. Default 0 = draft.
 
     Returns:
-        str: A formatted JSON string containing the configuration information of the agent and all its sub-agents.
-
-    Data Structure Example:
-        model.py  ExportAndImportDataFormat
-
-    Note:
-        This function recursively finds all managed sub-agents and exports the detailed configuration of each agent (including tools, prompts, etc.) as a dictionary, and finally returns it as a formatted JSON string for frontend download and backup.
+        dict: ExportAndImportDataFormat as a plain dict (via model_dump).
     """
-
     user_id, tenant_id, _ = get_current_user_info(authorization)
-
-    export_agent_dict = {}
-    search_list = deque([agent_id])
-    agent_id_set = set()
-
-    mcp_info_set = set()
-
-    while len(search_list):
-        left_ele = search_list.popleft()
-        if left_ele in agent_id_set:
-            continue
-
-        agent_id_set.add(left_ele)
-        agent_info = await export_agent_by_agent_id(agent_id=left_ele, tenant_id=tenant_id, user_id=user_id)
-
-        # collect mcp name
-        for tool in agent_info.tools:
-            if tool.source == "mcp" and tool.usage:
-                mcp_info_set.add(tool.usage)
-
-        search_list.extend(agent_info.managed_agents)
-        export_agent_dict[str(agent_info.agent_id)] = agent_info
-
-    # convert mcp info to MCPInfo list
-    mcp_info_list = []
-    for mcp_server_name in mcp_info_set:
-        # get mcp url by mcp_server_name and tenant_id
-        mcp_url = get_mcp_server_by_name_and_tenant(mcp_server_name, tenant_id)
-        mcp_info_list.append(
-            MCPInfo(mcp_server_name=mcp_server_name, mcp_url=mcp_url))
-
-    export_data = ExportAndImportDataFormat(
-        agent_id=agent_id, agent_info=export_agent_dict, mcp_info=mcp_info_list)
-    return json.dumps(export_data.model_dump())
+    return await _export_agent_dict_core(
+        root_agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        version_no=version_no,
+    )
 
 
-async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) -> ExportAndImportAgentInfo:
-    """
-    Export a single agent's information based on agent_id
-    """
+async def export_agent_dict_for_repository_impl(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int,
+) -> dict:
+    """Export agent tree for marketplace repository storage (no HTTP auth header)."""
+    return await _export_agent_dict_core(
+        root_agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        version_no=version_no,
+    )
+
+
+async def export_agent_impl(
+    agent_id: int,
+    authorization: str = Header(None),
+    version_no: int = 0,
+) -> str:
+    """Serialize export_agent_dict_impl output to a JSON string for download or ZIP embedding."""
+    agent_dict = await export_agent_dict_impl(
+        agent_id, authorization, version_no=version_no
+    )
+    return json.dumps(agent_dict)
+
+
+def _collect_skill_names_from_tree(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+    visited: Optional[set] = None,
+) -> List[str]:
+    """Collect unique skill names from an agent tree at the given version."""
+    if visited is None:
+        visited = set()
+
+    skill_names: List[str] = []
+    seen_names: set = set()
+
+    def _walk(current_agent_id: int, current_version_no: int) -> None:
+        visit_key = (current_agent_id, current_version_no)
+        if visit_key in visited:
+            return
+        visited.add(visit_key)
+
+        skill_instances = skill_db.query_skill_instances_by_agent_id(
+            agent_id=current_agent_id,
+            tenant_id=tenant_id,
+            version_no=current_version_no,
+        )
+        for inst in skill_instances:
+            skill_id = inst.get("skill_id")
+            skill = skill_db.get_skill_by_id(skill_id, tenant_id)
+            if skill:
+                name = skill.get("name")
+                if name and name not in seen_names:
+                    seen_names.add(name)
+                    skill_names.append(name)
+
+        relations = query_sub_agent_relations(
+            main_agent_id=current_agent_id,
+            tenant_id=tenant_id,
+            version_no=current_version_no,
+        )
+        for rel in relations:
+            child_id = rel["selected_agent_id"]
+            child_version = resolve_sub_agent_version_no(
+                child_id,
+                rel.get("selected_agent_version_no"),
+                tenant_id,
+            )
+            _walk(child_id, child_version)
+
+    _walk(agent_id, version_no)
+    return skill_names
+
+
+def collect_skill_zip_entries(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int = 0,
+) -> List[SkillZipEntry]:
+    """Export skill ZIP payloads for all skills in an agent tree."""
+    skill_names = _collect_skill_names_from_tree(agent_id, tenant_id, version_no)
+    if not skill_names:
+        return []
+
+    skill_service = SkillService(tenant_id=tenant_id)
+    exported = skill_service.export_skills_by_names(skill_names, tenant_id)
+    return [
+        SkillZipEntry(
+            skill_name=entry["skill_name"],
+            skill_zip_base64=entry["skill_zip_base64"],
+        )
+        for entry in exported
+    ]
+
+
+async def export_agent_by_agent_id(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+) -> ExportAndImportAgentInfo:
+    """Export a single agent's information based on agent_id and version_no."""
     agent_info = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id)
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
+    )
     agent_relation_in_db = query_sub_agents_id_list(
-        main_agent_id=agent_id, tenant_id=tenant_id)
-    tool_list = await create_tool_config_list(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+        main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
+    )
+    tool_list = await create_tool_config_list(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        version_no=version_no,
+    )
 
     # Collect skill names from skill instances
     skill_names: List[str] = []
     try:
         skill_instances = skill_db.query_skill_instances_by_agent_id(
-            agent_id=agent_id, tenant_id=tenant_id, version_no=0
+            agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
         )
         for inst in skill_instances:
             skill_id = inst.get("skill_id")
@@ -1518,6 +1659,7 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
             "display_name") if business_logic_model_info is not None else None
 
     agent_info = ExportAndImportAgentInfo(agent_id=agent_id,
+                                          tenant_id=agent_info["tenant_id"],
                                           name=agent_info["name"],
                                           display_name=agent_info["display_name"],
                                           description=agent_info["description"],
@@ -2491,52 +2633,45 @@ def get_agent_call_relationship_impl(agent_id: int, tenant_id: str) -> dict:
         raise ValueError(f"Failed to get agent call relationship: {str(e)}")
 
 
-async def export_agent_with_skills_impl(agent_id: int, authorization: str) -> dict:
-    """Export an agent, returning a ZIP if it has skill instances, otherwise plain JSON.
+async def export_agent_with_skills_impl(
+    agent_id: int,
+    authorization: str,
+    version_no: int = 0,
+) -> dict:
+    """Export an agent, returning a ZIP if it has skill instances, otherwise a plain dict.
 
     The response is either:
       - A dict with {"_zip": True, "data": bytes, "filename": str} when the agent has skills
-      - A plain dict (JSON string) when the agent has no skills
+      - ExportAndImportDataFormat as a plain dict when the agent has no skills
     """
-    from services.skill_service import SkillService
-
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
-    skill_instances = skill_db.query_skill_instances_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id, version_no=0
+    skill_zip_entries = collect_skill_zip_entries(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )
 
-    if not skill_instances:
-        return await export_agent_impl(agent_id, authorization)
+    if not skill_zip_entries:
+        return await export_agent_dict_impl(
+            agent_id, authorization, version_no=version_no
+        )
 
-    skill_names = []
-    for inst in skill_instances:
-        skill_id = inst.get("skill_id")
-        skill = skill_db.get_skill_by_id(skill_id, tenant_id)
-        if skill:
-            skill_names.append(skill.get("name"))
-
-    if not skill_names:
-        return await export_agent_impl(agent_id, authorization)
-
-    agent_json_str = await export_agent_impl(agent_id, authorization)
-
-    skill_service = SkillService(tenant_id=tenant_id)
-    skill_zip_entries = skill_service.export_skills_by_names(
-        skill_names, tenant_id)
+    agent_json_str = await export_agent_impl(
+        agent_id, authorization, version_no=version_no
+    )
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("agent.json", agent_json_str)
         for entry in skill_zip_entries:
-            skill_zip_bytes = base64.b64decode(entry["skill_zip_base64"])
-            zf.writestr(f"skills/{entry['skill_name']}.zip", skill_zip_bytes)
+            skill_zip_bytes = base64.b64decode(entry.skill_zip_base64)
+            zf.writestr(f"skills/{entry.skill_name}.zip", skill_zip_bytes)
 
     zip_buffer.seek(0)
     zip_data = zip_buffer.read()
 
     agent_info = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id)
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
+    )
     agent_name = agent_info.get(
         "name", "anonymous") if agent_info else "anonymous"
 
