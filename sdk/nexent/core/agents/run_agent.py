@@ -6,6 +6,7 @@ from typing import Any, Dict, Union
 
 from smolagents import ToolCollection
 
+from ...monitor import set_monitoring_capacity_snapshot
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
 
@@ -76,6 +77,9 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
     try:
+        set_monitoring_capacity_snapshot(
+            getattr(agent_run_info, "capacity_snapshot", None)
+        )
         mcp_host = agent_run_info.mcp_host
         if mcp_host is None or len(mcp_host) == 0:
             nexent = NexentAgent(

@@ -133,6 +133,7 @@ The table is grouped by assignable engineering module. Modules and workstreams a
 | Governance and Privacy | Medium | [W14](#w14) | Trust, provenance, redaction, and retention | Rich retrieved and persisted context lacks formal trust and lifecycle policies. | Label sources and trust, redact secrets, enforce retention, and propagate deletion. | Makes rich context safe for production use. |
 | Quality and Efficiency | Medium | [W15](#w15) | Context quality and reliability SLOs | Existing benchmarks do not block regressions or releases. | Add CI and production gates for fit, retention, latency, cost, recovery, and isolation. | Turns context quality into an enforceable product contract. |
 | Quality and Efficiency | Medium | [W16](#w16) | Prompt-cache-aware assembly | Prompt ordering does not intentionally maximize provider cache reuse. | Stabilize prompt prefixes and track cached-input metrics. | Reduces recurring latency and cost. |
+| Model Capacity and Request Safety | Medium (post-acceptance) | [W17](#w17) | Capacity suggestion on model add (UX follow-up to W1 catalog adoption) | Default `model_factory='OpenAI-API-Compatible'` misses the W1 catalog; operators have no UX path to reach catalog values without DB editing or the provider-browser tab. | Add suggest-capacity endpoint, fuzzy catalog match, provider discovery hints, and form placeholder UX; extend `_infer_model_factory` to cover LLM/VLM. | Makes W1's eight catalog entries reachable from the default add flow that most tenants use. |
 
 ### 1.3 Big-Picture Outcome
 
@@ -155,6 +156,26 @@ flowchart LR
 ```
 
 That separation allows Nexent to preserve enough evidence for reliable agent continuation while keeping every model request small, relevant, safe, and provider-correct.
+
+### 1.4 Post-Acceptance Additions
+
+W1-W16 represent the design-freeze scope completed on 2026-06-12 and reviewed
+through the 26 findings in `review/findings-registry.md`. Workstreams listed
+below were opened **after** the design freeze, triggered by limitations
+discovered during end-to-end testing of the shipped W1 stack. They are tracked
+here so the program plan reflects the full active workstream set without
+implying they were part of the original review.
+
+| ID | Workstream | Module | Trigger |
+| --- | --- | --- | --- |
+| [W17](#w17) | Capacity suggestion on model add | Model Capacity and Request Safety | CM-031 (catalog miss for default `model_factory`), discovered 2026-06-16 during glm-5.1 end-to-end test |
+
+Post-acceptance limitations share the same `CM-NNN` numbering as design-phase
+findings; entries created after acceptance are appended to the registry with
+the next available number (CM-031 onward). The over-engineering guardrail
+still applies: a new workstream is only opened when a specific, named
+limitation has been observed and the smallest scoped fix would still require
+a coordinated UX + backend change.
 
 ## 2. Improvements Details
 
@@ -492,6 +513,47 @@ Core invariants:
 
 - Property tests generate arbitrary context combinations and verify serialized requests remain within budget.
 - Provider overflow tests verify deterministic recovery without loops.
+
+<a id="w17"></a>
+
+##### W17. Capacity Suggestion on Model Add (Post-Acceptance Follow-up)
+
+**Status:** Post-acceptance addition opened 2026-06-16 after end-to-end W1 testing
+surfaced CM-031 (catalog miss for the default `model_factory`). Not part of the
+W1-W16 design-freeze scope. See `W17_Capacity_Suggestion_On_Model_Add.md` for the
+full spec.
+
+**Problem:** Catalog keys require an exact `(provider, model_name)` match, but
+the default `model_factory = 'OpenAI-API-Compatible'` from the manual-add UI does
+not match any catalog provider key. Most LLM rows added through this flow
+silently miss the catalog and fall through to the legacy fallback.
+
+**Solution:**
+
+- Add a read-only `POST /api/v1/models/suggest-capacity` endpoint that does
+  catalog fuzzy matching and optional provider discovery.
+- Frontend calls the endpoint after the user types `model_name` and `base_url`;
+  populates the capacity form fields as placeholders that the operator can
+  accept or override. Accepted values save as `capacity_source = 'operator'`.
+- Extend `_infer_model_factory` to cover LLM/VLM via the shared host-to-provider
+  map used by the suggestion endpoint.
+
+**Proof and benefit:** Without this, CM-031 forces every operator to either edit
+the database directly or use a provider-specific browser tab to reach the W1
+catalog values. With it, the same eight catalog entries become reachable from
+the default add path that most tenants use.
+
+**Acceptance criteria:**
+
+- Suggestion endpoint returns `catalog_exact` for direct catalog keys,
+  `catalog_fuzzy` for normalized variants, and `provider_discovery` for the four
+  supported provider adapters.
+- SLO: ≥70% of new manual-add LLM rows during the rollout window produce a
+  non-`none` match.
+- Disabling the feature flag leaves the W1 end-to-end path unaffected.
+
+**Schedule:** Post-acceptance follow-up. Not bound to the Phase 1-5 timeline;
+phased rollout with feature flag once W1 capacity validation is stable.
 
 #### 2.3.2 Durable Session State and Lifecycle
 
@@ -1013,10 +1075,12 @@ section 2.4 defines the claim-scoped readiness gates. **Findings:** CM-011, CM-0
 | Phase 3: Policy, Reduction, and Pollution Control | June 29-July 17 | [W10](#w10), [W11](#w11), [W12](#w12), [W14](#w14) | Improves the quality and safety of the context selected from the durable foundation. W12 also hardens W3 by controlling oversized outputs before final fit. |
 | Phase 4: Session Product and Compaction Operations | July 13-24 | [W9](#w9), [W13](#w13) | Productizes the durable state and compaction foundation as controllable session lifecycle operations. |
 | Phase 5: Efficiency and Release Hardening | July 20-August 7 target | [W15](#w15)-[W16](#w16) plus approved optional-package evidence | Completes release gates for the exact enabled capability claims and prompt-cache efficiency. |
+| Post-acceptance follow-ups | Unscheduled; flag-gated rollout | [W17](#w17) and any future post-acceptance-finding-triggered workstreams | Decoupled from the Phase 0-5 timeline. Each follow-up ships behind its own feature flag and graduates via its own evidence gate. Not blocked by, and does not block, the Phase 5 release-hardening exit. |
 
 The July 10 milestone targets the implementation outputs of W1-W8. It is not a
 production-readiness gate. Phases 3-5 overlap intentionally; August 7 is the earliest
-target for the approved release-scope evidence review. **Findings:** CM-011, CM-024.
+target for the approved release-scope evidence review. Post-acceptance follow-ups
+(see §1.4) are separately tracked and do not move the Phase 5 milestone. **Findings:** CM-011, CM-024.
 
 #### Phase 0: Baseline and Design Freeze
 

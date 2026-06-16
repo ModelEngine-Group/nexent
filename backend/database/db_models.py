@@ -188,6 +188,20 @@ class ModelRecord(TableBase):
         Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
     concurrency_limit = Column(
         Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
+    context_window_tokens = Column(
+        Integer, doc="Total combined input/output context window in tokens, when the provider uses a combined window. Nullable.")
+    max_input_tokens = Column(
+        Integer, doc="Provider hard input-token limit when distinct from the combined window. Nullable.")
+    max_output_tokens = Column(
+        Integer, doc="Provider-supported or operator-configured completion-output cap. Replaces the ambiguous LLM meaning of max_tokens. Nullable.")
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved per request before constructing input context. Nullable.")
+    tokenizer_family = Column(
+        String(100), doc="Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.")
+    capacity_source = Column(
+        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.")
+    capability_profile_version = Column(
+        String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -237,6 +251,36 @@ class ModelMonitoringRecord(SimpleTableBase):
     input_tokens = Column(Integer, doc="Number of input tokens")
     output_tokens = Column(Integer, doc="Number of output tokens")
     total_tokens = Column(Integer, doc="Total tokens (input + output)")
+    context_window_tokens = Column(
+        Integer, doc="Resolved total combined model context window for this request"
+    )
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved before input context construction"
+    )
+    capability_profile_version = Column(
+        String(100), doc="Version of the resolved capacity profile for this request"
+    )
+    capacity_source = Column(
+        String(100), doc="Dominant source of resolved capacity fields for this request"
+    )
+    requested_output_tokens = Column(
+        Integer, doc="Output tokens requested or reserved during capacity resolution"
+    )
+    provider_input_limit_tokens = Column(
+        Integer, doc="Resolved provider input-token limit used by context management"
+    )
+    tokenizer_family = Column(
+        String(100), doc="Tokenizer family used for request token counting"
+    )
+    counting_mode = Column(
+        String(20), doc="Token counting mode for the request: exact or estimated"
+    )
+    unknown_capabilities = Column(
+        JSONB, doc="Structured list of capacity capabilities unknown at resolution time"
+    )
+    capacity_fingerprint = Column(
+        String(64), doc="Fingerprint of the resolved model capacity snapshot"
+    )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(

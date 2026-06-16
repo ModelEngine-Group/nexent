@@ -7,6 +7,16 @@ from .volc_stt_model import VolcSTTModel, VolcSTTConfig
 from .tts_model import BaseTTSModel
 from .ali_tts_model import AliTTSModel, AliTTSConfig
 from .volc_tts_model import VolcTTSModel, VolcTTSConfig
+from .capacity_resolver import (
+    CapabilityProfile,
+    ModelCapacitySnapshot,
+    ProfileKey,
+    ResolverError,
+    RESOLVER_VERSION,
+    compute_fingerprint,
+    resolve_capacity,
+)
+from . import tokenizer_registry
 
 __all__ = [
     "OpenAIModel",
@@ -22,4 +32,12 @@ __all__ = [
     "AliTTSConfig",
     "VolcTTSModel",
     "VolcTTSConfig",
+    "CapabilityProfile",
+    "ModelCapacitySnapshot",
+    "ProfileKey",
+    "ResolverError",
+    "RESOLVER_VERSION",
+    "compute_fingerprint",
+    "resolve_capacity",
+    "tokenizer_registry",
 ]

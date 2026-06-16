@@ -466,3 +466,64 @@ This ADR is accepted when:
 Current status: **Accepted.** ADR closes here. Implementation continues in W1
 follow-up PRs (DB migration, resolver implementation, provider adapter updates,
 frontend, monitoring).
+
+## Known Limitations (added post-acceptance)
+
+These limitations were discovered during end-to-end testing of the W1 stack and
+do not invalidate the ADR. They are recorded here so reviewers of follow-up
+workstreams know the trade-offs that were intentionally left in W1's scope.
+
+### CM-031 (formerly KL-1): Catalog miss for the default `model_factory` (2026-06-15)
+
+**Observation.** The catalog is keyed on `(provider, model_name)` where
+`provider` is the lower-cased value of `model_record_t.model_factory`. The
+backend Pydantic schema for `ModelRequest` sets the default `model_factory =
+'OpenAI-API-Compatible'`. The frontend "single model" add flow does not expose
+a `model_factory` control for LLM/VLM models, so most manually-added LLM rows
+end up with `model_factory = 'OpenAI-API-Compatible'`, which lower-cases to
+`'openai-api-compatible'` and matches none of the catalog provider keys
+(`openai`, `dashscope`, `silicon`).
+
+**Auxiliary gap.** `_infer_model_factory` in
+`backend/services/model_health_service.py` does infer `dashscope` from URLs
+containing the substring, but it is **only called inside the
+`embedding`/`multi_embedding` branch** of `model_management_service`. LLM/VLM
+records skip the inference entirely.
+
+**Net result.** Manual-add LLM models hit `ProviderCapabilityUnknown` at
+resolve time and fall back to `_TOKEN_THRESHOLD_LEGACY_FALLBACK` (8192) for
+`ContextManagerConfig.token_threshold`. The monitoring record for such a
+request leaves all capacity columns null.
+
+**Workarounds shipped with W1.**
+
+- Operators can directly set `model_factory` to a catalog provider key via DB
+  (`UPDATE nexent.model_record_t SET model_factory = 'dashscope' WHERE
+  model_id = ...`). After this, subsequent requests hit the catalog
+  (verified end-to-end 2026-06-15 with glm-5.1: `capability_profile_version =
+  'dashscope/glm-5.1@1'`, `capacity_source = 'profile'`).
+- Models added via the "provider browser" tab (SiliconFlow / DashScope /
+  TokenPony) already get the correct `model_factory` from the provider hook
+  and hit the catalog normally.
+
+**Why not fix in W1.** The product fix has two design questions —
+(a) extend `_infer_model_factory` to cover LLM (cheap, ~5 lines), or
+(b) add a "suggest capacity at add time" UX with fuzzy catalog matching
+(richer, see workstream proposal) — that should be decided in a fresh
+workstream rather than shoehorned into a closed ADR. Tracked in
+`doc/working/context-management-workstreams/W17_Capacity_Suggestion_On_Model_Add.md`.
+
+### CM-032 (formerly KL-2): Provider-level "Edit Config" batch dialog does not expose capacity
+
+**Observation.** `ProviderConfigEditDialog`, when invoked from the provider-
+level "Edit Config" button (as opposed to the per-model gear icon), applies
+settings to every model from one provider at once. Capacity fields
+(`context_window_tokens` et al.) are per-model and not meaningful as a
+batch operation, so the dialog hides them via `hideCapacityFields={true}` in
+that path. The per-model gear path in the same dialog **does** expose them
+(fix landed 2026-06-16).
+
+**Why this is a limitation, not a bug.** Operators who want to batch
+provision capacity for, say, all silicon models at once must either run a
+SQL UPDATE or use the per-model gear icon for each row. A future workstream
+could add a batch capacity panel; W1 does not.

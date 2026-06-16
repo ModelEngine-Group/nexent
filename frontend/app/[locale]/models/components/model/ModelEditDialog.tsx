@@ -18,6 +18,13 @@ import {
   ModelMaxTokensInput,
   parseMaxTokens,
 } from "./ModelMaxTokensInput";
+import {
+  buildCapacityPayload,
+  capacityFormFromModel,
+  emptyCapacityForm,
+  ModelCapacityFields,
+  validateCapacityForm,
+} from "./ModelCapacityFields";
 
 const { Option } = Select;
 
@@ -58,6 +65,7 @@ export const ModelEditDialog = ({
     modelFactory: "",
     modelAppid: "",
     accessToken: "",
+    ...emptyCapacityForm,
   });
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
@@ -89,6 +97,7 @@ export const ModelEditDialog = ({
         modelFactory: model.modelFactory || "",
         modelAppid: model.modelAppid || "",
         accessToken: model.accessToken || "",
+        ...capacityFormFromModel(model),
       });
     }
   }, [model]);
@@ -121,9 +130,25 @@ export const ModelEditDialog = ({
       : form.type;
   const isVoiceModel =
     form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS;
+  const supportsCapacityFields =
+    !isEmbeddingModel && !isRerankModel && !isVoiceModel;
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
+    : null;
 
   const isFormValid = () => {
-    const needsMaxTokens = !isEmbeddingModel && !isRerankModel;
+    if (
+      supportsCapacityFields &&
+      validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
+    ) {
+      return false;
+    }
+
+    // Capacity panel replaces the legacy max_tokens field for LLM/VLM, so
+    // the standalone max_tokens is only required for the types that still
+    // render that field (voice and rerank-style).
+    const needsMaxTokens =
+      !supportsCapacityFields && !isEmbeddingModel && !isRerankModel;
 
     if (isVoiceModel) {
       if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
@@ -159,6 +184,13 @@ export const ModelEditDialog = ({
     });
 
     try {
+      // For LLM/VLM the legacy form.maxTokens field is no longer rendered;
+      // fall back to form.maxOutputTokens (capacity panel) for the
+      // connectivity-probe budget.
+      const llmProbeMaxTokens = supportsCapacityFields
+        ? Number.parseInt(form.maxOutputTokens || "0", 10) ||
+          parseMaxTokens(form.maxTokens)
+        : parseMaxTokens(form.maxTokens);
       const config: any = {
         modelName: form.name,
         modelType: connectivityModelType,
@@ -169,7 +201,7 @@ export const ModelEditDialog = ({
             ? parseInt(form.vectorDimension)
             : form.type === MODEL_TYPES.RERANK
               ? 0
-              : parseMaxTokens(form.maxTokens),
+              : llmProbeMaxTokens,
         embeddingDim:
           form.type === MODEL_TYPES.EMBEDDING
             ? parseInt(form.vectorDimension)
@@ -241,6 +273,7 @@ export const ModelEditDialog = ({
           accessToken: isVoiceModel && form.modelFactory === "volcengine" ? form.accessToken : undefined,
           timeoutSeconds: !isEmbeddingModel && !isRerankModel ? parseInt(form.timeoutSeconds) || 120 : undefined,
           concurrencyLimit: !isEmbeddingModel && !isRerankModel ? (form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined) : undefined,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         });
       } else {
         await modelService.updateSingleModel({
@@ -276,6 +309,7 @@ export const ModelEditDialog = ({
                 concurrencyLimit: form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined,
               }
             : {}),
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         });
       }
 
@@ -300,6 +334,7 @@ export const ModelEditDialog = ({
             apiKey: form.apiKey,
             modelUrl: form.url,
           },
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...(isEmbeddingModel
             ? { dimension: parseInt(form.vectorDimension) }
             : {}),
@@ -430,8 +465,29 @@ export const ModelEditDialog = ({
           />
         </div>
 
-        {/* maxTokens */}
-        {!isEmbeddingModel && !isRerankModel && (
+        {supportsCapacityFields && (
+          <ModelCapacityFields
+            value={form}
+            onChange={(field, value) => handleFormChange(field, value)}
+            validationError={capacityValidationError}
+            capacitySource={model.capacitySource}
+            capabilityProfileVersion={model.capabilityProfileVersion}
+            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+            // The deprecation warning only makes sense when the form still
+            // has no max_output_tokens after capacityFormFromModel ran.
+            // capacityFormFromModel auto-promotes legacy max_tokens into
+            // the form's maxOutputTokens, so this stays true only when
+            // neither column is populated on the model record.
+            showDeprecatedMaxTokensWarning={
+              Boolean(model.maxTokens) &&
+              !model.maxOutputTokens &&
+              !form.maxOutputTokens
+            }
+          />
+        )}
+
+        {/* maxTokens (legacy; only kept for types not covered by the capacity panel) */}
+        {!isEmbeddingModel && !isRerankModel && !supportsCapacityFields && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
               {t("model.dialog.label.maxTokens")}{" "}
@@ -577,16 +633,41 @@ export const ModelEditDialog = ({
 };
 
 // New: provider config edit dialog (only apiKey and maxTokens)
+interface ProviderConfigInitialCapacity {
+  contextWindowTokens?: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  /** Legacy alias passed through so capacityFormFromModel can auto-migrate it. */
+  maxTokens?: number
+  defaultOutputReserveTokens?: number
+  tokenizerFamily?: string
+  capacitySource?: string
+  capabilityProfileVersion?: string
+}
+
 interface ProviderConfigEditDialogProps {
   isOpen: boolean
   initialApiKey?: string
   initialMaxTokens?: string
   initialTimeoutSeconds?: string
   initialConcurrencyLimit?: string
+  initialCapacity?: ProviderConfigInitialCapacity
+  hideCapacityFields?: boolean  // Suppress capacity controls when caller is a provider-level batch (not per-model)
   modelType?: ModelType
   showApiKeyField?: boolean  // Whether to show API Key field (default: true)
   onClose: () => void
-  onSave: (config: { apiKey?: string; maxTokens: number; timeoutSeconds?: number; concurrencyLimit?: number }) => Promise<void> | void
+  onSave: (config: {
+    apiKey?: string
+    maxTokens: number
+    timeoutSeconds?: number
+    concurrencyLimit?: number
+    contextWindowTokens?: number
+    maxInputTokens?: number
+    maxOutputTokens?: number
+    defaultOutputReserveTokens?: number
+    tokenizerFamily?: string
+    capacitySource?: string
+  }) => Promise<void> | void
 }
 
 export const ProviderConfigEditDialog = ({
@@ -595,6 +676,8 @@ export const ProviderConfigEditDialog = ({
   initialMaxTokens = '',
   initialTimeoutSeconds = '120',
   initialConcurrencyLimit = '',
+  initialCapacity,
+  hideCapacityFields = false,
   modelType,
   showApiKeyField = true,
   onClose,
@@ -605,6 +688,9 @@ export const ProviderConfigEditDialog = ({
   const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens)
   const [timeoutSeconds, setTimeoutSeconds] = useState<string>(initialTimeoutSeconds)
   const [concurrencyLimit, setConcurrencyLimit] = useState<string>(initialConcurrencyLimit)
+  const [capacityForm, setCapacityForm] = useState(
+    initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
+  )
   const [saving, setSaving] = useState<boolean>(false)
 
   useEffect(() => {
@@ -612,10 +698,29 @@ export const ProviderConfigEditDialog = ({
     setMaxTokens(initialMaxTokens)
     setTimeoutSeconds(initialTimeoutSeconds)
     setConcurrencyLimit(initialConcurrencyLimit)
-  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit])
+    setCapacityForm(
+      initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
+    )
+  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit, initialCapacity])
+
+  const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+  const isRerankModel = modelType === MODEL_TYPES.RERANK
+  const isVoiceModel = modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS
+  const supportsCapacityFields =
+    !hideCapacityFields && !isEmbeddingModel && !isRerankModel && !isVoiceModel
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(capacityForm, [
+        "contextWindowTokens",
+        "maxOutputTokens",
+      ])
+    : null
+
+  const handleCapacityChange = (field: keyof typeof capacityForm, value: string) => {
+    setCapacityForm((prev) => ({ ...prev, [field]: value }))
+  }
 
   const valid = () => {
-    const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+    if (supportsCapacityFields && capacityValidationError) return false
     return isEmbeddingModel || isValidMaxTokens(maxTokens)
   }
 
@@ -623,22 +728,18 @@ export const ProviderConfigEditDialog = ({
     if (!valid()) return
     try {
       setSaving(true)
-      const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
-      const isRerankModel = modelType === MODEL_TYPES.RERANK
       await onSave({
         ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
         maxTokens: parseMaxTokens(maxTokens) || 0,
         ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
         ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
+        ...(supportsCapacityFields ? buildCapacityPayload(capacityForm) : {}),
       })
       onClose()
     } finally {
       setSaving(false)
     }
   }
-
-  const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
-  const isRerankModel = modelType === MODEL_TYPES.RERANK
 
   return (
     <Modal
@@ -656,6 +757,21 @@ export const ProviderConfigEditDialog = ({
             </label>
             <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
           </div>
+        )}
+        {supportsCapacityFields && (
+          <ModelCapacityFields
+            value={capacityForm}
+            onChange={handleCapacityChange}
+            validationError={capacityValidationError}
+            capacitySource={initialCapacity?.capacitySource}
+            capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
+            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+            showDeprecatedMaxTokensWarning={
+              Boolean(initialMaxTokens) &&
+              !initialCapacity?.maxOutputTokens &&
+              !capacityForm.maxOutputTokens
+            }
+          />
         )}
         {!isEmbeddingModel && (
           <div>

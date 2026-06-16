@@ -26,6 +26,7 @@ from sdk.nexent.monitor.monitoring import (
     get_monitoring_buffer,
     set_monitoring_context,
     get_monitoring_context,
+    set_monitoring_capacity_snapshot,
     get_agent_monitoring_context,
     agent_monitoring_context,
     _monitoring_buffer,
@@ -1388,6 +1389,32 @@ class TestWriteBatchIsolation:
 
         assert mock_session.add.call_count == 3
 
+    def test_capacity_snapshot_fields_pass_to_model_monitoring_record(self):
+        """Capacity snapshot fields are persisted through the ORM row payload."""
+        mock_session_fn, mock_model_monitoring_record = self._setup_db_mocks()
+        mock_session = MagicMock()
+        mock_session_fn.return_value.__enter__ = Mock(return_value=mock_session)
+        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
+
+        buf = self._make_buffer()
+        record = {
+            "model_name": "m1",
+            "tenant_id": "t1",
+            "context_window_tokens": 128000,
+            "default_output_reserve_tokens": 1024,
+            "capability_profile_version": "openai/gpt-4o@1",
+            "capacity_source": "profile",
+            "requested_output_tokens": 1024,
+            "provider_input_limit_tokens": 126976,
+            "tokenizer_family": "o200k_base",
+            "counting_mode": "exact",
+            "unknown_capabilities": ["prompt_cache"],
+            "capacity_fingerprint": "abc123",
+        }
+        buf._write_batch([record])
+
+        mock_model_monitoring_record.assert_called_once_with(**record)
+
     def test_all_invalid_records(self):
         """When every record fails, _write_batch still does not raise."""
         mock_session_fn, _ = self._setup_db_mocks()
@@ -1415,6 +1442,7 @@ class TestEnqueueMonitoringRecord:
         _mod._monitoring_user_id.set(None)
         _mod._monitoring_agent_id.set(None)
         _mod._monitoring_conversation_id.set(None)
+        _mod._monitoring_capacity_snapshot.set(None)
 
     def test_enqueue_with_tenant_id(self):
         """Record is added to buffer when tenant_id is present."""
@@ -1496,6 +1524,80 @@ class TestEnqueueMonitoringRecord:
         mock_buffer.add_record.assert_called_once()
         record = mock_buffer.add_record.call_args[0][0]
         assert record["tenant_id"] == "from-snapshot"
+
+    def test_capacity_snapshot_fields_are_enqueued(self):
+        """Resolved capacity snapshot fields are copied to LLM monitoring rows."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 12
+        tracker.output_tokens = 5
+        tracker.token_count = 5
+        tracker._context_snapshot = {"tenant_id": "t-1"}
+        tracker._display_name = None
+
+        set_monitoring_capacity_snapshot({
+            "context_window_tokens": 128000,
+            "default_output_reserve_tokens": 1024,
+            "capability_profile_version": "openai/gpt-4o@1",
+            "field_sources": {
+                "context_window_tokens": "profile",
+                "max_output_tokens": "operator",
+            },
+            "requested_output_tokens": 1024,
+            "provider_input_limit_tokens": 127000,
+            "tokenizer_family": "o200k_base",
+            "counting_mode": "exact",
+            "unknown_capabilities": ["prompt_cache"],
+            "fingerprint": "abc123",
+        })
+
+        with patch(
+            "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+            return_value=mock_buffer,
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["context_window_tokens"] == 128000
+        assert record["default_output_reserve_tokens"] == 1024
+        assert record["capability_profile_version"] == "openai/gpt-4o@1"
+        assert record["capacity_source"] == "operator"
+        assert record["requested_output_tokens"] == 1024
+        assert record["provider_input_limit_tokens"] == 127000
+        assert record["tokenizer_family"] == "o200k_base"
+        assert record["counting_mode"] == "exact"
+        assert record["unknown_capabilities"] == ["prompt_cache"]
+        assert record["capacity_fingerprint"] == "abc123"
+
+    def test_absent_capacity_snapshot_does_not_add_fields(self):
+        """Records remain valid when no capacity snapshot is bound."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 0
+        tracker.output_tokens = 0
+        tracker.token_count = 0
+        tracker._context_snapshot = {"tenant_id": "t-1"}
+        tracker._display_name = None
+
+        set_monitoring_capacity_snapshot(None)
+
+        with patch(
+            "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+            return_value=mock_buffer,
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert "capacity_fingerprint" not in record
+        assert "provider_input_limit_tokens" not in record
 
 
 # =========================================================================
@@ -1817,6 +1919,7 @@ class TestEnqueueClientMonitoringRecord:
         _mod._monitoring_conversation_id.set(99)
         _mod._monitoring_operation.set("title_generation")
         _mod._monitoring_display_name.set("MyModel")
+        _mod._monitoring_capacity_snapshot.set(None)
 
     def test_full_record_fields(self):
         mock_buffer = MagicMock()
@@ -1852,6 +1955,37 @@ class TestEnqueueClientMonitoringRecord:
         assert record["agent_id"] == 42
         assert record["conversation_id"] == 99
         assert record["display_name"] == "MyModel"
+
+    def test_client_record_includes_capacity_snapshot_fields(self):
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+        set_monitoring_capacity_snapshot({
+            "capacity_source": "profile",
+            "requested_output_tokens": 2048,
+            "provider_input_limit_tokens": 30000,
+            "counting_mode": "estimated",
+            "capacity_fingerprint": "def456",
+        })
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            _enqueue_client_monitoring_record(
+                model_name="test-model",
+                model_type="llm",
+                request_duration_ms=500,
+                ttft_ms=0,
+                input_tokens=10,
+                output_tokens=20,
+                total_tokens=30,
+                generation_rate=0.0,
+                is_streaming=False,
+            )
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["capacity_source"] == "profile"
+        assert record["requested_output_tokens"] == 2048
+        assert record["provider_input_limit_tokens"] == 30000
+        assert record["counting_mode"] == "estimated"
+        assert record["capacity_fingerprint"] == "def456"
 
     def test_error_record(self):
         mock_buffer = MagicMock()

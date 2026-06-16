@@ -46,10 +46,11 @@ not duplicate or weaken the delegated contract.
 | [W10](W10_Unified_Context_and_Memory_Policy.md) | Unified Context and Memory Policy | Context Shaping and Compaction | W5-W6 contracts |
 | [W11](W11_Progressive_Component_Reduction.md) | Progressive Component Reduction | Context Shaping and Compaction | W10 |
 | [W12](W12_Context_Pollution_and_Large_Output_Control.md) | Context Pollution and Large Output Control | Context Shaping and Compaction | W5, W10, W11 |
-| [W13](W13_Reliable_Governed_Compaction.md) | Reliable Governed Compaction | Context Shaping and Compaction | W2, W3, W7 |
+| [W13](W13_Reliable_Governed_Compaction.md) | Reliable Governed Compaction | Context Shaping and Compaction | W2, W3, W5 |
 | [W14](W14_Trust_Provenance_Redaction_and_Retention.md) | Trust, Provenance, Redaction, and Retention | Governance and Privacy | Governs W5-W12 |
 | [W15](W15_Context_Quality_and_Reliability_SLOs.md) | Context Quality and Reliability SLOs | Quality and Efficiency | Measures all workstreams |
 | [W16](W16_Prompt_Cache_Aware_Assembly.md) | Prompt-Cache-Aware Assembly | Quality and Efficiency | W3, W10, W11 |
+| [W17](W17_Capacity_Suggestion_On_Model_Add.md) | Capacity Suggestion on Model Add | Model Capacity and Request Safety | W1 catalog; resolves CM-031 |
 
 ## Shared Engineering Rules
 
