@@ -199,10 +199,11 @@ async def run_chat(
         description="User input to send to the agent.",
         examples=["Summarize the uploaded report and list the key risks."],
     ),
-    attachments: Optional[list[str]] = Body(
+    attachments: Optional[list] = Body(
         None,
         embed=True,
-        description="S3 URLs returned by the attachment upload API.",
+        description="Attachments for the chat. Can be either a list of S3 URL strings"
+                    "or a list of attachment objects with full metadata.",
         examples=[["s3://nexent/attachments/user123/20260609_report.pdf"]],
     ),
     meta_data: Optional[Dict[str, Any]] = Body(
