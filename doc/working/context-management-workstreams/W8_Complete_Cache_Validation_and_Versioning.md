@@ -12,20 +12,23 @@ W8 owns canonical fingerprints, validation, and invalidation delivery. It does n
 create projections or decide policy content; W6, W10, and W14 provide
 the versioned inputs that W8 validates.
 
-Replace boundary-only fingerprints in `sdk/nexent/core/agents/agent_context.py` with a
-complete canonical fingerprint. A derived view or cached projection is valid only when all inputs match:
+Replace boundary-only fingerprints in `sdk/nexent/core/agents/agent_context.py` with
+metadata-based validation. A derived view or cached projection is valid only when all
+metadata inputs match:
 
-- Hash of the complete covered event range using canonical serialization.
 - W5 session identity and covered start/end event sequence.
+- `partial_after_erasure` flag (one-time mark for physical erasure propagation).
 - Context policy and memory policy versions.
 - Summary prompt and output schema versions.
 - Agent/configuration version and model ID.
 - Tokenizer family/version and capacity-calculation version.
 - Projection/representation schema versions.
 - Relevant redaction, authority, and lifecycle-state versions.
+- Event count since last compression snapshot (for W6 materialized projections).
 
-Use an explicit hash algorithm and canonical JSON rules. Store components separately
-as well as in one final digest so invalidation reasons remain observable.
+Content hashing (traversing event payloads to compute a digest) is removed from W8.
+Storage-layer integrity is handled by database checksums, not by W8. Store validation
+components separately so invalidation reasons remain observable. **Finding:** CM-015.
 
 ## Invalidation Rules
 
@@ -54,15 +57,18 @@ fingerprint components plus stable reasons. Required invalid reasons include
 `source_erased`.
 Validation errors never degrade to cache hits.
 
-## Canonicalization and Invalidation Delivery
+## Validation and Invalidation Delivery
 
-- Define one canonical JSON/byte serialization, hash algorithm, and registry version.
-- Store component digests separately so operators can explain invalidation.
+- Define one version registry and validation component schema.
+- Store validation components separately so operators can explain invalidation.
 - Direct read paths must call the centralized validator; bypasses are test failures.
 - Deletion/redaction/policy changes publish targeted invalidation work with durable
   retries; lazy validation remains the correctness backstop.
 - An authorized W14 deletion tombstone makes matching read candidates immediately
   invalid even while destination-specific physical deletion remains in progress.
+- Physical erasure propagates through the one-time `partial_after_erasure` flag on
+  `agent_session`; all historical compression snapshots are invalidated without
+  per-snapshot hash computation. **Finding:** CM-015.
 
 ## Required Deliverables and Phases
 
@@ -73,13 +79,19 @@ Validation errors never degrade to cache hits.
 
 ## Implementation Plan
 
-1. Define canonical serialization and version registry in an ADR.
-2. Implement streaming complete-prefix hashing over W5 events.
-3. Extend derived-state records with digest inputs and invalidation reason.
-4. Centralize validation in `CheckpointValidator`; callers cannot bypass it.
+1. Define version registry and validation component schema in an ADR.
+2. Implement O(1) metadata-based validation:
+   - compression.snapshot: `partial_after_erasure` flag + version field comparison
+     (policy_version, model_version, projection_version).
+   - W6 materialized projections: snapshot validity + event count since snapshot +
+     version fields.
+   - Physical erasure: one-time `partial_after_erasure` flag that invalidates all
+     historical snapshots without per-snapshot hash computation.
+3. Extend derived-state records with validation inputs and invalidation reason.
+4. Centralize validation in `DerivedStateValidator`; callers cannot bypass it.
 5. Add targeted invalidation events/jobs for deletion, redaction, and policy changes.
 6. Emit hit, miss, invalid, rebuild, and reason-code metrics.
-7. Provide an operator tool to explain why a checkpoint was accepted or rejected.
+7. Provide an operator tool to explain why derived state was accepted or rejected.
 
 ## Repository Touchpoints
 
