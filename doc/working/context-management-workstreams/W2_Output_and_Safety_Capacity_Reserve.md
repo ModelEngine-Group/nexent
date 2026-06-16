@@ -13,6 +13,10 @@ W3, W10, and W11 consume the resulting budget. SDK/client calculations are advis
 only; the trusted server-side model dispatch boundary resolves or verifies the W2
 snapshot used for production dispatch.
 
+The fingerprint algorithm, override precedence chain, DB column shape, and
+the SDK dispatch assertion are pinned in
+[`ADRs/W2_ADR_Budget_Snapshot_Overrides_and_Dispatch_Enforcement.md`](ADRs/W2_ADR_Budget_Snapshot_Overrides_and_Dispatch_Enforcement.md).
+
 ## Budget Contract
 
 For each request:
@@ -40,8 +44,29 @@ operate without `context_window_tokens` only when its approved profile supplies 
 specific reserve and verifies the relevant behavior.
 
 `requested_output_tokens` is bounded by `max_output_tokens`; it defaults to
-`default_output_reserve_tokens` and may be overridden per agent or request.
-All reserve decisions and their sources are included in request telemetry.
+`default_output_reserve_tokens` and may be overridden through two distinct
+contracts, both in W2 release-one scope:
+
+- **Per-agent override:** persisted in a new
+  `ag_tenant_agent_t.requested_output_tokens` nullable positive integer column;
+  the agent-edit UI exposes a numeric input whose placeholder shows the
+  resolved model-level default. The column value is validated against
+  `max_output_tokens` from the resolved W1 capacity at save time.
+- **Per-request override:** an optional positive integer field on the
+  agent-run API request body. Same `max_output_tokens` validation applies.
+  Documented in OpenAPI; no frontend control is added for it.
+
+Per-tool-call overrides, runtime negotiation, and policy-driven dynamic
+ceilings are out of scope. All reserve decisions and their sources are
+included in request telemetry. **Findings:** CM-028.
+
+Snapshots are per-model. Every model dispatch — primary run, compaction
+(W13), summary, and any future secondary-model dispatch — invokes its own
+W1→W2 resolution chain keyed on that model's identity. Snapshots are never
+shared across model identities; reusing the main run's snapshot for a
+different compaction model would misjudge the compaction budget. W13 must
+invoke the W1→W2 chain with the compaction model's `model_record_t` as
+input. **Findings:** CM-029.
 
 ## Policy Model
 
@@ -53,7 +78,10 @@ operator overrides:
   tokenizer, reasoning-window, or provider-overhead behavior is unknown.
 - Approved profile-specific reserve: may replace the 10% uncertainty reserve only when
   the relevant behavior is verified in the selected W1 capability profile.
-- Soft-limit ratio: point at which proactive compaction begins.
+- Soft-limit ratio: point at which proactive compaction begins. Default
+  `soft_limit_ratio = 0.8` of the safe input budget. Operators may override
+  per-tenant via `tenant_config_t`; per-agent and per-request runtime
+  overrides of the ratio are out of scope in release one. **Findings:** CM-027.
 
 Invalid or negative remaining budgets fail configuration before a model call. Requests
 may not lower the configured default output reserve in release one. A request may
@@ -75,9 +103,13 @@ calculate_safe_input_budget(capacity_snapshot, reserve_policy, request_overrides
 ```
 
 `CapacityReservePolicy` is an immutable/frozen SDK model containing
-`soft_limit_ratio` as a decimal in `(0, 1]` and an optional non-negative
-`approved_profile_reserve_tokens`. `request_overrides` contains only an optional
-positive `requested_output_tokens`.
+`soft_limit_ratio` as a decimal in `(0, 1]` (resolved from per-tenant
+configuration; default `0.8` when no tenant override is set — see CM-027)
+and an optional non-negative `approved_profile_reserve_tokens`.
+`request_overrides` carries only an optional positive
+`requested_output_tokens` from the per-request API field; the per-agent
+column override is resolved into the effective `requested_output_tokens`
+before the calculator is invoked (see CM-028).
 
 `SafeInputBudgetSnapshot` is immutable/frozen and contains the W1 capacity fingerprint,
 provider hard input limit, requested output, uncertainty or approved profile-specific
@@ -109,7 +141,14 @@ Typed failures include `invalid_reserve_policy`, `requested_output_exceeds_capac
 2. Implement a pure `SafeInputBudgetCalculator` using W1 capacity snapshots.
 3. Resolve per-request output allowance before context assembly begins.
 4. Replace `token_threshold` usage with the calculated soft and hard input budgets.
-5. Pass requested output tokens to the provider call consistently.
+5. Enforce CM-013 trusted-dispatch at the provider call: the trusted
+   server-side dispatch wrapper asserts that the `max_tokens` value sent to
+   `chat.completions.create` equals the W2 snapshot's
+   `requested_output_tokens`. Caller-supplied `max_tokens` kwargs are
+   rejected or coerced to the snapshot value before the provider call. The
+   assertion lives in the SDK or backend dispatch wrapper, not in callers.
+   This step is the CM-013 enforcement contract, not a rename of the
+   existing parameter. **Findings:** CM-013, CM-030.
 6. Emit budget snapshots to logs, traces, and monitoring.
 7. Surface an operator warning whenever the unified 10% uncertainty reserve is active.
 8. Require the trusted server-side dispatch path to resolve or verify the immutable
@@ -136,7 +175,12 @@ Typed failures include `invalid_reserve_policy`, `requested_output_exceeds_capac
 - `sdk/nexent/core/utils/token_estimation.py`
 - `backend/agents/create_agent_info.py`
 - `backend/utils/monitoring.py`
-- Agent/model configuration APIs and frontend forms
+- `backend/database/db_models.py` and a versioned `docker/sql/` migration
+  adding `ag_tenant_agent_t.requested_output_tokens` (CM-028)
+- `tenant_config_t` reader used by the policy resolver to source the
+  `soft_limit_ratio` override (CM-027)
+- Agent/model configuration APIs and frontend forms (agent-edit numeric
+  input for per-agent output reserve)
 
 ## Tests
 
@@ -151,6 +195,17 @@ Typed failures include `invalid_reserve_policy`, `requested_output_exceeds_capac
 - Telemetry tests verify every request records reserve values and source.
 - Negative integration tests prove SDK/client-supplied or locally recalculated budgets
   cannot expand the limits enforced at production dispatch.
+- Negative dispatch tests prove a caller-supplied `max_tokens` kwarg into the
+  SDK chat-completion path is rejected or coerced to the W2 snapshot value
+  before reaching `chat.completions.create`. **Findings:** CM-030.
+- Tests cover both override paths from CM-028: a per-agent
+  `ag_tenant_agent_t.requested_output_tokens` value resolves into the
+  snapshot when no API override is present, and a per-request API body
+  value takes precedence when supplied; both reject values above
+  `max_output_tokens`.
+- Cross-model tests prove a secondary-model call (e.g., W13 compaction with
+  a distinct `model_record_t`) produces its own W1/W2 snapshots and does
+  not inherit the main run's snapshots. **Findings:** CM-029.
 
 ## Rollout and Definition of Done
 

@@ -455,7 +455,12 @@ Core invariants:
 **Solution:**
 
 - Use the capacity formula in section 2.1.
-- Support per-agent and per-request output reserve overrides.
+- Support per-agent and per-request output reserve overrides through two
+  distinct contracts: a new `ag_tenant_agent_t.requested_output_tokens`
+  column with an agent-edit UI numeric input, and an optional
+  `requested_output_tokens` integer field on the agent-run API body
+  documented in OpenAPI. Both validate against `max_output_tokens` from
+  the resolved W1 capacity.
 - When required tokenizer, reasoning-window, or provider-overhead behavior is unknown,
   use one unified uncertainty reserve equal to 10% of `context_window_tokens`, in
   addition to output reserve. Do not separately configure unknown-behavior reserves in
@@ -466,9 +471,22 @@ Core invariants:
 - In release one, request-level output overrides may only increase output reservation
   up to `max_output_tokens`. Lowering the configured default uses existing authorized
   model/agent configuration; no new override permission system is required.
-- Trigger compaction before the hard boundary using a configurable soft limit.
+- Trigger compaction before the hard boundary using a configurable soft
+  limit. Default `soft_limit_ratio = 0.8`; operators may override
+  per-tenant via `tenant_config_t`. Per-agent and per-request ratio
+  overrides are out of scope in release one.
+- Snapshots are per-model. Every dispatch (primary, compaction, summary,
+  any future secondary-model call) runs its own W1→W2 resolution chain
+  keyed on that model's identity; W13 invokes the chain with the
+  compaction model's `model_record_t` as input rather than inheriting the
+  main run's snapshot.
 - Treat SDK/client budgets as advisory only; the trusted server-side dispatch path
   resolves or verifies the enforced budget and rejects caller-expanded limits.
+  At the provider call, the trusted dispatch wrapper asserts that the
+  `max_tokens` value sent to `chat.completions.create` equals the W2
+  snapshot's `requested_output_tokens`; caller-supplied `max_tokens`
+  kwargs are rejected or coerced to the snapshot value before the
+  provider call.
 
 **Proof and benefit:** Reduces overflow risk and avoids starving the model's answer generation.
 
@@ -476,6 +494,8 @@ Core invariants:
 
 - Every request reports and honors its reserved capacities.
 - Long-answer tasks retain the configured output allowance.
+
+**Findings:** CM-013, CM-016, CM-027-CM-030.
 
 <a id="w3"></a>
 
