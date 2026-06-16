@@ -54,6 +54,12 @@ stable-prefix fingerprint, full-prompt fingerprint, and final prefix-change mani
 from the exact payload accepted for dispatch. W16 never fingerprints a pre-fit payload,
 dispatches requests, or changes authority/selection decisions.
 
+## Subagent Cache Optimization
+
+Subagent sessions apply W16 cache optimization independently using their own agent
+configuration. The subagent's cache partition plan is scoped to the subagent's
+session and does not interact with the parent session's cache optimization.
+
 ## Canonicalization and Provider Rules
 
 - Each provider adapter declares supported cache boundaries/directives and versioned
@@ -98,6 +104,8 @@ dispatches requests, or changes authority/selection decisions.
   payload and the trusted dispatch path does not modify prompt/cache content.
 - Change tests attribute every prefix invalidation to a known reason.
 - Repeated-turn benchmarks show measurable cached-input reuse on supported providers.
+  Performance baseline tests for repeated-turn workloads are lower priority (after
+  functional implementation is stable).
 - Regression tests prove authority ordering, privacy, and fit remain unchanged.
 - Provider-agnostic tests work when cache metrics are unavailable.
 - Unknown-cache-capability tests prove no cache directive is emitted and proxy prefix
