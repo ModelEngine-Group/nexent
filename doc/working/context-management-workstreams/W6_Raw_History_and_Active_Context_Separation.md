@@ -174,6 +174,18 @@ event-schema upcasters independently. W5 events outside the approved `current +
 previous` compatibility window fail with `unsupported_event_schema`; W6 does not guess,
 silently exclude, or rewrite them.
 
+### Projection Implementation Priority
+
+Not all projections are required for Release 1. Prioritize by consumer dependency:
+
+- **Release 1 required:** `chat_projection` (UI compatibility), `resume_projection`
+  (restart recovery), `model_context_projection` (W10/W3 input).
+- **Release 1 optional:** `working_memory_projection` (can defer if compression
+  snapshots carry Working Memory directly), `memory_candidate_projection` (depends
+  on W10 Memory Policy Engine), `audit_projection` (can implement after core
+  projections are stable).
+- **Deferred:** `memory_projection` (compatibility flow, low priority).
+
 ## Required Projections
 
 ### `chat_projection`
@@ -310,6 +322,12 @@ Rules:
 - Include stable reason codes for unavailable, deleted, or physically redacted detail.
 
 ## `ContextItem` Contract
+
+Not all projections produce full `ContextItem` objects. Only `model_context_projection`
+and `working_memory_projection` produce complete `ContextItem` candidates with all
+fields. Other projections (`chat_projection`, `resume_projection`, `audit_projection`)
+produce simpler purpose-specific record structures without the full `ContextItem`
+schema.
 
 Use a stable item identity so an item can be selected, reduced, checkpointed, inspected,
 and rebuilt without relying on array position.
@@ -469,13 +487,19 @@ At minimum define:
 2. Build shadow comparison with current conversation tables and `AgentRequest.history`.
 3. Integrate W5 compatibility projector using source-event idempotency.
 4. Define/import the pre-W5 legacy-history boundary.
-5. Cut over compatibility writes only after mismatch targets pass.
+5. Cut over compatibility writes only after mismatch targets pass. "Zero semantic
+   mismatch" means: message order is identical, message content is identical,
+   attachment/citation references match, and search sources match. Allowed
+   differences: `message_index` derivation source (event order vs. history length)
+   and any explicitly approved UI behavior changes.
 
 ### Phase 3: Resumable Runtime State
 
 1. Implement `working_memory_projection` and its conflict/supersession rules.
 2. Implement `resume_projection`, including interrupted tool/run handling.
-3. Integrate W5 `compression.snapshot` load/replay and W8 validation.
+3. Integrate W5 `compression.snapshot` load/replay: after loading a snapshot, call
+   W8 `validate_derived_state(snapshot, current_events)` to confirm validity before
+   using the snapshot payload for state reconstruction.
 4. Change durable run preparation to use backend projections instead of caller history.
 5. Validate restart and cross-worker continuation.
 
@@ -486,10 +510,13 @@ At minimum define:
 3. Implement `memory_candidate_projection` and `memory_projection`.
 4. Implement authorized `audit_projection`.
 5. Add materialization only for measured bottlenecks.
+6. Performance tests measure projection latency for sessions with 100, 1000, and
+   10000 events to establish baselines before production deployment.
 
 ## Repository Touchpoints
 
-- New backend projection registry, event reader, lineage resolver, and projector modules
+- New backend projection registry (projection registration, reason-code registry,
+  event-to-projection mapping), event reader, lineage resolver, and projector modules
 - W5 event-log repository and compatibility projector
 - W5 compression snapshot events and W8 validator
 - `backend/services/conversation_management_service.py`
