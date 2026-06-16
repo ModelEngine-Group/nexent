@@ -71,6 +71,13 @@ confirmation, target scope/destination, budgets, and stable reasons. Required fa
 include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible`,
 `authority_conflict_unresolved`, and `memory_operation_denied`.
 
+## Subagent Policy Independence
+
+Subagent sessions resolve their own W10 policy based on their agent configuration.
+The parent agent's policy does not apply to the subagent's internal context selection
+or memory operations. When a subagent returns its final answer to the parent, the
+parent's W10 policy governs how that result is integrated into the parent's context.
+
 ## Merge and Bypass Rules
 
 - Merge precedence is platform, tenant, agent, user configuration, then permitted
@@ -100,7 +107,8 @@ include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible
    the Memory Policy Engine.
 5. Add global cross-scope retrieval resolution.
 6. Emit policy decisions and expose authorized inspection through W9.
-7. Remove or deprecate runtime paths that bypass policy.
+7. Mark runtime paths that bypass policy as deprecated with a notice that they will
+   be removed in the next version.
 8. Enforce server-resolved policy decisions at model dispatch and governed persistence
    boundaries.
 
@@ -123,5 +131,7 @@ include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible
 - Negative integration tests prove caller-supplied, stale, or mismatched decisions
   cannot authorize dispatch or persistence.
 - Invalid policy fixtures fail before run start with actionable errors.
+- Performance baseline tests measure policy resolution and context selection latency
+  to ensure W10 does not become a bottleneck on the model request hot path.
 - W10 is done when one versioned policy explains and enforces every context selection
   and memory lifecycle decision.
