@@ -723,6 +723,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
     version_no INTEGER DEFAULT 0 NOT NULL,
+    selected_agent_version_no INTEGER,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -755,6 +756,7 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_id IS 'Selected agen
 COMMENT ON COLUMN nexent.ag_agent_relation_t.parent_agent_id IS 'Parent agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.tenant_id IS 'Tenant ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_version_no IS 'Pinned version of selected_agent_id. NULL = use child current published version at runtime (legacy/draft).';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.created_by IS 'Creator ID, audit field';
@@ -1268,7 +1270,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     config_schemas JSON,
     config_values JSON,
     source VARCHAR(30) DEFAULT 'official',
-    tenant_id VARCHAR(100),
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
