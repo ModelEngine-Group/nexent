@@ -23,8 +23,43 @@ class ContextManagerConfig:
     keep_recent_pairs: int = 2
     max_chunk_count: int = 0
     max_memory_step_length: int = 2000
+
+    # === Offload Settings ===
+    # Archives oversized step-render segments to an in-memory OffloadStore
+    # so the LLM still sees compact context.  Requires **both** enable_reload
+    # AND per_step_render_limit > 0.  The agent retrieves archived content
+    # via the ``reload_original_context_messages`` tool.
+
+    enable_reload: bool = False
+    """Create an :class:`OffloadStore` and inject the reload tool into the agent.
+
+    Offload is only *triggered* when ``per_step_render_limit > 0``.
+    """
+
     per_step_render_limit: int = 0
-    """Per-step character limit when rendering action steps. 0 = no limit."""
+    """Character threshold triggering offload **during compression**.
+
+    Only applies to old steps outside the ``keep_recent`` window — recent
+    steps are never offloaded.  When a step's rendered text exceeds this
+    limit, the full content is archived and replaced with an
+    ``[[OFFLOAD:handle:desc]]`` marker.  Unlike ``max_observation_length``
+    this is **reversible**: the agent can reload archived content on demand.
+
+    Set to 0 to disable (the default).  Suggested: 3000–10000.
+    """
+
+    max_offload_entries: int = 200
+    """Max entries in the :class:`OffloadStore`.  Oldest evicted (FIFO) when full."""
+
+    max_offload_entry_chars: int = 30000
+    """Max characters per offload entry.  Oversized content is rejected by the
+    store.  Safety cap against a single giant observation dominating memory.
+    """
+
+    max_offload_total_chars: int = 2_000_000
+    """Cumulative character budget across all entries.  Oldest evicted (FIFO)
+    when exceeded.  Together with ``max_offload_entries`` bounds total memory.
+    """
 
     summary_system_prompt: str = (
         "You are a conversation summarization assistant. Compress the following "
@@ -61,23 +96,12 @@ class ContextManagerConfig:
     estimated_chunk_summary_tokens: int = 400
     chars_per_token: float = 1.5
 
-    # Pre-truncate single observations (model/tool outputs) longer than this
-    # character limit at execute_action time, before they reach memory.
-    # 0 = disabled (production default). Only takes effect when ``enabled``
-    # is True, so production callers that do not opt in see no behaviour
-    # change.
+    # Pre-truncate observations at source (before memory), keeping head+tail
+    # around a truncation marker.  This is per-step, irreversible sanitation —
+    # not a compression mechanism.  For reversible archiving of large content,
+    # use offload (``per_step_render_limit``) instead.
+    # 0 = disabled (default).  Takes effect only when ``enabled`` is True.
     max_observation_length: int = 0
-
-    # === Offload Settings (feat branch) ===
-    enable_reload: bool = False
-    max_offload_entries: int = 200
-    max_offload_entry_chars: int = 30000
-    """单条 offload 原始内容的最大字符数。超过此限制的内容即使 enable_reload=True
-    也不会完整存档，只保留前 N 字符。防止超大 observation（如百万行日志）爆内存。
-    """
-    max_offload_total_chars: int = 2_000_000
-    """OffloadStore 中所有条目累计字符数上限。超过时驱逐最早的条目。
-    """
 
     # === NEW: Strategy Selection ===
     strategy: StrategyType = "token_budget"
