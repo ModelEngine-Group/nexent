@@ -175,7 +175,10 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Check if current route has access
   const cleanPath = getEffectiveRoutePath(pathname);
-  const hasAccess = accessibleRoutes.includes(cleanPath);
+  // Support prefix matching: /space/agents/1/evaluate matches /space
+  const hasAccess =
+    accessibleRoutes.includes(cleanPath) ||
+    accessibleRoutes.some((route) => cleanPath.startsWith(route + "/"));
 
   // Route guard
   useLayoutEffect(() => {

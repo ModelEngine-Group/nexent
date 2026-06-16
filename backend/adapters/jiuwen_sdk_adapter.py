@@ -1,13 +1,13 @@
 """
 openjiuwen SDK adapter for Nexent.
 
-This module must be imported lazily (not at module load time) because
-openjiuwen 0.1.13 has circular import bugs in its __init__.py files that
-prevent the SDK from loading unless we bypass them.
+This module works around circular import bugs in openjiuwen 0.1.13 by:
+  1. Stubbing react_agent_evolve (causes the circular import)
+  2. Installing a meta-path finder that blocks broken __init__.py files
+  3. All of the above runs at MODULE LOAD TIME (before openjiuwen imports)
 
-Import flow:
-  backend/adapters/__init__.py -> try/except -> JiuwenSDKAdapter = None
-  -> when needed: _install_jiuwen_bypasser() -> openjiuwen imports work
+The adapters/__init__.py wraps the import in try/except so the server
+starts even when openjiuwen is not installed.
 """
 import asyncio
 import importlib.abc
@@ -19,36 +19,71 @@ import sys
 import types
 from typing import Any, List, Literal, Optional, Tuple
 
-from openjiuwen.dev_tools.tune.base import Case as _Case, EvaluatedCase as _EvaluatedCase
-
-
-def _case_from_inputs_label(inputs: dict, label: dict) -> "_Case":
-    # Keep stable keys for schema; allow extra fields to exist.
-    return _Case(inputs=inputs, label=label)
-
-
-def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
-    """Try to normalize Jiuwen EvaluatedCase into (score, reason)."""
-    try:
-        score = float(getattr(evaluated, "score", 0.0) or 0.0)
-    except Exception:
-        score = 0.0
-    reason = getattr(evaluated, "reason", "") or ""
-    return score, str(reason)
-
-logger = logging.getLogger("jiuwen_adapter")
-
-from adapters.exception import JiuwenSDKError
-
-
 # ----------------------------------------------------------------------
-# Circular import bypasser for openjiuwen 0.1.13
-#
-# openjiuwen has broken __init__.py files that create circular import chains:
-#   tune/__init__.py -> tune.optimizer -> core.operator -> agent_evolving -> ...
-# This bypasser prevents those __init__.py files from executing while still
-# allowing regular .py submodule files to load normally.
+# MUST install bypasser + stubs before any openjiuwen import.
+# The module-level `from openjiuwen.dev_tools.tune.base import ...` below
+# triggers the entire circular import chain.  Installing the bypasser here
+# (before that line executes) breaks the cycle.
 # ----------------------------------------------------------------------
+
+# Stub react_agent_evolve so single_agent.__init__.py can import it without
+# hitting the circular core.operator dependency.
+if "openjiuwen.core.single_agent.agents.react_agent_evolve" not in sys.modules:
+    _stub = types.ModuleType("openjiuwen.core.single_agent.agents.react_agent_evolve")
+    _stub.__file__ = "<bypasser stub>"
+
+    # Provide a dummy ReActAgentEvolve class.  The real one lives in the
+    # actual react_agent_evolve.py which we cannot load at this stage
+    # because it imports ToolCallOperator from core.operator (still blocked).
+    # The stub class satisfies the import in single_agent.__init__.py.
+    class _DummyReActAgentEvolve:  # noqa: N801
+        pass
+
+    _stub.ReActAgentEvolve = _DummyReActAgentEvolve
+    _stub.__all__ = ["ReActAgentEvolve"]
+    sys.modules["openjiuwen.core.single_agent.agents.react_agent_evolve"] = _stub
+
+# NOTE: do NOT stub openjiuwen.core.single_agent.  Its real __init__.py must
+# run so that `from .schema.agent_card import AgentCard` and the other
+# relative submodule imports resolve correctly.  We only need react_agent_evolve
+# stubbed (its real file imports ToolCallOperator from core.operator, which
+# the bypasser below blocks).
+
+# Stub missing optional dependencies before openjiuwen import chain reaches them
+for _name, _attrs in [
+    ("pymilvus", {"is_successful": lambda *a, **kw: True}),
+    ("dashscope", {}),
+    ("pdfplumber", {}),
+]:
+    if _name not in sys.modules:
+        _mod = types.ModuleType(_name)
+        _mod.__path__ = []
+        for _k, _v in _attrs.items():
+            setattr(_mod, _k, _v)
+        sys.modules[_name] = _mod
+
+for _name in ["pymilvus.client", "pymilvus.client.utils"]:
+    if _name not in sys.modules:
+        _m = types.ModuleType(_name)
+        _m.__path__ = []
+        if _name == "pymilvus.client.utils":
+            _m.is_successful = lambda *a, **kw: True
+        sys.modules[_name] = _m
+
+for _name, _attrs in [
+    ("dashscope.api_entities", {}),
+    ("dashscope.api_entities.data", {}),
+    ("dashscope.api_entities.dashscope_response", {"DashScopeAPIResponse": object}),
+    ("dashscope.common", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
+    ("dashscope.common.constants", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
+]:
+    if _name not in sys.modules:
+        _m = types.ModuleType(_name)
+        _m.__path__ = []
+        for _k, _v in _attrs.items():
+            setattr(_m, _k, _v)
+        sys.modules[_name] = _m
+
 _CIRCULAR_CHAIN = {
     "openjiuwen.agent_evolving",
     "openjiuwen.agent_evolving.trainer",
@@ -74,30 +109,24 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
         if not fullname.startswith("openjiuwen") or fullname == "openjiuwen":
             return None
-
         try:
             import openjiuwen as _oj
 
             pkg_root = _oj.__path__[0]
         except ImportError:
             return None
-
         parts = fullname.split(".")[1:]
         file_path = pkg_root
         for p in parts:
             file_path = os.path.join(file_path, p)
-
         is_package = os.path.isdir(file_path)
         if not is_package:
             return None
-
         init_path = os.path.join(file_path, "__init__.py")
         if not os.path.exists(init_path):
             return None
-
         if fullname not in _CIRCULAR_CHAIN:
             return None
-
         spec = importlib.machinery.ModuleSpec(
             fullname, self, is_package=True, origin="<init bypassed>"
         )
@@ -123,7 +152,6 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         import openjiuwen as _oj
         import importlib
 
-        # Prevent recursion when Python scans sys.meta_path for find_distributions etc.
         if name in (
             "find_distributions",
             "find_module",
@@ -135,87 +163,55 @@ class _JiuwenInitBypasser(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             "__spec__",
         ):
             raise AttributeError(name)
-
         pkg_root = _oj.__path__[0]
         parts = self.__name__.split(".")[1:] + [name]
         file_path = pkg_root
         for p in parts:
             file_path = os.path.join(file_path, p)
-
-        # If it's a package directory, import it as a submodule
         if os.path.isdir(file_path) and os.path.exists(os.path.join(file_path, "__init__.py")):
             return importlib.import_module(f"{self.__name__}.{name}")
-        # If it's a regular .py file
         if os.path.exists(file_path + ".py"):
             return importlib.import_module(f"{self.__name__}.{name}")
         raise AttributeError(name)
 
 
-_bypasser_installed = False
+# Install the bypasser into sys.meta_path so it intercepts openjiuwen imports.
+for _finder in sys.meta_path:
+    if isinstance(_finder, _JiuwenInitBypasser):
+        break
+else:
+    sys.meta_path.insert(0, _JiuwenInitBypasser())
+
+# No-op: bypasser is already installed above.
+# Kept for backward compatibility with code that calls it.
+_bypasser_installed = True
 
 
 def _install_jiuwen_bypasser() -> bool:
-    """
-    Install the circular import bypasser for openjiuwen.
-    Returns True if installed, False if already installed or openjiuwen not available.
-    """
-    global _bypasser_installed
-    if _bypasser_installed:
-        return True
-
-    # Stub missing optional dependencies before openjiuwen import chain reaches them
-    _stubbed = [
-        ("pymilvus", {"is_successful": lambda *args, **kwargs: True}),
-        ("dashscope", {}),
-        ("pdfplumber", {}),
-    ]
-    for _name, _attrs in _stubbed:
-        if _name not in sys.modules:
-            _mod = types.ModuleType(_name)
-            for _k, _v in _attrs.items():
-                setattr(_mod, _k, _v)
-            sys.modules[_name] = _mod
-            _mod.__path__ = []
-
-    # Pre-create nested stub modules for pymilvus.client.utils chain
-    if "pymilvus.client" not in sys.modules:
-        _client_mod = types.ModuleType("pymilvus.client")
-        _client_mod.__path__ = []
-        sys.modules["pymilvus.client"] = _client_mod
-    if "pymilvus.client.utils" not in sys.modules:
-        _utils_mod = types.ModuleType("pymilvus.client.utils")
-        _utils_mod.is_successful = lambda *args, **kwargs: True
-        sys.modules["pymilvus.client.utils"] = _utils_mod
-
-    # Stub dashscope sub-modules that may be imported lazily
-    _dashscope_subs = [
-        ("dashscope.api_entities", {}),
-        ("dashscope.api_entities.data", {}),
-        ("dashscope.api_entities.dashscope_response", {"DashScopeAPIResponse": object}),
-        ("dashscope.common", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
-        ("dashscope.common.constants", {"REQUEST_TIMEOUT_KEYWORD": "timeout"}),
-    ]
-    for _name, _attrs in _dashscope_subs:
-        if _name not in sys.modules:
-            _m = types.ModuleType(_name)
-            _m.__path__ = []
-            for _k, _v in _attrs.items():
-                setattr(_m, _k, _v)
-            sys.modules[_name] = _m
-
-    try:
-        import openjiuwen  # noqa: F401
-    except ImportError:
-        return False
-
-    for finder in sys.meta_path:
-        if isinstance(finder, _JiuwenInitBypasser):
-            _bypasser_installed = True
-            return True
-
-    sys.meta_path.insert(0, _JiuwenInitBypasser())
-    _bypasser_installed = True
+    """No-op: bypasser is installed at module load time. Kept for compatibility."""
     return True
+
+# Now safe to import openjiuwen — bypasser is active.
+from openjiuwen.dev_tools.tune.base import Case as _Case, EvaluatedCase as _EvaluatedCase
+
+
+def _case_from_inputs_label(inputs: dict, label: dict) -> "_Case":
+    # Keep stable keys for schema; allow extra fields to exist.
+    return _Case(inputs=inputs, label=label)
+
+
+def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
+    """Try to normalize Jiuwen EvaluatedCase into (score, reason)."""
+    try:
+        score = float(getattr(evaluated, "score", 0.0) or 0.0)
+    except Exception:
+        score = 0.0
+    reason = getattr(evaluated, "reason", "") or ""
+    return score, str(reason)
+
+logger = logging.getLogger("jiuwen_adapter")
+
+from adapters.exception import JiuwenSDKError
 
 
 # ----------------------------------------------------------------------
@@ -597,7 +593,13 @@ class JiuwenSDKAdapter:
         self._ensure_available()
 
         try:
-            _, _, _, _, _, _, _, LLMAsJudgeMetric = _lazy_import_jiuwen()
+            # Import directly instead of via _lazy_import_jiuwen() to avoid
+            # triggering circular import chain in openjiuwen 0.1.13:
+            # agent_evolving -> model.py -> runner -> resource_manager
+            #   -> multi_agent/__init__ -> agent_team -> single_agent (cycle)
+            from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
+                LLMAsJudgeMetric,
+            )
         except Exception as exc:
             raise JiuwenSDKError(f"Failed to import LLMAsJudgeMetric: {exc}") from exc
 

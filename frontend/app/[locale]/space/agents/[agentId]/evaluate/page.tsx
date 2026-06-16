@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "antd";
 import { ArrowLeft } from "lucide-react";
 import { searchAgentInfo } from "@/services/agentConfigService";
-import AgentEvaluationTab from "@/app/[locale]/agents/components/agentInfo/AgentEvaluationTab";
+import AgentEvaluationTab from "@/app/agents/components/agentInfo/AgentEvaluationTab";
 import log from "@/lib/logger";
 
 export default function AgentEvaluatePage() {
