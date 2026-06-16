@@ -782,6 +782,8 @@ def _validate_local_tool(
                 'embedding_model': embedding_model,
                 'rerank_model': rerank_model,
                 'display_name_to_index_map': display_name_to_index_map,
+                # Internal access control: restrict results to specific document paths (path_or_urls)
+                'document_paths': instantiation_params.get('document_paths'),
             }
             tool_instance = tool_class(**params)
         elif tool_name in ["dify_search", "datamate_search"]:

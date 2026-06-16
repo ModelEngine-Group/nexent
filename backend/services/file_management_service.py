@@ -386,13 +386,19 @@ async def upload_to_minio(
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
 
+            # Store original filename before upload
+            original_filename = f.filename or ""
+
             # Upload file
             result = upload_fileobj(
                 file_obj=file_obj,
-                file_name=f.filename or "",
+                file_name=original_filename,
                 prefix=actual_folder,
                 file_size=len(file_content)
             )
+
+            # Preserve original filename in result (upload_fileobj uses it for object name generation)
+            result["original_file_name"] = original_filename
 
             # Reset file pointer for potential re-reading
             await f.seek(0)
@@ -405,6 +411,7 @@ async def upload_to_minio(
             results.append({
                 "success": False,
                 "file_name": f.filename,
+                "original_file_name": f.filename,
                 "error": "An error occurred while processing the file."
             })
     return results
