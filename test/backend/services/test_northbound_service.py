@@ -71,12 +71,15 @@ conversation_db_mod = types.ModuleType("database.conversation_db")
 conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
     {"message_role": "user", "message_content": "Hello"}
 ])
+conversation_db_mod.get_source_searches_by_message = MagicMock(return_value=[])
 sys.modules["database.conversation_db"] = conversation_db_mod
 
 # Mock attachment_db
 attachment_db_mod = types.ModuleType("database.attachment_db")
 attachment_db_mod.build_s3_url = MagicMock(return_value="s3://bucket/file")
 attachment_db_mod.get_file_url = MagicMock(return_value={"success": True, "url": "https://proxy.example/file"})
+attachment_db_mod.get_file_size_from_minio = MagicMock(return_value=0)
+attachment_db_mod._build_mcp_presigned_url = MagicMock(side_effect=lambda url: url)
 sys.modules["database.attachment_db"] = attachment_db_mod
 
 # Mock nexent.multi_modal.utils
@@ -1041,3 +1044,368 @@ class TestNormalizeAttachmentsErrorHandling:
                 )
             assert "Invalid S3 URL format" in str(exc_info.value)
 
+    def test_normalize_attachments_invalid_type(self):
+        """Test that non-list attachments raise ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            ns._normalize_northbound_attachments("s3://bucket/file.txt", "user123", "tenant123")
+        assert "attachments must be an array" in str(exc_info.value)
+
+    def test_normalize_attachments_empty_list(self):
+        """Test that an empty list returns an empty list."""
+        assert ns._normalize_northbound_attachments([], "user123", "tenant123") == []
+
+    def test_normalize_attachments_invalid_url(self):
+        """Test that an unsupported URL scheme raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            ns._normalize_northbound_attachments(["https://example.com/file.txt"], "user123", "tenant123")
+        assert "Invalid attachment format" in str(exc_info.value) or "Invalid S3 URL format" in str(exc_info.value)
+
+    def test_normalize_attachments_empty_string(self):
+        """Test that an empty-string attachment raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            ns._normalize_northbound_attachments([""], "user123", "tenant123")
+        assert "non-empty" in str(exc_info.value)
+
+    def test_normalize_attachments_whitespace_string(self):
+        """Test that a whitespace-only attachment raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            ns._normalize_northbound_attachments(["  "], "user123", "tenant123")
+        assert "non-empty" in str(exc_info.value)
+
+    def test_normalize_attachments_permission_denied(self):
+        """Test that a generic PermissionError is re-raised as-is."""
+        with patch(
+            "backend.services.northbound_service.validate_urls_access",
+            side_effect=PermissionError("Access denied: You don't have permission to access this file")
+        ):
+            with pytest.raises(PermissionError) as exc_info:
+                ns._normalize_northbound_attachments(["s3://bucket/attachments/other/file.txt"], "user123", "tenant123")
+            assert "Access denied" in str(exc_info.value)
+
+    def test_normalize_attachments_s3_url_success(self):
+        """Test successful normalization of an s3:// URL with assertions on collaborator calls."""
+        with patch("backend.services.northbound_service.validate_urls_access") as mock_validate, \
+                patch("backend.services.northbound_service.get_file_url", return_value={
+                    "success": True,
+                    "url": "https://proxy.example/file"
+                }) as mock_get_url, \
+                patch("backend.services.northbound_service.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+            result = ns._normalize_northbound_attachments(
+                ["s3://nexent/attachments/user123/report.pdf"],
+                "user123",
+                "tenant123",
+            )
+
+        mock_validate.assert_called_once_with(
+            ["s3://nexent/attachments/user123/report.pdf"],
+            "user123",
+            "tenant123",
+        )
+        mock_get_url.assert_called_once_with(
+            object_name="attachments/user123/report.pdf",
+            expires=86400,
+        )
+        assert result == [{
+            "name": "report.pdf",
+            "object_name": "attachments/user123/report.pdf",
+            "url": "/nexent/attachments/user123/report.pdf",
+            "type": "file",
+            "size": 0,
+            "description": "",
+            "presigned_url": "https://proxy.example/file",
+        }]
+
+    def test_normalize_attachments_no_presigned_url(self):
+        """Test that presigned_url is omitted when get_file_url returns no url."""
+        with patch("backend.services.northbound_service.validate_urls_access"), \
+                patch("backend.services.northbound_service.get_file_url", return_value={
+                    "success": True,
+                    "url": None
+                }), \
+                patch("backend.services.northbound_service.parse_s3_url", return_value=("nexent", "attachments/user123/report.pdf")):
+            result = ns._normalize_northbound_attachments(
+                ["s3://nexent/attachments/user123/report.pdf"],
+                "user123",
+                "tenant123",
+            )
+        assert "presigned_url" not in result[0]
+
+    def test_normalize_attachments_relative_path(self):
+        """Test support for attachments/xxx.md relative path format."""
+        with patch("backend.services.northbound_service.validate_urls_access") as mock_validate, \
+                patch("backend.services.northbound_service.get_file_url", return_value={
+                    "success": True,
+                    "url": "https://proxy.example/file"
+                }) as mock_get_url:
+            result = ns._normalize_northbound_attachments(
+                ["attachments/user123/report.pdf"],
+                "user123",
+                "tenant123",
+            )
+
+        mock_validate.assert_called_once_with(
+            ["s3://nexent/attachments/user123/report.pdf"],
+            "user123",
+            "tenant123",
+        )
+        mock_get_url.assert_called_once_with(
+            object_name="attachments/user123/report.pdf",
+            expires=86400,
+        )
+        assert result == [{
+            "name": "report.pdf",
+            "object_name": "attachments/user123/report.pdf",
+            "url": "/nexent/attachments/user123/report.pdf",
+            "type": "file",
+            "size": 0,
+            "description": "",
+            "presigned_url": "https://proxy.example/file",
+        }]
+
+    def test_normalize_attachments_nexent_path(self):
+        """Test support for nexent/xxx.md path format."""
+        with patch("backend.services.northbound_service.validate_urls_access") as mock_validate, \
+                patch("backend.services.northbound_service.get_file_url", return_value={
+                    "success": True,
+                    "url": "https://proxy.example/file"
+                }) as mock_get_url:
+            result = ns._normalize_northbound_attachments(
+                ["nexent/attachments/user123/report.pdf"],
+                "user123",
+                "tenant123",
+            )
+
+        mock_validate.assert_called_once_with(
+            ["s3://nexent/nexent/attachments/user123/report.pdf"],
+            "user123",
+            "tenant123",
+        )
+        mock_get_url.assert_called_once_with(
+            object_name="nexent/attachments/user123/report.pdf",
+            expires=86400,
+        )
+        assert result == [{
+            "name": "report.pdf",
+            "object_name": "nexent/attachments/user123/report.pdf",
+            "url": "/nexent/nexent/attachments/user123/report.pdf",
+            "type": "file",
+            "size": 0,
+            "description": "",
+            "presigned_url": "https://proxy.example/file",
+        }]
+
+    def test_normalize_attachments_absolute_path(self):
+        """Test support for /nexent/xxx.md absolute path format."""
+        with patch("backend.services.northbound_service.validate_urls_access") as mock_validate, \
+                patch("backend.services.northbound_service.get_file_url", return_value={
+                    "success": True,
+                    "url": "https://proxy.example/file"
+                }) as mock_get_url:
+            result = ns._normalize_northbound_attachments(
+                ["/nexent/attachments/user123/report.pdf"],
+                "user123",
+                "tenant123",
+            )
+
+        mock_validate.assert_called_once_with(
+            ["s3://nexent/attachments/user123/report.pdf"],
+            "user123",
+            "tenant123",
+        )
+        mock_get_url.assert_called_once_with(
+            object_name="attachments/user123/report.pdf",
+            expires=86400,
+        )
+        assert result == [{
+            "name": "report.pdf",
+            "object_name": "attachments/user123/report.pdf",
+            "url": "/nexent/attachments/user123/report.pdf",
+            "type": "file",
+            "size": 0,
+            "description": "",
+            "presigned_url": "https://proxy.example/file",
+        }]
+
+
+class TestNorthboundFileDescriptorAndUpload:
+    """Tests for _build_northbound_file_descriptor and upload_files_for_northbound."""
+
+    def test_build_file_descriptor_defaults(self):
+        """Test that descriptor uses file_name and includes presigned_url when present."""
+        result = ns._build_northbound_file_descriptor({
+            "file_name": "report.pdf",
+            "object_name": "attachments/user123/report.pdf",
+            "presigned_url": "https://proxy.example/file",
+        })
+
+        assert result["name"] == "report.pdf"
+        assert result["object_name"] == "attachments/user123/report.pdf"
+        assert result["type"] == "file"
+        assert result["size"] == 0
+        assert result["url"] == "/nexent/attachments/user123/report.pdf"
+        assert result["description"] == ""
+        assert result["presigned_url"] == "https://proxy.example/file"
+
+    def test_build_file_descriptor_with_original_filename(self):
+        """Test that original_file_name parameter takes precedence over upload_result file_name."""
+        result = ns._build_northbound_file_descriptor({
+            "file_name": "auto_generated_name.md",
+            "object_name": "attachments/user123/20260101120000_abc123.md",
+            "file_size": 0,
+        }, original_file_name="original-document.pdf", file_size=2048)
+
+        assert result["name"] == "original-document.pdf"
+        assert result["object_name"] == "attachments/user123/20260101120000_abc123.md"
+        assert result["type"] == "file"
+        assert result["size"] == 2048
+        assert result["url"] == "/nexent/attachments/user123/20260101120000_abc123.md"
+        assert result["description"] == ""
+
+    def test_build_file_descriptor_with_type_and_size(self):
+        """Test that explicit file_type and file_size override upload_result values."""
+        result = ns._build_northbound_file_descriptor({
+            "file_name": "image.png",
+            "object_name": "attachments/user123/image.png",
+            "file_size": 1024,
+            "content_type": "image/png",
+        }, file_type="image", file_size=2048)
+
+        assert result["name"] == "image.png"
+        assert result["object_name"] == "attachments/user123/image.png"
+        assert result["type"] == "image"
+        assert result["size"] == 2048
+        assert result["url"] == "/nexent/attachments/user123/image.png"
+        assert result["description"] == ""
+
+    def test_build_file_descriptor_no_filename(self):
+        """Test that basename(object_name) is used when no filename is provided."""
+        result = ns._build_northbound_file_descriptor({
+            "object_name": "attachments/user123/report.pdf",
+        })
+        assert result["name"] == "report.pdf"
+        assert result["object_name"] == "attachments/user123/report.pdf"
+        assert result["type"] == "file"
+
+    def test_build_file_descriptor_no_presigned_url(self):
+        """Test that presigned_url is omitted when not present in upload_result."""
+        result = ns._build_northbound_file_descriptor({
+            "file_name": "report.pdf",
+            "object_name": "attachments/user123/report.pdf",
+        })
+        assert "presigned_url" not in result
+
+    @pytest.mark.asyncio
+    async def test_upload_files_for_northbound_success(self):
+        """Test successful upload returns normalized descriptors and summary counts."""
+        ctx = ns.NorthboundContext(
+            request_id="req-123",
+            tenant_id="tenant123",
+            user_id="user123",
+            authorization="Bearer token",
+            token_id=1,
+        )
+        mock_file = MagicMock()
+        mock_file.filename = "report.pdf"
+
+        with patch(
+            "backend.services.northbound_service.resolve_minio_upload_folder",
+            return_value="attachments/user123"
+        ), patch(
+            "backend.services.northbound_service.upload_to_minio",
+            AsyncMock(return_value=[{
+                "success": True,
+                "file_name": "report.pdf",
+                "object_name": "attachments/user123/report.pdf",
+                "content_type": "application/pdf",
+                "file_size": 1024,
+                "presigned_url": "https://proxy.example/file",
+            }])
+        ):
+            result = await ns.upload_files_for_northbound(ctx, [mock_file])
+
+        assert result["summary"]["uploaded"] == 1
+        assert result["summary"]["failed"] == 0
+        assert result["files"][0]["object_name"] == "attachments/user123/report.pdf"
+        assert result["files"][0]["name"] == "report.pdf"
+        assert result["files"][0]["type"] == "file"
+        assert result["files"][0]["size"] == 1024
+        assert result["files"][0]["url"] == "/nexent/attachments/user123/report.pdf"
+        assert result["files"][0]["description"] == ""
+
+    @pytest.mark.asyncio
+    async def test_upload_files_for_northbound_no_files(self):
+        """Test that uploading with no files raises ValueError."""
+        ctx = ns.NorthboundContext(
+            request_id="req-123",
+            tenant_id="tenant123",
+            user_id="user123",
+            authorization="Bearer token",
+        )
+        with pytest.raises(ValueError) as exc_info:
+            await ns.upload_files_for_northbound(ctx, [])
+        assert "No files in the request" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_upload_files_for_northbound_all_failed(self):
+        """Test that all-failed uploads raise ValueError."""
+        ctx = ns.NorthboundContext(
+            request_id="req-123",
+            tenant_id="tenant123",
+            user_id="user123",
+            authorization="Bearer token",
+        )
+        mock_file = MagicMock()
+        mock_file.filename = "report.pdf"
+
+        with patch(
+            "backend.services.northbound_service.resolve_minio_upload_folder",
+            return_value="attachments/user123"
+        ), patch(
+            "backend.services.northbound_service.upload_to_minio",
+            AsyncMock(return_value=[{
+                "success": False,
+                "file_name": "report.pdf",
+                "object_name": None,
+            }])
+        ):
+            with pytest.raises(ValueError) as exc_info:
+                await ns.upload_files_for_northbound(ctx, [mock_file])
+        assert "No valid files uploaded" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_upload_files_for_northbound_mixed_results(self):
+        """Test that mixed success/failure results are reflected in the summary counts."""
+        ctx = ns.NorthboundContext(
+            request_id="req-123",
+            tenant_id="tenant123",
+            user_id="user123",
+            authorization="Bearer token",
+        )
+        mock_file1 = MagicMock()
+        mock_file1.filename = "report.pdf"
+        mock_file2 = MagicMock()
+        mock_file2.filename = "image.png"
+
+        with patch(
+            "backend.services.northbound_service.resolve_minio_upload_folder",
+            return_value="attachments/user123"
+        ), patch(
+            "backend.services.northbound_service.upload_to_minio",
+            AsyncMock(return_value=[
+                {
+                    "success": True,
+                    "file_name": "report.pdf",
+                    "object_name": "attachments/user123/report.pdf",
+                },
+                {
+                    "success": False,
+                    "file_name": "image.png",
+                    "object_name": None,
+                },
+            ])
+        ):
+            result = await ns.upload_files_for_northbound(ctx, [mock_file1, mock_file2])
+
+        assert result["summary"]["total"] == 2
+        assert result["summary"]["uploaded"] == 1
+        assert result["summary"]["failed"] == 1
