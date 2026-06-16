@@ -517,29 +517,17 @@ class TestIdataAppRouter:
     def test_routes_registered(self):
         """Test that all routes are registered."""
         app = _build_app()
-        routes = [route.path for route in app.routes]
+        paths = app.openapi()["paths"]
 
-        assert "/idata/knowledge-space" in routes
-        assert "/idata/datasets" in routes
+        assert "/idata/knowledge-space" in paths
+        assert "/idata/datasets" in paths
 
     def test_router_methods(self):
         """Test that routes have correct HTTP methods."""
         app = _build_app()
+        paths = app.openapi()["paths"]
 
-        # Find routes by path
-        knowledge_space_route = None
-        datasets_route = None
-
-        for route in app.routes:
-            if hasattr(route, 'path'):
-                if route.path == "/idata/knowledge-space":
-                    knowledge_space_route = route
-                elif route.path == "/idata/datasets":
-                    datasets_route = route
-
-        assert knowledge_space_route is not None
-        assert datasets_route is not None
-
-        # Check HTTP methods
-        assert "GET" in [method for method in knowledge_space_route.methods]
-        assert "GET" in [method for method in datasets_route.methods]
+        assert "/idata/knowledge-space" in paths
+        assert "/idata/datasets" in paths
+        assert "get" in paths["/idata/knowledge-space"]
+        assert "get" in paths["/idata/datasets"]

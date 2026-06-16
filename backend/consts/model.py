@@ -557,6 +557,7 @@ class MessageIdRequest(BaseModel):
 
 class ExportAndImportAgentInfo(BaseModel):
     agent_id: int
+    tenant_id: Optional[str] = None
     name: str
     display_name: Optional[str] = None
     description: str
@@ -591,6 +592,11 @@ class ExportAndImportDataFormat(BaseModel):
     agent_id: int
     agent_info: Dict[str, ExportAndImportAgentInfo]
     mcp_info: List[MCPInfo]
+
+
+class AgentRepositorySnapshot(ExportAndImportDataFormat):
+    """Frozen marketplace snapshot: export format plus optional skill ZIP payloads."""
+    skills: Optional[List["SkillZipEntry"]] = None
 
 
 class SkillZipEntry(BaseModel):
