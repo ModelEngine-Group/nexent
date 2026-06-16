@@ -611,16 +611,39 @@ export const ModelEditDialog = ({
 };
 
 // New: provider config edit dialog (only apiKey and maxTokens)
+interface ProviderConfigInitialCapacity {
+  contextWindowTokens?: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  defaultOutputReserveTokens?: number
+  tokenizerFamily?: string
+  capacitySource?: string
+  capabilityProfileVersion?: string
+}
+
 interface ProviderConfigEditDialogProps {
   isOpen: boolean
   initialApiKey?: string
   initialMaxTokens?: string
   initialTimeoutSeconds?: string
   initialConcurrencyLimit?: string
+  initialCapacity?: ProviderConfigInitialCapacity
+  hideCapacityFields?: boolean  // Suppress capacity controls when caller is a provider-level batch (not per-model)
   modelType?: ModelType
   showApiKeyField?: boolean  // Whether to show API Key field (default: true)
   onClose: () => void
-  onSave: (config: { apiKey?: string; maxTokens: number; timeoutSeconds?: number; concurrencyLimit?: number }) => Promise<void> | void
+  onSave: (config: {
+    apiKey?: string
+    maxTokens: number
+    timeoutSeconds?: number
+    concurrencyLimit?: number
+    contextWindowTokens?: number
+    maxInputTokens?: number
+    maxOutputTokens?: number
+    defaultOutputReserveTokens?: number
+    tokenizerFamily?: string
+    capacitySource?: string
+  }) => Promise<void> | void
 }
 
 export const ProviderConfigEditDialog = ({
@@ -629,6 +652,8 @@ export const ProviderConfigEditDialog = ({
   initialMaxTokens = '',
   initialTimeoutSeconds = '120',
   initialConcurrencyLimit = '',
+  initialCapacity,
+  hideCapacityFields = false,
   modelType,
   showApiKeyField = true,
   onClose,
@@ -639,6 +664,9 @@ export const ProviderConfigEditDialog = ({
   const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens)
   const [timeoutSeconds, setTimeoutSeconds] = useState<string>(initialTimeoutSeconds)
   const [concurrencyLimit, setConcurrencyLimit] = useState<string>(initialConcurrencyLimit)
+  const [capacityForm, setCapacityForm] = useState(
+    initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
+  )
   const [saving, setSaving] = useState<boolean>(false)
 
   useEffect(() => {
@@ -646,10 +674,26 @@ export const ProviderConfigEditDialog = ({
     setMaxTokens(initialMaxTokens)
     setTimeoutSeconds(initialTimeoutSeconds)
     setConcurrencyLimit(initialConcurrencyLimit)
-  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit])
+    setCapacityForm(
+      initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
+    )
+  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit, initialCapacity])
+
+  const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+  const isRerankModel = modelType === MODEL_TYPES.RERANK
+  const isVoiceModel = modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS
+  const supportsCapacityFields =
+    !hideCapacityFields && !isEmbeddingModel && !isRerankModel && !isVoiceModel
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(capacityForm)
+    : null
+
+  const handleCapacityChange = (field: keyof typeof capacityForm, value: string) => {
+    setCapacityForm((prev) => ({ ...prev, [field]: value }))
+  }
 
   const valid = () => {
-    const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
+    if (supportsCapacityFields && capacityValidationError) return false
     return isEmbeddingModel || isValidMaxTokens(maxTokens)
   }
 
@@ -657,22 +701,18 @@ export const ProviderConfigEditDialog = ({
     if (!valid()) return
     try {
       setSaving(true)
-      const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
-      const isRerankModel = modelType === MODEL_TYPES.RERANK
       await onSave({
         ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
         maxTokens: parseMaxTokens(maxTokens) || 0,
         ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
         ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
+        ...(supportsCapacityFields ? buildCapacityPayload(capacityForm) : {}),
       })
       onClose()
     } finally {
       setSaving(false)
     }
   }
-
-  const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
-  const isRerankModel = modelType === MODEL_TYPES.RERANK
 
   return (
     <Modal
@@ -690,6 +730,18 @@ export const ProviderConfigEditDialog = ({
             </label>
             <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
           </div>
+        )}
+        {supportsCapacityFields && (
+          <ModelCapacityFields
+            value={capacityForm}
+            onChange={handleCapacityChange}
+            validationError={capacityValidationError}
+            capacitySource={initialCapacity?.capacitySource}
+            capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
+            showDeprecatedMaxTokensWarning={
+              Boolean(initialMaxTokens) && !initialCapacity?.maxOutputTokens
+            }
+          />
         )}
         {!isEmbeddingModel && (
           <div>

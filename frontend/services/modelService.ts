@@ -439,6 +439,12 @@ export const modelService = {
       maxTokens?: number;
       timeoutSeconds?: number;
       concurrencyLimit?: number;
+      contextWindowTokens?: number;
+      maxInputTokens?: number;
+      maxOutputTokens?: number;
+      defaultOutputReserveTokens?: number;
+      tokenizerFamily?: string;
+      capacitySource?: string;
     }[],
     provider?: string
   ): Promise<any> => {
@@ -453,6 +459,12 @@ export const modelService = {
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
             ...(m.timeoutSeconds !== undefined ? { timeout_seconds: m.timeoutSeconds } : {}),
             ...(m.concurrencyLimit !== undefined ? { concurrency_limit: m.concurrencyLimit } : {}),
+            ...(m.contextWindowTokens !== undefined ? { context_window_tokens: m.contextWindowTokens } : {}),
+            ...(m.maxInputTokens !== undefined ? { max_input_tokens: m.maxInputTokens } : {}),
+            ...(m.maxOutputTokens !== undefined ? { max_output_tokens: m.maxOutputTokens } : {}),
+            ...(m.defaultOutputReserveTokens !== undefined ? { default_output_reserve_tokens: m.defaultOutputReserveTokens } : {}),
+            ...(m.tokenizerFamily !== undefined ? { tokenizer_family: m.tokenizerFamily } : {}),
+            ...(m.capacitySource !== undefined ? { capacity_source: m.capacitySource } : {}),
             ...(provider ? { model_factory: provider } : {}),
           }))
         ),

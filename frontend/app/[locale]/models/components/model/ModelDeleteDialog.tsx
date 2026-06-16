@@ -1551,6 +1551,7 @@ export const ModelDeleteDialog = ({
           )?.concurrencyLimit?.toString() || ""
         )}
         modelType={deletingModelType || undefined}
+        hideCapacityFields={true}
         onSave={handleProviderConfigSave}
       />
 
@@ -1564,6 +1565,21 @@ export const ModelDeleteDialog = ({
         initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || ""}
         initialTimeoutSeconds={selectedSingleModel?.timeout_seconds?.toString() || "120"}
         initialConcurrencyLimit={selectedSingleModel?.concurrency_limit?.toString() || ""}
+        initialCapacity={
+          selectedSingleModel
+            ? {
+                contextWindowTokens: selectedSingleModel.context_window_tokens,
+                maxInputTokens: selectedSingleModel.max_input_tokens,
+                maxOutputTokens: selectedSingleModel.max_output_tokens,
+                defaultOutputReserveTokens:
+                  selectedSingleModel.default_output_reserve_tokens,
+                tokenizerFamily: selectedSingleModel.tokenizer_family,
+                capacitySource: selectedSingleModel.capacity_source,
+                capabilityProfileVersion:
+                  selectedSingleModel.capability_profile_version,
+              }
+            : undefined
+        }
         modelType={deletingModelType || undefined}
         showApiKeyField={false}
         onSave={async (config) => {
@@ -1576,6 +1592,12 @@ export const ModelDeleteDialog = ({
               maxTokens: config.maxTokens,
               timeoutSeconds: config.timeoutSeconds,
               concurrencyLimit: config.concurrencyLimit,
+              contextWindowTokens: config.contextWindowTokens,
+              maxInputTokens: config.maxInputTokens,
+              maxOutputTokens: config.maxOutputTokens,
+              defaultOutputReserveTokens: config.defaultOutputReserveTokens,
+              tokenizerFamily: config.tokenizerFamily,
+              capacitySource: config.capacitySource,
             };
 
             if (config.apiKey) {
@@ -1596,6 +1618,13 @@ export const ModelDeleteDialog = ({
                       max_tokens: config.maxTokens,
                       timeout_seconds: config.timeoutSeconds,
                       concurrency_limit: config.concurrencyLimit,
+                      context_window_tokens: config.contextWindowTokens,
+                      max_input_tokens: config.maxInputTokens,
+                      max_output_tokens: config.maxOutputTokens,
+                      default_output_reserve_tokens:
+                        config.defaultOutputReserveTokens,
+                      tokenizer_family: config.tokenizerFamily,
+                      capacity_source: config.capacitySource,
                     }
                   : model
               )
