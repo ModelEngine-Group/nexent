@@ -18,6 +18,7 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
+from .capacity_budget import SafeInputBudgetSnapshot
 from ..utils.observer import MessageObserver, ProcessType
 
 logger = logging.getLogger("openai_llm")
@@ -106,7 +107,9 @@ ssl_verify=True, model_factory: Optional[str] = None,
             _monitoring_display_name.set(self.display_name)
 
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
-                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
+                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
+                 _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+                 **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
@@ -139,6 +142,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
                     response_format=response_format,
                     tools_to_call_from=tools_to_call_from,
                     _token_tracker=token_tracker,
+                    safe_input_budget_snapshot=safe_input_budget_snapshot,
                     **kwargs,
                 )
 
@@ -198,8 +202,11 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if self.max_output_tokens is not None and "max_tokens" not in completion_kwargs:
             completion_kwargs["max_tokens"] = self.max_output_tokens
 
-        current_request = self.client.chat.completions.create(
-            stream=True, **completion_kwargs)
+        current_request = self._dispatch_chat_completion(
+            safe_input_budget_snapshot=safe_input_budget_snapshot,
+            stream=True,
+            **completion_kwargs,
+        )
 
         # Validate response type: ensure we got a proper iterator, not error strings or dicts
         # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
@@ -341,6 +348,21 @@ ssl_verify=True, model_factory: Optional[str] = None,
             if "context_length_exceeded" in str(e):
                 raise ValueError(f"Token limit exceeded: {str(e)}")
             raise e
+
+    def _dispatch_chat_completion(
+        self,
+        *,
+        safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+        **completion_kwargs: Any,
+    ) -> Any:
+        """Dispatch the OpenAI chat completion request.
+
+        W2 enforcement will assert `max_tokens` against
+        `safe_input_budget_snapshot.requested_output_tokens` here after the ADR
+        is accepted. The skeleton keeps current behavior unchanged.
+        """
+        _ = safe_input_budget_snapshot
+        return self.client.chat.completions.create(**completion_kwargs)
 
     async def check_connectivity(self) -> bool:
         """

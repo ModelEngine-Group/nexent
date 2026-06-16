@@ -2,20 +2,29 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Proposed |
+| Status | Accepted |
 | Owners | Agent runtime squad (W2 lead), AI Agent squad (SDK boundary), Model integration squad (W1 lead, fingerprint compatibility) |
 | Affects | [W2](../W2_Output_and_Safety_Capacity_Reserve.md), [W3](../W3_Guaranteed_Context_Fit.md), [W13](../W13_Reliable_Governed_Compaction.md), [W16](../W16_Prompt_Cache_Aware_Assembly.md) |
 | Related findings | CM-013, CM-027, CM-028, CM-029, CM-030 |
 | Date | 2026-06-16 |
-| Accepted on | Pending |
+| Accepted on | 2026-06-16 |
 | Supersedes | None |
+
+## Signoff Status
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Decision 1: W2 fingerprint field set and algorithm | Confirmed | W3 can use the W2 snapshot fingerprint algorithm and field set for validation. |
+| Decision 2: override precedence chain | Confirmed | The precedence chain and frontend-facing agent override behavior are accepted. |
+| Decision 3: reject-on-mismatch at SDK dispatch | Confirmed | AI Agent squad / SDK boundary owner accepts reject-on-mismatch and SDK-wrapper enforcement. |
+| Type skeleton PR | Completed | Interface/type skeleton work is included in the W2 skeleton commit; calculator body, migration, and dispatch enforcement remain separate W2 implementation work. |
 
 ## Context
 
 The W2 spec body now reflects CM-027–CM-030 (per the 2026-06-16 phase 6
-review and today's spec edits). Three implementation-detail couplings
-remain unpinned, each with two reasonable choices that downstream W3,
-W13, and the SDK boundary will hard-depend on:
+review and today's spec edits). This ADR was opened to pin three
+implementation-detail couplings, each with two reasonable choices that
+downstream W3, W13, and the SDK boundary will hard-depend on:
 
 1. **`SafeInputBudgetSnapshot` field set and fingerprint algorithm.** The
    W1 ADR Decision 3 explicitly defers this to a sibling ADR:
@@ -36,7 +45,9 @@ W13, and the SDK boundary will hard-depend on:
    layer-rule implications.
 
 Resolving the three together avoids spec drift across W2, W3, W13, the
-SDK, and `tenant_config_t` storage.
+SDK, and `tenant_config_t` storage. As of the signoff status above,
+Decisions 1-3 are confirmed, and the type skeleton has been completed.
+This ADR is accepted as of 2026-06-16.
 
 ## Decision 1: SafeInputBudgetSnapshot Field Set and Fingerprint Algorithm
 
@@ -196,7 +207,8 @@ budget enforcement) ships.
 
 **Decision:** *Reject* (not coerce) caller-supplied `max_tokens` kwargs.
 The assertion lives in the *SDK* dispatch wrapper, immediately before the
-`chat.completions.create` call.
+`chat.completions.create` call. **Signoff:** confirmed by AI Agent squad /
+SDK boundary owner.
 
 ### Reject vs coerce: choose reject
 
@@ -211,6 +223,25 @@ CM-013's accepted minimum is to fail closed on "missing, stale, mismatched,
 caller-expanded, or incomplete inputs"; a caller-supplied `max_tokens` is
 exactly the *caller-expanded* case. Coercion would re-introduce the
 silent-pass behavior CM-013 was written to remove.
+
+### Production frontend exposure
+
+In the normal Nexent production flow, end users interact through the web
+frontend and do not directly pass `max_tokens`. A `max_tokens` mismatch is
+therefore expected to indicate an internal caller bug, test/script misuse,
+future integration bug, or an unintended kwargs pass-through inside backend
+or SDK code rather than an ordinary user action.
+
+For ordinary frontend users, the mapped error should be generic and
+actionable without exposing budget internals, for example "model request
+budget configuration is invalid; contact an administrator." The typed
+exception and structured logs/traces must include `snapshot_value`,
+`caller_value`, W1/W2 fingerprints, provider, and model identity for
+operators and developers. External API clients may receive the stable
+reason code `caller_max_tokens_override_forbidden`; exposing the exact
+`requested_output_tokens` value in API error details is allowed only for
+authorized developer/admin-facing diagnostics, not required for the
+consumer chat UI.
 
 ### SDK vs backend wrapper: choose SDK
 
@@ -268,6 +299,11 @@ that catches the residual class of "caller passes a stray kwarg through."
 - **W2 can start implementation once this ADR is accepted.** Its
   remaining dependency is W1 (already accepted) plus W3's trusted-dispatch
   integration, which consumes this ADR's fingerprint contract.
+- **Type skeleton can start before acceptance.** The skeleton may add
+  frozen model types, calculator signatures, and dispatch wrapper
+  signatures while final ADR acceptance is still pending. It must not merge
+  calculator behavior, migrations, or production dispatch enforcement
+  before this ADR is accepted.
 
 ## Open items
 
@@ -284,18 +320,21 @@ decisions that can be made during the type-skeleton PR.
 
 This ADR is accepted when:
 
-- [ ] **Decision 1 fingerprint field set signed off by W3 lead** — W3
+- [x] **Decision 1 fingerprint field set signed off by W3 lead** — W3
       verification code can be written against it.
-- [ ] **Decision 2 precedence chain signed off by W2 lead and frontend
+- [x] **Decision 2 precedence chain signed off by W2 lead and frontend
       reviewer** — the agent-edit UI behavior is unambiguous.
-- [ ] **Decision 3 reject-on-mismatch signed off by AI Agent squad
+- [x] **Decision 3 reject-on-mismatch signed off by AI Agent squad
       (SDK boundary owner)** — `CallerMaxTokensOverrideForbidden` is added
       to the SDK error taxonomy.
-- [ ] **Type skeleton PR merged** adding `SafeInputBudgetSnapshot`,
+- [x] **Type skeleton PR merged or explicitly approved for parallel
+      development** adding `SafeInputBudgetSnapshot`,
       `CapacityReservePolicy`, `SafeInputBudgetCalculator`, and the
-      `_dispatch_chat_completion` wrapper signature into the SDK.
-- [ ] **Status flipped to Accepted.**
+      `_dispatch_chat_completion` wrapper signature into the SDK. Calculator
+      body, migration, and dispatch enforcement are separate W2
+      implementation work.
+- [x] **Status flipped to Accepted.**
 
-Until accepted, W2 implementation should not start coding the calculator
-body or migration; the spec contract is in place but the three coupling
-points above will keep regenerating PR-review churn.
+With this ADR accepted, W2 implementation may proceed. Calculator body,
+migration, and dispatch enforcement should still land as explicit W2
+implementation changes with the tests required by the W2 spec.
