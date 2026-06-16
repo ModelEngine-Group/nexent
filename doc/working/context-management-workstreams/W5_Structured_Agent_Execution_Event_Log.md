@@ -330,20 +330,47 @@ production implementation.
 
 ## Implementation Plan
 
-1. Approve event taxonomy, schemas, ordering, idempotency, and the initial
-   `current + previous` event-evolution ADR before the first production schema upgrade.
+1. Approve architecture decision records (ADRs) before the first production schema upgrade:
+   - **1a. Event taxonomy and schema ADR:** Define event types (user.input,
+     run.started, run.completed, tool.call.started, tool.call.completed,
+     final.answer, error, cancellation, Working Memory update, memory decision,
+     compression.snapshot, lifecycle boundary, etc.), payload schema for each event
+     type, and schema versioning strategy.
+   - **1b. Ordering and idempotency ADR:** Define event_seq as the sole ordering
+     mechanism, idempotency_key usage and uniqueness constraints, run_id and step_id
+     scoping rules, and concurrent writer conflict resolution.
+   - **1c. Event schema evolution ADR:** Define current + previous version support
+     policy, upcaster implementation requirements, and deployment/rollback procedures.
 2. Add database entities, indexes, payload-size limits, and append repository.
-3. Add session resolution and an event writer to agent execution, tool, error,
-   cancellation, and answer paths.
+3. Add session resolution and an event writer to each code path:
+   - **3a. Agent main loop:** Emit `run.started` (with model/agent/config snapshots)
+     and `run.completed`/`run.failed` events in `CoreAgent._run_stream`.
+   - **3b. Tool execution:** Emit `tool.call.started` and `tool.call.completed`
+     events around each tool invocation in the agent step loop.
+   - **3c. Error and cancellation:** Emit `error` events on exceptions and
+     `cancellation` events when `stop_event` is triggered.
+   - **3d. Answer generation:** Emit `final.answer` events when the agent produces
+     its final output.
 4. Add context/memory lifecycle event APIs for W6-W14.
 5. Implement redaction-before-persistence and artifact-reference behavior with W14.
 6. Build compatibility projection into current conversation tables.
-7. Migrate direct/asynchronous conversation saves to event-first projection.
+7. Migrate direct/asynchronous conversation saves to event-first projection in phases:
+   - **7a. Shadow mode:** Dual-write to both W5 events and existing conversation
+     tables; compare outputs and log mismatches without changing behavior.
+   - **7b. Read switch:** Read conversation history from W5 event projections;
+     keep dual-write for safety.
+   - **7c. Write switch:** W5 events become authoritative; conversation table
+     writes happen asynchronously through the compatibility projector.
+   - **7d. Remove direct writes:** Remove legacy direct-write paths to
+     conversation tables; all mutations go through W5 event append first.
 8. Implement replay tooling that reconstructs a run after process restart.
 
 ## Repository Touchpoints
 
-- `backend/database/db_models.py` and new event-log database module
+- `backend/database/db_models.py` and new event-log database module (event
+  repository for index/data append and replay, session repository for
+  agent_session CRUD and sequence allocation, projection outbox for
+  compatibility projection work items)
 - `backend/agents/create_agent_info.py`
 - `backend/apps/agent_app.py`
 - `backend/services/conversation_management_service.py`
@@ -381,6 +408,9 @@ production implementation.
 - Compatibility projection matches existing UI behavior.
 - Migration tests cover conversation-backed, debug/non-conversation, and concurrent-run paths.
 - Redaction fixtures prove secrets and hidden reasoning are absent.
+- Performance baseline tests measure event-append latency, session-sequence lock
+  contention, and projection lag under realistic workloads to establish benchmarks
+  before production deployment.
 - W5 is done when all production run paths emit typed events, replay is deterministic
   enough to rebuild state, ambiguous tool calls cannot auto-resume, and no UI
   transcript is treated as the execution source of truth.
