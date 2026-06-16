@@ -275,10 +275,10 @@ class TestNorthboundBaseApp(unittest.TestCase):
     def test_router_inclusion(self):
         """The main northbound router should be included."""
         from fastapi.routing import APIRoute
-        # 检查是否有任何路由被注册，或者检查挂载的子应用
+        
         routes = [route.path for route in app.routes if isinstance(route, APIRoute)]
         mounted_apps = [route for route in app.routes if hasattr(route, 'app')]
-        # 至少应该有路由或挂载的应用
+        
         self.assertTrue(len(routes) > 0 or len(mounted_apps) > 0, 
                         "No routes or mounted applications found")
 
