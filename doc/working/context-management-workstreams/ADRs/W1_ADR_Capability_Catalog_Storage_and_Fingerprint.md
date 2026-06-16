@@ -473,7 +473,7 @@ These limitations were discovered during end-to-end testing of the W1 stack and
 do not invalidate the ADR. They are recorded here so reviewers of follow-up
 workstreams know the trade-offs that were intentionally left in W1's scope.
 
-### KL-1: Catalog miss for the default `model_factory` (2026-06-15)
+### CM-031 (formerly KL-1): Catalog miss for the default `model_factory` (2026-06-15)
 
 **Observation.** The catalog is keyed on `(provider, model_name)` where
 `provider` is the lower-cased value of `model_record_t.model_factory`. The
@@ -513,7 +513,7 @@ request leaves all capacity columns null.
 workstream rather than shoehorned into a closed ADR. Tracked in
 `doc/working/context-management-workstreams/W17_Capacity_Suggestion_On_Model_Add.md`.
 
-### KL-2: Provider-level "Edit Config" batch dialog does not expose capacity
+### CM-032 (formerly KL-2): Provider-level "Edit Config" batch dialog does not expose capacity
 
 **Observation.** `ProviderConfigEditDialog`, when invoked from the provider-
 level "Edit Config" button (as opposed to the per-model gear icon), applies

@@ -168,13 +168,14 @@ implying they were part of the original review.
 
 | ID | Workstream | Module | Trigger |
 | --- | --- | --- | --- |
-| [W17](#w17) | Capacity suggestion on model add | Model Capacity and Request Safety | W1 ADR Known Limitation KL-1 (catalog miss for default `model_factory`), discovered 2026-06-16 during glm-5.1 end-to-end test |
+| [W17](#w17) | Capacity suggestion on model add | Model Capacity and Request Safety | CM-031 (catalog miss for default `model_factory`), discovered 2026-06-16 during glm-5.1 end-to-end test |
 
-Limitations that triggered post-acceptance additions use the `KL-N` prefix to
-distinguish them from the design-phase `CM-NNN` findings. The over-engineering
-guardrail still applies: a new workstream is only opened when a specific,
-named limitation has been observed and the smallest scoped fix would still
-require a coordinated UX + backend change.
+Post-acceptance limitations share the same `CM-NNN` numbering as design-phase
+findings; entries created after acceptance are appended to the registry with
+the next available number (CM-031 onward). The over-engineering guardrail
+still applies: a new workstream is only opened when a specific, named
+limitation has been observed and the smallest scoped fix would still require
+a coordinated UX + backend change.
 
 ## 2. Improvements Details
 
@@ -518,7 +519,7 @@ Core invariants:
 ##### W17. Capacity Suggestion on Model Add (Post-Acceptance Follow-up)
 
 **Status:** Post-acceptance addition opened 2026-06-16 after end-to-end W1 testing
-surfaced KL-1 (catalog miss for the default `model_factory`). Not part of the
+surfaced CM-031 (catalog miss for the default `model_factory`). Not part of the
 W1-W16 design-freeze scope. See `W17_Capacity_Suggestion_On_Model_Add.md` for the
 full spec.
 
@@ -537,7 +538,7 @@ silently miss the catalog and fall through to the legacy fallback.
 - Extend `_infer_model_factory` to cover LLM/VLM via the shared host-to-provider
   map used by the suggestion endpoint.
 
-**Proof and benefit:** Without this, KL-1 forces every operator to either edit
+**Proof and benefit:** Without this, CM-031 forces every operator to either edit
 the database directly or use a provider-specific browser tab to reach the W1
 catalog values. With it, the same eight catalog entries become reachable from
 the default add path that most tenants use.
@@ -1074,7 +1075,7 @@ section 2.4 defines the claim-scoped readiness gates. **Findings:** CM-011, CM-0
 | Phase 3: Policy, Reduction, and Pollution Control | June 29-July 17 | [W10](#w10), [W11](#w11), [W12](#w12), [W14](#w14) | Improves the quality and safety of the context selected from the durable foundation. W12 also hardens W3 by controlling oversized outputs before final fit. |
 | Phase 4: Session Product and Compaction Operations | July 13-24 | [W9](#w9), [W13](#w13) | Productizes the durable state and compaction foundation as controllable session lifecycle operations. |
 | Phase 5: Efficiency and Release Hardening | July 20-August 7 target | [W15](#w15)-[W16](#w16) plus approved optional-package evidence | Completes release gates for the exact enabled capability claims and prompt-cache efficiency. |
-| Post-acceptance follow-ups | Unscheduled; flag-gated rollout | [W17](#w17) and any future KL-triggered workstreams | Decoupled from the Phase 0-5 timeline. Each follow-up ships behind its own feature flag and graduates via its own evidence gate. Not blocked by, and does not block, the Phase 5 release-hardening exit. |
+| Post-acceptance follow-ups | Unscheduled; flag-gated rollout | [W17](#w17) and any future post-acceptance-finding-triggered workstreams | Decoupled from the Phase 0-5 timeline. Each follow-up ships behind its own feature flag and graduates via its own evidence gate. Not blocked by, and does not block, the Phase 5 release-hardening exit. |
 
 The July 10 milestone targets the implementation outputs of W1-W8. It is not a
 production-readiness gate. Phases 3-5 overlap intentionally; August 7 is the earliest

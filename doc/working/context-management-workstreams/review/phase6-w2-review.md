@@ -15,7 +15,7 @@ the spec with implementation-readiness in mind surfaces four additional
 under-specifications. None invalidate the architecture; each would leave a
 concrete code or configuration decision unresolved at implementation time
 and risks the same "one-sentence spec hides multiple decisions" failure mode
-that produced W1 KL-1.
+that produced CM-031.
 
 ## Findings and Risks
 
@@ -32,7 +32,7 @@ that produced W1 KL-1.
   its own W1→W2 snapshot pair. W13's compaction model is a separate
   `model_record_t` with its own capacity; reusing the main run's snapshot
   would misjudge the compaction budget. This is the same defect class as
-  W1 KL-1 — assuming one model's parameters apply to all calls.
+  CM-031 — assuming one model's parameters apply to all calls.
 - **CM-030 (High):** Implementation Plan Step 5 reads "consistently" without
   saying whether it is a rename or the CM-013 trusted-dispatch enforcement
   contract. The interpretations have very different code scope and security

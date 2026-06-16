@@ -77,9 +77,9 @@ Sub-questions:
 > **W1 lesson**: "Tests cover combined-window and separate-input-limit
 > providers" and "Monitoring reports total window, output reserve, safe
 > input budget, actual input usage, and capacity source" — both abstract.
-> KL-1 wasn't found until ~10 days post-acceptance when a human manually
+> CM-031 wasn't found until ~10 days post-acceptance when a human manually
 > ran a real model addition. A demo script in acceptance would have surfaced
-> KL-1 on day 1.
+> CM-031 on day 1.
 
 ### 4. Operational Dependencies
 

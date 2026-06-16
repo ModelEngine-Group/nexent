@@ -7,7 +7,7 @@ Make W1's capability profile catalog reachable from the default frontend
 `model_factory` field, the catalog's exact provider keys, or the
 `ProviderCapabilityUnknown` fallback path. Most production tenants add LLMs
 through the manual form (URL + API key + model name) and currently bypass the
-catalog entirely (see W1 ADR Known Limitation KL-1), defeating W1's purpose.
+catalog entirely (see CM-031 / W1 ADR Known Limitations), defeating W1's purpose.
 
 ## Current State and Scope
 
