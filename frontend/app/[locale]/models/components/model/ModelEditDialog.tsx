@@ -141,7 +141,11 @@ export const ModelEditDialog = ({
       return false;
     }
 
-    const needsMaxTokens = !isEmbeddingModel && !isRerankModel;
+    // Capacity panel replaces the legacy max_tokens field for LLM/VLM, so
+    // the standalone max_tokens is only required for the types that still
+    // render that field (voice and rerank-style).
+    const needsMaxTokens =
+      !supportsCapacityFields && !isEmbeddingModel && !isRerankModel;
 
     if (isVoiceModel) {
       if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
@@ -177,6 +181,13 @@ export const ModelEditDialog = ({
     });
 
     try {
+      // For LLM/VLM the legacy form.maxTokens field is no longer rendered;
+      // fall back to form.maxOutputTokens (capacity panel) for the
+      // connectivity-probe budget.
+      const llmProbeMaxTokens = supportsCapacityFields
+        ? Number.parseInt(form.maxOutputTokens || "0", 10) ||
+          parseMaxTokens(form.maxTokens)
+        : parseMaxTokens(form.maxTokens);
       const config: any = {
         modelName: form.name,
         modelType: connectivityModelType,
@@ -187,7 +198,7 @@ export const ModelEditDialog = ({
             ? parseInt(form.vectorDimension)
             : form.type === MODEL_TYPES.RERANK
               ? 0
-              : parseMaxTokens(form.maxTokens),
+              : llmProbeMaxTokens,
         embeddingDim:
           form.type === MODEL_TYPES.EMBEDDING
             ? parseInt(form.vectorDimension)
@@ -471,8 +482,8 @@ export const ModelEditDialog = ({
           />
         )}
 
-        {/* maxTokens */}
-        {!isEmbeddingModel && !isRerankModel && (
+        {/* maxTokens (legacy; only kept for types not covered by the capacity panel) */}
+        {!isEmbeddingModel && !isRerankModel && !supportsCapacityFields && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
               {t("model.dialog.label.maxTokens")}{" "}

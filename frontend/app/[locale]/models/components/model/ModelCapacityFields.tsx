@@ -270,34 +270,61 @@ export const ModelCapacityFields = ({
           "model.dialog.capacity.maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens.tooltip"
         )}
-        {!isAddMode &&
+        {/* In add mode the tokenizer sits next to maxOutputTokens so the panel
+            is two tidy rows. In edit mode defaultOutputReserveTokens takes
+            this slot and the tokenizer renders full-width below. */}
+        {isAddMode ? (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
+                <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
+              </Tooltip>
+              {requiredSet.has("tokenizerFamily") && (
+                <span className="text-red-500 ml-1">*</span>
+              )}
+            </label>
+            <AutoComplete
+              allowClear
+              value={value.tokenizerFamily}
+              onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
+              options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
+                label: item,
+                value: item,
+              }))}
+              style={{ width: "100%" }}
+            />
+          </div>
+        ) : (
           renderNumberInput(
             "defaultOutputReserveTokens",
             "model.dialog.capacity.defaultOutputReserveTokens",
             "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
-          )}
+          )
+        )}
       </div>
 
-      <div>
-        <label className="block mb-1 text-sm font-medium text-gray-700">
-          <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
-            <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
-          </Tooltip>
-          {requiredSet.has("tokenizerFamily") && (
-            <span className="text-red-500 ml-1">*</span>
-          )}
-        </label>
-        <AutoComplete
-          allowClear
-          value={value.tokenizerFamily}
-          onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
-          options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
-            label: item,
-            value: item,
-          }))}
-          style={{ width: "100%" }}
-        />
-      </div>
+      {!isAddMode && (
+        <div>
+          <label className="block mb-1 text-sm font-medium text-gray-700">
+            <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
+              <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
+            </Tooltip>
+            {requiredSet.has("tokenizerFamily") && (
+              <span className="text-red-500 ml-1">*</span>
+            )}
+          </label>
+          <AutoComplete
+            allowClear
+            value={value.tokenizerFamily}
+            onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
+            options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
+              label: item,
+              value: item,
+            }))}
+            style={{ width: "100%" }}
+          />
+        </div>
+      )}
 
       {validationError && (
         <Alert type="error" showIcon message={t(validationError)} />
@@ -306,22 +333,11 @@ export const ModelCapacityFields = ({
   );
 
   // In add mode the capacity fields are part of required input; render as a
-  // flat labelled section so context_window/max_input red asterisks are
-  // unmissable. Edit mode keeps the existing collapsible panel.
+  // flat section so context_window/max_input red asterisks are unmissable.
+  // No header text — capacity controls speak for themselves alongside the
+  // rest of the model form. Edit mode keeps the existing collapsible panel.
   if (isAddMode) {
-    return (
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium text-gray-700">
-            {t("model.dialog.capacity.title")}
-          </div>
-          <div className="text-xs font-normal text-gray-500">
-            {t("model.dialog.capacity.description")}
-          </div>
-        </div>
-        {content}
-      </div>
-    );
+    return <div className="space-y-2">{content}</div>;
   }
 
   return (
