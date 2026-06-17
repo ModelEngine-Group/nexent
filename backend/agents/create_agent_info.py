@@ -53,11 +53,13 @@ logger.setLevel(logging.DEBUG)
 
 # Safe fallback for context-manager token_threshold when no capacity is known.
 # Used only when the resolver fails (uncataloged model with no operator-supplied
-# hard capacity). Sized to fit most modern 32K+ LLMs without aggressive
-# early compression; an undersized model will overflow at request time and
-# surface as a clear provider error rather than silent truncation. Will be
-# removed once enforcement phase requires snapshots end to end.
-_TOKEN_THRESHOLD_LEGACY_FALLBACK = 81920
+# hard capacity). Sized to cover the typical 32K-context band shared by the
+# majority of production LLMs (GPT-3.5 16K, GLM-4 32K, Qwen2 32K, Llama 3
+# 32K, etc.). Larger windows benefit only by skipping a few extra
+# compressions; smaller ones surface as a clear provider token-overflow
+# error at request time rather than silent truncation. Will be removed
+# once enforcement phase requires snapshots end to end.
+_TOKEN_THRESHOLD_LEGACY_FALLBACK = 32768
 
 _OPERATOR_OVERRIDE_FIELDS = (
     "context_window_tokens",
