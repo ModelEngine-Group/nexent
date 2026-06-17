@@ -688,6 +688,14 @@ async def create_agent_config(
         agent_requested_output_tokens=requested_output_tokens,
         request_requested_output_tokens=request_requested_output_tokens,
     )
+    if safe_input_budget_snapshot is not None:
+        soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
+        hard_input_budget_tokens = safe_input_budget_snapshot["hard_input_budget_tokens"]
+        context_token_threshold = soft_input_budget_tokens
+    else:
+        soft_input_budget_tokens = 0
+        hard_input_budget_tokens = 0
+        context_token_threshold = input_budget
 
     # Use agent-level setting for context management, default to False.
     # When ContextManager is disabled, do not attach context_components because
@@ -716,7 +724,9 @@ async def create_agent_config(
         )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
-        token_threshold=input_budget,
+        token_threshold=context_token_threshold,
+        soft_input_budget_tokens=soft_input_budget_tokens,
+        hard_input_budget_tokens=hard_input_budget_tokens,
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
