@@ -1394,6 +1394,47 @@ def _safe_input_budget_snapshot(requested_output_tokens=128):
     return payload
 
 
+def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
+    openai_model_instance,
+):
+    """Regression: when a W2 snapshot is active on self, __call__ must not
+    auto-fill max_tokens from self.max_output_tokens. The dispatch boundary
+    treats any caller-supplied max_tokens that disagrees with the snapshot as
+    CallerMaxTokensOverrideForbidden, so the pre-W2 auto-fill must be gated
+    on the snapshot being absent.
+    """
+    snapshot = _safe_input_budget_snapshot(requested_output_tokens=8192)
+    openai_model_instance.max_output_tokens = 131072
+    openai_model_instance.safe_input_budget_snapshot = snapshot
+
+    messages = [{"role": "user", "content": [{"text": "Hi"}]}]
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "ok"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.total_tokens = 2
+    mock_chunk.usage.completion_tokens = 1
+    mock_stream = [mock_chunk]
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = mock_stream
+    mock_result_message.role = MagicMock()
+
+    with patch.object(
+        openai_model_instance, "_prepare_completion_kwargs", return_value={}
+    ), patch.object(
+        mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message
+    ):
+        openai_model_instance.client.chat.completions.create.return_value = mock_stream
+        openai_model_instance.__call__(messages)
+
+    create_kwargs = openai_model_instance.client.chat.completions.create.call_args.kwargs
+    assert create_kwargs["max_tokens"] == 8192
+
+
 def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
         stream=True,

@@ -55,6 +55,29 @@ def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type
     return True
 
 
+def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
+    """Keep the deprecated `max_tokens` column in lockstep with `max_output_tokens`.
+
+    W1 step 7 deprecates `max_tokens` as the LLM/VLM output-cap alias of
+    `max_output_tokens`. Legacy clients that still write `max_tokens`
+    independently let the two columns diverge in the DB; that divergence
+    later surfaces at the W2 dispatch boundary as
+    `CallerMaxTokensOverrideForbidden` because the SDK auto-fills
+    `max_tokens` from the model record while the W2 snapshot computes its
+    output cap from `max_output_tokens`.
+
+    Defense in depth at the service layer: when a caller sends a non-None
+    `max_output_tokens`, force `max_tokens` to mirror it. Embedding rows are
+    exempt because they repurpose `max_tokens` as the vector dimension.
+    """
+    max_output = model_data.get("max_output_tokens")
+    if max_output is None:
+        return
+    if model_data.get("model_type") in ("embedding", "multi_embedding"):
+        return
+    model_data["max_tokens"] = max_output
+
+
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
     """Create a single model record for the given tenant.
 
@@ -92,6 +115,8 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 model_repo=model_data.get("model_repo", ""),
                 model_name=model_data.get("model_name", "")
             )
+
+        _coerce_legacy_max_tokens_alias(model_data)
 
         # Use NOT_DETECTED status as default
         model_data["connect_status"] = model_data.get(
@@ -315,6 +340,16 @@ async def update_single_model_for_tenant(
             else:
                 model_data["ssl_verify"] = True
 
+        # Carry model_type from the existing record so the legacy-alias
+        # coercion can distinguish LLM/VLM updates from embedding updates
+        # even when the caller payload omits model_type. We don't store the
+        # injected model_type back on model_data because the update path
+        # explicitly strips it later.
+        existing_model_type = existing_models[0].get("model_type") if existing_models else None
+        if model_data.get("max_output_tokens") is not None and \
+                existing_model_type not in ("embedding", "multi_embedding"):
+            model_data["max_tokens"] = model_data["max_output_tokens"]
+
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
             for model in existing_models:
@@ -343,6 +378,7 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
     """Batch update models for a tenant by model_id or model_name."""
     try:
         for model in model_list:
+            _coerce_legacy_max_tokens_alias(model)
             # Build update data excluding id fields
             update_data = {k: v for k, v in model.items() if k not in ["model_id", "model_name"]}
 

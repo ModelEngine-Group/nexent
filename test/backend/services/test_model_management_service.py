@@ -1022,6 +1022,57 @@ async def test_update_single_model_for_tenant_success_single_model():
         )
 
 
+async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max_tokens():
+    """LLM updates carrying max_output_tokens must mirror into the legacy
+    max_tokens column so the SDK's pre-W2 auto-fill cannot read a stale value
+    and trip CallerMaxTokensOverrideForbidden at the W2 dispatch boundary.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name", "max_tokens": 204800},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "max_output_tokens": 131072,
+        # No explicit max_tokens — caller relies on backend coercion.
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_args = mock_update.call_args.args[1]
+        assert update_args["max_output_tokens"] == 131072
+        assert update_args["max_tokens"] == 131072
+
+
+async def test_update_single_model_for_tenant_preserves_embedding_max_tokens():
+    """Embedding rows must NOT have max_tokens mirrored from max_output_tokens —
+    max_tokens is repurposed as the vector dimension on those rows.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 10, "model_type": "embedding", "display_name": "emb", "max_tokens": 4096},
+    ]
+    # Defensive caller accidentally passes max_output_tokens on an embedding row.
+    model_data = {
+        "model_id": 10,
+        "display_name": "emb",
+        "max_output_tokens": 8192,
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "emb", model_data)
+
+        update_args = mock_update.call_args.args[1]
+        # Embedding rows skip the coercion, so legacy max_tokens stays untouched.
+        assert "max_tokens" not in update_args
+
+
 async def test_update_single_model_for_tenant_conflict_new_display_name():
     """Updating to a new conflicting display_name raises ValueError."""
     svc = import_svc()

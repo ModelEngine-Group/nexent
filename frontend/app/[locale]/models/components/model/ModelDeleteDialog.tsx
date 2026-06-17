@@ -1357,7 +1357,43 @@ export const ModelDeleteDialog = ({
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent switch toggle
-                                handleSingleModelSettingsClick(providerModel);
+                                // The provider catalog entry carries snake_case
+                                // ids and (sometimes) a default max_tokens, but
+                                // never the user's saved capacity columns. When
+                                // the model has already been added, overlay the
+                                // saved ModelOption (camelCase) onto the catalog
+                                // row in snake_case so the edit dialog
+                                // pre-fills context_window_tokens etc. instead
+                                // of showing empty fields.
+                                const settingsTarget = existingModel
+                                  ? {
+                                      ...providerModel,
+                                      max_tokens:
+                                        existingModel.maxTokens ??
+                                        providerModel.max_tokens,
+                                      timeout_seconds:
+                                        existingModel.timeoutSeconds ??
+                                        providerModel.timeout_seconds,
+                                      concurrency_limit:
+                                        existingModel.concurrencyLimit ??
+                                        providerModel.concurrency_limit,
+                                      context_window_tokens:
+                                        existingModel.contextWindowTokens,
+                                      max_input_tokens:
+                                        existingModel.maxInputTokens,
+                                      max_output_tokens:
+                                        existingModel.maxOutputTokens,
+                                      default_output_reserve_tokens:
+                                        existingModel.defaultOutputReserveTokens,
+                                      tokenizer_family:
+                                        existingModel.tokenizerFamily,
+                                      capacity_source:
+                                        existingModel.capacitySource,
+                                      capability_profile_version:
+                                        existingModel.capabilityProfileVersion,
+                                    }
+                                  : providerModel;
+                                handleSingleModelSettingsClick(settingsTarget);
                               }}
                             />
                           </Tooltip>

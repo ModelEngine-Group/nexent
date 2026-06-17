@@ -212,15 +212,24 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if self.extra_body:
             completion_kwargs["extra_body"] = self.extra_body
 
-        # Bound completion length unless the caller passed their own override
-        # via kwargs (which already landed in completion_kwargs above).
-        # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
-        if self.max_output_tokens is not None and "max_tokens" not in completion_kwargs:
-            completion_kwargs["max_tokens"] = self.max_output_tokens
-
         trusted_budget_snapshot = (
             safe_input_budget_snapshot or self.safe_input_budget_snapshot
         )
+
+        # Bound completion length unless the caller passed their own override
+        # via kwargs (which already landed in completion_kwargs above).
+        # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
+        # When a W2 snapshot is active, its requested_output_tokens is the sole
+        # authority per CM-030 — skip the pre-W2 auto-fill so the dispatch
+        # boundary does not see max_output_tokens masquerading as a caller
+        # override and reject it via CallerMaxTokensOverrideForbidden.
+        if (
+            self.max_output_tokens is not None
+            and "max_tokens" not in completion_kwargs
+            and trusted_budget_snapshot is None
+        ):
+            completion_kwargs["max_tokens"] = self.max_output_tokens
+
         current_request = self._dispatch_chat_completion(
             safe_input_budget_snapshot=trusted_budget_snapshot,
             capacity_snapshot=self.capacity_snapshot,

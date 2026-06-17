@@ -720,7 +720,13 @@ export const ProviderConfigEditDialog = ({
   }
 
   const valid = () => {
-    if (supportsCapacityFields && capacityValidationError) return false
+    if (supportsCapacityFields) {
+      // For LLM/VLM the legacy max_tokens input is hidden — the capacity
+      // panel's max_output_tokens is the source of truth and is already
+      // required by validateCapacityForm. Don't gate Save on the now-hidden
+      // legacy input.
+      return !capacityValidationError
+    }
     return isEmbeddingModel || isValidMaxTokens(maxTokens)
   }
 
@@ -773,7 +779,12 @@ export const ProviderConfigEditDialog = ({
             }
           />
         )}
-        {!isEmbeddingModel && (
+        {/* Legacy max_tokens input — only shown when the capacity panel is
+            NOT rendered (i.e. STT/TTS/rerank). For LLM/VLM the capacity
+            panel's max_output_tokens replaces it; rendering both side by
+            side lets the two diverge in the DB. Matches the gate used by
+            ModelEditDialog per W1 step 7. */}
+        {!isEmbeddingModel && !supportsCapacityFields && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
               {t('model.dialog.label.maxTokens')} <span className="text-red-500">*</span>

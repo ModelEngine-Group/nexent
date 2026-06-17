@@ -302,11 +302,120 @@ behind a separate small flag (`CAPACITY_COVERAGE_VISIBILITY_ENABLED`,
 default off) so it can be enabled without waiting for the suggestion
 UX, then merged into the broader W17 flag at GA.
 
+### Last-Resort Auto-Inference from Legacy `max_tokens`
+
+When the W1 catalog backfill misses (CM-031: typically
+`model_factory = 'OpenAI-API-Compatible'`) **and** the W17
+provider-discovery recommendation table also returns no match, the
+row stays bare and the dispatch path silently runs without CM-030
+enforcement. The visibility surfaces above tell operators *which*
+rows need attention, but until the operator finds the time to open
+the edit dialog the model is unprotected. W17 closes the remaining
+gap with a narrowly bounded auto-inference from the legacy
+`max_tokens` column.
+
+Gating (all must hold; any miss leaves the row bare and falls back
+to the visibility surfaces):
+
+- `model_type IN ('llm', 'vlm')`. Embeddings re-use `max_tokens`
+  as the vector dimension; STT/TTS/rerank do not participate in W2,
+  per the "Scope: LLM and VLM Only" invariant above.
+- `context_window_tokens IS NULL AND max_output_tokens IS NULL`.
+  Any operator edit, any catalog backfill hit, or any W17
+  recommendation acceptance disables inference for that row.
+- `max_tokens IS NOT NULL AND max_tokens > 0`.
+- W1 catalog match returned `none` for the row's
+  `(model_factory, model_name)`.
+- W17 provider-discovery returned `match_kind = none`, or the
+  provider adapter is unreachable or did not return capacity hints.
+
+Inferred values:
+
+| Field | Value | Rationale |
+| --- | --- | --- |
+| `context_window_tokens` | `max_tokens` | Pre-W1, `max_tokens` was most often entered as the context window value (W1 ADR Decision 1 calls out this ambiguity). Defaulting to that assumption recovers the common case. |
+| `max_output_tokens` | `min(max_tokens, _TOKEN_THRESHOLD_LEGACY_FALLBACK)` where the constant is `32768` | Caps the inferred output at the same threshold used by `create_agent_info._resolve_safe_input_budget` and the frontend `tokenUsageIndicator` default. Avoids the failure mode documented below where the legacy `max_tokens` was actually a context window. |
+| `default_output_reserve_tokens` | `min(max_output_tokens, 4096)` | Matches the SDK `_DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096` so W2 has a reasonable per-request reserve without exceeding the inferred cap. |
+| `tokenizer_family` | `NULL` | CM-016 uncertainty reserve (10% of `context_window_tokens`) covers the resulting unknowns. |
+| `capacity_source` | `legacy_inferred` | New tag, distinct from `profile` / `operator` / `provider_candidate`. |
+
+**Production evidence motivating the cap (2026-06-17 incident).**
+`glm-5.1` on `dashscope` shipped to the active development cluster
+with `max_tokens = 204800` persisted by an operator who entered the
+provider's **context window** value into the pre-W1 "最大Token数"
+input. The 2026-06-17 W2 catalog backfill then set
+`max_output_tokens = 131072` from the catalog while leaving the
+legacy column untouched. At runtime the SDK
+`OpenAIModel.__call__` auto-filled `max_tokens = 131072` from the
+new column, the W2 snapshot's `requested_output_tokens` resolved
+from the per-tenant default reserve to `8192`, and the dispatch
+boundary raised `CallerMaxTokensOverrideForbidden` (CM-030),
+breaking the "数学思考" agent end-to-end. The post-mortem fixes
+were the service-layer `_coerce_legacy_max_tokens_alias`
+(new-write defense), `v2.2.0_0618_reconcile_max_tokens_alias.sql`
+(one-shot data reconcile), and the W2 dispatch flow guard
+(`safe_input_budget_snapshot != None` → skip the SDK's pre-W2
+auto-fill). The 32K cap on inferred `max_output_tokens` here is the
+forward-looking complement: even if a future legacy row's
+`max_tokens` is again a context window value, the inferred output
+cap stays well below provider hard limits and the dispatch boundary
+contract holds.
+
+UI surfacing:
+
+- The model-edit capacity-source tag (`SOURCE_COLORS` in
+  `ModelCapacityFields.tsx`) gains a `legacy_inferred` entry
+  rendered in **orange**, distinct from the green `profile`,
+  blue `operator`, and gold `provider_candidate` tags.
+- Tag tooltip: "These values were inferred from the legacy
+  `max_tokens` column and have not been verified against the
+  provider. Please confirm and save." (i18n key
+  `model.dialog.capacity.source.legacy_inferred.tooltip`.)
+- The bare-row badge from the visibility surfaces above treats
+  `legacy_inferred` rows as **not bare** (W2 has a snapshot, CM-030
+  is enforced), but the model-list page still renders a smaller
+  outline "verify" indicator so operators can find them.
+- The agent-edit selector subtitle reads "Capacity inferred from
+  legacy values — confirm in Model Management" instead of the
+  bare-row warning.
+
+Persistence semantics:
+
+- Inference runs once per row at the next agent run that loads the
+  model record. The helper writes the inferred values back into
+  `model_record_t` so subsequent loads see real columns and the
+  helper is an immediate no-op; this preserves the
+  `capacity_source = legacy_inferred` provenance for the UI to
+  surface.
+- Inference is **not** run from API request paths or schemas; only
+  from the model loader. This keeps it off the hot path and makes
+  the audit trail (`updated_by = system_w17_inferred`) easy to
+  reason about.
+- Operator edits, catalog backfill SQL, and W17 recommendation
+  acceptance always win over inferred values (the gating clause
+  `context_window_tokens IS NULL AND max_output_tokens IS NULL`
+  short-circuits on any non-NULL).
+
+Out of scope for this fallback:
+
+- Embedding `max_tokens` migration. Embedding dimension lives in
+  `max_tokens` until a separate workstream introduces a dedicated
+  column (W1 spec, line 17).
+- STT/TTS/rerank capacity inference. These types do not have W2
+  semantics; their bare-row state is not a missed enforcement.
+- Inferring `max_input_tokens`. The W2 formula tolerates a NULL
+  `max_input_tokens` by falling back to
+  `context_window_tokens - requested_output_tokens`, so leaving it
+  NULL keeps inference minimal.
+
 ### Out of Scope for This Section
 
-- Auto-fixing bare rows. The fix path is always the operator opening
-  the edit dialog and saving. Auto-write paths are governed by the
-  catalog backfill SQL migration
+- Auto-fixing bare rows beyond the narrowly bounded
+  `legacy_inferred` fallback documented above. The fix path
+  for any row that does not qualify for inference is still the
+  operator opening the edit dialog and saving. Auto-write paths
+  for catalog-matched rows are governed by the catalog backfill
+  SQL migration
   (`docker/sql/v2.2.0_0617_backfill_w2_capacity_from_w1_catalog.sql`),
   not by this UI work.
 - Blocking agent save when a bare-capacity model is selected.
