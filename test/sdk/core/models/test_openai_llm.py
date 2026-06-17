@@ -1356,7 +1356,7 @@ def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
 
 
 def _safe_input_budget_snapshot(requested_output_tokens=128):
-    return {
+    payload = {
         "w1_fingerprint": "w1fingerprint",
         "provider": "openai",
         "model_name": "gpt-test",
@@ -1373,8 +1373,25 @@ def _safe_input_budget_snapshot(requested_output_tokens=128):
         "field_sources": {},
         "warnings": [],
         "resolver_version": "1.0.0",
-        "fingerprint": "w2fingerprint",
     }
+    payload["fingerprint"] = openai_llm_module.compute_w2_fingerprint(
+        w2_resolver_version=payload["resolver_version"],
+        w1_fingerprint=payload["w1_fingerprint"],
+        provider=payload["provider"],
+        model_name=payload["model_name"],
+        requested_output_tokens=payload["requested_output_tokens"],
+        output_reserve_source=payload["output_reserve_source"],
+        uncertainty_reserve_tokens=payload["uncertainty_reserve_tokens"],
+        uncertainty_reserve_basis=payload["uncertainty_reserve_basis"],
+        approved_profile_reserve_tokens=payload["approved_profile_reserve_tokens"],
+        soft_limit_ratio=payload["soft_limit_ratio"],
+        soft_limit_ratio_source=payload["soft_limit_ratio_source"],
+        soft_input_budget_tokens=payload["soft_input_budget_tokens"],
+        hard_input_budget_tokens=payload["hard_input_budget_tokens"],
+        field_sources=payload["field_sources"],
+        warnings=payload["warnings"],
+    )
+    return payload
 
 
 def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model_instance):
@@ -1432,12 +1449,26 @@ def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
     openai_model_instance.client.chat.completions.create.assert_not_called()
 
 
+def test_dispatch_rejects_tampered_w2_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    snapshot["hard_input_budget_tokens"] = 999
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetFingerprintMismatch):
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            stream=True,
+            messages=[],
+        )
+
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
 def test_safe_input_budget_trace_attributes_are_prefixed():
     attrs = ImportedOpenAIModel._safe_input_budget_trace_attributes(
         _safe_input_budget_snapshot(256)
     )
 
-    assert attrs["w2.budget_fingerprint"] == "w2fingerprint"
+    assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
     assert attrs["w2.requested_output_tokens"] == 256
     assert attrs["w2.soft_input_budget_tokens"] == 800

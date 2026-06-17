@@ -20,7 +20,9 @@ from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from .capacity_budget import (
     CallerMaxTokensOverrideForbidden,
+    SafeInputBudgetFingerprintMismatch,
     SafeInputBudgetSnapshot,
+    compute_w2_fingerprint,
 )
 from ..utils.observer import MessageObserver, ProcessType
 
@@ -394,12 +396,36 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if snapshot is None:
             return None
         if isinstance(snapshot, SafeInputBudgetSnapshot):
-            return snapshot
-        if isinstance(snapshot, dict):
-            return SafeInputBudgetSnapshot.model_validate(snapshot)
-        raise TypeError(
-            "safe_input_budget_snapshot must be a SafeInputBudgetSnapshot or dict"
+            resolved = snapshot
+        elif isinstance(snapshot, dict):
+            resolved = SafeInputBudgetSnapshot.model_validate(snapshot)
+        else:
+            raise TypeError(
+                "safe_input_budget_snapshot must be a SafeInputBudgetSnapshot or dict"
+            )
+        expected = compute_w2_fingerprint(
+            w2_resolver_version=resolved.resolver_version,
+            w1_fingerprint=resolved.w1_fingerprint,
+            provider=resolved.provider,
+            model_name=resolved.model_name,
+            requested_output_tokens=resolved.requested_output_tokens,
+            output_reserve_source=resolved.output_reserve_source,
+            uncertainty_reserve_tokens=resolved.uncertainty_reserve_tokens,
+            uncertainty_reserve_basis=resolved.uncertainty_reserve_basis,
+            approved_profile_reserve_tokens=resolved.approved_profile_reserve_tokens,
+            soft_limit_ratio=resolved.soft_limit_ratio,
+            soft_limit_ratio_source=resolved.soft_limit_ratio_source,
+            soft_input_budget_tokens=resolved.soft_input_budget_tokens,
+            hard_input_budget_tokens=resolved.hard_input_budget_tokens,
+            field_sources=resolved.field_sources,
+            warnings=resolved.warnings,
         )
+        if resolved.fingerprint != expected:
+            raise SafeInputBudgetFingerprintMismatch(
+                expected=expected,
+                actual=resolved.fingerprint,
+            )
+        return resolved
 
     @classmethod
     def _safe_input_budget_trace_attributes(

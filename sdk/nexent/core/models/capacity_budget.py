@@ -54,6 +54,18 @@ class NoSafeInputCapacity(BudgetResolverError):
     pass
 
 
+class SafeInputBudgetFingerprintMismatch(BudgetResolverError):
+    """Raised when a W2 snapshot fingerprint does not match its payload."""
+
+    def __init__(self, *, expected: str, actual: str) -> None:
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            "safe_input_budget_fingerprint_mismatch: "
+            f"expected={expected} actual={actual}"
+        )
+
+
 class CallerMaxTokensOverrideForbidden(BudgetResolverError):
     """Raised when a caller tries to override W2's trusted output cap."""
 
