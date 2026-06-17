@@ -54,7 +54,8 @@ when supplied an idempotency key and emits pre/post lifecycle events.
   when the compression.snapshot is unavailable, then apply events after the restore
   event; events between the restored boundary and restore event remain auditable but
   inactive.
-- Manual compaction instructions are untrusted user input governed by P3/P5.
+- Manual compaction instructions are untrusted user input governed by W13 and, when
+  enabled, P5.
 - Inspect responses redact sensitive payloads and reveal no hidden chain-of-thought.
 - Inspect, restore, and resume responses expose session `replay_status`. A
   `partial_after_erasure` session must never be reported as completely replayable.

@@ -1,5 +1,7 @@
 # P1：原始历史与活动上下文分离
 
+**状态：** 完整范围已推迟。Release 1 子集（`chat_projection`、`resume_projection` 和 `model_context_projection`）已拆分到 `W12_Release_1_History_Projections.md`。本 P1 文档现代表 W12 之外的更广投影套件。
+
 ## 目标
 
 从 W5 执行事件构建确定性、版本化、用途特定的投影。W5 事件日志保持为持久事实源；P1 生成聊天 UI、智能体恢复、模型请求、Working Memory、长期记忆和审计所需的不同视图，而不将全部持久历史发送给每个消费者。

@@ -1,5 +1,10 @@
 # P3: Unified Context and Memory Policy
 
+**Status:** Promoted for core scope. The Release 1 policy engine has been split into
+`W13_Unified_Context_and_Memory_Policy.md`. This P3 document now represents future
+policy extensions beyond W13, especially capabilities that require full P5 governance
+or advanced temporal-memory lifecycle.
+
 ## Objective
 
 Replace distributed, partially enforced context and memory behavior with one validated,

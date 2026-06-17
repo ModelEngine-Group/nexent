@@ -1,5 +1,7 @@
 # P3：统一上下文与记忆策略
 
+**状态：** 核心范围已提升实施。Release 1 策略引擎已拆分到 `W13_Unified_Context_and_Memory_Policy.md`。本 P3 文档现代表 W13 之外的未来策略扩展，尤其是需要完整 P5 治理或高级时间记忆生命周期的能力。
+
 ## 目标
 
 用单一的、经过校验的、版本化的策略引擎替代分散的、部分执行的上下文和记忆行为，供每个策略、投影、记忆操作和模型请求使用。
@@ -96,3 +98,27 @@ decide_memory_operation(resolved_policy, candidate_or_query) -> MemoryDecision
 - 无效策略 fixture 在运行启动前以可操作的错误失败。
 - 性能基线测试度量策略解析和上下文选择延迟，确保 P3 不成为模型请求热路径上的瓶颈。
 - P3 在一个版本化策略能解释并强制执行每个上下文选择和记忆生命周期决策时视为完成。
+
+## 代码库差距分析（2026-06-17）
+
+**结论：ContextManager 已集中约 40%；记忆决策分散。前置步骤合理。**
+
+### ContextManager 已集中的内容
+- 对话压缩引擎（1050 行）
+- 组件注册（7 种 ContextComponent 类型）
+- 基于策略的选择（4 种策略）
+- 系统提示消息装配
+
+### ContextManager 之外分散的内容
+- 运行前的记忆搜索：`create_agent_info.py:495`（绕过 ContextManager）
+- 记忆层级过滤：在 3 个文件中重复（`create_agent_info.py`、`store_memory_tool.py`、`search_memory_tool.py`）
+- 运行结束时的自动记忆写入：`agent_service.py:900-945`（完全在 ContextManager 之外）
+- 冲突解决：仅 Prompt 文本（LLM 遵循指令，无代码强制执行）
+- Observation 截断：`core_agent.py:438-447`（使用配置但逻辑在 CoreAgent 中）
+- 时间注入：`core_agent.py:485-486`（硬编码）
+
+### 前置步骤（现在做）
+将记忆层级过滤逻辑的 3 个副本提取为单一共享函数。
+
+### 为什么完整 P3 推迟
+完整策略引擎需要 W5 事件日志和 P1 投影作为输入，以提供版本化的策略实体。

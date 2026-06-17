@@ -56,7 +56,7 @@ Deterministic stages:
    tool-call/result pairs.
 4. Apply explicit emergency truncation and emit a context-loss event.
 
-P3-W6 may later add policy-guided selection, progressive component reduction,
+W13-W6 may later add policy-guided selection, progressive component reduction,
 artifact offload, and governed compaction as quality-enhancing stages. Those stages
 cannot become prerequisites for hard fit or dispatch safety.
 
@@ -99,7 +99,7 @@ request.
 
 Production provider credentials and dispatch capability are available only to the
 trusted server-side dispatch path. Immediately before dispatch, it requires an
-authorized W4 identity, an immutable P3 policy decision, a server-resolved or verified
+authorized W4 identity, an immutable W13 policy decision, a server-resolved or verified
 W2 budget snapshot, and the exact final W10 `FitResult`. SDK/client assertions and
 ordinary internal callers are untrusted and cannot mark a payload authorized, governed,
 or fit.
@@ -122,7 +122,7 @@ increase the W2 hard input budget.
   outcomes/events, mandatory installer, optional-upgrade selector, trusted dispatch
   enforcement, and bypass detection.
 - First deliver the independent minimal hard-fit gateway. Then phase through shadow
-  counting, compaction-call enforcement, main-call enforcement, P3-W6 quality-stage
+  counting, compaction-call enforcement, main-call enforcement, W13-W6 quality-stage
   integration, and deletion/blocking of every direct provider-dispatch path.
 
 ## Implementation Plan
@@ -135,7 +135,7 @@ increase the W2 hard input budget.
 6. Refuse safely when mandatory minimums cannot fit; include actionable diagnostics.
 7. Accept W3 cache partition plans and compute cache metadata only from the final
    serialized payload.
-8. Connect P3-W6 quality-enhancing stages without weakening the hard invariant.
+8. Connect W13-W6 quality-enhancing stages without weakening the hard invariant.
 9. Eliminate production dispatch bypasses and restrict provider credentials to the
    trusted path:
    - **9a. Fix B1** (`backend/utils/llm_utils.py:100`): Replace manual
@@ -172,14 +172,14 @@ increase the W2 hard input budget.
 - Test mandatory-only overflow, emergency truncation, and stable reason codes.
 - Test tool-call/result pair integrity under every reduction stage.
 - Simulate provider context-length errors and prove one deterministic retry without loops.
-- Prove the minimal gateway guarantees fit before P3-W6 integrations are available.
+- Prove the minimal gateway guarantees fit before W13-W6 integrations are available.
 - Prove W3 plans cannot change fit decisions and fingerprints match the exact final
   payload dispatched by the trusted boundary.
 - Run multilingual, multimodal, and large-schema fixtures. Release 1 multimodal
   fixtures cover only text modality; add modality-specific fixtures when a modality
   enters product scope. **Finding:** CM-026.
 - Negative integration tests prove SDK/client and ordinary internal callers cannot
-  dispatch without valid W4, P3, W2, and W10 decisions.
+  dispatch without valid W4, W13, W2, and W10 decisions.
 - Bypass elimination tests prove that all production `chat.completions.create` calls
   flow through the single chokepoint (`openai_llm.py:186`). Specifically:
   - System prompt generation (`llm_utils.py`) routes through `OpenAIModel.__call__`.
@@ -191,7 +191,7 @@ increase the W2 hard input budget.
 ## Rollout and Definition of Done
 
 Start with the minimal hard-fit gateway, shadow evaluation, and fault telemetry, then
-enforce on compaction calls and finally main calls. Integrate P3-W6 quality stages
+enforce on compaction calls and finally main calls. Integrate W13-W6 quality stages
 afterward. Maintain a temporary kill switch only for diagnosis; it must not permit
 unverified production dispatch. W10 is done when all model-call paths use the trusted
 server-side gateway, direct production provider access is denied, property tests pass,

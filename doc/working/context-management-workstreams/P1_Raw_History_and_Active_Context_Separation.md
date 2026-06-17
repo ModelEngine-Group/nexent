@@ -1,5 +1,10 @@
 # P1: Raw History and Active Context Separation
 
+**Status:** Deferred full scope. The Release 1 subset (`chat_projection`,
+`resume_projection`, and `model_context_projection`) has been split into
+`W12_Release_1_History_Projections.md`. This P1 document now represents the broader
+projection suite beyond W12.
+
 ## Objective
 
 Build deterministic, versioned, purpose-specific projections from W5 execution events.
