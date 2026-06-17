@@ -203,10 +203,6 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Mock supabase before utils.auth_utils is imported
-from conftest import install_supabase_mock
-install_supabase_mock()
-
 # Mock nexent.core.utils.observer before services.skill_service is imported
 nexent_core_utils = _create_package_mock('nexent.core.utils')
 sys.modules['nexent.core.utils'] = nexent_core_utils

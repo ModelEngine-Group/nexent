@@ -260,10 +260,6 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Mock supabase before utils.auth_utils is imported
-from conftest import install_supabase_mock
-install_supabase_mock()
-
 # Mock services.* modules that vectordatabase_service imports
 # These must be registered in sys.modules so import can find them
 sys.modules['services'] = _create_package_mock('services')

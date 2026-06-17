@@ -202,11 +202,6 @@ sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
 
-# Mock supabase module
-from conftest import install_supabase_mock
-supabase_mock = install_supabase_mock()
-supabase_mock.create_client = MagicMock()
-
 sys.modules['boto3'] = MagicMock()
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()

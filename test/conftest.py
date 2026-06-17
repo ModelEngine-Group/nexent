@@ -158,10 +158,27 @@ def install_supabase_mock():
     return supabase_mock
 
 
-# Install a sane supabase mock up front so test files that import
-# ``backend.utils.auth_utils`` (directly or transitively) succeed during
-# collection, even before their own module-level mocks run. Individual
-# test files can override ``sys.modules['supabase']`` with their own mock
-# and call this helper to re-install the structured attributes.
+@pytest.fixture(autouse=True)
+def _supabase_mock():
+    """Re-install the supabase mock before each test.
+
+    Module-level ``sys.modules['supabase']`` overrides in test files
+    (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
+    structured attributes (``lib``, ``lib.client_options``,
+    ``SyncClientOptions``) that ``backend.utils.auth_utils`` resolves at
+    import time. The module-level install below covers collection, but
+    any test that re-mocks ``supabase`` after collection needs the
+    structured attributes re-installed before its test body runs.
+    """
+    install_supabase_mock()
+    yield
+
+
+# Install a sane supabase mock at collection time so test modules that
+# import ``backend.utils.auth_utils`` (directly or transitively) succeed
+# during pytest's collection phase, before any test fixture has had a
+# chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
+# install before each test body in case individual test modules
+# overwrote ``sys.modules['supabase']``.
 if 'supabase' not in sys.modules:
     install_supabase_mock()

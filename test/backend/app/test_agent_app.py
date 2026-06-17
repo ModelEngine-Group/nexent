@@ -114,8 +114,6 @@ sys.modules['database.client'] = MagicMock()
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['agents.create_agent_info'] = MagicMock()
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
-from conftest import install_supabase_mock
-install_supabase_mock()
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()

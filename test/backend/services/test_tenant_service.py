@@ -14,8 +14,6 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
-from conftest import install_supabase_mock
-install_supabase_mock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
