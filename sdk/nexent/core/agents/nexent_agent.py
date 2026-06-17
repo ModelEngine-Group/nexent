@@ -380,6 +380,11 @@ extra_body=model_config.extra_body,
                 "safe_input_budget_snapshot",
                 None,
             )
+            model.capacity_snapshot = getattr(
+                agent_config,
+                "capacity_snapshot",
+                None,
+            )
             prompt_templates = agent_config.prompt_templates
 
             try:

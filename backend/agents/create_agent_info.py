@@ -92,6 +92,8 @@ def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
 def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
     data = snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
     return {
+        "provider": data.get("provider"),
+        "model_name": data.get("model_name"),
         "context_window_tokens": data.get("context_window_tokens"),
         "default_output_reserve_tokens": data.get("default_output_reserve_tokens"),
         "capability_profile_version": data.get("capability_profile_version"),

@@ -79,6 +79,25 @@ class CallerMaxTokensOverrideForbidden(BudgetResolverError):
         )
 
 
+class SafeInputBudgetCapacityMismatch(BudgetResolverError):
+    """Raised when a W2 snapshot's W1 identity disagrees with the active W1.
+
+    Catches the case where a W2 snapshot computed from one model's W1
+    capacity is dispatched against a different model (stale cache, mid-flight
+    swap, cross-tenant leak). Verified at the trusted dispatch boundary as
+    defense-in-depth per CM-013.
+    """
+
+    def __init__(self, *, field: str, expected: str, actual: str) -> None:
+        self.field = field
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            "safe_input_budget_capacity_mismatch: "
+            f"field={field} expected={expected} actual={actual}"
+        )
+
+
 class CapacityReservePolicy(BaseModel):
     """Immutable W2 reserve policy resolved before budget calculation."""
 

@@ -1463,6 +1463,98 @@ def test_dispatch_rejects_tampered_w2_snapshot(openai_model_instance):
     openai_model_instance.client.chat.completions.create.assert_not_called()
 
 
+def _matching_capacity_snapshot(budget_snapshot):
+    return {
+        "provider": budget_snapshot["provider"],
+        "model_name": budget_snapshot["model_name"],
+        "capacity_fingerprint": budget_snapshot["w1_fingerprint"],
+    }
+
+
+def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=snapshot,
+        capacity_snapshot=_matching_capacity_snapshot(snapshot),
+        stream=True,
+        messages=[],
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_dispatch_rejects_stale_w1_fingerprint(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    capacity = _matching_capacity_snapshot(snapshot)
+    capacity["capacity_fingerprint"] = "different-w1-fingerprint"
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            capacity_snapshot=capacity,
+            stream=True,
+            messages=[],
+        )
+
+    assert exc_info.value.field == "w1_fingerprint"
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_rejects_cross_provider_w2_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    capacity = _matching_capacity_snapshot(snapshot)
+    capacity["provider"] = "dashscope"
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            capacity_snapshot=capacity,
+            stream=True,
+            messages=[],
+        )
+
+    assert exc_info.value.field == "provider"
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_rejects_cross_model_w2_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    capacity = _matching_capacity_snapshot(snapshot)
+    capacity["model_name"] = "gpt-other"
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            capacity_snapshot=capacity,
+            stream=True,
+            messages=[],
+        )
+
+    assert exc_info.value.field == "model_name"
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=snapshot,
+        capacity_snapshot=None,
+        stream=True,
+        messages=[],
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
 def test_safe_input_budget_trace_attributes_are_prefixed():
     attrs = ImportedOpenAIModel._safe_input_budget_trace_attributes(
         _safe_input_budget_snapshot(256)
