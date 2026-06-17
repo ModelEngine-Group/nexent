@@ -69,10 +69,16 @@ interface A2AAgentDiscoveryModalProps {
   localAgentId?: number;
 }
 
+// Constants for agent settings
+const DEFAULT_PROTOCOL = "JSONRPC";
+const DEFAULT_TIMEOUT_SECONDS = 300;
+const MIN_TIMEOUT_SECONDS = 1;
+const MAX_TIMEOUT_SECONDS = 3600;
+
 // Helper function to extract available protocols from supported interfaces
 function extractAvailableProtocols(supportedInterfaces?: Record<string, any>[]): string[] {
   if (!supportedInterfaces || supportedInterfaces.length === 0) {
-    return ["JSONRPC"]; // Default protocol
+    return [DEFAULT_PROTOCOL];
   }
 
   const protocols = new Set<string>();
@@ -84,7 +90,7 @@ function extractAvailableProtocols(supportedInterfaces?: Record<string, any>[]):
     }
   }
 
-  return protocols.size > 0 ? Array.from(protocols) : ["JSONRPC"];
+  return protocols.size > 0 ? Array.from(protocols) : [DEFAULT_PROTOCOL];
 }
 
 // Agent Settings Popover Component (protocol, custom headers, timeout)
@@ -98,9 +104,9 @@ function AgentSettings({ agent, onProtocolChange, onSettingsChange }: Readonly<A
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState(
-    agent.protocol_type || "JSONRPC"
+    agent.protocol_type || DEFAULT_PROTOCOL
   );
-  const [timeout, setTimeout] = useState<number>(agent.timeout ?? 300);
+  const [timeout, setTimeout] = useState<number>(agent.timeout ?? DEFAULT_TIMEOUT_SECONDS);
   // custom_headers stored as key-value pairs for editing
   const [headerPairs, setHeaderPairs] = useState<{ key: string; value: string }[]>(() => {
     const h = agent.custom_headers || {};
@@ -112,11 +118,11 @@ function AgentSettings({ agent, onProtocolChange, onSettingsChange }: Readonly<A
 
   // Sync local state when the agent prop changes (e.g. after list reload)
   useEffect(() => {
-    setSelectedProtocol(agent.protocol_type || "JSONRPC");
+    setSelectedProtocol(agent.protocol_type || DEFAULT_PROTOCOL);
   }, [agent.protocol_type]);
 
   useEffect(() => {
-    setTimeout(agent.timeout ?? 300);
+    setTimeout(agent.timeout ?? DEFAULT_TIMEOUT_SECONDS);
   }, [agent.timeout]);
 
   useEffect(() => {
@@ -142,7 +148,7 @@ function AgentSettings({ agent, onProtocolChange, onSettingsChange }: Readonly<A
     setSaving(true);
     try {
       // Save protocol if changed
-      if (selectedProtocol !== (agent.protocol_type || "JSONRPC")) {
+      if (selectedProtocol !== (agent.protocol_type || DEFAULT_PROTOCOL)) {
         onProtocolChange(String(agent.id), selectedProtocol);
       }
 
@@ -204,10 +210,10 @@ function AgentSettings({ agent, onProtocolChange, onSettingsChange }: Readonly<A
             <Text strong className="text-xs">{t("a2a.settings.timeout")}</Text>
           </div>
           <InputNumber
-            min={1}
-            max={3600}
+            min={MIN_TIMEOUT_SECONDS}
+            max={MAX_TIMEOUT_SECONDS}
             value={timeout}
-            onChange={(v) => setTimeout(v ?? 300)}
+            onChange={(v) => setTimeout(v ?? DEFAULT_TIMEOUT_SECONDS)}
             addonAfter={t("a2a.settings.seconds")}
             style={{ width: "100%", marginBottom: 16 }}
           />
