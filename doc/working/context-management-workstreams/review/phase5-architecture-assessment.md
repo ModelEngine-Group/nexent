@@ -15,7 +15,7 @@
 
 Yes. The source-of-truth model, projection separation, policy control point, checkpoint
 role, and final-fit invariant are sound. Release-one identity is now explicitly
-single-owner; W3 now has an independent minimum stage and the accepted contracts assign
+single-owner; W4 now has an independent minimum stage and the accepted contracts assign
 artifact publication, deletion, and final-payload ownership. Remaining work centers on
 durable checkpoint compatibility and production evidence.
 
@@ -30,7 +30,7 @@ measure-triggered observation and does not itself block initial implementation.
 
 1. Unsafe automatic continuation around ambiguous external effects. **CM-001**
 2. Lifecycle concurrency without fencing. **CM-003**
-3. Checkpoint evolution remains unresolved; W5 event evolution now has the accepted
+3. Checkpoint evolution remains unresolved; P1 event evolution now has the accepted
    claim-gated current-plus-previous contract. **CM-005, CM-014**
 4. Production claims without numeric evidence or clear capability scope.
    Calendar-based approval is now prohibited by CM-011. **CM-009, CM-010, CM-024**
@@ -48,7 +48,7 @@ model dispatch and governed persistence. It does not require a separate enforcem
 microservice, service mesh, or distributed capability-token platform.
 
 CM-011 calendar risk is now bounded by planning-target language and one lightweight
-claim-scoped release checklist that reuses W15 evidence; it does not require a separate
+claim-scoped release checklist that reuses W10 evidence; it does not require a separate
 release-governance platform.
 
 ### 4. What additional workstreams are required?
@@ -58,7 +58,7 @@ contracts or conditional capability packages:
 
 - **Automatic side-effect-safe resume package:** required only for that product claim.
 - **Production topology evidence package:** owned by concrete storage paths and SRE.
-- **Advanced schema migration package:** promote from W5/W7 only when ownership or
+- **Advanced schema migration package:** promote from P1/W7 only when ownership or
   migration scale justifies a separate workstream.
 
 ## Production-Readiness Decision

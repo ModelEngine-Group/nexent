@@ -1,4 +1,4 @@
-# W4: Structured Agent Execution Event Log
+# W5: Structured Agent Execution Event Log
 
 ## Objective
 
@@ -8,9 +8,9 @@ compatibility projection.
 
 ## Scope and Non-Goals
 
-W4 stores what happened: runs, model actions, tool calls/results, artifacts, errors,
-answers, context-item lifecycle, Working Memory updates, and memory decisions. W5
-decides what each consumer sees. W4 also persists `compression.snapshot` events for recovery acceleration. Hidden/private
+W5 stores what happened: runs, model actions, tool calls/results, artifacts, errors,
+answers, context-item lifecycle, Working Memory updates, and memory decisions. P1
+decides what each consumer sees. W5 also persists `compression.snapshot` events for recovery acceleration. Hidden/private
 chain-of-thought is explicitly not required and is not persisted by default. Branching
 and forking execution history are not supported by this design.
 
@@ -22,7 +22,7 @@ and forking execution history are not supported by this design.
 | `agent_event_index` | Ordered event envelope and run/step relationships |
 | `agent_event_data` | Typed, schema-versioned event payload |
 | `agent_artifact` | Large or binary output stored outside inline events |
-| `compression.snapshot` | Event-boundary recovery record, stored as a W4 event type |
+| `compression.snapshot` | Event-boundary recovery record, stored as a W5 event type |
 
 ### Table Design
 
@@ -71,7 +71,7 @@ Required constraints:
 The split between index and data keeps replay scans and relationship queries small.
 Both rows must be inserted atomically, so an indexed event can never exist without its
 typed payload. Large or binary payloads are stored in `agent_artifact` and referenced
-from `detail`. Before this transaction, the trusted W11 governance boundary must return
+from `detail`. Before this transaction, the trusted P5 governance boundary must return
 a complete `GovernedPayload`. Classification or redaction failure cannot fall back to
 raw event persistence; only a sanitized reason-coded failure event without the rejected
 payload may be appended.
@@ -79,44 +79,44 @@ payload may be appended.
 ### Compatibility with Current Nexent Conversations
 
 The existing integer `conversation_id` remains the public chat identifier and current
-conversation APIs do not need to expose `agent_session_id`. W4 creates exactly one
+conversation APIs do not need to expose `agent_session_id`. W5 creates exactly one
 internal `agent_session` for each owned Nexent conversation and enforces uniqueness on
 `(tenant_id, user_id, conversation_id)` when `conversation_id` is present. Debug or
 northbound runs without a conversation may receive standalone non-reusable agent
-sessions. Existing conversations receive sessions lazily on their first W4-backed run
+sessions. Existing conversations receive sessions lazily on their first W5-backed run
 or through a migration job.
 
 The initial release never changes an `agent_session` owner and does not attach multiple
-users to one session. Sharing and ownership-transfer requests are rejected by W3/W7;
-shared agents or tenant-shared memories do not grant access to W4 history.
+users to one session. Sharing and ownership-transfer requests are rejected by W4/W7;
+shared agents or tenant-shared memories do not grant access to W5 history.
 
 Current conversation tables remain a compatibility projection during migration:
 
-- User input and assistant output are appended to W4 first, then projected into
+- User input and assistant output are appended to W5 first, then projected into
   `conversation_message_t`, `conversation_message_unit_t`, and source tables.
 - Existing `message_index` and `unit_index` remain UI ordering fields; they do not
-  replace W4 `event_seq`.
+  replace W5 `event_seq`.
 - Existing opinion updates, title changes, and soft deletion remain supported, but
   corresponding typed events must be appended so projections and audit state agree.
 - `agent_id`, model configuration, and agent version are run properties stored in the
   typed `run.started` payload because the selected agent may differ between runs.
 
 The main migration conflict is authority: current save paths write conversation tables
-directly, while the target design makes W4 the source of truth. For every event that
-requires a compatibility projection, the W4 event rows and its projection-outbox row
+directly, while the target design makes W5 the source of truth. For every event that
+requires a compatibility projection, the W5 event rows and its projection-outbox row
 are created in the same relational transaction. The asynchronous projector is
 idempotent, so an event commit may be temporarily absent from the compatibility view
 but can never lose the durable work item needed to repair that view.
 
 Additional current-mechanism conflicts and required resolutions:
 
-| Current Nexent behavior | W4 migration requirement |
+| Current Nexent behavior | W5 migration requirement |
 | --- | --- |
 | Conversation rows identify their creator but do not store explicit `tenant_id`. | Backfill and enforce tenant ownership for each `agent_session`; never infer ownership from `conversation_id` alone. |
 | `AgentRequest.conversation_id` is optional for debug and northbound paths. | Create a standalone agent session or explicitly classify the run as non-durable; do not silently append it to another conversation. |
 | User and assistant messages are saved asynchronously and directly to conversation tables. | Append typed events synchronously at lifecycle boundaries, then project chat rows asynchronously with durable retries. |
 | Active runs are registered by `user_id:conversation_id`, so a concurrent run overwrites the previous registry entry. | Initial durable-session scope permits exactly one active run per `agent_session`. A second run is rejected until the first reaches a committed terminal or recovery state. |
-| UI `message_index` is computed from request history and may collide under concurrent runs. | Derive compatibility message order from committed W4 events rather than caller history length. |
+| UI `message_index` is computed from request history and may collide under concurrent runs. | Derive compatibility message order from committed W5 events rather than caller history length. |
 | Conversation rows support opinion updates, title changes, and soft deletion. | Keep them as projections while appending corresponding feedback, metadata-change, and deletion/tombstone events. |
 
 ### Identity and Replay Contract
@@ -132,7 +132,7 @@ database row order, `run_id`, and `step_id` must never substitute for `event_seq
 
 The initial release permits exactly one active run per durable `agent_session`.
 `agent_session` stores or references the current `active_run_id`; run start and terminal
-state changes update it transactionally with the corresponding W4 lifecycle event.
+state changes update it transactionally with the corresponding W5 lifecycle event.
 
 A second run and conflicting W7 lifecycle mutations are rejected while `active_run_id`
 is present. A cancelled, interrupted, or crashed run must first reach a committed
@@ -146,7 +146,7 @@ transaction commits. The normal application role may insert and read event rows 
 may not update or delete them. Corrections, retries, cancellations, and logical
 redactions are represented by new typed events. `agent_session.next_event_seq` and
 session lifecycle fields are mutable coordination state and are not part of the
-append-only event history. W11-governed legal deletion or physical redaction is the
+append-only event history. P5-governed legal deletion or physical redaction is the
 only privileged exception; it must emit an auditable tombstone/proof record and
 invalidate affected derived state. The owning `agent_session` is marked
 `partial_after_erasure`; the system must no longer claim complete deterministic replay
@@ -182,16 +182,16 @@ Payload schema:
 | `policy_version` | string | Context/memory policy version used for compression |
 | `model_version` | string | Model ID and version used for compression |
 | `schema_version` | string | Follows CM-005 event-schema compatibility contract |
-| `projection_version` | string | W5 projection version active at snapshot time |
+| `projection_version` | string | P1 projection version active at snapshot time |
 | `creation_reason` | enum | `periodic`, `lifecycle_boundary`, `manual_compact`, `dirty_state_flush` |
 
-A `compression.snapshot` event is appended like any other W4 event. It is immutable
+A `compression.snapshot` event is appended like any other W5 event. It is immutable
 after commit. Subsequent compression produces a new `compression.snapshot` event that
 covers an extended range; old snapshots remain in the event log as audit history but
 are superseded for recovery purposes by the latest snapshot.
 
 If the snapshot payload exceeds the inline event size limit, large fields (e.g.,
-Working Memory) are stored as W10 artifacts and referenced by pointer.
+Working Memory) are stored as P4 artifacts and referenced by pointer.
 
 ### Recovery from Compression Snapshot
 
@@ -202,7 +202,7 @@ recovery flow:
    `agent_event_data` for the most recent event of type `compression.snapshot`.
 2. **Load its payload**: summary text, Working Memory, token accounting, and
    covered event range.
-3. **Replay events after the snapshot**: read all W4 events with `event_seq`
+3. **Replay events after the snapshot**: read all W5 events with `event_seq`
    greater than the snapshot's `covered_event_range.end_seq` and apply them to
    reconstruct the current state.
 4. **Resume execution** from the reconstructed state.
@@ -233,10 +233,10 @@ CM-005 is claim-gated: this contract does not block the initial single-version
 implementation or deployment, but it is required before the first production event-
 schema upgrade.
 
-For each event type, the W4 registry declares one enabled writer version and supports
-reading that current version plus its immediately previous version. The W4 canonical
+For each event type, the W5 registry declares one enabled writer version and supports
+reading that current version plus its immediately previous version. The W5 canonical
 event reader owns the simple previous-to-current upcaster and returns the current
-internal representation to W5, replay, projection, and audit consumers. Stored events
+internal representation to P1, replay, projection, and audit consumers. Stored events
 remain immutable; consumers do not implement their own event upcasters.
 
 An event outside the declared `current + previous` read window fails explicitly with
@@ -266,14 +266,14 @@ terminal tool-result event is classified as `ambiguous_effect` during recovery. 
 conservative rule does not require a tool side-effect taxonomy and applies even when
 the tool may be read-only.
 
-An ambiguous tool call must not be invoked automatically during resume. W4 records an
+An ambiguous tool call must not be invoked automatically during resume. W5 records an
 explicit operator/user resolution event selecting `retry`, `skip`, or
 `confirm_completed`, including actor, timestamp, and optional rationale. Only that
 resolution permits the run to continue. Selecting `retry` is an explicit acceptance
 of possible duplicate external effects.
 
 Automatic effect reconciliation, external-system status queries, and cross-tool
-transaction coordination are outside W4's initial scope.
+transaction coordination are outside W5's initial scope.
 
 ## Event Writer Interface and Failures
 
@@ -310,7 +310,7 @@ required compatibility-projection outbox row. If any required outbox insert fail
 entire append transaction rolls back. Concurrent writers use row locking or optimistic
 compare-and-swap on the session sequence.
 
-The committed W4 event is immediately authoritative and readable; compatibility views
+The committed W5 event is immediately authoritative and readable; compatibility views
 may lag until their outbox work completes. The outbox uses `(event_id,
 projection_type)` as its idempotency key and records pending, completed, or failed-with-
 retry state plus bounded error metadata and attempt timestamps. Projector retries and
@@ -351,18 +351,18 @@ production implementation.
      `cancellation` events when `stop_event` is triggered.
    - **3d. Answer generation:** Emit `final.answer` events when the agent produces
      its final output.
-4. Add context/memory lifecycle event APIs for W5-W11.
-5. Implement redaction-before-persistence and artifact-reference behavior with W11.
+4. Add context/memory lifecycle event APIs for P1-P5.
+5. Implement redaction-before-persistence and artifact-reference behavior with P5.
 6. Build compatibility projection into current conversation tables.
 7. Migrate direct/asynchronous conversation saves to event-first projection in phases:
-   - **7a. Shadow mode:** Dual-write to both W4 events and existing conversation
+   - **7a. Shadow mode:** Dual-write to both W5 events and existing conversation
      tables; compare outputs and log mismatches without changing behavior.
-   - **7b. Read switch:** Read conversation history from W4 event projections;
+   - **7b. Read switch:** Read conversation history from W5 event projections;
      keep dual-write for safety.
-   - **7c. Write switch:** W4 events become authoritative; conversation table
+   - **7c. Write switch:** W5 events become authoritative; conversation table
      writes happen asynchronously through the compatibility projector.
    - **7d. Remove direct writes:** Remove legacy direct-write paths to
-     conversation tables; all mutations go through W4 event append first.
+     conversation tables; all mutations go through W5 event append first.
 8. Implement replay tooling that reconstructs a run after process restart.
 
 ## Repository Touchpoints
@@ -382,7 +382,7 @@ production implementation.
 ## Tests and Definition of Done
 
 - Before the first production event-schema upgrade, schema contract tests prove the
-  current and immediately previous event versions read through the W4 canonical
+  current and immediately previous event versions read through the W5 canonical
   upcaster, while versions outside the window fail explicitly.
 - Before enabling a new production writer version, reader-first/writer-later deployment
   and rollback tests prove the writer cannot be enabled while an incompatible reader
@@ -394,7 +394,7 @@ production implementation.
 - Constraint tests prove event sequences are unique and parent events stay in-session.
 - Atomicity tests prove index and data rows cannot be partially committed.
 - Event/projection-outbox crash tests prove a required outbox row commits atomically
-  with its W4 event, projection lag remains visible, and retry/operator replay
+  with its W5 event, projection lag remains visible, and retry/operator replay
   idempotently repairs failed compatibility views.
 - Replay test reconstructs a completed and interrupted run after restart.
 - Physical-erasure tests retain only permitted envelope/proof metadata, mark the
@@ -411,7 +411,7 @@ production implementation.
 - Performance baseline tests measure event-append latency, session-sequence lock
   contention, and projection lag under realistic workloads to establish benchmarks
   before production deployment.
-- W4 is done when all production run paths emit typed events, replay is deterministic
+- W5 is done when all production run paths emit typed events, replay is deterministic
   enough to rebuild state, ambiguous tool calls cannot auto-resume, and no UI
   transcript is treated as the execution source of truth.
 

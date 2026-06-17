@@ -1,4 +1,4 @@
-# W6: Complete Cache Validation and Versioning
+# P2: Complete Cache Validation and Versioning
 
 ## Objective
 
@@ -8,15 +8,15 @@ lifecycle change.
 
 ## Validity Contract
 
-W6 owns canonical fingerprints, validation, and invalidation delivery. It does not
-create projections or decide policy content; W5, W8, and W11 provide
-the versioned inputs that W6 validates.
+P2 owns canonical fingerprints, validation, and invalidation delivery. It does not
+create projections or decide policy content; P1, P3, and P5 provide
+the versioned inputs that P2 validates.
 
 Replace boundary-only fingerprints in `sdk/nexent/core/agents/agent_context.py` with
 metadata-based validation. A derived view or cached projection is valid only when all
 metadata inputs match:
 
-- W4 session identity and covered start/end event sequence.
+- W5 session identity and covered start/end event sequence.
 - `partial_after_erasure` flag (one-time mark for physical erasure propagation).
 - Context policy and memory policy versions.
 - Summary prompt and output schema versions.
@@ -24,10 +24,10 @@ metadata inputs match:
 - Tokenizer family/version and capacity-calculation version.
 - Projection/representation schema versions.
 - Relevant redaction, authority, and lifecycle-state versions.
-- Event count since last compression snapshot (for W5 materialized projections).
+- Event count since last compression snapshot (for P1 materialized projections).
 
-Content hashing (traversing event payloads to compute a digest) is removed from W6.
-Storage-layer integrity is handled by database checksums, not by W6. Store validation
+Content hashing (traversing event payloads to compute a digest) is removed from P2.
+Storage-layer integrity is handled by database checksums, not by P2. Store validation
 components separately so invalidation reasons remain observable. **Finding:** CM-015.
 
 ## Invalidation Rules
@@ -40,7 +40,7 @@ immutable, so edits are represented by events and invalidation metadata.
 
 Physical erasure or irreversible redaction additionally sets the owning session replay
 status to `partial_after_erasure`. Derived objects located through explicit source IDs
-or covered source ranges are invalidated as whole objects; W6 does not attempt
+or covered source ranges are invalidated as whole objects; P2 does not attempt
 field-level removal from summaries or other generated content.
 
 ## Validator Contract
@@ -64,7 +64,7 @@ Validation errors never degrade to cache hits.
 - Direct read paths must call the centralized validator; bypasses are test failures.
 - Deletion/redaction/policy changes publish targeted invalidation work with durable
   retries; lazy validation remains the correctness backstop.
-- An authorized W11 deletion tombstone makes matching read candidates immediately
+- An authorized P5 deletion tombstone makes matching read candidates immediately
   invalid even while destination-specific physical deletion remains in progress.
 - Physical erasure propagates through the one-time `partial_after_erasure` flag on
   `agent_session`; all historical compression snapshots are invalidated without
@@ -83,7 +83,7 @@ Validation errors never degrade to cache hits.
 2. Implement O(1) metadata-based validation:
    - compression.snapshot: `partial_after_erasure` flag + version field comparison
      (policy_version, model_version, projection_version).
-   - W5 materialized projections: snapshot validity + event count since snapshot +
+   - P1 materialized projections: snapshot validity + event count since snapshot +
      version fields.
    - Physical erasure: one-time `partial_after_erasure` flag that invalidates all
      historical snapshots without per-snapshot hash computation.
@@ -97,8 +97,8 @@ Validation errors never degrade to cache hits.
 
 - `sdk/nexent/core/agents/agent_context.py`
 - `sdk/nexent/core/agents/summary_cache.py`
-- W4 event-log repository
-- Policy/version registries from W8 and W11
+- W5 event-log repository
+- Policy/version registries from P3 and P5
 - Monitoring and lifecycle services
 
 ## Tests and Definition of Done
@@ -110,7 +110,7 @@ Validation errors never degrade to cache hits.
 - Erasure tests prove range- and explicit-ID lineage locate affected derived objects
   and prevent their reuse after payload deletion.
 - Canonicalization tests are stable across processes and supported runtime versions.
-- W6 is done when no derived view or cached projection can be used without centralized
+- P2 is done when no derived view or cached projection can be used without centralized
   complete validation and every invalidation is observable by stable reason code.
 
 ## Codebase Gap Analysis (2026-06-17)
@@ -126,8 +126,8 @@ Validation errors never degrade to cache hits.
 - Mid-sequence edits, model switches, or prompt changes go undetected
 - No model ID, prompt version, or schema version in fingerprints
 
-### Why full W6 is deferred
-The 9 metadata dimensions W6 specifies (policy version, prompt version, schema version, agent version, model ID, tokenizer version, projection version, lifecycle state, redaction version) **don't exist yet** — they require W4/W8/W11 to deliver versioned inputs first.
+### Why full P2 is deferred
+The 9 metadata dimensions P2 specifies (policy version, prompt version, schema version, agent version, model ID, tokenizer version, projection version, lifecycle state, redaction version) **don't exist yet** — they require W5/P3/P5 to deliver versioned inputs first.
 
 ### Minimal fix (do now)
 Hash the full covered prefix + include model ID in fingerprint (~50 lines in `agent_context.py`).

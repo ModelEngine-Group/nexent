@@ -1,4 +1,4 @@
-# W15: Guaranteed Context Fit
+# W10: Guaranteed Context Fit
 
 ## Objective
 
@@ -8,9 +8,9 @@ compaction-model request is within its W2 safe input budget before provider disp
 ## Current State and Scope
 
 `sdk/nexent/core/agents/agent_context.py` can warn after compression while still
-returning oversized context. W15 replaces that best-effort behavior with a deterministic
+returning oversized context. W10 replaces that best-effort behavior with a deterministic
 `ContextFitPipeline`. It owns final assembly and emergency degradation; richer
-component reducers and artifact offloading arrive through W9 and W10. The initial
+component reducers and artifact offloading arrive through W8 and P4. The initial
 gateway does not depend on those richer stages: hard fit is delivered first, and later
 workstreams may improve retained quality without weakening or replacing the invariant.
 
@@ -43,9 +43,9 @@ request or a typed `mandatory_context_overflow` failure. It must never dispatch 
 unverified request.
 
 Production dispatch requires a W1 snapshot with known hard capacity. Unknown hard
-capacity fails with `provider_capability_unknown`; W15 cannot claim guaranteed fit by
+capacity fails with `provider_capability_unknown`; W10 cannot claim guaranteed fit by
 guessing a total window. When exact counting behavior is unknown but hard capacity is
-known, W15 verifies against the W2 budget that already includes the mandatory 10%
+known, W10 verifies against the W2 budget that already includes the mandatory 10%
 uncertainty reserve and records that the count is estimated rather than exact.
 
 Deterministic stages:
@@ -56,7 +56,7 @@ Deterministic stages:
    tool-call/result pairs.
 4. Apply explicit emergency truncation and emit a context-loss event.
 
-W8-W12 may later add policy-guided selection, progressive component reduction,
+P3-W6 may later add policy-guided selection, progressive component reduction,
 artifact offload, and governed compaction as quality-enhancing stages. Those stages
 cannot become prerequisites for hard fit or dispatch safety.
 
@@ -85,22 +85,22 @@ provider overflow triggers one request-local limit correction and at most one re
 
 ## Final Assembly and Cache Metadata Boundary
 
-W14 provides a deterministic `CachePartitionPlan` containing partition assignments,
-ordering rules, and allowed provider cache directives. W15 alone owns final provider
+W3 provides a deterministic `CachePartitionPlan` containing partition assignments,
+ordering rules, and allowed provider cache directives. W10 alone owns final provider
 payload assembly, canonical serialization, token counting, fit verification, and the
 stable-prefix/full-prompt fingerprints calculated from that exact final payload.
 
-The trusted dispatch boundary sends the W15 `FitResult` payload unchanged. It may add
+The trusted dispatch boundary sends the W10 `FitResult` payload unchanged. It may add
 transport-only authentication, tracing, and retry metadata, but it cannot modify prompt
-content or cache directives. W14 never fingerprints a pre-fit payload or dispatches a
+content or cache directives. W3 never fingerprints a pre-fit payload or dispatches a
 request.
 
 ## Trusted Model Dispatch Boundary
 
 Production provider credentials and dispatch capability are available only to the
 trusted server-side dispatch path. Immediately before dispatch, it requires an
-authorized W3 identity, an immutable W8 policy decision, a server-resolved or verified
-W2 budget snapshot, and the exact final W15 `FitResult`. SDK/client assertions and
+authorized W4 identity, an immutable P3 policy decision, a server-resolved or verified
+W2 budget snapshot, and the exact final W10 `FitResult`. SDK/client assertions and
 ordinary internal callers are untrusted and cannot mark a payload authorized, governed,
 or fit.
 
@@ -113,7 +113,7 @@ removed or denied rather than merely monitored.
 The trusted path verifies that the W2 snapshot references the active W1 fingerprint
 and that the final `FitResult` references both active W1 and W2 fingerprints. It also
 verifies provider/model identity and requested output match the final provider request.
-W15 may reduce input content but cannot re-resolve capacity, recalculate reserve, or
+W10 may reduce input content but cannot re-resolve capacity, recalculate reserve, or
 increase the W2 hard input budget.
 
 ## Required Deliverables and Phases
@@ -122,7 +122,7 @@ increase the W2 hard input budget.
   outcomes/events, mandatory installer, optional-upgrade selector, trusted dispatch
   enforcement, and bypass detection.
 - First deliver the independent minimal hard-fit gateway. Then phase through shadow
-  counting, compaction-call enforcement, main-call enforcement, W8-W12 quality-stage
+  counting, compaction-call enforcement, main-call enforcement, P3-W6 quality-stage
   integration, and deletion/blocking of every direct provider-dispatch path.
 
 ## Implementation Plan
@@ -133,9 +133,9 @@ increase the W2 hard input budget.
 4. Route all main and compaction calls through one fit gateway.
 5. Add a single provider-overflow recovery retry using provider-reported limits.
 6. Refuse safely when mandatory minimums cannot fit; include actionable diagnostics.
-7. Accept W14 cache partition plans and compute cache metadata only from the final
+7. Accept W3 cache partition plans and compute cache metadata only from the final
    serialized payload.
-8. Connect W8-W12 quality-enhancing stages without weakening the hard invariant.
+8. Connect P3-W6 quality-enhancing stages without weakening the hard invariant.
 9. Eliminate production dispatch bypasses and restrict provider credentials to the
    trusted path:
    - **9a. Fix B1** (`backend/utils/llm_utils.py:100`): Replace manual
@@ -146,11 +146,11 @@ increase the W2 hard input budget.
      Replace `llm.generate(messages)` with `llm(messages)` to route through the
      trusted `__call__` path instead of the smolagents parent `generate` method.
    - **9c. Credential isolation** (architecture layer): Ensure only requests that
-     have passed W15 fit verification can access production provider API keys.
+     have passed W10 fit verification can access production provider API keys.
      Options include injecting credentials at the trusted dispatch layer rather than
      storing them on `OpenAIModel` instances, or adding a fit-verification gate in
      `__call__`. This is a broader architectural change to be designed alongside
-     the W15 gateway implementation.
+     the W10 gateway implementation.
 
 ## Repository Touchpoints
 
@@ -172,14 +172,14 @@ increase the W2 hard input budget.
 - Test mandatory-only overflow, emergency truncation, and stable reason codes.
 - Test tool-call/result pair integrity under every reduction stage.
 - Simulate provider context-length errors and prove one deterministic retry without loops.
-- Prove the minimal gateway guarantees fit before W8-W12 integrations are available.
-- Prove W14 plans cannot change fit decisions and fingerprints match the exact final
+- Prove the minimal gateway guarantees fit before P3-W6 integrations are available.
+- Prove W3 plans cannot change fit decisions and fingerprints match the exact final
   payload dispatched by the trusted boundary.
 - Run multilingual, multimodal, and large-schema fixtures. Release 1 multimodal
   fixtures cover only text modality; add modality-specific fixtures when a modality
   enters product scope. **Finding:** CM-026.
 - Negative integration tests prove SDK/client and ordinary internal callers cannot
-  dispatch without valid W3, W8, W2, and W15 decisions.
+  dispatch without valid W4, P3, W2, and W10 decisions.
 - Bypass elimination tests prove that all production `chat.completions.create` calls
   flow through the single chokepoint (`openai_llm.py:186`). Specifically:
   - System prompt generation (`llm_utils.py`) routes through `OpenAIModel.__call__`.
@@ -191,8 +191,8 @@ increase the W2 hard input budget.
 ## Rollout and Definition of Done
 
 Start with the minimal hard-fit gateway, shadow evaluation, and fault telemetry, then
-enforce on compaction calls and finally main calls. Integrate W8-W12 quality stages
+enforce on compaction calls and finally main calls. Integrate P3-W6 quality stages
 afterward. Maintain a temporary kill switch only for diagnosis; it must not permit
-unverified production dispatch. W15 is done when all model-call paths use the trusted
+unverified production dispatch. W10 is done when all model-call paths use the trusted
 server-side gateway, direct production provider access is denied, property tests pass,
-and preventable context-length provider errors meet the W13 release target.
+and preventable context-length provider errors meet the W9 release target.

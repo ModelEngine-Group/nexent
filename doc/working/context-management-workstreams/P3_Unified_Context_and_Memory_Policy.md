@@ -1,4 +1,4 @@
-# W8: Unified Context and Memory Policy
+# P3: Unified Context and Memory Policy
 
 ## Objective
 
@@ -8,9 +8,9 @@ request.
 
 ## Policy Domains
 
-W8 owns policy resolution, authority/conflict decisions, selection decisions, and
+P3 owns policy resolution, authority/conflict decisions, selection decisions, and
 memory-operation permission. It does not serialize final prompts, reduce content, or
-persist events/memory; W15, W9-W10, W4, and memory services execute approved decisions.
+persist events/memory; W10, W8-P4, W5, and memory services execute approved decisions.
 
 Define `ContextPolicy` with a nested `MemoryPolicy`. The policy covers:
 
@@ -46,7 +46,7 @@ conflicts that cannot be resolved by these rules return `authority_conflict_unre
 and do not silently select either side. Multi-source memory conflicts are handled by
 global retrieval resolution for deduplication, lifecycle filtering, and contradiction
 detection; unresolvable conflicts are excluded from injection. All unresolved conflicts
-emit a stable reason code visible through W7 inspection and W13 measurement. An
+emit a stable reason code visible through W7 inspection and W9 measurement. An
 exhaustive conflict-resolution ontology is explicitly out of scope. **Finding:** CM-017.
 
 ## Selection Contract
@@ -73,10 +73,10 @@ include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible
 
 ## Subagent Policy Independence
 
-Subagent sessions resolve their own W8 policy based on their agent configuration.
+Subagent sessions resolve their own P3 policy based on their agent configuration.
 The parent agent's policy does not apply to the subagent's internal context selection
 or memory operations. When a subagent returns its final answer to the parent, the
-parent's W8 policy governs how that result is integrated into the parent's context.
+parent's P3 policy governs how that result is integrated into the parent's context.
 
 ## Merge and Bypass Rules
 
@@ -132,8 +132,8 @@ parent's W8 policy governs how that result is integrated into the parent's conte
   cannot authorize dispatch or persistence.
 - Invalid policy fixtures fail before run start with actionable errors.
 - Performance baseline tests measure policy resolution and context selection latency
-  to ensure W8 does not become a bottleneck on the model request hot path.
-- W8 is done when one versioned policy explains and enforces every context selection
+  to ensure P3 does not become a bottleneck on the model request hot path.
+- P3 is done when one versioned policy explains and enforces every context selection
   and memory lifecycle decision.
 
 ## Codebase Gap Analysis (2026-06-17)
@@ -157,5 +157,5 @@ parent's W8 policy governs how that result is integrated into the parent's conte
 ### Pre-step (do now)
 Extract the 3 copies of memory-level-filtering logic into a single shared function.
 
-### Why full W8 is deferred
-Full policy engine requires W4 event log and W5 projections as input to provide versioned policy entities.
+### Why full P3 is deferred
+Full policy engine requires W5 event log and P1 projections as input to provide versioned policy entities.

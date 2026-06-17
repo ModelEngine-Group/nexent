@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Status | Accepted |
-| Owners | Model integration squad (W1 lead), Agent runtime squad (W2/W3 leads) |
-| Affects | [W1](W1_Correct_Model_Token_Capacity_Configuration.md), [W2](W2_Output_and_Safety_Capacity_Reserve.md), [W3](W3_Guaranteed_Context_Fit.md), [W16](W16_Prompt_Cache_Aware_Assembly.md) |
+| Owners | Model integration squad (W1 lead), Agent runtime squad (W2/W10 leads) |
+| Affects | [W1](W1_Correct_Model_Token_Capacity_Configuration.md), [W2](W2_Output_and_Safety_Capacity_Reserve.md), [W10](W10_Guaranteed_Context_Fit.md), [W3](W3_Prompt_Cache_Aware_Assembly.md) |
 | Related findings | CM-013, CM-016, CM-023 |
 | Date | 2026-06-15 |
 | Accepted on | 2026-06-15 |
@@ -16,17 +16,17 @@ W1 requires three concrete answers before implementation begins. The W1 specific
 names them in passing but does not pin them down:
 
 1. **What is in the day-one capability profile catalog.** Without an explicit catalog,
-   the resolver only knows the `provider_capability_unknown` path and W2/W3 cannot
+   the resolver only knows the `provider_capability_unknown` path and W2/W10 cannot
    activate production dispatch for any model.
 2. **Where the catalog lives.** Code module, YAML asset, or DB table determines who
    may edit it, how versioning works, and what "approved" means operationally.
-3. **How `ModelCapacitySnapshot.fingerprint` is computed.** W2 and W3 reject mismatched
-   fingerprints; without an exact algorithm the contract between W1/W2/W3 cannot be
+3. **How `ModelCapacitySnapshot.fingerprint` is computed.** W2 and W10 reject mismatched
+   fingerprints; without an exact algorithm the contract between W1/W2/W10 cannot be
    verified end-to-end.
 
 These three decisions are coupled (the field set in (3) depends on which fields
 the catalog in (2) supplies for the entries in (1)). Resolving them together avoids
-spec drift across W1, W2, W3, and W16.
+spec drift across W1, W2, W10, and W3.
 
 ## Decision 1: Day-One Capability Profile Catalog
 
@@ -75,7 +75,7 @@ Notes:
 - `tokenizer_family` identifiers (`o200k_base`, `qwen`, `chatglm`, `deepseek`,
   `moonshot`) follow the naming rules below. `counting_mode` stays `estimated`
   for every entry until the tokenizer registry ships a verified adapter.
-- `prompt_cache = unknown` for every entry. Promoting to `known` requires W16
+- `prompt_cache = unknown` for every entry. Promoting to `known` requires W3
   verification evidence for that specific provider/model deployment.
 - Each entry carries its own `capability_profile_version` string (see Decision 2).
 - `modelengine` and `tokenpony` entries are **deliberately excluded from day one**.
@@ -370,7 +370,7 @@ def compute_fingerprint(
 | `resolver_version` | Bumped whenever the resolver's own logic changes; prevents stale fingerprints from collapsing across logic versions |
 | `provider`, `model_name` | Identity of the dispatch target |
 | Four capacity fields (`context_window`, `max_input`, `max_output`, `default_output_reserve`) | The actual numbers W2 derives the budget from |
-| `requested_output_tokens` | Per-request choice; W2/W3 must reject a snapshot if request changes |
+| `requested_output_tokens` | Per-request choice; W2/W10 must reject a snapshot if request changes |
 | `provider_input_limit_tokens` | Derived hard limit; included so a resolver bug that changes derivation can't silently match |
 | `tokenizer_family`, `counting_mode` | Determines exact vs estimated path; W2 budgeting depends on it |
 | `capability_profile_version` | Per-entry version; matches snapshot to a specific catalog row |
@@ -390,7 +390,7 @@ def compute_fingerprint(
   uses **the same algorithm** with its own field set (defined in a sibling W2 ADR if
   needed) and includes the W1 fingerprint as one input — so a W1 change cascades
   through W2 by construction.
-- W3 verifies the W1 fingerprint and W2 fingerprint before final assembly. The
+- W10 verifies the W1 fingerprint and W2 fingerprint before final assembly. The
   trusted dispatch boundary (CM-013) re-computes both from the active snapshots and
   rejects mismatch with the typed failure `capacity_fingerprint_mismatch`.
 - 32 hex chars (128 bits) is sufficient for equality-check use; we are not using the
@@ -441,7 +441,7 @@ required by the catalog completeness rule still have unknowns for every entry:
 
 - `reasoning_window_behavior` — not consistently documented by any provider.
 - `provider_overhead_behavior` — not documented at all; must be measured empirically.
-- `prompt_cache` — marked `unknown` for every entry; promotion requires W16 evidence.
+- `prompt_cache` — marked `unknown` for every entry; promotion requires W3 evidence.
 - `tokenizer_family` is **fixed** by this ADR, but `counting_mode` stays `estimated`
   until the registry's adapter passes the ≤0.5% MAE / ≤2% max-error gate.
 
@@ -454,7 +454,7 @@ to `exact` counting and `known` cache happens incrementally with evidence.
 This ADR is accepted when:
 
 - [x] **All five Open Items resolved** (signed off 2026-06-15; see Resolution Log).
-- [x] **W2 and W3 leads signed off on Decision 3 fingerprint algorithm** (2026-06-15).
+- [x] **W2 and W10 leads signed off on Decision 3 fingerprint algorithm** (2026-06-15).
       They will use the same algorithm shape (different field sets) for their own
       snapshot fingerprints.
 - [x] **Type skeleton PR merged** into `feature/model-capacity-and-request-safety`
@@ -511,7 +511,7 @@ request leaves all capacity columns null.
 (b) add a "suggest capacity at add time" UX with fuzzy catalog matching
 (richer, see workstream proposal) — that should be decided in a fresh
 workstream rather than shoehorned into a closed ADR. Tracked in
-`doc/working/context-management-workstreams/W17_Capacity_Suggestion_On_Model_Add.md`.
+`doc/working/context-management-workstreams/W11_Capacity_Suggestion_On_Model_Add.md`.
 
 ### CM-032 (formerly KL-2): Provider-level "Edit Config" batch dialog does not expose capacity
 

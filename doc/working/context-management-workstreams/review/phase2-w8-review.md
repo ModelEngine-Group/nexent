@@ -1,4 +1,4 @@
-# Phase 2: W8 Review
+# Phase 2: P3 Review
 
 ## Assessment
 
@@ -9,7 +9,7 @@ cost model and durable-version compatibility rules.
 
 - **CM-014 (Medium):** Historical checkpoint/projection schema compatibility is incomplete.
 - **CM-015 (Low):** Rehashing complete event ranges can become O(history) per checkpoint.
-- **CM-020 (High):** The accepted tombstone blocks reads immediately while W14's fixed
+- **CM-020 (High):** The accepted tombstone blocks reads immediately while W3's fixed
   destination registry tracks, retries, and verifies cross-store deletion.
 
 ## Recommendations

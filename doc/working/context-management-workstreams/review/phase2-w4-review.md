@@ -1,8 +1,8 @@
-# Phase 2: W4 Review
+# Phase 2: W5 Review
 
 ## Assessment
 
-W4 fixes a real isolation blocker and has a clear trusted identity-resolution model.
+W5 fixes a real isolation blocker and has a clear trusted identity-resolution model.
 It supports only a single owning user per conversation.
 
 ## Findings and Risks

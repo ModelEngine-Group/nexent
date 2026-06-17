@@ -1,4 +1,4 @@
-# W3: Tenant and User Isolation
+# W4: Tenant and User Isolation
 
 ## Objective
 
@@ -14,8 +14,8 @@ compression snapshots, and artifacts would multiply the impact unless identity i
 
 ## Identity Contract
 
-W3 owns identity resolution, authorization, and identity-qualified keying. It does not
-define event schemas, compression snapshot contents, or lifecycle behavior; W4 and W7 consume
+W4 owns identity resolution, authorization, and identity-qualified keying. It does not
+define event schemas, compression snapshot contents, or lifecycle behavior; W5 and W7 consume
 the authorized identity contract.
 
 Introduce immutable branchless `ContextIdentity`:
@@ -38,7 +38,7 @@ A subagent runs under its own `agent_session_id` (UUID) but inherits the parent'
 nullable) and `delegation_type` (enum: `'subagent'` or NULL) to capture the
 delegation relationship.
 
-The subagent's W3 `ContextIdentity` uses the same `tenant_id` and `user_id` as
+The subagent's W4 `ContextIdentity` uses the same `tenant_id` and `user_id` as
 the parent session. Subagent authorization follows the same rules as ordinary
 agents, determined by its agent configuration.
 
@@ -49,7 +49,7 @@ Recursive delegation is prohibited: a subagent cannot create sub-subagents.
 ### Initial Single-Owner Contract
 
 The initial release supports exactly one immutable owning `tenant_id` and `user_id` for
-each conversation and its W4 `agent_session`. It does not support conversation
+each conversation and its W5 `agent_session`. It does not support conversation
 membership, shared-session access, or ownership transfer. A future product request to
 give another user an independent copy creates a new conversation/session; it does not
 change the original owner's durable identity.
@@ -103,8 +103,8 @@ to the operation and resource being executed.
 1. Add `ContextIdentity` to backend and SDK boundary models.
 2. Replace string key construction in `AgentRunManager`.
 3. Require identity in context-manager creation, cleanup, and run registration.
-4. Verify W4 persistence schemas include identity columns and composite indexes;
-   coordinate with W4 implementation to ensure alignment.
+4. Verify W5 persistence schemas include identity columns and composite indexes;
+   coordinate with W5 implementation to ensure alignment.
 5. Add an authorization service used by compression snapshot, artifact, and lifecycle operations.
 6. Mark internal mutation APIs that accept only `conversation_id` as deprecated
    with a notice that they will be removed in the next version. Public conversation
@@ -122,7 +122,7 @@ to the operation and resource being executed.
 - `backend/apps/conversation_management_app.py`
 - `backend/services/conversation_management_service.py`
 - `backend/database/conversation_db.py`
-- New event-log, artifact, and lifecycle modules from W4-W7
+- New event-log, artifact, and lifecycle modules from W5-W7
 
 ## Tests
 
@@ -145,8 +145,8 @@ to the operation and resource being executed.
 ## Rollout and Definition of Done
 
 Dual-key in-memory state briefly while logging mismatches, then switch to the full
-identity and remove legacy keys. Existing conversations receive an internal W4 session
-during migration. W3 is done when every context-state mutation requires authorized
+identity and remove legacy keys. Existing conversations receive an internal W5 session
+during migration. W4 is done when every context-state mutation requires authorized
 `ContextIdentity`, unsupported sharing/transfer fails explicitly, and collision/security
 suites pass.
 

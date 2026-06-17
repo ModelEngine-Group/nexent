@@ -1,4 +1,4 @@
-# W17: Capacity Suggestion on Model Add
+# W11: Capacity Suggestion on Model Add
 
 ## Objective
 
@@ -18,7 +18,7 @@ only when `(provider, model_name)` exactly matches a catalog key. The frontend
 Pydantic default `'OpenAI-API-Compatible'` and matches no catalog key. The
 backend helper `_infer_model_factory` only fires for embedding-type records.
 
-W17 owns the user-facing "suggest defaults at add time" experience. It does
+W11 owns the user-facing "suggest defaults at add time" experience. It does
 **not** change the resolver, the catalog data model, or the W1 fingerprint
 contract; it adds a thin lookup layer between the frontend and the catalog,
 plus a UX affordance to accept suggested values.
@@ -90,7 +90,7 @@ A small inference helper picks `suggested_provider` for the response:
 
 This helper subsumes and replaces the LLM-only gap in
 `_infer_model_factory`. Embedding records continue to use the existing
-inference path; W17 does not refactor it.
+inference path; W11 does not refactor it.
 
 ## Runtime Contract
 
@@ -113,7 +113,7 @@ discovery makes upstream API calls).
 
 ## Database Migration Contract
 
-None. W17 does not introduce schema. It reads catalog + makes optional
+None. W11 does not introduce schema. It reads catalog + makes optional
 upstream HTTP calls.
 
 ## Migration, Deliverables, and Phases
@@ -222,7 +222,7 @@ Frontend — **all three model-management dialogs**, not just Add:
 
 ## Operational Dependencies
 
-W17 requires a coordinated deploy across backend + web containers. There
+W11 requires a coordinated deploy across backend + web containers. There
 is no DB migration.
 
 | Component | Action | Trigger |
@@ -240,7 +240,7 @@ globally for paid tenants → measure 1 week → enable for all.
 
 **Rollback**: set `CAPACITY_SUGGESTION_ENABLED=false`. Frontend hides
 suggestion UI; backend route stops being called. No data migration needed
-since W17 never persists provider_candidate values automatically.
+since W11 never persists provider_candidate values automatically.
 
 ## Tests and Release Evidence
 
@@ -274,7 +274,7 @@ since W17 never persists provider_candidate values automatically.
   budget approval.
 - Phase 3 (extend `_infer_model_factory`) gated on Phase 2 ship + one week
   monitoring.
-- W17 done when the dogfood and SLO checks pass for two consecutive weeks
+- W11 done when the dogfood and SLO checks pass for two consecutive weeks
   and the feature flag is removed.
 
 ## Why This Is Not W1
@@ -283,7 +283,7 @@ W1's ADR was explicitly scoped to the catalog data model and the resolver
 contract. The "how does the catalog get populated correctly from real user
 behavior" question is a separate layer of the same problem. Moving the fix
 into a fresh workstream keeps W1's invariants stable (catalog keys remain
-exact; `provider_candidate` is never authoritative) while letting W17
+exact; `provider_candidate` is never authoritative) while letting W11
 iterate on UX without renegotiating W1's CM-016 boundaries.
 
 See `W1_ADR_Capability_Catalog_Storage_and_Fingerprint.md` "Known

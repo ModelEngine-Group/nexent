@@ -38,7 +38,7 @@ migration. It must never feed `ContextManagerConfig.token_threshold`.
 
 Create a `ModelCapacityResolver` in the SDK model layer backed by a small versioned
 capability profile for each formally supported provider/model or deployment ID. The
-profile contains only capabilities required by W1-W15 and W14: hard capacity fields,
+profile contains only capabilities required by W1-W10 and W3: hard capacity fields,
 token-counter mode/tokenizer family, reasoning-window behavior, provider-overhead
 behavior, prompt-cache mode, and cache-metric availability.
 
@@ -89,7 +89,7 @@ resolve_capacity(model_id, provider, operator_overrides, requested_output_tokens
 | `warnings` | bounded list of stable reason codes |
 | `fingerprint` | required deterministic string over the resolved contract |
 
-The snapshot is passed unchanged to W2, W15, W14, monitoring, and provider dispatch.
+The snapshot is passed unchanged to W2, W10, W3, monitoring, and provider dispatch.
 Typed failures include `invalid_capacity_configuration`,
 `provider_capability_unknown`, `uncertainty_reserve_basis_unknown`,
 `requested_output_exceeds_cap`, and `provider_metadata_invalid`.
@@ -131,13 +131,13 @@ Follow the repository's existing SQL migration convention:
 7. Update frontend add/edit forms and labels; show capacity source and warnings.
 8. Add monitoring fields for the resolved snapshot on every request.
 
-## W1 to W2/W15 Handoff
+## W1 to W2/W10 Handoff
 
 - W1 creates exactly one immutable `ModelCapacitySnapshot` for a model request after
   resolving the selected model and requested output.
 - W2 consumes that snapshot and returns a budget snapshot that records the W1
   fingerprint; W2 never mutates or independently re-resolves capacity.
-- W15 consumes both snapshots and rejects a missing or mismatched W1 fingerprint before
+- W10 consumes both snapshots and rejects a missing or mismatched W1 fingerprint before
   fit/serialization or dispatch.
 - Provider dispatch verifies the selected provider/model, requested output, and W1
   fingerprint still match the final request.

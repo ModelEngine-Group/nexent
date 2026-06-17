@@ -1,4 +1,4 @@
-# W3：租户与用户隔离
+# W4：租户与用户隔离
 
 ## 目标
 
@@ -10,7 +10,7 @@
 
 ## 身份契约
 
-W3 负责身份解析、授权和身份限定的建键。它不定义事件 Schema、压缩快照内容或生命周期行为；W4 和 W7 消费已授权的身份契约。
+W4 负责身份解析、授权和身份限定的建键。它不定义事件 Schema、压缩快照内容或生命周期行为；W5 和 W7 消费已授权的身份契约。
 
 引入不可变、无分支的 `ContextIdentity`：
 
@@ -24,7 +24,7 @@ tenant_id, user_id, conversation_id
 
 子智能体在自己的 `agent_session_id`（UUID）下运行，但继承父级的 `conversation_id`。`agent_session` 表记录 `parent_session_id`（UUID，可空）和 `delegation_type`（枚举：`'subagent'` 或 NULL）以捕获委派关系。
 
-子智能体的 W3 `ContextIdentity` 使用与父会话相同的 `tenant_id` 和 `user_id`。子智能体授权遵循与普通智能体相同的规则，由其智能体配置决定。
+子智能体的 W4 `ContextIdentity` 使用与父会话相同的 `tenant_id` 和 `user_id`。子智能体授权遵循与普通智能体相同的规则，由其智能体配置决定。
 
 递归委派被禁止：子智能体不能创建子子智能体。
 
@@ -32,7 +32,7 @@ tenant_id, user_id, conversation_id
 
 ### 初始单所有者契约
 
-初始版本为每个 Conversation 及其 W4 `agent_session` 支持恰好一个不可变的所有 `tenant_id` 和 `user_id`。不支持 Conversation 成员、共享会话访问或所有权转移。未来的产品请求若需给另一个用户独立副本，则创建新的 Conversation/会话；不改变原始所有者的持久身份。
+初始版本为每个 Conversation 及其 W5 `agent_session` 支持恰好一个不可变的所有 `tenant_id` 和 `user_id`。不支持 Conversation 成员、共享会话访问或所有权转移。未来的产品请求若需给另一个用户独立副本，则创建新的 Conversation/会话；不改变原始所有者的持久身份。
 
 共享智能体、租户共享记忆和其他独立治理的资源不授予对 Conversation、会话、事件、压缩快照、运行产物（Artifact）、投影或生命周期操作的访问权限。显式管理员/运维特权（如单独定义）是经审计的策略例外，绝不改变会话所有权。
 
@@ -66,7 +66,7 @@ authorize_context_operation(identity, operation, resource) -> AuthorizationDecis
 1. 在后端和 SDK 边界模型中添加 `ContextIdentity`。
 2. 替换 `AgentRunManager` 中的字符串键构造。
 3. 在上下文管理器创建、清理和运行注册中要求身份。
-4. 验证 W4 持久化 Schema 包含身份列和复合索引；与 W4 实施协调以确保对齐。
+4. 验证 W5 持久化 Schema 包含身份列和复合索引；与 W5 实施协调以确保对齐。
 5. 添加供压缩快照、运行产物（Artifact）和生命周期操作使用的授权服务。
 6. 将仅接受 `conversation_id` 的内部变更 API 标记为已弃用，并注明将在下一版本中移除。公共 Conversation API 可以保留 `conversation_id` 作为参数，但必须从请求上下文中解析和授权完整身份。
 7. 为拒绝访问添加结构化安全审计事件。
@@ -80,7 +80,7 @@ authorize_context_operation(identity, operation, resource) -> AuthorizationDecis
 - `backend/apps/conversation_management_app.py`
 - `backend/services/conversation_management_service.py`
 - `backend/database/conversation_db.py`
-- W4-W7 的新事件日志、运行产物（Artifact）和生命周期模块
+- W5-W7 的新事件日志、运行产物（Artifact）和生命周期模块
 
 ## 测试
 
@@ -97,4 +97,4 @@ authorize_context_operation(identity, operation, resource) -> AuthorizationDecis
 
 ## 上线与完成标准
 
-短暂使用双键内存状态并记录不匹配，然后切换到完整身份并移除旧版键。现有 Conversation 在迁移期间获得内部 W4 会话。当每次上下文状态变更都需要已授权的 `ContextIdentity`、不支持的共享/转移显式失败、且碰撞/安全测试套件全部通过时，W3 即完成。
+短暂使用双键内存状态并记录不匹配，然后切换到完整身份并移除旧版键。现有 Conversation 在迁移期间获得内部 W5 会话。当每次上下文状态变更都需要已授权的 `ContextIdentity`、不支持的共享/转移显式失败、且碰撞/安全测试套件全部通过时，W4 即完成。

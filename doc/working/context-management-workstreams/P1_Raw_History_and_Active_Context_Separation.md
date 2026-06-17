@@ -1,42 +1,42 @@
-# W5: Raw History and Active Context Separation
+# P1: Raw History and Active Context Separation
 
 ## Objective
 
-Build deterministic, versioned, purpose-specific projections from W4 execution events.
-The W4 event log remains the durable source of truth; W5 produces the different views
+Build deterministic, versioned, purpose-specific projections from W5 execution events.
+The W5 event log remains the durable source of truth; P1 produces the different views
 needed by the chat UI, agent resume, model requests, Working Memory, long-term memory,
 and audit without sending all durable history to every consumer.
 
-W5 is successful when adding more tool details, lifecycle events, and audit metadata to
-W4 does not automatically increase model-prompt size or change current chat behavior.
+P1 is successful when adding more tool details, lifecycle events, and audit metadata to
+W5 does not automatically increase model-prompt size or change current chat behavior.
 
 ## Scope and Non-Goals
 
-W5 owns:
+P1 owns:
 
-- Reading an authorized, session-ordered range of W4 events.
+- Reading an authorized, session-ordered range of W5 events.
 - Applying restore/reset lifecycle semantics to determine active-state lineage.
 - Transforming events into rebuildable, purpose-specific records and `ContextItem`s.
 - Explaining every inclusion, transformation, and exclusion with stable reason codes.
 - Providing backend-owned chat and resumable-history views during migration.
 
-W5 does not:
+P1 does not:
 
-- Append or mutate W4 events.
-- Decide final token budgets or representation upgrades; W8 and W15 own selection.
-- Generate compressed representations; W9 and W12 own reduction and compaction.
-- Persist recovery compression snapshots; W4 owns compression snapshots.
-- Persist long-term memories; W8 and memory services decide and perform writes.
+- Append or mutate W5 events.
+- Decide final token budgets or representation upgrades; P3 and W10 own selection.
+- Generate compressed representations; W8 and W6 own reduction and compaction.
+- Persist recovery compression snapshots; W5 owns compression snapshots.
+- Persist long-term memories; P3 and memory services decide and perform writes.
 
 ## Source and Derived-State Invariants
 
-1. W4 events are the source of truth. Projections and materialized caches are disposable.
+1. W5 events are the source of truth. Projections and materialized caches are disposable.
 2. Events are read in ascending `event_seq`; UUIDs and timestamps never define order.
 3. A projector never changes source events or hides an event from authorized audit.
 4. The same event prefix, projector version, policy version, and authorization scope
    produce the same projection and fingerprint.
 5. `model_context_projection` is not the complete model prompt. It supplies eligible
-   history/context candidates to W8/W15 for policy selection and final fit.
+   history/context candidates to P3/W10 for policy selection and final fit.
 6. Restore/reset changes active-state lineage through lifecycle events, while
    `audit_projection` continues to expose the complete authorized event sequence.
 7. Hidden/private chain-of-thought is neither required nor reconstructed.
@@ -45,18 +45,18 @@ W5 does not:
 
 | Term | Meaning |
 | --- | --- |
-| Raw history | Authorized W4 events ordered by `event_seq`. |
+| Raw history | Authorized W5 events ordered by `event_seq`. |
 | Active-state lineage | Events currently effective after applying restore/reset lifecycle semantics. |
 | Projection | Rebuildable transformation of raw history for one declared purpose. |
 | Projection record | Purpose-specific output record, such as one chat message or resume action. |
 | `ContextItem` | Stable typed candidate that may be selected or reduced for model context. |
-| Materialized projection | Optional cached projection that can always be rebuilt from W4. |
+| Materialized projection | Optional cached projection that can always be rebuilt from W5. |
 
 ## Projection Request and Result Contract
 
 Create one shared `HistoryProjector` service. Public callers resolve
 `ContextIdentity` and authorization before projection; internal execution uses the
-resolved W4 `agent_session_id`.
+resolved W5 `agent_session_id`.
 
 ```text
 project(
@@ -84,7 +84,7 @@ Request rules:
 
 | Field | Meaning |
 | --- | --- |
-| `agent_session_id` | Projected W4 session. |
+| `agent_session_id` | Projected W5 session. |
 | `through_event_seq` | Last source sequence considered. |
 | `active_baseline_seq` | Checkpoint/event baseline selected by the latest applicable restore/reset lifecycle event. |
 | `purpose` | Projection registry key. |
@@ -94,7 +94,7 @@ Request rules:
 | `context_items` | Stable candidate items, empty for projections that do not produce them. |
 | `source_ranges` | Source event ranges consumed, including excluded inactive ranges when relevant. |
 | `decisions` | Inclusion, exclusion, redaction, grouping, and transformation decisions with reason codes. |
-| `token_estimates` | Optional estimates by record/item and total; never treated as final W15 counts. |
+| `token_estimates` | Optional estimates by record/item and total; never treated as final W10 counts. |
 | `fingerprint` | Canonical digest of source ranges, relevant event content, versions, and options. |
 | `replay_status` | `complete` or `partial_after_erasure`; projections never hide loss of source evidence. |
 
@@ -115,10 +115,10 @@ Every projection runs the same ordered stages:
 
 1. **Resolve identity and boundary:** authorize `ContextIdentity`, resolve
    `agent_session_id`, and validate `through_event_seq`.
-2. **Read canonical events:** stream W4 index/data rows ordered by `event_seq`; the W4
+2. **Read canonical events:** stream W5 index/data rows ordered by `event_seq`; the W5
    canonical reader validates event schemas, upcasts the immediately previous version
    to the current internal representation, and validates parent/session relationships.
-3. **Apply governance:** enforce W11 redaction, deletion, retention, and authorization.
+3. **Apply governance:** enforce P5 redaction, deletion, retention, and authorization.
 4. **Resolve active lineage:** interpret `restore.applied`, `reset.applied`, and related
    lifecycle events for projections that represent current state.
 5. **Transform by purpose:** group, select, and transform events using the registered
@@ -137,7 +137,7 @@ Every projection runs the same ordered stages:
   unless product policy explicitly hides them.
 - Resume, model-context, and Working Memory projections apply active lineage.
 - A `restore.applied` event records the restored covered `event_seq` and may reference
-  a W4 `compression.snapshot` event. Current state is reconstructed from the active source prefix through
+  a W5 `compression.snapshot` event. Current state is reconstructed from the active source prefix through
   that sequence, then events after the restore event are applied. The checkpoint may
   accelerate reconstruction but is never required. Events between the restored
   boundary and restore event remain audit history but are excluded from active state
@@ -147,7 +147,7 @@ Every projection runs the same ordered stages:
 
 ## Minimum Event-to-Projection Mapping
 
-The event taxonomy ADR must define mapping rules for every registered W4 event type.
+The event taxonomy ADR must define mapping rules for every registered W5 event type.
 The initial registry must cover at least:
 
 | Event type or family | Chat | Resume | Model context | Working Memory | Memory candidate | Audit |
@@ -169,9 +169,9 @@ Unknown registered event types must never be silently ignored. A projector must 
 handle the type, explicitly exclude it with a registered reason, or fail with
 `unsupported_event_schema`.
 
-W5 projectors consume only W4 canonical current-form events and never implement
-event-schema upcasters independently. W4 events outside the approved `current +
-previous` compatibility window fail with `unsupported_event_schema`; W5 does not guess,
+P1 projectors consume only W5 canonical current-form events and never implement
+event-schema upcasters independently. W5 events outside the approved `current +
+previous` compatibility window fail with `unsupported_event_schema`; P1 does not guess,
 silently exclude, or rewrite them.
 
 ### Projection Implementation Priority
@@ -179,10 +179,10 @@ silently exclude, or rewrite them.
 Not all projections are required for Release 1. Prioritize by consumer dependency:
 
 - **Release 1 required:** `chat_projection` (UI compatibility), `resume_projection`
-  (restart recovery), `model_context_projection` (W8/W15 input).
+  (restart recovery), `model_context_projection` (P3/W10 input).
 - **Release 1 optional:** `working_memory_projection` (can defer if compression
   snapshots carry Working Memory directly), `memory_candidate_projection` (depends
-  on W8 Memory Policy Engine), `audit_projection` (can implement after core
+  on P3 Memory Policy Engine), `audit_projection` (can implement after core
   projections are stable).
 - **Deferred:** `memory_projection` (compatibility flow, low priority).
 
@@ -230,7 +230,7 @@ Include:
 - Latest compatible checkpoint reference when available.
 
 An unresolved `ambiguous_effect` is a blocking resume record. The projection must not
-represent the associated tool call as safely retryable or completed. After a W4
+represent the associated tool call as safely retryable or completed. After a W5
 resolution event, it projects the explicit `retry`, `skip`, or `confirm_completed`
 decision and its actor.
 
@@ -242,7 +242,7 @@ Exclude:
 
 ### `model_context_projection`
 
-**Consumer:** W8 policy selection and W15 final-fit assembly for the next model request.
+**Consumer:** P3 policy selection and W10 final-fit assembly for the next model request.
 
 **Produces:** Ordered eligible `ContextItem` candidates, not a final serialized prompt.
 
@@ -256,14 +256,14 @@ Include:
 Rules:
 
 - Never split a required tool-call/result pair.
-- Mark mandatory/minimum-fidelity metadata, but let W8 decide policy priority.
+- Mark mandatory/minimum-fidelity metadata, but let P3 decide policy priority.
 - Do not automatically include all chat or audit records.
 - Increasing raw event detail must not increase this projection unless transformation
   rules intentionally produce a new candidate.
 
 ### `working_memory_projection`
 
-**Consumer:** Agent runtime, W4 compression snapshots, W7 inspection/editing, and W8.
+**Consumer:** Agent runtime, W5 compression snapshots, W7 inspection/editing, and P3.
 
 **Produces:** One versioned structured state object plus source-linked `ContextItem`s.
 
@@ -286,7 +286,7 @@ Rules:
 
 ### `memory_candidate_projection`
 
-**Consumer:** W8 Memory Policy Engine.
+**Consumer:** P3 Memory Policy Engine.
 
 **Produces:** Sanitized candidate facts/corrections/evidence for review; it never writes
 long-term memory directly.
@@ -305,20 +305,20 @@ requirements.
 
 **Consumer:** Memory inspection and compatibility flows requiring event-derived memory.
 
-**Produces:** Policy-approved memory records derived from W4 memory decision/write
+**Produces:** Policy-approved memory records derived from W5 memory decision/write
 events. It does not perform retrieval from external memory stores and does not bypass
-W8 lifecycle filtering.
+P3 lifecycle filtering.
 
 ### `audit_projection`
 
-**Consumer:** Authorized operators, debugging, compliance, and W13 evidence.
+**Consumer:** Authorized operators, debugging, compliance, and W9 evidence.
 
 **Produces:** Complete authorized event records plus projection/governance decisions.
 
 Rules:
 
 - Preserve canonical event order and inactive-lineage events.
-- Redact or deny payloads according to W11; audit access is not automatic full access.
+- Redact or deny payloads according to P5; audit access is not automatic full access.
 - Include stable reason codes for unavailable, deleted, or physically redacted detail.
 
 ## `ContextItem` Contract
@@ -359,25 +359,25 @@ Rules:
 - Source provenance is mandatory; an item with no resolvable source is invalid.
 - Items contain canonical semantic content or a governed reference, not UI formatting.
 - Representations such as `full`, `compressed`, `structured`, and `pointer` are separate
-  W9 records linked to the item.
-- W5 may mark an item mandatory or declare minimum fidelity from source semantics, but
-  W8 validates and resolves final policy.
+  W8 records linked to the item.
+- P1 may mark an item mandatory or declare minimum fidelity from source semantics, but
+  P3 validates and resolves final policy.
 
 ## Storage and Materialization
 
-Start with on-demand projection from W4 plus `compression.snapshot` acceleration. Do not create a
+Start with on-demand projection from W5 plus `compression.snapshot` acceleration. Do not create a
 database table for every projection before profiling.
 
 Materialize only when a measured latency/load requirement justifies it:
 
 - `chat_projection` may be materialized into existing conversation tables through the
-  W4 compatibility projector.
-- `working_memory_projection` is persisted inside W4 `compression.snapshot` events and rebuilt from W4 when missing or invalid.
+  W5 compatibility projector.
+- `working_memory_projection` is persisted inside W5 `compression.snapshot` events and rebuilt from W5 when missing or invalid.
 - Other projections default to on-demand or short-lived cache.
 
 Every materialized result stores `agent_session_id`, `through_event_seq`,
 `projection_version`, `policy_version`, fingerprint, creation time, and invalidation
-status. A cache hit is accepted only through W6 validation.
+status. A cache hit is accepted only through P2 validation.
 
 Every persisted derived object must expose queryable source lineage. Use explicit
 `source_event_ids` for sparse or selected inputs and `source_event_range` for complete
@@ -391,7 +391,7 @@ must exist and not be deleted, mandatory ContextItems must have a corresponding
 representation after compression (tier may degrade but cannot disappear), and schema
 must be valid. Semantic coverage (measured, does not block commit): key
 decision/constraint/goal retention rate and source-to-summary information-loss
-classification are routed to W13 SLO measurement. **Finding:** CM-021.
+classification are routed to W9 SLO measurement. **Finding:** CM-021.
 
 When a source event is physically erased or irreversibly redacted, every persisted
 derived object whose lineage includes that event is invalidated as a whole. Rebuild
@@ -402,18 +402,18 @@ return the object as unavailable rather than preserving or editing old derived c
 
 ### New Durable Run
 
-1. W4 appends `user.input` and `run.started`.
-2. W5 builds resume/Working Memory/model-context candidates through the committed head.
-3. W8/W15 select, reduce, and fit the final model request.
-4. Runtime events append to W4.
-5. W5 chat projection updates compatibility tables; W4 appends `compression.snapshot` events at configured boundaries.
+1. W5 appends `user.input` and `run.started`.
+2. P1 builds resume/Working Memory/model-context candidates through the committed head.
+3. P3/W10 select, reduce, and fit the final model request.
+4. Runtime events append to W5.
+5. P1 chat projection updates compatibility tables; W5 appends `compression.snapshot` events at configured boundaries.
 
 ### Resume or Worker Restart
 
-1. W4 locates the latest `compression.snapshot` event for the session.
-2. W5 loads the snapshot payload (summary, Working Memory, token accounting) and
+1. W5 locates the latest `compression.snapshot` event for the session.
+2. P1 loads the snapshot payload (summary, Working Memory, token accounting) and
    replays events after the snapshot's covered range through the requested event head.
-3. W5 returns reconstructed Working Memory, resume state, and model-context candidates.
+3. P1 returns reconstructed Working Memory, resume state, and model-context candidates.
 4. Runtime continues without trusting frontend-provided history.
 
 ### Stateless or Non-Durable Run
@@ -429,7 +429,7 @@ before each run. Migrate in phases:
 1. **Observe:** Build `chat_projection` in shadow mode and compare it with existing
    conversation tables and caller history. Emit mismatch reason codes and no behavior
    change.
-2. **Project:** Append W4 events first and populate current conversation tables through
+2. **Project:** Append W5 events first and populate current conversation tables through
    the compatibility projector. Existing read APIs still use current tables.
 3. **Authoritative backend history:** Run preparation reads backend projections.
    Caller history is ignored for durable sessions except validated fallback.
@@ -437,7 +437,7 @@ before each run. Migrate in phases:
    legacy tables remain optional materialized compatibility views.
 
 Never append caller-provided history as duplicate source events. Historical
-conversation rows predating W4 may be imported once using explicit migration events or
+conversation rows predating W5 may be imported once using explicit migration events or
 kept as a legacy prefix with a documented boundary.
 
 ## Stable Decision Reason Codes
@@ -461,7 +461,7 @@ At minimum define:
 
 - Projection request/result and per-purpose record schemas.
 - Projection registry and event-to-projection mapping registry.
-- Authorized canonical W4 event reader.
+- Authorized canonical W5 event reader.
 - Restore/reset active-lineage resolver.
 - Deterministic fingerprint and decision-reason implementation.
 - Seven required projector implementations.
@@ -476,17 +476,17 @@ At minimum define:
 
 1. Approve projection request/result, record, decision, and `ContextItem` schemas.
 2. Define projection and reason-code registries plus their schema/version evolution rules.
-3. Integrate the authorized W4 canonical event-range reader; do not duplicate W4 event
+3. Integrate the authorized W5 canonical event-range reader; do not duplicate W5 event
    upcasters in projectors.
 4. Implement active-lineage resolver for restore/reset lifecycle events.
 5. Implement deterministic fingerprinting and shared invariant checks.
 
 ### Phase 2: Chat Compatibility
 
-1. Implement `chat_projection` against golden W4 fixtures.
+1. Implement `chat_projection` against golden W5 fixtures.
 2. Build shadow comparison with current conversation tables and `AgentRequest.history`.
-3. Integrate W4 compatibility projector using source-event idempotency.
-4. Define/import the pre-W4 legacy-history boundary.
+3. Integrate W5 compatibility projector using source-event idempotency.
+4. Define/import the pre-W5 legacy-history boundary.
 5. Cut over compatibility writes only after mismatch targets pass. "Zero semantic
    mismatch" means: message order is identical, message content is identical,
    attachment/citation references match, and search sources match. Allowed
@@ -497,8 +497,8 @@ At minimum define:
 
 1. Implement `working_memory_projection` and its conflict/supersession rules.
 2. Implement `resume_projection`, including interrupted tool/run handling.
-3. Integrate W4 `compression.snapshot` load/replay: after loading a snapshot, call
-   W6 `validate_derived_state(snapshot, current_events)` to confirm validity before
+3. Integrate W5 `compression.snapshot` load/replay: after loading a snapshot, call
+   P2 `validate_derived_state(snapshot, current_events)` to confirm validity before
    using the snapshot payload for state reconstruction.
 4. Change durable run preparation to use backend projections instead of caller history.
 5. Validate restart and cross-worker continuation.
@@ -506,7 +506,7 @@ At minimum define:
 ### Phase 4: Context and Memory Candidates
 
 1. Implement `model_context_projection` producing `ContextItem` candidates.
-2. Integrate candidate output with W8/W9/W15 without duplicating policy logic.
+2. Integrate candidate output with P3/W8/W10 without duplicating policy logic.
 3. Implement `memory_candidate_projection` and `memory_projection`.
 4. Implement authorized `audit_projection`.
 5. Add materialization only for measured bottlenecks.
@@ -517,8 +517,8 @@ At minimum define:
 
 - New backend projection registry (projection registration, reason-code registry,
   event-to-projection mapping), event reader, lineage resolver, and projector modules
-- W4 event-log repository and compatibility projector
-- W4 compression snapshot events and W6 validator
+- W5 event-log repository and compatibility projector
+- W5 compression snapshot events and P2 validator
 - `backend/services/conversation_management_service.py`
 - `backend/services/agent_service.py`
 - `backend/agents/create_agent_info.py`
@@ -533,8 +533,8 @@ At minimum define:
 - Golden event fixtures validate every projection and decision reason.
 - Determinism tests reproduce byte-equivalent canonical results and fingerprints.
 - Restore/reset fixtures prove correct active lineage while audit retains full history.
-- Current and immediately previous W4 event-version fixtures produce the same canonical
-  projector input; versions outside the W4 compatibility window fail explicitly rather
+- Current and immediately previous W5 event-version fixtures produce the same canonical
+  projector input; versions outside the W5 compatibility window fail explicitly rather
   than being silently dropped.
 - Authorization/redaction tests prove projections cannot leak tenant or restricted data.
 - Chat shadow tests compare projected messages, units, attachments, and sources with
@@ -546,29 +546,29 @@ At minimum define:
   resolution event exists.
 - Prompt-growth tests prove additional audit/tool detail does not automatically increase
   `model_context_projection`.
-- Cache rebuild tests reproduce materialized results from W4 after deletion or corruption.
+- Cache rebuild tests reproduce materialized results from W5 after deletion or corruption.
 - Erasure-lineage tests locate affected persisted projections, Working Memory,
   summaries, checkpoints, and memory candidates by source event; invalidate each whole
   object; and mark rebuilt results `partial_after_erasure`.
 
 ## Definition of Done
 
-W5 is complete when:
+P1 is complete when:
 
 - Every required projection has an approved typed schema, version, deterministic
   implementation, golden fixtures, and stable reason codes.
-- Every registered W4 event type has an explicit mapping or exclusion rule for every
+- Every registered W5 event type has an explicit mapping or exclusion rule for every
   required projection; no event type is silently dropped.
-- W4-backed `chat_projection` produces zero semantic message/order/attachment/source
+- W5-backed `chat_projection` produces zero semantic message/order/attachment/source
   mismatches against approved compatibility fixtures. Any intentionally changed UI
   behavior is separately approved and versioned.
 - Durable run preparation and restart recovery use backend projections rather than
   trusting caller-provided history.
-- Working Memory and resume state rebuild from W4 alone, optionally accelerated by a
-  valid W4 `compression.snapshot` event.
-- W8/W15 receive bounded `ContextItem` candidates instead of raw complete history.
+- Working Memory and resume state rebuild from W5 alone, optionally accelerated by a
+  valid W5 `compression.snapshot` event.
+- P3/W10 receive bounded `ContextItem` candidates instead of raw complete history.
 - Audit can reconstruct the complete authorized event sequence, including inactive
   restore/reset history.
-- All materialized projections are disposable and demonstrably rebuildable from W4.
+- All materialized projections are disposable and demonstrably rebuildable from W5.
 - Determinism, authorization, restore/reset lineage, restart, and migration test suites
   pass with no known projection-invariant violations.

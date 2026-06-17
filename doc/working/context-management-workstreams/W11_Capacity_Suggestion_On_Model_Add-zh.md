@@ -1,4 +1,4 @@
-# W17：模型添加时的容量建议
+# W11：模型添加时的容量建议
 
 ## 目标
 
@@ -8,7 +8,7 @@
 
 W1 在 `backend/consts/capability_profiles.py` 中交付了八个已验证的目录条目。请求时的解析仅在 `(provider, model_name)` 精确匹配目录键时成功。前端"单模型"添加表单不暴露 `model_factory`，因此它以 Pydantic 默认值 `'OpenAI-API-Compatible'` 提交，无法匹配任何目录键。后端辅助函数 `_infer_model_factory` 仅对 embedding 类型记录生效。
 
-W17 负责面向用户的"添加时建议默认值"体验。它**不**修改解析器、目录数据模型或 W1 指纹契约；它在前端和目录之间增加一层轻量查询，以及一个接受建议值的 UX 交互。
+W11 负责面向用户的"添加时建议默认值"体验。它**不**修改解析器、目录数据模型或 W1 指纹契约；它在前端和目录之间增加一层轻量查询，以及一个接受建议值的 UX 交互。
 
 不在范围内：修改 W1 的目录优先级；削弱 `ProviderCapabilityUnknown` 语义；自动持久化 `provider_candidate` 值（仍需运维人员确认）。
 
@@ -51,7 +51,7 @@ POST /api/v1/models/suggest-capacity
 - 否则如果找到了目录匹配，使用该条目的 Provider。
 - 否则返回 `OpenAI-API-Compatible` 和 `match_kind: "none"`。
 
-该辅助函数取代并覆盖了 `_infer_model_factory` 中仅限 LLM 的缺口。Embedding 记录继续使用现有的推断路径；W17 不对其进行重构。
+该辅助函数取代并覆盖了 `_infer_model_factory` 中仅限 LLM 的缺口。Embedding 记录继续使用现有的推断路径；W11 不对其进行重构。
 
 ## 运行时契约
 
@@ -68,7 +68,7 @@ suggest_capacity(model_name, base_url, provider_hint)
 
 ## 数据库迁移契约
 
-无。W17 不引入 Schema。它读取目录并可选地发起上游 HTTP 调用。
+无。W11 不引入 Schema。它读取目录并可选地发起上游 HTTP 调用。
 
 ## 迁移、交付物与阶段
 
@@ -138,7 +138,7 @@ suggest_capacity(model_name, base_url, provider_hint)
 
 ## 运维依赖
 
-W17 需要后端 + Web 容器协调部署。无数据库迁移。
+W11 需要后端 + Web 容器协调部署。无数据库迁移。
 
 | 组件 | 操作 | 触发条件 |
 | --- | --- | --- |
@@ -151,7 +151,7 @@ W17 需要后端 + Web 容器协调部署。无数据库迁移。
 
 **发布顺序**：在 staging 全局启用环境变量 → 通过 `tenant_config_t` 为一个内部租户启用 → 观测 1 周 → 为付费租户全局启用 → 观测 1 周 → 全量启用。
 
-**回滚**：设置 `CAPACITY_SUGGESTION_ENABLED=false`。前端隐藏建议 UI；后端路由不再被调用。无需数据迁移，因为 W17 从不自动持久化 `provider_candidate` 值。
+**回滚**：设置 `CAPACITY_SUGGESTION_ENABLED=false`。前端隐藏建议 UI；后端路由不再被调用。无需数据迁移，因为 W11 从不自动持久化 `provider_candidate` 值。
 
 ## 测试与发布证据
 
@@ -168,10 +168,10 @@ W17 需要后端 + Web 容器协调部署。无数据库迁移。
 - 内部试用一周；验证八个目录条目的建议准确性。
 - 阶段 2（Provider 发现）以试用证据和限流预算批准为 Gate。
 - 阶段 3（扩展 `_infer_model_factory`）以阶段 2 上线 + 一周监控为 Gate。
-- 当试用和 SLO 检查连续两周通过且 Feature Flag 已移除时，W17 即视为完成。
+- 当试用和 SLO 检查连续两周通过且 Feature Flag 已移除时，W11 即视为完成。
 
 ## 为什么这不是 W1
 
-W1 的 ADR 明确限定在目录数据模型和解析器契约范围内。"目录如何从真实用户行为中正确填充"是同一问题的另一个层面。将修复移入新的工作流，既保持 W1 的不变量稳定（目录键保持精确匹配；`provider_candidate` 永远不作为权威值），又让 W17 在不必重新协商 W1 的 CM-016 边界的前提下迭代 UX。
+W1 的 ADR 明确限定在目录数据模型和解析器契约范围内。"目录如何从真实用户行为中正确填充"是同一问题的另一个层面。将修复移入新的工作流，既保持 W1 的不变量稳定（目录键保持精确匹配；`provider_candidate` 永远不作为权威值），又让 W11 在不必重新协商 W1 的 CM-016 边界的前提下迭代 UX。
 
 参见 `W1_ADR_Capability_Catalog_Storage_and_Fingerprint.md` 的"已知限制"部分，了解本工作流解决的缺口。

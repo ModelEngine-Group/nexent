@@ -10,7 +10,7 @@ checkpoint overwrite but does not alone guarantee lifecycle or worker ownership 
 - **CM-003 (Critical):** No fencing prevents an old worker from appending or flushing
   after restore, reset, or handoff.
 - **CM-006 (High):** The accepted W7 path atomically creates the checkpoint and its
-  publication outbox; W5 lifecycle publication is asynchronous audit and never gates
+  publication outbox; P1 lifecycle publication is asynchronous audit and never gates
   recovery.
 - **CM-010 (Medium):** No RPO/RTO, rebuild-time, or storage availability targets exist.
 - **CM-014 (Medium):** Checkpoint schema upcasting and compatibility are undefined.

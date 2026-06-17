@@ -26,7 +26,7 @@
 
 ## 设计
 
-在 SDK 模型层创建 `ModelCapacityResolver`，为每个正式支持的 Provider/模型或部署 ID 维护一个小型版本化能力 Profile。该 Profile 仅包含 W1-W15 和 W14 所需的能力：硬容量字段、Token 计数模式/Tokenizer 族、推理窗口行为、Provider 开销行为、Prompt 缓存模式和缓存指标可用性。
+在 SDK 模型层创建 `ModelCapacityResolver`，为每个正式支持的 Provider/模型或部署 ID 维护一个小型版本化能力 Profile。该 Profile 仅包含 W1-W10 和 W3 所需的能力：硬容量字段、Token 计数模式/Tokenizer 族、推理窗口行为、Provider 开销行为、Prompt 缓存模式和缓存指标可用性。
 
 解析优先级为：已批准的运维覆盖、已批准的版本化能力 Profile、Provider 发现作为未验证的候选元数据，最后为 unknown。Provider 发现在被批准进入 Profile 版本之前，绝不改变生产行为。每次请求记录所选 Profile 版本和字段来源。
 
@@ -60,7 +60,7 @@ resolve_capacity(model_id, provider, operator_overrides, requested_output_tokens
 | `warnings` | 稳定的原因码有界列表 |
 | `fingerprint` | 基于解析后契约的确定性必填字符串 |
 
-该快照原样传递给 W2、W15、W14、监控和 Provider 调度。类型化失败包括 `invalid_capacity_configuration`、`provider_capability_unknown`、`uncertainty_reserve_basis_unknown`、`requested_output_exceeds_cap` 和 `provider_metadata_invalid`。
+该快照原样传递给 W2、W10、W3、监控和 Provider 调度。类型化失败包括 `invalid_capacity_configuration`、`provider_capability_unknown`、`uncertainty_reserve_basis_unknown`、`requested_output_exceeds_cap` 和 `provider_metadata_invalid`。
 
 ## 数据库迁移契约
 
@@ -90,11 +90,11 @@ resolve_capacity(model_id, provider, operator_overrides, requested_output_tokens
 7. 更新前端添加/编辑表单和标签；显示容量来源和警告。
 8. 为每次请求添加已解析快照的监控字段。
 
-## W1 到 W2/W15 的交接
+## W1 到 W2/W10 的交接
 
 - W1 在解析所选模型和请求输出后，为一次模型请求创建恰好一个不可变的 `ModelCapacitySnapshot`。
 - W2 消费该快照并返回记录 W1 指纹的预算快照；W2 绝不修改或独立重新解析容量。
-- W15 消费两个快照，在适配/序列化或调度之前拒绝缺失或不匹配的 W1 指纹。
+- W10 消费两个快照，在适配/序列化或调度之前拒绝缺失或不匹配的 W1 指纹。
 - Provider 调度验证所选 Provider/模型、请求输出和 W1 指纹仍与最终请求匹配。
 
 ## 代码触点

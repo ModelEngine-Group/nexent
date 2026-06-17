@@ -25,12 +25,12 @@ This comparison evaluates Nexent's current implementation as of June 10, 2026. I
 
 | Capability | Nexent current status | Gap versus leading platforms | Value of closing the gap | Actions |
 | --- | --- | --- | --- | --- |
-| Context compression and budgeting | Incremental summaries, summary caches, fallback truncation, context components, and debugger traces already exist. | Token-capacity semantics are incorrect, final fit is not guaranteed, and large components or tool outputs are not reduced progressively. | Prevents context-length failures while improving answer quality, latency, and token cost during long runs. | [W1](#w1)-[W15](#w15), [W8](#w8)-[W12](#w12), and [W14](#w14). |
-| Durable session and execution state | User prompts, final answers, and some visible progress are persisted, while summary state remains process-local. | Unlike mature durable agent runtimes, Nexent cannot reliably reconstruct, resume, replay, or recover complete agent execution. | Enables dependable long-running agents, multi-worker failover, debugging, audit, and user-controlled session recovery. | [W4](#w4)-[W7](#w7). |
-| Long-term memory | Mem0 is integrated across four authorization scopes and provides a useful retrieval foundation. | Memory lacks a platform-level policy engine, temporal validity, conflict resolution, evidence links, and measurable lifecycle governance. | Produces more trustworthy personalization and prevents stale or contradictory memories from influencing decisions. | [W11](#w11)-[W13](#w13), plus introduce a Memory Policy Engine and temporal-memory metadata. |
-| Authoritative Working Memory | No first-class structured layer currently represents the agent's active goals, decisions, constraints, and task state. | Unlike Letta and LangGraph, important working state is buried in transcripts or transient runtime objects. | Gives agents a compact, editable, recoverable source of truth without repeatedly replaying full history. | Implement Working Memory as a typed derived view from the execution event log under [W4](#w4)-[W5](#w5) and expose it through [W7](#w7). |
-| Context and memory governance | Authorization scopes and feature switches exist. | Trust labels, provenance, redaction, retention, deletion propagation, and decision traces are incomplete. | Reduces privacy and security risk and makes persisted context suitable for enterprise production use. | [W3](#w3), [W6](#w6), and [W11](#w11)-[W13](#w13). |
-| Platform productization | Nexent already combines zero-code configuration, multi-tenancy, tools, skills, knowledge, memory, and orchestration. | Stronger state and context primitives are not yet exposed as a coherent operator and developer control plane. | Converts Nexent's broad integration advantage into a differentiated, production-grade agent platform. | Deliver the complete [W1](#w1)-[W14](#w14) roadmap while preserving existing platform workflows. |
+| Context compression and budgeting | Incremental summaries, summary caches, fallback truncation, context components, and debugger traces already exist. | Token-capacity semantics are incorrect, final fit is not guaranteed, and large components or tool outputs are not reduced progressively. | Prevents context-length failures while improving answer quality, latency, and token cost during long runs. | [W1](#w1)-[W10](#w10), [P3](#p3)-[W6](#w6), and [W3](#w3). |
+| Durable session and execution state | User prompts, final answers, and some visible progress are persisted, while summary state remains process-local. | Unlike mature durable agent runtimes, Nexent cannot reliably reconstruct, resume, replay, or recover complete agent execution. | Enables dependable long-running agents, multi-worker failover, debugging, audit, and user-controlled session recovery. | [W5](#w5)-[W7](#w7). |
+| Long-term memory | Mem0 is integrated across four authorization scopes and provides a useful retrieval foundation. | Memory lacks a platform-level policy engine, temporal validity, conflict resolution, evidence links, and measurable lifecycle governance. | Produces more trustworthy personalization and prevents stale or contradictory memories from influencing decisions. | [P5](#p5)-[W9](#w9), plus introduce a Memory Policy Engine and temporal-memory metadata. |
+| Authoritative Working Memory | No first-class structured layer currently represents the agent's active goals, decisions, constraints, and task state. | Unlike Letta and LangGraph, important working state is buried in transcripts or transient runtime objects. | Gives agents a compact, editable, recoverable source of truth without repeatedly replaying full history. | Implement Working Memory as a typed derived view from the execution event log under [W5](#w5)-[P1](#p1) and expose it through [W7](#w7). |
+| Context and memory governance | Authorization scopes and feature switches exist. | Trust labels, provenance, redaction, retention, deletion propagation, and decision traces are incomplete. | Reduces privacy and security risk and makes persisted context suitable for enterprise production use. | [W4](#w4), [P2](#p2), and [P5](#p5)-[W9](#w9). |
+| Platform productization | Nexent already combines zero-code configuration, multi-tenancy, tools, skills, knowledge, memory, and orchestration. | Stronger state and context primitives are not yet exposed as a coherent operator and developer control plane. | Converts Nexent's broad integration advantage into a differentiated, production-grade agent platform. | Deliver the complete [W1](#w1)-[W3](#w3) roadmap while preserving existing platform workflows. |
 
 **Bottom line:** Nexent already has broader platform integration than most specialized competitors, but it trails the leading systems in durable execution state, authoritative Working Memory, lifecycle controls, and memory governance.
 
@@ -38,21 +38,21 @@ This comparison evaluates Nexent's current implementation as of June 10, 2026. I
 
 | Compared with | Nexent current status | Gap between Nexent and platform | Value of closing the gap | Actions to take |
 | --- | --- | --- | --- | --- |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code/sub-agents) | Nexent supports multi-agent execution and context compression, but delegated work still shares too much main-run context and has limited lifecycle control. | Claude Code isolates subagent contexts, returns bounded summaries, exposes compaction hooks, and maintains persistent project guidance. | Prevents delegated work from polluting the parent context and gives users predictable control over long sessions. | Isolate subagent contexts and offload outputs through [W10](#w10); add compaction hooks and inspection through [W7](#w7) and [W12](#w12); govern persistent guidance through [W8](#w8) and [W11](#w11). |
-| [Codex](https://developers.openai.com/codex/learn/best-practices) | Nexent persists chat-facing records but lacks a complete durable execution history and first-class resume, restore, and context-status controls. | Codex treats session history and lifecycle operations as core product capabilities and uses progressive disclosure to control context growth. | Enables reliable continuation, recovery from earlier states, transparent context control, and efficient long-running work. | Build the execution event log, derived views, compression snapshots, and lifecycle APIs through [W4](#w4)-[W7](#w7); add progressive loading and output control through [W8](#w8)-[W10](#w10). |
-| [OpenCode](https://opencode.ai/docs/config/) | Nexent has automatic compression and fallback truncation, but operational controls are fragmented and large outputs can dominate context. | OpenCode exposes straightforward controls for reserved capacity, tool-output pruning, session export, and extension hooks. | Makes context behavior easier to operate, debug, customize, and keep within budget. | Add capacity reserves through [W2](#w2); output pruning and artifact offloading through [W10](#w10); session export through [W7](#w7); define a small extension-hook API around [W8](#w8) and [W12](#w12). |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code/sub-agents) | Nexent supports multi-agent execution and context compression, but delegated work still shares too much main-run context and has limited lifecycle control. | Claude Code isolates subagent contexts, returns bounded summaries, exposes compaction hooks, and maintains persistent project guidance. | Prevents delegated work from polluting the parent context and gives users predictable control over long sessions. | Isolate subagent contexts and offload outputs through [P4](#p4); add compaction hooks and inspection through [W7](#w7) and [W6](#w6); govern persistent guidance through [P3](#p3) and [P5](#p5). |
+| [Codex](https://developers.openai.com/codex/learn/best-practices) | Nexent persists chat-facing records but lacks a complete durable execution history and first-class resume, restore, and context-status controls. | Codex treats session history and lifecycle operations as core product capabilities and uses progressive disclosure to control context growth. | Enables reliable continuation, recovery from earlier states, transparent context control, and efficient long-running work. | Build the execution event log, derived views, compression snapshots, and lifecycle APIs through [W5](#w5)-[W7](#w7); add progressive loading and output control through [P3](#p3)-[P4](#p4). |
+| [OpenCode](https://opencode.ai/docs/config/) | Nexent has automatic compression and fallback truncation, but operational controls are fragmented and large outputs can dominate context. | OpenCode exposes straightforward controls for reserved capacity, tool-output pruning, session export, and extension hooks. | Makes context behavior easier to operate, debug, customize, and keep within budget. | Add capacity reserves through [W2](#w2); output pruning and artifact offloading through [P4](#p4); session export through [W7](#w7); define a small extension-hook API around [P3](#p3) and [W6](#w6). |
 
 ### 0.3 State, Memory, and Agent Frameworks
 
 | Compared with | Nexent current status | Gap between Nexent and platform | Value of closing the gap | Actions to take |
 | --- | --- | --- | --- | --- |
-| [LangGraph](https://docs.langchain.com/oss/python/langgraph/persistence) | Nexent's summaries and caches primarily live in process and are not sufficient to reconstruct each execution step. | LangGraph provides typed per-step checkpoints, versioned threads, replay, time travel, and fault recovery. | Enables multi-worker recovery, deterministic debugging, and resuming from a known-good execution state. | Implement typed execution events and compression snapshots through [W4](#w4) and [W6](#w6); expose replay and restore through [W7](#w7). |
-| [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/sessions/) | Nexent stores chat records and some visible progress, but lacks one canonical session protocol for all run items. | The Agents SDK models tools, handoffs, approvals, and run events as rich session items with pluggable storage. | Simplifies integrations and preserves enough structured evidence for reliable resume, audit, and alternative derived views. | Define canonical run-item schemas and pluggable event-log storage through [W4](#w4)-[W5](#w5); expose a minimal session interface through [W7](#w7). |
-| [Letta](https://docs.letta.com/guides/core-concepts/stateful-agents/) | Nexent has long-term memory but no authoritative, editable Working Memory representation for active task state. | Letta provides explicit in-context memory blocks, archival memory, shared blocks, and context visualization. | Keeps goals, constraints, decisions, and task progress compact, inspectable, and recoverable across runs. | Create typed Working Memory derived views through [W4](#w4)-[W5](#w5); add inspect/edit APIs through [W7](#w7); enforce shared-state authorization through [W3](#w3) and [W11](#w11). |
-| [Zep / Graphiti](https://help.getzep.com/graphiti/getting-started/overview) | Nexent retrieves scoped long-term memories but does not formally model when facts are valid, superseded, conflicting, or evidence-backed. | Zep/Graphiti maintains temporal facts, relationships, validity intervals, and supersession. | Prevents stale facts from silently overriding newer evidence and improves explainability of memory-driven behavior. | Extend [W11](#w11) with temporal metadata, evidence links, conflict detection, and supersession rules; evaluate a graph backend only after these contracts are stable. |
-| [Mem0](https://docs.mem0.ai/) | Mem0 is already integrated as Nexent's long-term-memory provider across four scopes. | Nexent lacks a provider-independent policy layer governing extraction, retrieval, update, conflict handling, retention, and quality. | Preserves the existing investment while making memory behavior trustworthy, measurable, and replaceable. | Keep Mem0 as a provider; add a Memory Policy Engine fed by [W4](#w4)-[W5](#w5), governed by [W11](#w11), and measured through [W13](#w13). |
-| [LlamaIndex](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/memory/) | Nexent has useful context and memory components, but their storage, retrieval, derived-view generation, and policy responsibilities are tightly coupled. | LlamaIndex offers composable memory, storage, retrieval, and summary primitives. | Makes context algorithms easier to test, replace, and evolve without weakening platform-wide governance. | Define stable store, retriever, derived-view generator, reducer, and policy interfaces while implementing [W5](#w5), [W8](#w8), and [W9](#w9). |
-| [ClawVM](https://doi.org/10.1145/3805621.3807648) | Nexent already has budgeting, summaries, artifacts, memory, and lifecycle concepts, but they operate mainly as best-effort mechanisms. | ClawVM makes context residency and durability enforceable through typed pages, minimum-fidelity invariants, multi-resolution representations, lifecycle-complete validated writeback, and observable context faults. | Prevents critical state from silently disappearing during compaction, reset, eviction, or failed recall, while making failures replayable and diagnosable. | Apply its enforcement contract across [W15](#w15), [W4](#w4)-[W5](#w5), [W7](#w7)-[W10](#w10), [W11](#w11), and [W13](#w13); retain Nexent's existing stores and Mem0 behind adapters. |
+| [LangGraph](https://docs.langchain.com/oss/python/langgraph/persistence) | Nexent's summaries and caches primarily live in process and are not sufficient to reconstruct each execution step. | LangGraph provides typed per-step checkpoints, versioned threads, replay, time travel, and fault recovery. | Enables multi-worker recovery, deterministic debugging, and resuming from a known-good execution state. | Implement typed execution events and compression snapshots through [W5](#w5) and [P2](#p2); expose replay and restore through [W7](#w7). |
+| [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/sessions/) | Nexent stores chat records and some visible progress, but lacks one canonical session protocol for all run items. | The Agents SDK models tools, handoffs, approvals, and run events as rich session items with pluggable storage. | Simplifies integrations and preserves enough structured evidence for reliable resume, audit, and alternative derived views. | Define canonical run-item schemas and pluggable event-log storage through [W5](#w5)-[P1](#p1); expose a minimal session interface through [W7](#w7). |
+| [Letta](https://docs.letta.com/guides/core-concepts/stateful-agents/) | Nexent has long-term memory but no authoritative, editable Working Memory representation for active task state. | Letta provides explicit in-context memory blocks, archival memory, shared blocks, and context visualization. | Keeps goals, constraints, decisions, and task progress compact, inspectable, and recoverable across runs. | Create typed Working Memory derived views through [W5](#w5)-[P1](#p1); add inspect/edit APIs through [W7](#w7); enforce shared-state authorization through [W4](#w4) and [P5](#p5). |
+| [Zep / Graphiti](https://help.getzep.com/graphiti/getting-started/overview) | Nexent retrieves scoped long-term memories but does not formally model when facts are valid, superseded, conflicting, or evidence-backed. | Zep/Graphiti maintains temporal facts, relationships, validity intervals, and supersession. | Prevents stale facts from silently overriding newer evidence and improves explainability of memory-driven behavior. | Extend [P5](#p5) with temporal metadata, evidence links, conflict detection, and supersession rules; evaluate a graph backend only after these contracts are stable. |
+| [Mem0](https://docs.mem0.ai/) | Mem0 is already integrated as Nexent's long-term-memory provider across four scopes. | Nexent lacks a provider-independent policy layer governing extraction, retrieval, update, conflict handling, retention, and quality. | Preserves the existing investment while making memory behavior trustworthy, measurable, and replaceable. | Keep Mem0 as a provider; add a Memory Policy Engine fed by [W5](#w5)-[P1](#p1), governed by [P5](#p5), and measured through [W9](#w9). |
+| [LlamaIndex](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/memory/) | Nexent has useful context and memory components, but their storage, retrieval, derived-view generation, and policy responsibilities are tightly coupled. | LlamaIndex offers composable memory, storage, retrieval, and summary primitives. | Makes context algorithms easier to test, replace, and evolve without weakening platform-wide governance. | Define stable store, retriever, derived-view generator, reducer, and policy interfaces while implementing [P1](#p1), [P3](#p3), and [W8](#w8). |
+| [ClawVM](https://doi.org/10.1145/3805621.3807648) | Nexent already has budgeting, summaries, artifacts, memory, and lifecycle concepts, but they operate mainly as best-effort mechanisms. | ClawVM makes context residency and durability enforceable through typed pages, minimum-fidelity invariants, multi-resolution representations, lifecycle-complete validated writeback, and observable context faults. | Prevents critical state from silently disappearing during compaction, reset, eviction, or failed recall, while making failures replayable and diagnosable. | Apply its enforcement contract across [W10](#w10), [W5](#w5)-[P1](#p1), [W7](#w7)-[P4](#p4), [P5](#p5), and [W9](#w9); retain Nexent's existing stores and Mem0 behind adapters. |
 
 ### 0.4 Strategic Position
 
@@ -72,14 +72,14 @@ review adds claim-scoped constraints, not three unconditional platform workstrea
   side-effect-safe resume.
 - Storage operating requirements stay with the concrete storage paths and deployment
   topology that introduce them.
-- Schema evolution begins as the W4 event-schema compatibility contract (CM-005).
+- Schema evolution begins as the W5 event-schema compatibility contract (CM-005).
 
 The foundational additions are not cosmetic. They affect the correctness and delivery
 gates of most other workstreams.
 
 ### 1.1 Design Completion Status
 
-The design phase completed on June 12, 2026. W1-W14 now have implementation-ready
+The design phase completed on June 12, 2026. W1-W3 now have implementation-ready
 specifications under `doc/working/context-management-workstreams/`. Each specification
 defines its objective, ownership boundary, dependencies, typed service and failure
 contracts, persistence/versioning behavior where applicable, phased implementation
@@ -89,11 +89,11 @@ The completed design establishes five coordinated engineering modules:
 
 | Module | W-IDs | Design result |
 | --- | --- | --- |
-| Model Capacity and Request Safety | W1, W2, W15 | One capacity resolver, per-request safe-input budgets, and a mandatory final-fit gateway before provider dispatch. |
-| Durable Session State and Lifecycle | W3-W7 | Fully qualified identity, typed event-log source of truth with compression snapshots, purpose-specific projections, complete validation, and authorized lifecycle APIs. |
-| Context Shaping and Compaction | W8-W12 | One enforceable policy engine, minimum-fidelity representations, artifact offload/retrieval, and bounded governed compaction. |
-| Governance and Privacy | W11 | Shared provenance, redaction, retention, deletion-lineage, and validated writeback contracts across persisted context. |
-| Quality and Efficiency | W13-W14 | Versioned SLO/evidence gates and deterministic cache-aware final assembly. |
+| Model Capacity and Request Safety | W1, W2, W10 | One capacity resolver, per-request safe-input budgets, and a mandatory final-fit gateway before provider dispatch. |
+| Durable Session State and Lifecycle | W4-W7 | Fully qualified identity, typed event-log source of truth with compression snapshots, purpose-specific projections, complete validation, and authorized lifecycle APIs. |
+| Context Shaping and Compaction | P3-W6 | One enforceable policy engine, minimum-fidelity representations, artifact offload/retrieval, and bounded governed compaction. |
+| Governance and Privacy | P5 | Shared provenance, redaction, retention, deletion-lineage, and validated writeback contracts across persisted context. |
+| Quality and Efficiency | W9-W3 | Versioned SLO/evidence gates and deterministic cache-aware final assembly. |
 
 The production-readiness review is also complete. It approves staged implementation
 without adding unconditional workstreams, while requiring minimum guardrails and
@@ -107,11 +107,11 @@ The modules below are intended as assignable ownership boundaries. Cross-module 
 
 | Module | Workstreams | Suggested primary owners | Primary responsibility |
 | --- | --- | --- | --- |
-| Model Capacity and Request Safety | W1, W2, W15, W17 | Model integration and agent-runtime engineers | Capacity contracts, token budgeting, guaranteed request fit, and catalog UX. |
-| Durable Session State and Lifecycle | W3, W4, W7 (W5, W6 deferred) | Backend platform, data, and distributed-systems engineers | Identity isolation, execution event log with compression snapshots, replay, and session operations. |
-| Context Shaping and Compaction | W9, W12 (W8, W10 deferred) | Agent-runtime and context-algorithm engineers | Reduction, compaction reliability, and quick pollution fixes. |
-| Governance and Privacy | W11 (minimal fix only) | Security, privacy, and platform-governance engineers | Secret redaction in tool outputs. Full governance deferred. |
-| Quality and Efficiency | W13, W14 | Quality infrastructure and performance engineers | Context SLOs, release gates, observability, and prompt-cache efficiency. |
+| Model Capacity and Request Safety | W1, W2, W10, W11 | Model integration and agent-runtime engineers | Capacity contracts, token budgeting, guaranteed request fit, and catalog UX. |
+| Durable Session State and Lifecycle | W4, W5, W7 (P1, P2 deferred) | Backend platform, data, and distributed-systems engineers | Identity isolation, execution event log with compression snapshots, replay, and session operations. |
+| Context Shaping and Compaction | W8, W6 (P3, P4 deferred) | Agent-runtime and context-algorithm engineers | Reduction, compaction reliability, and quick pollution fixes. |
+| Governance and Privacy | P5 (minimal fix only) | Security, privacy, and platform-governance engineers | Secret redaction in tool outputs. Full governance deferred. |
+| Quality and Efficiency | W9, W3 | Quality infrastructure and performance engineers | Context SLOs, release gates, observability, and prompt-cache efficiency. |
 
 The table is grouped by assignable engineering module. Modules and workstreams are ordered by dependency and recommended execution priority; severity remains explicit for release planning.
 
@@ -119,21 +119,21 @@ The table is grouped by assignable engineering module. Modules and workstreams a
 | --- | --- | --: | --- | --- | --- | --- | --- |
 | Model Capacity and Request Safety | Blocker | [W1](#w1) | Correct model token-capacity configuration | `max_tokens` has conflicting meanings and is incorrectly reused as the context threshold. | Separate total context, hard input, output cap, output reserve, and tokenizer fields; derive a safe input budget. | Correct compression triggers and provider-safe requests. | Done |
 | Model Capacity and Request Safety | High | [W2](#w2) | Output and safety capacity reserve | Context construction can consume all model capacity. | Reserve output separately; when required provider behavior is unknown, reserve an additional 10% of the context window. | Protects answer quality and reduces overflow risk. | Done |
-| Quality and Efficiency | High | [W14](#w14) | Prompt-cache-aware assembly | Prompt ordering does not intentionally maximize provider cache reuse; no cache directives sent to providers; no cache metrics extracted. | Stabilize prompt prefixes, inject provider cache directives, and track cached-input metrics. | Reduces recurring latency by 50-80% and input cost by 50% on supported providers. | **Moved to Phase 1** |
-| Durable Session State and Lifecycle | Blocker | [W3](#w3) | Tenant and user isolation | Context state is keyed only by `conversation_id`; conversation tables have no `tenant_id` column. | Qualify all conversation/session state by tenant, user, and conversation. | Prevents cross-user or cross-tenant leakage. | Active |
-| Durable Session State and Lifecycle | Blocker | [W4](#w4) | Structured agent execution event log | Current persistence is a UI transcript, not replayable agent state. Two `model_output_deep_thinking` bugs found. | Fix deep-thinking bugs first; then persist session-ordered typed runs, steps, tool calls/results, artifacts, errors, and compression snapshots. | Enables state reconstruction, restart recovery, and audit. | Bug fix first |
-| Context Shaping and Compaction | High | [W12](#w12) | Reliable governed compaction | Compaction uses the active model without timeout, retry on transient failures, circuit breaker, or cancellation. | Add compaction-model policy, deadlines, retries, cancellation, circuit breakers, and deterministic fallback. | Prevents compaction failures from taking down agent runs. | Reliability prioritized |
+| Quality and Efficiency | High | [W3](#w3) | Prompt-cache-aware assembly | Prompt ordering does not intentionally maximize provider cache reuse; no cache directives sent to providers; no cache metrics extracted. | Stabilize prompt prefixes, inject provider cache directives, and track cached-input metrics. | Reduces recurring latency by 50-80% and input cost by 50% on supported providers. | **Moved to Phase 1** |
+| Durable Session State and Lifecycle | Blocker | [W4](#w4) | Tenant and user isolation | Context state is keyed only by `conversation_id`; conversation tables have no `tenant_id` column. | Qualify all conversation/session state by tenant, user, and conversation. | Prevents cross-user or cross-tenant leakage. | Active |
+| Durable Session State and Lifecycle | Blocker | [W5](#w5) | Structured agent execution event log | Current persistence is a UI transcript, not replayable agent state. Two `model_output_deep_thinking` bugs found. | Fix deep-thinking bugs first; then persist session-ordered typed runs, steps, tool calls/results, artifacts, errors, and compression snapshots. | Enables state reconstruction, restart recovery, and audit. | Bug fix first |
+| Context Shaping and Compaction | High | [W6](#w6) | Reliable governed compaction | Compaction uses the active model without timeout, retry on transient failures, circuit breaker, or cancellation. | Add compaction-model policy, deadlines, retries, cancellation, circuit breakers, and deterministic fallback. | Prevents compaction failures from taking down agent runs. | Reliability prioritized |
 | Durable Session State and Lifecycle | High | [W7](#w7) | Full session lifecycle APIs | Nexent lacks first-class compact, flush_snapshot, restore, reset, and inspect operations. | Add durable lifecycle APIs and compaction hooks over immutable execution-event history. | Makes long-running sessions controllable and recoverable. | Active |
-| Context Shaping and Compaction | High | [W9](#w9) | Progressive component reduction | Oversized tools, skills, memory, or instructions may be dropped whole. | Add component-specific shorten, rerank, summarize, and minimum-representation reducers. | Retains critical capabilities under pressure. | Active |
-| Model Capacity and Request Safety | Blocker | [W15](#w15) | Guaranteed context fit | Nexent can still call the model after compression leaves context oversized. | Add a mandatory deterministic final-fit pipeline before every model call. | Eliminates preventable context-length failures. | Active |
-| Quality and Efficiency | Medium | [W13](#w13) | Context quality and reliability SLOs | Existing benchmarks do not block regressions or releases. | Add CI and production gates for fit, retention, latency, cost, recovery, and isolation. | Turns context quality into an enforceable product contract. | Active |
-| Model Capacity and Request Safety | Medium (post-acceptance) | [W17](#w17) | Capacity suggestion on model add (UX follow-up to W1 catalog adoption) | Default `model_factory='OpenAI-API-Compatible'` misses the W1 catalog; operators have no UX path to reach catalog values without DB editing or the provider-browser tab. | Add suggest-capacity endpoint, fuzzy catalog match, provider discovery hints, and form placeholder UX; extend `_infer_model_factory` to cover LLM/VLM. | Makes W1's eight catalog entries reachable from the default add flow that most tenants use. | Post-acceptance |
-| Durable Session State and Lifecycle | — | ~~W7~~ | ~~Durable multi-worker context state~~ | — | Retired: checkpoint functionality merged into W4 as `compression.snapshot` events. | Recovery and restart handled through W4 event replay from latest compression snapshot. | Retired |
-| Durable Session State and Lifecycle | Blocker | [W5](#w5) | Separate raw history from active context | Persisting richer progress without purpose-specific derived views would flood model context. | Derive purpose-specific chat, resume, model-context, memory, and audit derived views from the execution event log. | Preserves rich evidence without increasing prompt size. | **Deferred** (pending W4) |
-| Durable Session State and Lifecycle | Blocker | [W6](#w6) | Complete cache validation and versioning | Boundary-only fingerprints can reuse stale summaries. | **Minimal fix now**: hash full covered prefix + model ID. Full version registry after W4/W5/W8 deliver versioned inputs. | Prevents stale or incorrect resumed context. | **Minimal fix; full deferred** |
-| Context Shaping and Compaction | High | [W8](#w8) | Unified enforceable context and memory policy | Context injection and memory decisions are distributed across inconsistent strategies and paths. | **Pre-step**: merge 3 copies of memory-level-filtering logic. Full policy engine after W4/W5. | Makes context and memory behavior predictable, trustworthy, and configurable. | **Pre-step now; full deferred** |
-| Context Shaping and Compaction | High | [W10](#w10) | Context-pollution and large-output control | Tool results and intermediate steps can dominate the main context. | **Quick fixes now**: enable `max_observation_length`, cap terminal/read-file outputs. Full artifact system after W4/W11. | Improves long-session reliability and lowers token cost. | **Quick fixes; artifact deferred** |
-| Governance and Privacy | Medium | [W11](#w11) | Trust, provenance, redaction, and retention | Rich retrieved and persisted context lacks formal trust and lifecycle policies. | **Minimal fix now**: pattern-based secret redaction in tool outputs. Full governance stack on compliance trigger. | Makes rich context safe for production use. | **Minimal fix; full deferred** |
+| Context Shaping and Compaction | High | [W8](#w8) | Progressive component reduction | Oversized tools, skills, memory, or instructions may be dropped whole. | Add component-specific shorten, rerank, summarize, and minimum-representation reducers. | Retains critical capabilities under pressure. | Active |
+| Model Capacity and Request Safety | Blocker | [W10](#w10) | Guaranteed context fit | Nexent can still call the model after compression leaves context oversized. | Add a mandatory deterministic final-fit pipeline before every model call. | Eliminates preventable context-length failures. | Active |
+| Quality and Efficiency | Medium | [W9](#w9) | Context quality and reliability SLOs | Existing benchmarks do not block regressions or releases. | Add CI and production gates for fit, retention, latency, cost, recovery, and isolation. | Turns context quality into an enforceable product contract. | Active |
+| Model Capacity and Request Safety | Medium (post-acceptance) | [W11](#w11) | Capacity suggestion on model add (UX follow-up to W1 catalog adoption) | Default `model_factory='OpenAI-API-Compatible'` misses the W1 catalog; operators have no UX path to reach catalog values without DB editing or the provider-browser tab. | Add suggest-capacity endpoint, fuzzy catalog match, provider discovery hints, and form placeholder UX; extend `_infer_model_factory` to cover LLM/VLM. | Makes W1's eight catalog entries reachable from the default add flow that most tenants use. | Post-acceptance |
+| Durable Session State and Lifecycle | — | ~~W7~~ | ~~Durable multi-worker context state~~ | — | Retired: original W7 "Durable Multi-Worker Context State" — checkpoint functionality merged into W5 (was W4) as `compression.snapshot` events. | Recovery and restart handled through W5 event replay from latest compression snapshot. | Retired |
+| Durable Session State and Lifecycle | Blocker | [P1](#p1) | Separate raw history from active context | Persisting richer progress without purpose-specific derived views would flood model context. | Derive purpose-specific chat, resume, model-context, memory, and audit derived views from the execution event log. | Preserves rich evidence without increasing prompt size. | **Deferred** (pending W5) |
+| Durable Session State and Lifecycle | Blocker | [P2](#p2) | Complete cache validation and versioning | Boundary-only fingerprints can reuse stale summaries. | **Minimal fix now**: hash full covered prefix + model ID. Full version registry after W5/P1/P3 deliver versioned inputs. | Prevents stale or incorrect resumed context. | **Minimal fix; full deferred** |
+| Context Shaping and Compaction | High | [P3](#p3) | Unified enforceable context and memory policy | Context injection and memory decisions are distributed across inconsistent strategies and paths. | **Pre-step**: merge 3 copies of memory-level-filtering logic. Full policy engine after W5/P1. | Makes context and memory behavior predictable, trustworthy, and configurable. | **Pre-step now; full deferred** |
+| Context Shaping and Compaction | High | [P4](#p4) | Context-pollution and large-output control | Tool results and intermediate steps can dominate the main context. | **Quick fixes now**: enable `max_observation_length`, cap terminal/read-file outputs. Full artifact system after W5/P5. | Improves long-session reliability and lowers token cost. | **Quick fixes; artifact deferred** |
+| Governance and Privacy | Medium | [P5](#p5) | Trust, provenance, redaction, and retention | Rich retrieved and persisted context lacks formal trust and lifecycle policies. | **Minimal fix now**: pattern-based secret redaction in tool outputs. Full governance stack on compliance trigger. | Makes rich context safe for production use. | **Minimal fix; full deferred** |
 
 ### 1.3 Big-Picture Outcome
 
@@ -168,7 +168,7 @@ implying they were part of the original review.
 
 | ID | Workstream | Module | Trigger |
 | --- | --- | --- | --- |
-| [W17](#w17) | Capacity suggestion on model add | Model Capacity and Request Safety | CM-031 (catalog miss for default `model_factory`), discovered 2026-06-16 during glm-5.1 end-to-end test |
+| [W11](#w11) | Capacity suggestion on model add | Model Capacity and Request Safety | CM-031 (catalog miss for default `model_factory`), discovered 2026-06-16 during glm-5.1 end-to-end test |
 
 Post-acceptance limitations share the same `CM-NNN` numbering as design-phase
 findings; entries created after acceptance are appended to the registry with
@@ -187,20 +187,20 @@ gaps, implementation readiness, and dependency feasibility.
 
 | ID | Adjustment | Rationale |
 | --- | --- | --- |
-| [W3](#w3) | Confirmed as Blocker | Conversation tables (`conversation_record_t`, `conversation_message_t`, etc.) have **no `tenant_id` column**. `ContextManager` is keyed only by `str(conversation_id)` in `AgentRunManager._conversation_context_managers`. Cross-tenant context collision is possible. Memory system already implements proper tenant+user isolation (`build_memory_identifiers()`), proving the pattern is feasible. |
-| [W4](#w4) | Bug fix first, then full implementation | Two bugs found: (1) `save_conversation_assistant()` in `conversation_management_service.py:222` does not merge `model_output_deep_thinking` units — each token becomes a separate DB row. (2) `chatMessageExtractor.ts` has no case for `MODEL_OUTPUT_DEEP_THINKING` — deep thinking content is silently dropped on history reload. Fix these (~10 lines each) before the full event-log implementation. |
-| [W12](#w12) | Reliability improvements prioritized | Compaction uses the same model as the agent (`self.model`), has **no timeout** on LLM calls, **no retry** on transient failures (only context-length errors get one retry), **no circuit breaker**, and **no cancellation support**. `compress_if_needed()` is called without try/except — unexpected exceptions crash the step. These are real production risks on the hot path. |
-| [W14](#w14) | **Moved to Phase 1** (was Phase 4) | High value, low effort, zero dependencies. The codebase already excludes timestamps from system prompts for cache stability (`context_utils.py:538`, `core_agent.py:483`) but gets **zero benefit** because no cache directives are sent to providers and no cache metrics are extracted. Phase 1 (observability + cache directives) is ~70 lines of code and can save 50-80% latency on repeated-turn workloads. |
+| [W4](#w4) | Confirmed as Blocker | Conversation tables (`conversation_record_t`, `conversation_message_t`, etc.) have **no `tenant_id` column**. `ContextManager` is keyed only by `str(conversation_id)` in `AgentRunManager._conversation_context_managers`. Cross-tenant context collision is possible. Memory system already implements proper tenant+user isolation (`build_memory_identifiers()`), proving the pattern is feasible. |
+| [W5](#w5) | Bug fix first, then full implementation | Two bugs found: (1) `save_conversation_assistant()` in `conversation_management_service.py:222` does not merge `model_output_deep_thinking` units — each token becomes a separate DB row. (2) `chatMessageExtractor.ts` has no case for `MODEL_OUTPUT_DEEP_THINKING` — deep thinking content is silently dropped on history reload. Fix these (~10 lines each) before the full event-log implementation. |
+| [W6](#w6) | Reliability improvements prioritized | Compaction uses the same model as the agent (`self.model`), has **no timeout** on LLM calls, **no retry** on transient failures (only context-length errors get one retry), **no circuit breaker**, and **no cancellation support**. `compress_if_needed()` is called without try/except — unexpected exceptions crash the step. These are real production risks on the hot path. |
+| [W3](#w3) | **Moved to Phase 1** (was Phase 4) | High value, low effort, zero dependencies. The codebase already excludes timestamps from system prompts for cache stability (`context_utils.py:538`, `core_agent.py:483`) but gets **zero benefit** because no cache directives are sent to providers and no cache metrics are extracted. Phase 1 (observability + cache directives) is ~70 lines of code and can save 50-80% latency on repeated-turn workloads. |
 
 #### Tentatively Deferred Workstreams
 
 | ID | Deferral scope | Rationale | Activation trigger |
 | --- | --- | --- | --- |
-| [W5](#w5) | Full scope deferred | Current architecture already has implicit, ad-hoc projections: `get_conversation_history_service()` (UI), `_convert_history_with_minio_files()` + `ContextManager` (model), `agent_service.py` memory construction (memory), `get_conversation_history_internal()` (northbound). The model does NOT read from DB — frontend sends history with each request. A formal projection layer requires W4's event log as the single source of truth first. | W4 event log completion |
-| [W6](#w6) | Full version registry deferred; **minimal fix now** | Current fingerprint hashes only the last 200 chars of boundary steps. Mid-sequence edits, model switches, or prompt changes go undetected. However, the 9 metadata dimensions W6 specifies (policy version, prompt version, schema version, etc.) **don't exist yet** — they require W4/W8/W11 to deliver versioned inputs first. **Minimal fix**: hash the full covered prefix + include model ID in fingerprint (~50 lines). | W4 + W5 + W8 completion |
-| [W8](#w8) | Full policy engine deferred; **pre-step: merge memory logic** | `ContextManager` already centralizes ~40% of context management (compression, component registry, strategy selection, system prompt assembly). But memory decisions are scattered: level-filtering logic is duplicated in 3 files (`create_agent_info.py`, `store_memory_tool.py`, `search_memory_tool.py`), end-of-run auto-write in `agent_service.py` bypasses ContextManager entirely, and conflict resolution is prompt-only (LLM follows text instructions, no code enforcement). **Pre-step**: extract the 3 copies of memory-level-filtering into one function. Full policy engine requires W4/W5 as input. | W4 + W5 completion |
-| [W10](#w10) | Artifact system deferred; **3 quick fixes now** | Current safeguards: smolagents `truncate_content()` (20K chars), ContextManager compression. Gaps: `terminal_tool.py` has **zero output limits**, `read_file_tool.py` returns full content (warns at 10MB but no truncation), `max_observation_length` exists but **defaults to 0 (disabled)**. **Quick fixes**: (1) set `max_observation_length` default to 4000-8000; (2) add output caps to terminal and read-file tools; (3) cap subagent return strings. Full artifact offload system requires W4 event log + W11 governance. | W4 + W11 completion, or customer-reported large-output incidents |
-| [W11](#w11) | Full governance stack deferred; **minimal fix now** | Only redaction in the codebase is logging-level (`core_agent.py:257-263`: api_key/token/password/secret → `***REDACTED***`). No PII detection, no content sanitization before persistence, no retention policies, no deletion propagation. **No customer requests** for sensitive content removal. Full W11 (trust tiers, temporal lifecycle, deletion propagation, writeback journal) is multi-month infrastructure for problems that haven't materialized. **Minimal fix**: pattern-based secret redaction in tool outputs before persistence (~100 lines). | Compliance requirement, legal mandate, or customer request |
+| [P1](#p1) | Full scope deferred | Current architecture already has implicit, ad-hoc projections: `get_conversation_history_service()` (UI), `_convert_history_with_minio_files()` + `ContextManager` (model), `agent_service.py` memory construction (memory), `get_conversation_history_internal()` (northbound). The model does NOT read from DB — frontend sends history with each request. A formal projection layer requires W5's event log as the single source of truth first. | W5 event log completion |
+| [P2](#p2) | Full version registry deferred; **minimal fix now** | Current fingerprint hashes only the last 200 chars of boundary steps. Mid-sequence edits, model switches, or prompt changes go undetected. However, the 9 metadata dimensions P2 specifies (policy version, prompt version, schema version, etc.) **don't exist yet** — they require W5/P3/P5 to deliver versioned inputs first. **Minimal fix**: hash the full covered prefix + include model ID in fingerprint (~50 lines). | W5 + P1 + P3 completion |
+| [P3](#p3) | Full policy engine deferred; **pre-step: merge memory logic** | `ContextManager` already centralizes ~40% of context management (compression, component registry, strategy selection, system prompt assembly). But memory decisions are scattered: level-filtering logic is duplicated in 3 files (`create_agent_info.py`, `store_memory_tool.py`, `search_memory_tool.py`), end-of-run auto-write in `agent_service.py` bypasses ContextManager entirely, and conflict resolution is prompt-only (LLM follows text instructions, no code enforcement). **Pre-step**: extract the 3 copies of memory-level-filtering into one function. Full policy engine requires W5/P1 as input. | W5 + P1 completion |
+| [P4](#p4) | Artifact system deferred; **3 quick fixes now** | Current safeguards: smolagents `truncate_content()` (20K chars), ContextManager compression. Gaps: `terminal_tool.py` has **zero output limits**, `read_file_tool.py` returns full content (warns at 10MB but no truncation), `max_observation_length` exists but **defaults to 0 (disabled)**. **Quick fixes**: (1) set `max_observation_length` default to 4000-8000; (2) add output caps to terminal and read-file tools; (3) cap subagent return strings. Full artifact offload system requires W5 event log + P5 governance. | W5 + P5 completion, or customer-reported large-output incidents |
+| [P5](#p5) | Full governance stack deferred; **minimal fix now** | Only redaction in the codebase is logging-level (`core_agent.py:257-263`: api_key/token/password/secret → `***REDACTED***`). No PII detection, no content sanitization before persistence, no retention policies, no deletion propagation. **No customer requests** for sensitive content removal. Full P5 (trust tiers, temporal lifecycle, deletion propagation, writeback journal) is multi-month infrastructure for problems that haven't materialized. **Minimal fix**: pattern-based secret redaction in tool outputs before persistence (~100 lines). | Compliance requirement, legal mandate, or customer request |
 
 #### Priority Reordering Summary
 
@@ -208,17 +208,17 @@ The adjusted implementation priority is:
 
 1. **W1** — Token capacity (done, post-acceptance)
 2. **W2** — Output reserve (done, post-acceptance)
-3. **W14** — Prompt cache optimization (moved forward: high value, no dependencies)
-4. **W3** — Tenant isolation (blocker: real security gap)
-5. **W4** — Event log (bug fix first, then full implementation)
-6. **W12** — Compaction reliability (real production risk on hot path)
+3. **W3** — Prompt cache optimization (moved forward: high value, no dependencies)
+4. **W4** — Tenant isolation (blocker: real security gap)
+5. **W5** — Event log (bug fix first, then full implementation)
+6. **W6** — Compaction reliability (real production risk on hot path)
 7. **W7** — Session lifecycle APIs
-8. **W9** — Progressive reduction
-9. **W13** — Quality SLOs
-10. **W15** — Guaranteed fit
-11. **W17** — Capacity suggestion (post-acceptance)
+8. **W8** — Progressive reduction
+9. **W9** — Quality SLOs
+10. **W10** — Guaranteed fit
+11. **W11** — Capacity suggestion (post-acceptance)
 
-Tentatively deferred: W5, W6 (full), W8 (full), W10 (artifact system), W11 (full).
+Tentatively deferred: P1, P2 (full), P3 (full), P4 (artifact system), P5 (full).
 
 ## 2. Improvements Details
 
@@ -329,7 +329,7 @@ Here, a **session** is the user-visible interaction container. The **execution e
 | Run | One user-triggered agent execution within a session. |
 | Execution event log | The append-only ordered record of actions, tool calls, results, errors, and answers produced during runs. |
 | Derived view | A rebuildable, purpose-specific selection and transformation of execution events. |
-| Compression Snapshot | A versioned recovery snapshot tied to a known execution-event boundary, stored as a W4 event. |
+| Compression Snapshot | A versioned recovery snapshot tied to a known execution-event boundary, stored as a W5 event. |
 | Artifact | A large output, file, log, or binary stored outside the active model context. |
 | Working Memory | Structured current goals, constraints, decisions, and task state used by the agent. |
 
@@ -350,7 +350,7 @@ Recommended durable entities:
 | `agent_event_index` | Session-ordered event IDs plus run, step, parent, and idempotency relationships. |
 | `agent_event_data` | Typed schema-versioned payloads for user input, model action, tool call/result, error, final answer, and cancellation. |
 | `agent_artifact` | Large tool outputs, files, logs, and binary references stored outside prompt context. |
-| `compression.snapshot` (W4 event) | Versioned summary, Working Memory state, covered event range, policy/model/schema versions, and token accounting. Stored as a W4 event, not a separate table. |
+| `compression.snapshot` (W5 event) | Versioned summary, Working Memory state, covered event range, policy/model/schema versions, and token accounting. Stored as a W5 event, not a separate table. |
 
 Compatibility decision: the current integer `conversation_id` remains Nexent's public
 chat identifier. A new internal UUID `agent_session_id` maps one-to-one to an owned
@@ -381,19 +381,19 @@ Visible reasoning content can remain available for UI replay when product policy
 
 #### Required Memory-Control Capabilities
 
-Production-grade memory requires the following control capabilities. They are implemented within W4-W13 rather than managed as a separate workstream:
+Production-grade memory requires the following control capabilities. They are implemented within W5-W9 rather than managed as a separate workstream:
 
 | Required capability | Required behavior | Parent W-IDs |
 | --- | --- | --- |
-| Authoritative Working Memory | Maintain a typed derived view of current goals, explicit constraints, confirmed decisions, unresolved items, active entities, and tool state. It must be rebuildable from execution events and survive restart or restore. | [W4](#w4)-[W7](#w7), [W9](#w9) |
-| Unified Memory Policy Engine | Route every automatic and tool-driven memory write, retrieval, update, expiry, and deletion through one versioned policy contract. | [W8](#w8), [W11](#w11) |
-| Deterministic authority and conflict resolution | Resolve conflicts in code before prompt assembly. System and tenant policy outrank user instructions; explicit current-user corrections outrank Working Memory and long-term memory; relevance never implies trust. | [W8](#w8), [W11](#w11) |
-| Correct prompt authority order | Keep retrieved long-term memory attributed and non-authoritative. Inject it below authoritative instructions, current-task constraints, and confirmed Working Memory. | [W15](#w15), [W8](#w8), [W11](#w11) |
-| Rich memory candidate extraction | Generate memory candidates from sanitized execution events, verified tool facts, decisions, and corrections instead of only the user prompt and final answer. | [W4](#w4)-[W5](#w5), [W11](#w11) |
-| Temporal memory lifecycle | Track source evidence, confidence, confirmation time, validity interval, status, and supersession. Exclude stale, rejected, deleted, or superseded memories before injection. | [W6](#w6), [W11](#w11) |
-| Global retrieval resolution | Merge results across scopes, then globally rerank, deduplicate, lifecycle-filter, and detect contradictions before prompt injection. | [W8](#w8)-[W9](#w9), [W11](#w11) |
-| Explainable memory decisions | Record why a memory was stored, rejected, retrieved, excluded, superseded, reduced, or injected, without exposing hidden chain-of-thought. | [W4](#w4)-[W5](#w5), [W13](#w13) |
-| Confirmation and no-write controls | Require confirmation for sensitive, tenant-shared, high-impact, or low-confidence writes; support ephemeral and explicit no-write classifications. | [W8](#w8), [W11](#w11) |
+| Authoritative Working Memory | Maintain a typed derived view of current goals, explicit constraints, confirmed decisions, unresolved items, active entities, and tool state. It must be rebuildable from execution events and survive restart or restore. | [W5](#w5)-[W7](#w7), [W8](#w8) |
+| Unified Memory Policy Engine | Route every automatic and tool-driven memory write, retrieval, update, expiry, and deletion through one versioned policy contract. | [P3](#p3), [P5](#p5) |
+| Deterministic authority and conflict resolution | Resolve conflicts in code before prompt assembly. System and tenant policy outrank user instructions; explicit current-user corrections outrank Working Memory and long-term memory; relevance never implies trust. | [P3](#p3), [P5](#p5) |
+| Correct prompt authority order | Keep retrieved long-term memory attributed and non-authoritative. Inject it below authoritative instructions, current-task constraints, and confirmed Working Memory. | [W10](#w10), [P3](#p3), [P5](#p5) |
+| Rich memory candidate extraction | Generate memory candidates from sanitized execution events, verified tool facts, decisions, and corrections instead of only the user prompt and final answer. | [W5](#w5)-[P1](#p1), [P5](#p5) |
+| Temporal memory lifecycle | Track source evidence, confidence, confirmation time, validity interval, status, and supersession. Exclude stale, rejected, deleted, or superseded memories before injection. | [P2](#p2), [P5](#p5) |
+| Global retrieval resolution | Merge results across scopes, then globally rerank, deduplicate, lifecycle-filter, and detect contradictions before prompt injection. | [P3](#p3)-[W8](#w8), [P5](#p5) |
+| Explainable memory decisions | Record why a memory was stored, rejected, retrieved, excluded, superseded, reduced, or injected, without exposing hidden chain-of-thought. | [W5](#w5)-[P1](#p1), [W9](#w9) |
+| Confirmation and no-write controls | Require confirmation for sensitive, tenant-shared, high-impact, or low-confidence writes; support ephemeral and explicit no-write classifications. | [P3](#p3), [P5](#p5) |
 
 Working Memory must not become an independent source of truth that can drift from execution history. The durable execution event log (including compression snapshots) remains authoritative; object storage is reserved for large artifacts.
 
@@ -403,12 +403,12 @@ ClawVM's central insight is that context management should be an enforceable har
 
 | Paper contribution | Assessment for Nexent | Adoption in this plan |
 | --- | --- | --- |
-| Typed pages with stable identity, scope, provenance, and minimum fidelity | Adopt. This gives context policy a deterministic unit of selection, reduction, restoration, and audit. Use the product-neutral term `ContextItem` rather than exposing OS terminology in public APIs. | [W4](#w4), [W5](#w5), [W8](#w8), [W9](#w9), [W11](#w11) |
-| Full, compressed, structured, and pointer representations | Adopt. Precomputing lower-fidelity forms prevents emergency compaction from depending on another LLM call and enables graceful degradation. Generation cost and staleness must be measured. | [W15](#w15), [W5](#w5), [W9](#w9), [W10](#w10) |
-| Two-phase selection: install required minima, then spend remaining budget on upgrades | Adopt. This cleanly separates structural safety from quality optimization. Start with deterministic priority/recency/recompute-cost scoring; do not block launch on an optimal knapsack solver. | [W15](#w15), [W8](#w8), [W9](#w9), [W13](#w13) |
-| Lifecycle-complete, validated, non-destructive writeback | Adopt as a blocker-level persistence contract. Dirty state must be committed as a `compression.snapshot` event before compaction, reset, restore, eviction, shutdown, or worker handoff can destroy the only copy. Conversation/session ownership transfer is outside the initial release. | [W4](#w4), [W6](#w6), [W7](#w7), [W11](#w11) |
-| Observable context-fault model and deterministic replay | Adopt. Explicit fault classes and reason codes make context failures testable and operationally actionable. Add replay-oracle comparison later for policy tuning. | [W4](#w4), [W7](#w7), [W13](#w13) |
-| Claimed zero policy-controllable faults | Treat as evidence for the architecture, not as a transferable guarantee. The paper primarily evaluates deterministic replay and structural faults; semantic correctness, live cross-session behavior, and end-user quality remain open. | Require Nexent-specific live, replay, semantic-quality, and multi-tenant evidence under [W13](#w13). |
+| Typed pages with stable identity, scope, provenance, and minimum fidelity | Adopt. This gives context policy a deterministic unit of selection, reduction, restoration, and audit. Use the product-neutral term `ContextItem` rather than exposing OS terminology in public APIs. | [W5](#w5), [P1](#p1), [P3](#p3), [W8](#w8), [P5](#p5) |
+| Full, compressed, structured, and pointer representations | Adopt. Precomputing lower-fidelity forms prevents emergency compaction from depending on another LLM call and enables graceful degradation. Generation cost and staleness must be measured. | [W10](#w10), [P1](#p1), [W8](#w8), [P4](#p4) |
+| Two-phase selection: install required minima, then spend remaining budget on upgrades | Adopt. This cleanly separates structural safety from quality optimization. Start with deterministic priority/recency/recompute-cost scoring; do not block launch on an optimal knapsack solver. | [W10](#w10), [P3](#p3), [W8](#w8), [W9](#w9) |
+| Lifecycle-complete, validated, non-destructive writeback | Adopt as a blocker-level persistence contract. Dirty state must be committed as a `compression.snapshot` event before compaction, reset, restore, eviction, shutdown, or worker handoff can destroy the only copy. Conversation/session ownership transfer is outside the initial release. | [W5](#w5), [P2](#p2), [W7](#w7), [P5](#p5) |
+| Observable context-fault model and deterministic replay | Adopt. Explicit fault classes and reason codes make context failures testable and operationally actionable. Add replay-oracle comparison later for policy tuning. | [W5](#w5), [W7](#w7), [W9](#w9) |
+| Claimed zero policy-controllable faults | Treat as evidence for the architecture, not as a transferable guarantee. The paper primarily evaluates deterministic replay and structural faults; semantic correctness, live cross-session behavior, and end-user quality remain open. | Require Nexent-specific live, replay, semantic-quality, and multi-tenant evidence under [W9](#w9). |
 
 ### 2.2 Target Architecture
 
@@ -432,7 +432,7 @@ flowchart LR
     SLO -. "reviewed updates" .-> CP
 ```
 
-The Control Plane is intentionally shown as one architectural component; its internal policy, authority, budgeting, retrieval, reduction, and derived-view responsibilities are specified in W3-W13. The diagram emphasizes three closed loops: runtime execution, durable context/memory state, and human-reviewed governance improvement.
+The Control Plane is intentionally shown as one architectural component; its internal policy, authority, budgeting, retrieval, reduction, and derived-view responsibilities are specified in W4-W9. The diagram emphasizes three closed loops: runtime execution, durable context/memory state, and human-reviewed governance improvement.
 
 Core invariants:
 
@@ -520,9 +520,9 @@ Core invariants:
 - Every request reports and honors its reserved capacities.
 - Long-answer tasks retain the configured output allowance.
 
-<a id="w3"></a>
+<a id="w10"></a>
 
-##### W15. Guarantee Context Fit Before Every Model Call
+##### W10. Guarantee Context Fit Before Every Model Call
 
 **Problem:** After compression Nexent only warns if the result still exceeds the threshold at `sdk/nexent/core/agents/agent_context.py:628-633`.
 
@@ -531,11 +531,11 @@ Core invariants:
 - Add a `ContextFitPipeline` before every main and compaction model call.
 - First ship a minimal independent hard-fit gateway that can reject, use existing
   bounded representations, remove/truncate optional content deterministically, preserve
-  complete tool pairs, and fail on mandatory overflow. W8-W12 later improve retained
+  complete tool pairs, and fail on mandatory overflow. P3-W6 later improve retained
   quality without becoming prerequisites for hard fit.
 - Restrict production provider credentials and dispatch capability to one trusted
-  server-side path that requires current W3 authorization, W8 policy, W2 budget, and
-  the exact final W15 fit result; remove or deny direct dispatch paths.
+  server-side path that requires current W4 authorization, P3 policy, W2 budget, and
+  the exact final W10 fit result; remove or deny direct dispatch paths.
 - Eliminate production dispatch bypasses:
   - Fix B1: `backend/utils/llm_utils.py:100` (system prompt generation bypass)
   - Fix B2: `backend/services/conversation_management_service.py:282` (title generation bypass)
@@ -550,7 +550,7 @@ Core invariants:
 - Refuse or safely degrade if mandatory context alone exceeds capacity.
 - Assemble in two phases: first install every mandatory item's minimum representation, then use remaining capacity to upgrade selected items to higher-fidelity representations.
 - Retry once on provider context-length errors using provider-reported evidence.
-- W14 supplies only a cache partition plan. W15 alone assembles and serializes the final
+- W3 supplies only a cache partition plan. W10 alone assembles and serializes the final
   provider payload, then computes token counts and cache fingerprints from that exact
   payload; trusted dispatch cannot modify prompt content or cache directives.
 
@@ -561,13 +561,13 @@ Core invariants:
 - Property tests generate arbitrary context combinations and verify serialized requests remain within budget.
 - Provider overflow tests verify deterministic recovery without loops.
 
-<a id="w17"></a>
+<a id="w11"></a>
 
-##### W17. Capacity Suggestion on Model Add (Post-Acceptance Follow-up)
+##### W11. Capacity Suggestion on Model Add (Post-Acceptance Follow-up)
 
 **Status:** Post-acceptance addition opened 2026-06-16 after end-to-end W1 testing
 surfaced CM-031 (catalog miss for the default `model_factory`). Not part of the
-W1-W16 design-freeze scope. See `W17_Capacity_Suggestion_On_Model_Add.md` for the
+W1-W16 design-freeze scope. See `W11_Capacity_Suggestion_On_Model_Add.md` for the
 full spec.
 
 **Problem:** Catalog keys require an exact `(provider, model_name)` match, but
@@ -606,7 +606,7 @@ phased rollout with feature flag once W1 capacity validation is stable.
 
 <a id="w4"></a>
 
-##### W3. Fix Tenant and User Isolation
+##### W4. Fix Tenant and User Isolation
 
 **Problem:** Conversation-level context managers are keyed only by `conversation_id` in `backend/agents/agent_run_manager.py:78-93`.
 
@@ -616,7 +616,7 @@ phased rollout with feature flag once W1 capacity validation is stable.
 - Use the identity for in-memory caches, compression snapshots, locks, and metrics.
 - Require identity authorization before compression snapshot read/write.
 - Treat `tenant_id` and `user_id` as immutable single-owner fields for each conversation
-  and W4 session. Reject conversation sharing, membership, and ownership transfer;
+  and W5 session. Reject conversation sharing, membership, and ownership transfer;
   shared agents and tenant-shared memories do not grant session access.
 - Remove internal APIs that mutate context state using only a bare conversation ID;
   public conversation APIs may retain it after resolving authorized full identity.
@@ -630,7 +630,7 @@ phased rollout with feature flag once W1 capacity validation is stable.
 
 <a id="w5"></a>
 
-##### W4. Build the Structured Agent Execution Event Log
+##### W5. Build the Structured Agent Execution Event Log
 
 **Problem:** Existing persistence is a user-facing transcript, not a replayable agent-state model. Advanced context management cannot reliably reconstruct tool progress, failures, or compression boundaries from it.
 
@@ -658,7 +658,7 @@ phased rollout with feature flag once W1 capacity validation is stable.
 - Append `compression.snapshot` events at configured boundaries within the execution event log.
 - Build an outbox-backed, idempotent compatibility projector that continues populating
   the existing conversation tables/UI during migration. Required projection-outbox
-  rows commit atomically with their W4 source event; W4 owns retry and repair.
+  rows commit atomically with their W5 source event; W5 owns retry and repair.
 - Replace asynchronous direct message saves with event-first appends and derive
   compatibility message ordering from committed events.
 - Permit exactly one active run per durable session in the initial release. Reject a
@@ -679,9 +679,9 @@ resolution. **Finding:** CM-001.
 - UI transcript, active context, and long-term memory derived views can differ without losing the source events.
 - Hidden chain-of-thought is not required or persisted by default.
 
-<a id="w6"></a>
+<a id="p1"></a>
 
-##### W5. Separate Raw History from the Active-Context Derived View
+##### P1. Separate Raw History from the Active-Context Derived View
 
 **Problem:** Persisting more progress is valuable, but blindly injecting all stored events would worsen context pollution and cost.
 
@@ -707,11 +707,11 @@ resolution. **Finding:** CM-001.
 
 - Increasing execution-event detail does not increase active prompt size unless selected by policy.
 
-<a id="w7"></a>
+<a id="w7-retired"></a>
 
-##### ~~W7. Persist Context State for Multi-Worker Operation~~ (Retired)
+##### ~~Original W7. Persist Context State for Multi-Worker Operation~~ (Retired)
 
-**Status:** Retired. Checkpoint functionality is merged into W4 as `compression.snapshot`
+**Status:** Retired. The original W7 "Durable Multi-Worker Context State" — checkpoint functionality is merged into W5 (was W4) as `compression.snapshot`
 events.
 
 **Original problem:** Summary caches and context managers live only in a process-local
@@ -719,30 +719,30 @@ dictionary. Restart, failover, and load-balancer routing discard state.
 
 **Resolution:** Instead of an independent checkpoint subsystem with its own table, CAS
 logic, Redis cache, and schema migration (CM-014), compression results are stored as
-`compression.snapshot` events within the W4 execution event log. Recovery finds the
+`compression.snapshot` events within the W5 execution event log. Recovery finds the
 latest `compression.snapshot` event and replays subsequent events. This eliminates:
 
 - Independent checkpoint table and CAS concurrency control
 - Redis checkpoint cache layer
-- W6 checkpoint-specific validation (compression snapshots are validated like any other event)
+- P2 checkpoint-specific validation (compression snapshots are validated like any other event)
 - CM-014 checkpoint schema migration (covered by CM-005 event-schema compatibility)
-- W7 publication outbox for cross-system consistency
+- Original W7 publication outbox for cross-system consistency
 
 **Recovery flow:** Find latest `compression.snapshot` → load payload → replay subsequent
 events → resume. If no snapshot exists, replay entire event log.
 
-**See:** W4 `compression.snapshot` event type, recovery flow, and dirty-state flush.
+**See:** W5 `compression.snapshot` event type, recovery flow, and dirty-state flush.
 
-<a id="w8"></a>
+<a id="p2"></a>
 
-##### W6. Make Cache Validation Complete and Versioned
+##### P2. Make Cache Validation Complete and Versioned
 
 **Problem:** Summary cache validity uses only a short boundary fingerprint at `sdk/nexent/core/agents/agent_context.py:286-313`.
 
 **Solution:**
 
 - Hash the complete covered event prefix using canonical serialization.
-- Include W4 session identity, covered event sequence, context policy version, summary prompt/schema version, agent version, model ID, and tokenizer version in derived-state validity.
+- Include W5 session identity, covered event sequence, context policy version, summary prompt/schema version, agent version, model ID, and tokenizer version in derived-state validity.
 - Invalidate Working Memory and memory-retrieval derived views when source events, lifecycle state, authority rules, or memory-policy versions change.
 - Store the covered start/end event sequence.
 - Invalidate derived state after history edits or redactions.
@@ -755,7 +755,7 @@ events → resume. If no snapshot exists, replay entire event log.
 
 - Mutation tests prove any covered event or policy change invalidates the cache.
 
-<a id="w9"></a>
+<a id="w7"></a>
 
 ##### W7. Add Full Session Lifecycle APIs
 
@@ -783,9 +783,9 @@ events → resume. If no snapshot exists, replay entire event log.
 
 #### 2.3.3 Context Shaping and Compaction
 
-<a id="w10"></a>
+<a id="p3"></a>
 
-##### W8. Enforce One Context and Memory Policy Across All Strategies
+##### P3. Enforce One Context and Memory Policy Across All Strategies
 
 **Problem:** Injection flags exist in `summary_config.py` but are not applied by runtime selection. Some strategies ignore total or per-component budgets.
 
@@ -814,9 +814,9 @@ events → resume. If no snapshot exists, replay entire event log.
 
 - Matrix tests cover every strategy, flag, budget, authority, confirmation, conflict, and no-write combination.
 
-<a id="w11"></a>
+<a id="w8"></a>
 
-##### W9. Add Progressive Component Reduction
+##### W8. Add Progressive Component Reduction
 
 **Problem:** Oversized context components are dropped whole by `TokenBudgetStrategy` in `agent_model.py:443-486`.
 
@@ -839,9 +839,9 @@ events → resume. If no snapshot exists, replay entire event log.
 
 - Oversized component tests retain mandatory minimum representations.
 
-<a id="w12"></a>
+<a id="p4"></a>
 
-##### W10. Control Context Pollution and Large Tool Outputs
+##### P4. Control Context Pollution and Large Tool Outputs
 
 **Problem:** Large tool outputs and intermediate ReAct steps can dominate context. Observation truncation exists but defaults to disabled.
 
@@ -858,7 +858,7 @@ events → resume. If no snapshot exists, replay entire event log.
   content is preserved for retrieval. This is an offload decision, not a
   truncation — full content remains accessible through the artifact pointer.
   Context space decisions (whether to include full content, pointer only, or
-  summary) are made by W8 policy selection and W15 final fit, not by W10.
+  summary) are made by P3 policy selection and W10 final fit, not by P4.
 - Preserve complete tool-call/result pairs.
 - Run exploratory or high-volume delegated work in isolated subagent contexts.
 
@@ -869,11 +869,11 @@ events → resume. If no snapshot exists, replay entire event log.
 - Multi-megabyte tool results do not materially expand active prompt context.
 - Agents can retrieve offloaded details when needed.
 
-<a id="w13"></a>
+<a id="w6"></a>
 
-##### W12. Make Compaction Execution Reliable and Governed
+##### W6. Make Compaction Execution Reliable and Governed
 
-**Problem:** Compression synchronously uses the active model without a dedicated timeout, model policy, cost limit, or circuit breaker. Current implementation in `agent_context.py` has 21 gaps (16 critical) compared to W12 requirements.
+**Problem:** Compression synchronously uses the active model without a dedicated timeout, model policy, cost limit, or circuit breaker. Current implementation in `agent_context.py` has 21 gaps (16 critical) compared to W6 requirements.
 
 **Solution:**
 
@@ -882,11 +882,11 @@ events → resume. If no snapshot exists, replay entire event log.
 - Detect no-progress compaction and prevent infinite retry loops.
 - Make hard truncation deterministic when semantic compaction is unavailable.
 - Use W2 `CapacityReservePolicy.soft_limit_ratio` as the primary trigger for compaction.
-- Implement fallback model selection: primary → fallback → W9 deterministic hard reduction.
+- Implement fallback model selection: primary → fallback → W8 deterministic hard reduction.
 - Ensure measurable progress: compressed output token count must be strictly less than source token count.
-- Subagent sessions can trigger their own compaction through W12 using their own `CompactionPolicy`.
+- Subagent sessions can trigger their own compaction through W6 using their own `CompactionPolicy`.
 
-**Current State:** The existing `ContextManager` class in `agent_context.py` provides functional but incomplete compression. W12 includes a detailed gap analysis mapping current capabilities against requirements.
+**Current State:** The existing `ContextManager` class in `agent_context.py` provides functional but incomplete compression. W6 includes a detailed gap analysis mapping current capabilities against requirements.
 
 **Proof and benefit:** Keeps the main agent available during compaction-provider degradation and prevents uncontrolled latency or spend.
 
@@ -896,9 +896,9 @@ events → resume. If no snapshot exists, replay entire event log.
 
 #### 2.3.4 Governance and Privacy
 
-<a id="w14"></a>
+<a id="p5"></a>
 
-##### W11. Add Trust, Provenance, Redaction, and Retention Policies
+##### P5. Add Trust, Provenance, Redaction, and Retention Policies
 
 **Problem:** Retrieved memories and knowledge are injected as system messages without a formal trust boundary. Richer execution persistence also increases privacy and security risk.
 
@@ -937,9 +937,9 @@ events → resume. If no snapshot exists, replay entire event log.
 
 #### 2.3.5 Quality and Efficiency
 
-<a id="w15"></a>
+<a id="w9"></a>
 
-##### W13. Enforce Context Quality and Reliability SLOs
+##### W9. Enforce Context Quality and Reliability SLOs
 
 **Problem:** Nexent has benchmarks and tracing, but no release-blocking SLOs.
 
@@ -979,20 +979,20 @@ events → resume. If no snapshot exists, replay entire event log.
 
 - Releases fail when agreed context SLOs regress.
 
-<a id="w16"></a>
+<a id="w3"></a>
 
-##### W14. Make Prompt Assembly Cache-Aware
+##### W3. Make Prompt Assembly Cache-Aware
 
 **Problem:** Nexent does not intentionally optimize stable prompt prefixes or track cached-input usage.
 
 **Solution:**
 
 - Order stable system instructions and tool schemas before dynamic context.
-- Supply deterministic cache partition/order plans to W15; W15 owns final serialization
+- Supply deterministic cache partition/order plans to W10; W10 owns final serialization
   and computes fingerprints from the exact dispatched payload.
 - Track provider cached-input tokens and prefix-change causes.
 - Avoid changing timestamps or user-specific dynamic text inside stable prefixes when unnecessary.
-- Subagent sessions apply W14 cache optimization independently using their own agent configuration.
+- Subagent sessions apply W3 cache optimization independently using their own agent configuration.
 
 **Proof and benefit:** Improves latency and cost on providers supporting prompt caching while making prompt changes easier to diagnose.
 
@@ -1019,7 +1019,7 @@ trigger.
 
 #### Claim-Scoped Constraints
 
-1. W4-W7 may claim state replay. In the initial release, every tool-call start without
+1. W5-W7 may claim state replay. In the initial release, every tool-call start without
    a committed terminal result is conservatively classified as `ambiguous_effect`;
    automatic invocation stops until an authorized user or operator records `retry`,
    `skip`, or `confirm_completed`. A general effect-intent/reconciliation platform is
@@ -1041,26 +1041,26 @@ trigger.
    owning run. Fencing tokens and concurrent same-session lifecycle mutation are out
    of scope until that capability is approved. **Finding:** CM-003.
 4. Start with simple per-session serialization, the normalized event index/data join,
-   and append-time incremental hashes. W4 records append latency, session-sequence lock
+   and append-time incremental hashes. W5 records append latency, session-sequence lock
    wait, events per session, and replay latency under representative CM-009 workloads.
    CM-004 does not block the initial production implementation. Add batching,
    partitioning, materialization, a separate sequence service, or Merkle structures
    only after representative measurements cross approved thresholds.
    **Findings:** CM-004, CM-015.
 5. CM-006 covers multi-record publication and asynchronous derived-state repair, not a
-   generic cross-store transaction. W4 events and required compatibility-projection
-   outbox rows commit in one relational transaction; W4 events are immediately
+   generic cross-store transaction. W5 events and required compatibility-projection
+   outbox rows commit in one relational transaction; W5 events are immediately
    authoritative while compatibility views may lag and are repaired idempotently. A
-committed `compression.snapshot` event is immediately loadable as part of the W4
+committed `compression.snapshot` event is immediately loadable as part of the W5
 event log; no separate publication or cross-system repair is needed.
-   W10 uses governed non-readable staging, one pending-artifact/event/finalize-outbox
+   P4 uses governed non-readable staging, one pending-artifact/event/finalize-outbox
    transaction, idempotent finalize, ready-only reads, retry/repair, and orphan cleanup.
-   W11 immediately tombstones authorized deletion targets and coordinates a fixed
+   P5 immediately tombstones authorized deletion targets and coordinates a fixed
    per-store destination registry; each adapter deletes/verifies idempotently, and
    completion requires every required destination. Universal saga, distributed
    transaction, and generic workflow platforms are not required.
    **Findings:** CM-006, CM-019, CM-020.
-6. Before the first production event-schema upgrade, W4 supports reading the current
+6. Before the first production event-schema upgrade, W5 supports reading the current
    and immediately previous event version through one canonical reader/upcaster. The
    upgrade deploys compatible readers before enabling the new writer, and rollback may
    target only releases that can read committed new-version events. This does not block
@@ -1086,11 +1086,11 @@ event log; no separate publication or cross-system repair is needed.
    unsupported behavior rejects or degrades visibly. Structural minimum-fidelity
    validation is required, while general semantic validation remains measured.
    **Findings:** CM-013, CM-016-CM-018, CM-021.
-10. Decision traces reuse W11 governance and add bounded labels, sampling, and
+10. Decision traces reuse P5 governance and add bounded labels, sampling, and
     retention. **Finding:** CM-022.
-11. W15 first ships an independent minimal hard-fit gateway; W8-W12 later improve
-    quality without becoming fit prerequisites. W14 supplies only a cache partition
-    plan, while W15 alone assembles, serializes, counts, and fingerprints the exact final
+11. W10 first ships an independent minimal hard-fit gateway; P3-W6 later improve
+    quality without becoming fit prerequisites. W3 supplies only a cache partition
+    plan, while W10 alone assembles, serializes, counts, and fingerprints the exact final
     payload sent unchanged by trusted dispatch. **Findings:** CM-008, CM-023.
 
 #### Conditional Capability Packages
@@ -1099,18 +1099,18 @@ event log; no separate publication or cross-system repair is needed.
   declarations, ambiguity states, and reconciliation only when this product claim is
   approved. Until then, the minimum CM-001 guardrail conservatively marks every
   interrupted tool call ambiguous and stops for explicit resolution.
-- **Production-scale topology:** concrete W4/W10/W11 paths own correctness and
+- **Production-scale topology:** concrete W5/P4/P5 paths own correctness and
   repair; deployment/SRE approval owns topology-specific capacity, backup, DR, and
   RPO/RTO evidence. Do not create a single storage mega-workstream.
-- **Advanced schema migration:** begin with the W4 event-schema compatibility contract (CM-005).
+- **Advanced schema migration:** begin with the W5 event-schema compatibility contract (CM-005).
   A separate migration workstream is optional when multi-team or high-volume migration
   needs emerge.
 
 #### Corrected Dependency and Readiness Rules
 
-- W15 first ships a minimal deterministic fit gateway that can reject, remove optional
+- W10 first ships a minimal deterministic fit gateway that can reject, remove optional
   content, and apply bounded deterministic fallback. Its strengthened quality gate
-  depends on W8-W12; cache-preserving final assembly depends on a single W15/W14 final
+  depends on P3-W6; cache-preserving final assembly depends on a single W10/W3 final
   assembly contract. **Findings:** CM-008, CM-023.
 - The July 10 and August 7 dates are planning targets. Readiness is evaluated against
   the exact capability claims enabled by the release. Reaching a date never overrides
@@ -1122,33 +1122,33 @@ event log; no separate publication or cross-system repair is needed.
 
 Phases are time-boxed delivery bundles; W-IDs are the stable, assignable workstreams
 defined in chapters 1 and 2. A phase groups workstreams that should be integrated and
-demonstrated together. W13 is intentionally split. Optional capability packages are
+demonstrated together. W9 is intentionally split. Optional capability packages are
 scheduled only after their product claims are approved. Dates are planning targets;
 section 2.4 defines the claim-scoped readiness gates. **Findings:** CM-011, CM-024.
 
 | Phase | Schedule target | Included W-IDs | Mapping rationale and phase outcome |
 | --- | --- | --- | --- |
-| Phase 0: Baseline and Design Freeze | June 10-12 | [W1](#w1)-[W15](#w15) specifications; formal review; W13 groundwork | Completes implementation-ready designs, review constraints, baseline definitions, and shared contracts. |
-| Phase 1: Foundation and Cache Optimization | June 15-26 | [W1](#w1), [W2](#w2), [W3](#w3), [W14](#w14) | Establishes correct capacity semantics, output reservation, tenant isolation, and prompt-cache optimization. W14 moved forward: high value, zero dependencies, ~70 lines for Phase 1 observability. |
-| Phase 2: Event Infrastructure and Reliability | June 15-July 10 | [W4](#w4) (bug fix + full), [W6](#w6) (minimal fix), [W12](#w12) (reliability) | Fixes deep-thinking bugs, builds durable event log, applies minimal cache validation fix, and hardens compaction reliability (timeout, retry, circuit breaker). |
-| Phase 3: Lifecycle and Reduction | June 29-July 17 | [W7](#w7), [W9](#w9), [W10](#w10) (quick fixes), [W11](#w11) (minimal fix) | Implements session lifecycle APIs, progressive reduction, enables observation limits, and adds secret redaction. |
-| Phase 4: Quality and Fit | July 13-24 | [W13](#w13), [W15](#w15) | Defines SLOs, establishes baselines, and guarantees context fit before every model call. |
+| Phase 0: Baseline and Design Freeze | June 10-12 | [W1](#w1)-[W10](#w10) specifications; formal review; W9 groundwork | Completes implementation-ready designs, review constraints, baseline definitions, and shared contracts. |
+| Phase 1: Foundation and Cache Optimization | June 15-26 | [W1](#w1), [W2](#w2), [W4](#w4), [W3](#w3) | Establishes correct capacity semantics, output reservation, tenant isolation, and prompt-cache optimization. W3 moved forward: high value, zero dependencies, ~70 lines for Phase 1 observability. |
+| Phase 2: Event Infrastructure and Reliability | June 15-July 10 | [W5](#w5) (bug fix + full), [P2](#p2) (minimal fix), [W6](#w6) (reliability) | Fixes deep-thinking bugs, builds durable event log, applies minimal cache validation fix, and hardens compaction reliability (timeout, retry, circuit breaker). |
+| Phase 3: Lifecycle and Reduction | June 29-July 17 | [W7](#w7), [W8](#w8), [P4](#p4) (quick fixes), [P5](#p5) (minimal fix) | Implements session lifecycle APIs, progressive reduction, enables observation limits, and adds secret redaction. |
+| Phase 4: Quality and Fit | July 13-24 | [W9](#w9), [W10](#w10) | Defines SLOs, establishes baselines, and guarantees context fit before every model call. |
 | Phase 5: Release Hardening | July 20-August 7 target | Approved optional-package evidence | Completes release gates for the exact enabled capability claims. |
-| Post-acceptance follow-ups | Unscheduled; flag-gated rollout | [W17](#w17) and any future post-acceptance-finding-triggered workstreams | Decoupled from the Phase 0-5 timeline. |
-| Tentatively deferred | After dependency completion | [W5](#w5), [W6](#w6) (full), [W8](#w8) (full), [W10](#w10) (artifact system), [W11](#w11) (full) | Require W4 event log and/or W11 governance as prerequisites. Activated when dependencies are met or customer/compliance demand arises. See §1.5 for activation triggers. |
+| Post-acceptance follow-ups | Unscheduled; flag-gated rollout | [W11](#w11) and any future post-acceptance-finding-triggered workstreams | Decoupled from the Phase 0-5 timeline. |
+| Tentatively deferred | After dependency completion | [P1](#p1), [P2](#p2) (full), [P3](#p3) (full), [P4](#p4) (artifact system), [P5](#p5) (full) | Require W5 event log and/or P5 governance as prerequisites. Activated when dependencies are met or customer/compliance demand arises. See §1.5 for activation triggers. |
 
-The July 10 milestone targets the implementation outputs of W1-W6. It is not a
+The July 10 milestone targets the implementation outputs of W1-P2. It is not a
 production-readiness gate. Phases 3-5 overlap intentionally; August 7 is the earliest
 target for the approved release-scope evidence review. Post-acceptance follow-ups
 (see §1.4) are separately tracked and do not move the Phase 5 milestone. **Findings:** CM-011, CM-024.
 
 #### Phase 0: Baseline and Design Freeze
 
-**Schedule target:** June 10-12 **Workstreams:** W1-W14 design, formal review, W13 groundwork, and minimum shared contracts
+**Schedule target:** June 10-12 **Workstreams:** W1-W3 design, formal review, W9 groundwork, and minimum shared contracts
 
 Deliver:
 
-- Complete implementation-ready W1-W14 specifications and cross-workstream dependency
+- Complete implementation-ready W1-W3 specifications and cross-workstream dependency
   mapping.
 - Complete formal production-readiness and over-engineering reviews.
 - Define the measurement plan for current overflow rate, compression retention,
@@ -1165,7 +1165,7 @@ Exit gate:
 
 #### Phase 1: Foundation and Cache Optimization
 
-**Schedule target:** June 15-26 **Workstreams:** W1, W2, W3, W14
+**Schedule target:** June 15-26 **Workstreams:** W1, W2, W4, W3
 
 Deliver:
 
@@ -1188,7 +1188,7 @@ Exit gate:
 
 #### Phase 2: Event Infrastructure and Reliability
 
-**Schedule target:** June 15-July 10 **Workstreams:** W4 (bug fix + full), W6 (minimal fix), W12 (reliability)
+**Schedule target:** June 15-July 10 **Workstreams:** W5 (bug fix + full), P2 (minimal fix), W6 (reliability)
 
 Deliver:
 
@@ -1211,7 +1211,7 @@ Exit gate:
 
 #### Phase 3: Lifecycle and Reduction
 
-**Schedule target:** June 29-July 17 **Workstreams:** W7, W9, W10 (quick fixes), W11 (minimal fix)
+**Schedule target:** June 29-July 17 **Workstreams:** W7, W8, P4 (quick fixes), P5 (minimal fix)
 
 Deliver:
 
@@ -1219,8 +1219,8 @@ Deliver:
 - Subagent conflict check and `resolve_ambiguous_effect` API.
 - Progressive component reduction (7 reducer types).
 - Deterministic vs semantic reducer caching distinction.
-- W10 quick fixes: enable `max_observation_length` default, add output caps to terminal and read-file tools, cap subagent return strings.
-- W11 minimal fix: pattern-based secret redaction in tool outputs before persistence.
+- P4 quick fixes: enable `max_observation_length` default, add output caps to terminal and read-file tools, cap subagent return strings.
+- P5 minimal fix: pattern-based secret redaction in tool outputs before persistence.
 - Subagent governance.
 
 Exit gate:
@@ -1233,12 +1233,12 @@ Exit gate:
 
 #### Phase 4: Quality and Fit
 
-**Schedule target:** July 13-24 **Workstreams:** W13, W15
+**Schedule target:** July 13-24 **Workstreams:** W9, W10
 
 Deliver:
 
 - Context quality and reliability SLOs (fit rate, retention, latency, cost).
-- Baseline measurements established before W1-W12 changes.
+- Baseline measurements established before W1-W6 changes.
 - Performance baseline test coordination across all workstreams.
 - Guaranteed context fit with `ContextFitPipeline`.
 - Hard-fit gateway implementation.
@@ -1281,7 +1281,7 @@ The accelerated schedule assumes three parallel squads, heavy AI-assisted implem
 
 **July 10 target: Core Context Foundation**
 
-The July 10 planning target aims to demonstrate W1-W4, W6 (minimal), W12, and W14 end to end:
+The July 10 planning target aims to demonstrate W1-W5, P2 (minimal), W6, and W3 end to end:
 
 - Model capacity has correct semantics and every serialized request is guaranteed to fit.
 - Context state is tenant-isolated and survives worker restart or failover.
@@ -1305,23 +1305,23 @@ gantt
     axisFormat  %b %d
 
     section Foundation Squad
-    Phase 0 - W1-W15 design and review                 :done, p0, 2026-06-10, 3d
-    Phase 1 - W1-W3, W14 capacity, identity, cache    :p1, 2026-06-15, 12d
+    Phase 0 - W1-W10 design and review                 :done, p0, 2026-06-10, 3d
+    Phase 1 - W1-W4, W3 capacity, identity, cache    :p1, 2026-06-15, 12d
 
     section Event and Reliability Squad
-    Phase 2 - W4 bug fix, W4 full, W6 min, W12 reliability :p2, 2026-06-15, 26d
+    Phase 2 - W5 bug fix, W5 full, P2 min, W6 reliability :p2, 2026-06-15, 26d
     Core Context Foundation target                     :milestone, m1, 2026-07-10, 0d
 
     section Lifecycle and Reduction Squad
-    Phase 3 - W7, W9, W10/W11 quick fixes             :p3, 2026-06-29, 19d
+    Phase 3 - W7, W8, P4/P5 quick fixes             :p3, 2026-06-29, 19d
 
     section Quality and Fit Squad
-    Phase 4 - W13, W15 SLOs and guaranteed fit        :p4, 2026-07-13, 12d
+    Phase 4 - W9, W10 SLOs and guaranteed fit        :p4, 2026-07-13, 12d
     Phase 5 - Release hardening                        :p5, 2026-07-20, 19d
     Earliest production-readiness evidence review      :milestone, m2, 2026-08-07, 0d
 
     section Deferred
-    W5, W6 full, W8 full, W10 artifact, W11 full      :deferred, 2026-08-07, 60d
+    P1, P2 full, P3 full, P4 artifact, P5 full      :deferred, 2026-08-07, 60d
 ```
 
 ### 3.3 Dependency Order
@@ -1329,35 +1329,35 @@ gantt
 ```mermaid
 flowchart LR
     W1["W1 Token capacity"] --> W2["W2 Reserves"]
-    W3["W3 Identity"] --> W4["W4 Execution event log<br/>+ compression snapshots"]
-    W4 --> W5["W5 Derived views<br/>(deferred)"]
-    W5 --> W6["W6 Cache validity<br/>(full deferred)"]
-    W6 --> W7["W7 Lifecycle APIs"]
-    W7 --> W8["W8 Policy<br/>(deferred)"]
-    W8 --> W9["W9 Reducers"]
-    W9 --> W10["W10 Pollution control<br/>(artifact deferred)"]
-    W10 --> W11["W11 Trust / redaction<br/>(full deferred)"]
-    W11 --> W12["W12 Reliable compaction"]
-    W2 --> W14["W14 Cache-aware assembly<br/>(Phase 1)"]
-    W14 --> W15["W15 Guaranteed fit"]
-    W12 --> W13["W13 Quality SLOs"]
-    W13 --> W15
-    W11 -. governs .-> W4
-    W11 -. governs .-> W5
-    W11 -. governs .-> W10
-    W13 -. measures .-> W15
-    W13 -. measures .-> W7
-    W13 -. measures .-> W10
-    W4 --> C1["Optional effect reconciliation"] --> W7
-    W4 --> C2["Shared schema compatibility"] --> W5
-    W13 -. gates approved claims .-> C1
-    W13 -. gates approved topology .-> W4
+    W4["W4 Identity"] --> W5["W5 Execution event log<br/>+ compression snapshots"]
+    W5 --> P1["P1 Derived views<br/>(deferred)"]
+    P1 --> P2["P2 Cache validity<br/>(full deferred)"]
+    P2 --> W7["W7 Lifecycle APIs"]
+    W7 --> P3["P3 Policy<br/>(deferred)"]
+    P3 --> W8["W8 Reducers"]
+    W8 --> P4["P4 Pollution control<br/>(artifact deferred)"]
+    P4 --> P5["P5 Trust / redaction<br/>(full deferred)"]
+    P5 --> W6["W6 Reliable compaction"]
+    W2 --> W3["W3 Cache-aware assembly<br/>(Phase 1)"]
+    W3 --> W10["W10 Guaranteed fit"]
+    W6 --> W9["W9 Quality SLOs"]
+    W9 --> W10
+    P5 -. governs .-> W5
+    P5 -. governs .-> P1
+    P5 -. governs .-> P4
+    W9 -. measures .-> W10
+    W9 -. measures .-> W7
+    W9 -. measures .-> P4
+    W5 --> C1["Optional effect reconciliation"] --> W7
+    W5 --> C2["Shared schema compatibility"] --> P1
+    W9 -. gates approved claims .-> C1
+    W9 -. gates approved topology .-> W5
 
-    style W5 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
-    style W6 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
-    style W8 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
-    style W10 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
-    style W11 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
+    style P1 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
+    style P2 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
+    style P3 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
+    style P4 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
+    style P5 fill:#f9f,stroke:#333,stroke-dasharray: 5 5
 ```
 
 ### 3.4 Required Test Portfolio
@@ -1368,7 +1368,7 @@ flowchart LR
 | Tenant isolation | Same IDs across tenants/users cannot share state. |
 | Single-owner scope | Sharing and ownership-transfer requests are rejected; shared resources grant no session access; audited operator actions leave the owner unchanged. |
 | Restart/failover | Resume reproduces effective context on another worker. |
-| Concurrency | A durable session rejects a second active run and rejects restore/reset/manual compact until the active run reaches a committed terminal/recovery state; W4 sequence lock prevents stale overwrite. |
+| Concurrency | A durable session rejects a second active run and rejects restore/reset/manual compact until the active run reaches a committed terminal/recovery state; W5 sequence lock prevents stale overwrite. |
 | Event-log replay | Runs and derived views reconstruct from durable events. |
 | Cache invalidation | Any covered history or policy mutation invalidates stale summaries. |
 | Retention quality | Key decisions, pending work, tool outcomes, and constraints survive compression. |

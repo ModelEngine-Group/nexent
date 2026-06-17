@@ -9,7 +9,7 @@ output, provider framing, reasoning behavior, and token-estimation error.
 
 W2 depends on W1's capacity snapshot and tokenizer contract. It owns budget
 calculation and reserve policy. It does not own component selection or truncation;
-W15, W8, and W9 consume the resulting budget. SDK/client calculations are advisory
+W10, P3, and W8 consume the resulting budget. SDK/client calculations are advisory
 only; the trusted server-side model dispatch boundary resolves or verifies the W2
 snapshot used for production dispatch.
 
@@ -98,7 +98,7 @@ Typed failures include `invalid_reserve_policy`, `requested_output_exceeds_capac
   reserve, approved profile-specific reserve support, configuration/UI fields, and
   reserve telemetry.
 - Phase through observe-only comparison, soft-limit shaping, hard-budget/output-cap
-  enforcement through W15, then removal of direct `token_threshold` decisions.
+  enforcement through W10, then removal of direct `token_threshold` decisions.
 - All callers consume the same snapshot; local reserve recalculation is prohibited.
 - Caller-supplied budget snapshots, reserve values, and output caps are untrusted and
   cannot authorize or expand a production model call.
@@ -115,16 +115,16 @@ Typed failures include `invalid_reserve_policy`, `requested_output_exceeds_capac
 8. Require the trusted server-side dispatch path to resolve or verify the immutable
    budget snapshot and reject caller-expanded limits.
 
-## W2 to W15 Handoff
+## W2 to W10 Handoff
 
 - W2 calculates exactly one `SafeInputBudgetSnapshot` from the immutable W1 snapshot.
 - The W2 snapshot records the W1 fingerprint, selected requested output, reserve
   breakdown, hard input budget, soft input budget, and its own fingerprint.
-- W15 rejects a W2 snapshot whose W1 fingerprint, provider/model identity, or requested
+- W10 rejects a W2 snapshot whose W1 fingerprint, provider/model identity, or requested
   output does not match the active W1 snapshot.
-- W15 may reduce selected input content but cannot increase the W2 hard input budget or
+- W10 may reduce selected input content but cannot increase the W2 hard input budget or
   independently recalculate reserves.
-- Trusted dispatch verifies the final W15 result references the active W1 and W2
+- Trusted dispatch verifies the final W10 result references the active W1 and W2
   fingerprints.
 
 ## Repository Touchpoints

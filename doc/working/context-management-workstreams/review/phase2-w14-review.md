@@ -1,8 +1,8 @@
-# Phase 2: W14 Review
+# Phase 2: W3 Review
 
 ## Assessment
 
-W14 correctly centralizes governance, but deletion and fail-closed persistence behavior
+W3 correctly centralizes governance, but deletion and fail-closed persistence behavior
 need stronger cross-store semantics.
 
 ## Findings and Risks
