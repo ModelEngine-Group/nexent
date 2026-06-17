@@ -954,14 +954,13 @@ class TestGetMcpManagementApp:
     def test_app_has_routes(self):
         """Test that app has expected routes"""
         app = mcp_service.get_mcp_management_app()
+        paths = app.openapi()["paths"]
 
-        routes = [route.path for route in app.routes]
-
-        assert "/tools/outer_api/refresh" in routes
-        assert "/tools/openapi_service/refresh" in routes
-        assert "/tools/openapi_service" in routes
-        assert "/tools/openapi_service/{service_name}/refresh" in routes
-        assert "/tools/outer_api" in routes
+        assert "/tools/outer_api/refresh" in paths
+        assert "/tools/openapi_service/refresh" in paths
+        assert "/tools/openapi_service" in paths
+        assert "/tools/openapi_service/{service_name}/refresh" in paths
+        assert "/tools/outer_api" in paths
 
 
 # ---------------------------------------------------------------------------
