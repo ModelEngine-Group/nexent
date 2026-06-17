@@ -566,7 +566,7 @@ def update_external_agent_protocol(
         if interface:
             agent.agent_url = interface.get("url", agent.agent_url)
 
-        agent.updated_time = datetime.now(timezone.utc)
+        agent.update_time = datetime.now(timezone.utc)
 
         return {
             "id": agent.id,
@@ -626,7 +626,7 @@ def update_external_agent_settings(
         if timeout is not None:
             agent.timeout = timeout
 
-        agent.updated_time = datetime.now(timezone.utc)
+        agent.update_time = datetime.now(timezone.utc)
 
         return {
             "id": agent.id,
