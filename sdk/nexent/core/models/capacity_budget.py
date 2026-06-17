@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from typing import Any, Literal, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -176,10 +177,16 @@ def compute_w2_fingerprint(
 
 
 class SafeInputBudgetCalculator:
-    """W2 calculator interface.
+    """Pure W2 calculator over an immutable W1 capacity snapshot."""
 
-    The implementation is intentionally deferred until the W2 ADR is accepted.
-    """
+    _UNKNOWN_CAPABILITIES_REQUIRING_RESERVE = frozenset(
+        {
+            "capability_profile_missing",
+            "tokenizer",
+            "reasoning_window_behavior",
+            "provider_overhead_behavior",
+        }
+    )
 
     def calculate_safe_input_budget(
         self,
@@ -190,6 +197,158 @@ class SafeInputBudgetCalculator:
         requested_output_tokens: Optional[int] = None,
         output_reserve_source: OutputReserveSource = "model_default",
     ) -> SafeInputBudgetSnapshot:
-        raise NotImplementedError(
-            "SafeInputBudgetCalculator body is gated by W2 ADR acceptance"
+        effective_output_tokens = (
+            requested_output_tokens
+            if requested_output_tokens is not None
+            else capacity_snapshot.requested_output_tokens
         )
+        effective_output_source: OutputReserveSource = output_reserve_source
+        if requested_output_tokens is None:
+            effective_output_source = "model_default"
+
+        if effective_output_tokens <= 0:
+            raise InvalidReservePolicy(
+                "requested_output_tokens must be a positive integer"
+            )
+
+        if request_overrides and request_overrides.requested_output_tokens is not None:
+            if request_overrides.requested_output_tokens < effective_output_tokens:
+                raise InvalidReservePolicy(
+                    "per-request requested_output_tokens may not lower the "
+                    "resolved model or agent output reserve"
+                )
+            effective_output_tokens = request_overrides.requested_output_tokens
+            effective_output_source = "request"
+
+        if (
+            capacity_snapshot.max_output_tokens is not None
+            and effective_output_tokens > capacity_snapshot.max_output_tokens
+        ):
+            raise RequestedOutputExceedsCapacity(
+                "requested_output_tokens "
+                f"({effective_output_tokens}) exceeds max_output_tokens "
+                f"({capacity_snapshot.max_output_tokens})"
+            )
+
+        provider_input_limit = self._provider_input_limit(
+            capacity_snapshot=capacity_snapshot,
+            requested_output_tokens=effective_output_tokens,
+        )
+
+        uncertainty_reserve_tokens, uncertainty_reserve_basis, warnings = (
+            self._uncertainty_reserve(capacity_snapshot, reserve_policy)
+        )
+
+        if uncertainty_reserve_tokens > provider_input_limit:
+            raise ReserveExceedsCapacity(
+                "uncertainty reserve "
+                f"({uncertainty_reserve_tokens}) exceeds provider input limit "
+                f"({provider_input_limit})"
+            )
+
+        hard_input_budget_tokens = provider_input_limit - uncertainty_reserve_tokens
+        if hard_input_budget_tokens <= 0:
+            raise NoSafeInputCapacity(
+                "safe input budget is non-positive after applying reserves"
+            )
+
+        soft_input_budget_tokens = max(
+            1, math.floor(hard_input_budget_tokens * reserve_policy.soft_limit_ratio)
+        )
+
+        field_sources = {
+            "requested_output_tokens": effective_output_source,
+            "soft_limit_ratio": reserve_policy.soft_limit_ratio_source,
+            "uncertainty_reserve_tokens": uncertainty_reserve_basis,
+            "provider_input_limit_tokens": "derived",
+            "hard_input_budget_tokens": "derived",
+            "soft_input_budget_tokens": "derived",
+        }
+
+        fingerprint = compute_w2_fingerprint(
+            w2_resolver_version=W2_RESOLVER_VERSION,
+            w1_fingerprint=capacity_snapshot.fingerprint,
+            provider=capacity_snapshot.provider,
+            model_name=capacity_snapshot.model_name,
+            requested_output_tokens=effective_output_tokens,
+            output_reserve_source=effective_output_source,
+            uncertainty_reserve_tokens=uncertainty_reserve_tokens,
+            uncertainty_reserve_basis=uncertainty_reserve_basis,
+            approved_profile_reserve_tokens=reserve_policy.approved_profile_reserve_tokens,
+            soft_limit_ratio=reserve_policy.soft_limit_ratio,
+            soft_limit_ratio_source=reserve_policy.soft_limit_ratio_source,
+            soft_input_budget_tokens=soft_input_budget_tokens,
+            hard_input_budget_tokens=hard_input_budget_tokens,
+            field_sources=field_sources,
+            warnings=warnings,
+        )
+
+        return SafeInputBudgetSnapshot(
+            w1_fingerprint=capacity_snapshot.fingerprint,
+            provider=capacity_snapshot.provider,
+            model_name=capacity_snapshot.model_name,
+            requested_output_tokens=effective_output_tokens,
+            output_reserve_source=effective_output_source,
+            provider_input_limit_tokens=provider_input_limit,
+            uncertainty_reserve_tokens=uncertainty_reserve_tokens,
+            uncertainty_reserve_basis=uncertainty_reserve_basis,
+            approved_profile_reserve_tokens=reserve_policy.approved_profile_reserve_tokens,
+            soft_limit_ratio=reserve_policy.soft_limit_ratio,
+            soft_limit_ratio_source=reserve_policy.soft_limit_ratio_source,
+            soft_input_budget_tokens=soft_input_budget_tokens,
+            hard_input_budget_tokens=hard_input_budget_tokens,
+            field_sources=field_sources,
+            warnings=warnings,
+            resolver_version=W2_RESOLVER_VERSION,
+            fingerprint=fingerprint,
+        )
+
+    @staticmethod
+    def _provider_input_limit(
+        *,
+        capacity_snapshot: ModelCapacitySnapshot,
+        requested_output_tokens: int,
+    ) -> int:
+        derived_limits: list[int] = []
+        if capacity_snapshot.max_input_tokens is not None:
+            derived_limits.append(capacity_snapshot.max_input_tokens)
+        if capacity_snapshot.context_window_tokens is not None:
+            derived_limits.append(
+                capacity_snapshot.context_window_tokens - requested_output_tokens
+            )
+        if not derived_limits:
+            raise NoSafeInputCapacity("no provider input limit could be derived")
+        provider_input_limit = min(derived_limits)
+        if provider_input_limit <= 0:
+            raise NoSafeInputCapacity(
+                "provider input limit is non-positive after output reserve"
+            )
+        return provider_input_limit
+
+    def _uncertainty_reserve(
+        self,
+        capacity_snapshot: ModelCapacitySnapshot,
+        reserve_policy: CapacityReservePolicy,
+    ) -> tuple[int, UncertaintyReserveBasis, list[str]]:
+        unknown_required_behavior = self._UNKNOWN_CAPABILITIES_REQUIRING_RESERVE.intersection(
+            capacity_snapshot.unknown_capabilities
+        )
+
+        if reserve_policy.approved_profile_reserve_tokens is not None:
+            return (
+                reserve_policy.approved_profile_reserve_tokens,
+                "approved_profile",
+                [],
+            )
+
+        if not unknown_required_behavior:
+            return 0, "none", []
+
+        if capacity_snapshot.context_window_tokens is None:
+            raise UncertaintyReserveBasisUnknown(
+                "context_window_tokens is required for the unified 10 percent "
+                "uncertainty reserve"
+            )
+
+        reserve = math.ceil(capacity_snapshot.context_window_tokens * 0.10)
+        return reserve, "context_window_10pct", ["uncertainty_reserve_active"]
