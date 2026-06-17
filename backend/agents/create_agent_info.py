@@ -66,6 +66,11 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "tokenizer_family",
 )
 
+# Per-process dedup for the "model has no capacity configured" warning.
+# Without this, every agent run logs the same line, drowning real signal.
+# Keyed by model_id; cleared only on process restart.
+_CAPACITY_WARNING_EMITTED: set = set()
+
 
 def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     """Extract the W1 operator-override fields from a model_record_t row."""
@@ -189,26 +194,49 @@ def _resolve_input_budget(
             snapshot,
         )
     except ProviderCapabilityUnknown:
-        logger.warning(
-            "W2 enforcement disabled for model_id=%s (%s/%s): no W1 capacity "
-            "snapshot available. CM-030 output-token enforcement and CM-013 "
-            "trusted-dispatch fingerprint check will be skipped for requests "
-            "using this model. Remediation: re-save the model through the "
-            "Nexent UI (the Add/Edit form now requires context_window_tokens "
-            "and max_output_tokens), or set model_factory to a W1 catalog "
-            "provider key, or wait for W17. Falling back to %s for "
-            "token_threshold.",
-            model_info.get("model_id") if isinstance(model_info, dict) else None,
-            provider, model_id, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
-        )
+        _warn_missing_capacity_once(model_info, provider, model_id)
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
     except ResolverError as exc:
-        logger.warning(
-            "Capacity resolution failed for (%s, %s): %s. Falling back to %s. "
-            "W2 enforcement disabled for this model.",
-            provider, model_id, exc, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+        _warn_missing_capacity_once(
+            model_info, provider, model_id, detail=str(exc),
         )
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+
+
+def _warn_missing_capacity_once(
+    model_info: Optional[dict],
+    provider: str,
+    model_id_str: str,
+    detail: Optional[str] = None,
+) -> None:
+    """Log one WARNING per process per model when capacity is not configured.
+
+    Plain-English message aimed at operators reading backend logs. Tells
+    them what is disabled, which model is affected, and how to fix it
+    through the existing UI.
+    """
+    db_model_id = (
+        model_info.get("model_id") if isinstance(model_info, dict) else None
+    )
+    dedup_key = db_model_id if db_model_id is not None else f"{provider}/{model_id_str}"
+    if dedup_key in _CAPACITY_WARNING_EMITTED:
+        return
+    _CAPACITY_WARNING_EMITTED.add(dedup_key)
+
+    reason = (
+        f"resolver error: {detail}"
+        if detail
+        else "no context_window_tokens or max_output_tokens configured"
+    )
+    logger.warning(
+        "Output token cap and budget consistency check are not enforced for "
+        "model '%s' (model_id=%s, provider=%s) because %s. "
+        "To enable enforcement, open the Nexent model management UI, edit "
+        "this model, and fill in 'Context window tokens' and 'Max output "
+        "tokens'. Falling back to a default context threshold of %s tokens.",
+        model_id_str, db_model_id, provider, reason,
+        _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+    )
 
 
 def _build_internal_s3_url(file: dict) -> str:
