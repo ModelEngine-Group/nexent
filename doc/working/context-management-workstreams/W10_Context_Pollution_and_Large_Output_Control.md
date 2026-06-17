@@ -148,3 +148,28 @@ transactions, two-phase commit, and a general saga/workflow platform are out of 
   functional implementation is stable).
 - W10 is done when large output is artifact-first by default, retrieval is reliable and
   governed, and prompt-growth/cost targets meet W13 thresholds.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Real pollution gaps exist; artifact system deferred, quick fixes justified.**
+
+### Current safeguards
+- smolagents `truncate_content()`: 20K char head+tail truncation for code execution output
+- ContextManager pre-truncation: `max_observation_length` (exists but **defaults to 0 = disabled**)
+- Component token budgets: 7 types with individual limits
+- Compression: 3-level fallback (L1 full → L2 trimmed → L3 hard truncation)
+
+### Uncontrolled pollution sources
+- **`terminal_tool.py`**: ZERO output size limits — `cat` of large file returns unbounded output
+- **`read_file_tool.py`**: warns at 10MB but returns entire file content
+- **`max_observation_length` defaults to 0**: pre-truncation layer exists but is disabled
+- **No artifact offload mechanism**: cannot store large results externally
+- **Subagent output not budget-capped**: subagent can return up to 20K chars consuming parent context
+
+### Quick fixes (do now)
+1. Set `max_observation_length` default to 4000-8000 chars
+2. Add output size caps to `terminal_tool.py` and `read_file_tool.py`
+3. Add configurable budget cap on subagent return strings
+
+### Why artifact system is deferred
+Full artifact offload requires W4 event log (for artifact records) and W11 governance (for redaction before storage). No customer-reported large-output incidents yet.

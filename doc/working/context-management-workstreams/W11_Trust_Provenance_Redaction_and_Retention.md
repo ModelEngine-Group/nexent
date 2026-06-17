@@ -185,3 +185,22 @@ W11 does not re-redact already-redacted content.
 - W11 is done when governance metadata and policy apply end to end, secret tests pass,
   direct raw persistence is denied, and deletion/retention/writeback behavior is
   demonstrably complete.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Minimal secret redaction justified; full governance stack deferred.**
+
+### Current state
+- Only redaction: logging-level in `core_agent.py:257-263` (api_key/token/password/secret → `***REDACTED***`)
+- No PII detection or filtering
+- No content sanitization before persistence
+- No retention policies
+- No deletion propagation
+- No trust levels or source labeling
+- **No customer requests** for sensitive content removal
+
+### Why full W11 is deferred
+Full W11 (trust tiers, temporal lifecycle, deletion propagation, writeback journal, erasure lineage) is multi-month infrastructure for problems that haven't materialized. Requires W4 durable events as prerequisite.
+
+### Minimal fix (do now)
+Pattern-based secret redaction in tool outputs before persistence (~100 lines): regex detection for API keys, Bearer tokens, AWS keys, etc. Applied before `ActionStep` content enters memory or compression.

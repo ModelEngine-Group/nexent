@@ -149,3 +149,20 @@ identity and remove legacy keys. Existing conversations receive an internal W4 s
 during migration. W3 is done when every context-state mutation requires authorized
 `ContextIdentity`, unsupported sharing/transfer fails explicitly, and collision/security
 suites pass.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Plan is correct. Significant gaps confirmed.**
+
+### What exists
+- Memory system: properly isolated via `build_memory_identifiers()` (tenant+user scoped)
+- Agent runs: user-scoped (`"{user_id}:{conversation_id}"`)
+- Agent/Model/Knowledge/MCP tables: all have `tenant_id` columns
+- Auth extraction: JWT correctly extracts user_id and resolves tenant_id
+
+### What is missing
+- **5 conversation tables have no `tenant_id`**: `conversation_record_t`, `conversation_message_t`, `conversation_message_unit_t`, `conversation_source_search_t`, `conversation_source_image_t`
+- **ContextManager keyed only by `conversation_id`**: `_conversation_context_managers` dict uses `str(conversation_id)` — cross-tenant collision possible
+- **No tenant filtering on conversation queries**: `conversation_db.py` never filters by `tenant_id`
+- **`rename_conversation`/`delete_conversation` do not verify ownership**: any authenticated user can modify any conversation
+- **No tenant isolation middleware**: only `ExceptionHandlerMiddleware` exists

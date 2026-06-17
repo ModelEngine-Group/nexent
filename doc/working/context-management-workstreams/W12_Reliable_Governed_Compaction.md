@@ -216,3 +216,34 @@ session's compression state.
   functional implementation is stable).
 - W12 is done when compaction-provider degradation cannot cause uncontrolled run
   failure, latency, retries, or spend, and every outcome is durable and observable.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Compaction engine functional but reliability gaps are real production risks.**
+
+### Current architecture
+```
+CoreAgent._step_stream()
+  → ContextManager.compress_if_needed(self.model, memory, ...)
+    → [Same model as agent — no separate compaction model]
+    → [No timeout on LLM calls]
+    → [Only context-length errors get 1 retry]
+    → [No circuit breaker]
+    → [No cancellation support]
+    → L3 hard truncation fallback
+```
+
+### Critical reliability gaps
+- **No timeout**: `_do_generate_summary()` calls model with no timeout — model hang = infinite step block
+- **No transient-error retry**: network timeout, 429, 500 → immediate `return None` → L3 fallback
+- **No circuit breaker**: every step attempts compaction regardless of prior failures
+- **No cancellation**: `stop_event` not checked during compression
+- **No separate compaction model**: GPT-4o agent uses GPT-4o for summarization
+- **Unhandled exception propagation**: `compress_if_needed()` called without try/except at `core_agent.py:308`
+
+### Priority actions
+1. Add `compaction_timeout_seconds` config (default 30s)
+2. Add retry with exponential backoff for transient errors (max 2 retries)
+3. Add defensive try/except wrapper (fall back to original messages on unexpected errors)
+4. Add circuit breaker (skip compaction for M steps after N consecutive failures)
+5. Add `compaction_model` config field (allow cheaper model for summarization)

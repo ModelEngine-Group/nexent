@@ -112,3 +112,29 @@ session and does not interact with the parent session's cache optimization.
   equality is never labeled as a provider cache hit.
 - W14 is done when stable prefixes are deterministic, cache usage and invalidation are
   observable, and supported providers meet the W13 cache-reuse target.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: High value, low effort, zero dependencies. Moved to Phase 1.**
+
+### Current state
+- **Already cache-aware (partial)**: timestamps excluded from system prompts (`context_utils.py:538`, `core_agent.py:483`) with explicit comments about KV cache stability
+- **Zero provider integration**: no cache directives sent to OpenAI API, no `cache_control` parameter
+- **Zero metrics extraction**: `cached_tokens`, `cache_read_input_tokens` not read from usage objects
+- **All models mark "unknown"**: every entry in `capability_profiles.py` leaves `prompt_cache` as "unknown"
+- **No prefix fingerprinting**: no mechanism to detect or log stable-prefix changes
+
+### Impact potential
+- Agent conversations typically have 10-30+ steps with same system prompt prefix
+- OpenAI reports 80% latency reduction for cached prompts
+- OpenAI charges 50% less for cached input tokens
+- Current codebase gets zero benefit despite already trying to stabilize prefixes
+
+### Phase 1 actions (1-2 days)
+1. Extract `cached_tokens` from OpenAI usage objects (~5 lines in `openai_llm.py`)
+2. Add prefix fingerprinting to monitoring (~50 lines)
+3. Populate `prompt_cache` field in `capability_profiles.py`
+4. Inject `cache_control` parameter for supported providers (~10 lines)
+
+### Risk
+Memory injection into system prompt (`create_agent_info.py:622`) makes prefix user-specific. Must move to dynamic partition or cache hits will be per-user only.

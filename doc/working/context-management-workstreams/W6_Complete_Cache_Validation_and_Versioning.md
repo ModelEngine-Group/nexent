@@ -112,3 +112,22 @@ Validation errors never degrade to cache hits.
 - Canonicalization tests are stable across processes and supported runtime versions.
 - W6 is done when no derived view or cached projection can be used without centralized
   complete validation and every invalidation is observable by stable reason code.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Minimal fix justified now; full version registry deferred.**
+
+### Current state
+- Boundary-only fingerprint: MD5 of last 200 chars of boundary step
+- Incremental compression cache: PreviousSummaryCache + CurrentSummaryCache
+- Stable-phase bypass: skips LLM when effective tokens under threshold
+
+### Real gap
+- Mid-sequence edits, model switches, or prompt changes go undetected
+- No model ID, prompt version, or schema version in fingerprints
+
+### Why full W6 is deferred
+The 9 metadata dimensions W6 specifies (policy version, prompt version, schema version, agent version, model ID, tokenizer version, projection version, lifecycle state, redaction version) **don't exist yet** — they require W4/W8/W11 to deliver versioned inputs first.
+
+### Minimal fix (do now)
+Hash the full covered prefix + include model ID in fingerprint (~50 lines in `agent_context.py`).

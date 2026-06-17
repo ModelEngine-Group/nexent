@@ -135,3 +135,27 @@ parent's W8 policy governs how that result is integrated into the parent's conte
   to ensure W8 does not become a bottleneck on the model request hot path.
 - W8 is done when one versioned policy explains and enforces every context selection
   and memory lifecycle decision.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: ContextManager centralizes ~40%; memory decisions scattered. Pre-step justified.**
+
+### What ContextManager already centralizes
+- Conversation compression engine (1050 lines)
+- Component registration (7 ContextComponent types)
+- Strategy-based selection (4 strategies)
+- System prompt message assembly
+
+### What is scattered outside ContextManager
+- Memory search before run: `create_agent_info.py:495` (bypasses ContextManager)
+- Memory level filtering: duplicated in 3 files (`create_agent_info.py`, `store_memory_tool.py`, `search_memory_tool.py`)
+- End-of-run auto memory write: `agent_service.py:900-945` (completely outside ContextManager)
+- Conflict resolution: prompt text only (LLM follows instructions, no code enforcement)
+- Observation truncation: `core_agent.py:438-447` (uses config but logic in CoreAgent)
+- Time injection: `core_agent.py:485-486` (hardcoded)
+
+### Pre-step (do now)
+Extract the 3 copies of memory-level-filtering logic into a single shared function.
+
+### Why full W8 is deferred
+Full policy engine requires W4 event log and W5 projections as input to provide versioned policy entities.

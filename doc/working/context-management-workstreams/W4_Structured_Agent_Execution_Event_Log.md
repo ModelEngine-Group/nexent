@@ -414,3 +414,24 @@ production implementation.
 - W4 is done when all production run paths emit typed events, replay is deterministic
   enough to rebuild state, ambiguous tool calls cannot auto-resume, and no UI
   transcript is treated as the execution source of truth.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Current logging is UI-oriented, not an event log. Two bugs found.**
+
+### Current architecture
+```
+conversation_record_t → conversation_message_t → conversation_message_unit_t
+```
+Units are flat text with `unit_type varchar(100)` (no DB enum), ordered by `unit_index`. No run_id, step_id, event timestamps, or structured tool call/result records.
+
+### Bugs found
+1. **Backend merge omission** (`conversation_management_service.py:222`): `save_conversation_assistant()` merges consecutive `model_output_code` and `model_output_thinking` but NOT `model_output_deep_thinking`. Each deep-thinking token becomes a separate DB row.
+2. **Frontend history loader omission** (`chatMessageExtractor.ts`): `extractAssistantMsgFromResponse` has no case for `MODEL_OUTPUT_DEEP_THINKING`. Deep thinking content is silently dropped on history reload (live streaming works correctly).
+
+### What is NOT persisted
+- No agent run table (no record of "this agent ran at this time")
+- No step table (steps implicit via `step_count` units)
+- No tool call/result structured records
+- No event timestamps (`create_time` is batch insert time)
+- No append-only guarantee (units can be soft-deleted)
