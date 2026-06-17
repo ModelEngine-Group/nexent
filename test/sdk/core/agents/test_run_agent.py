@@ -1,4 +1,5 @@
 import types
+import json
 import importlib.machinery
 import pytest
 import importlib
@@ -306,6 +307,37 @@ def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_in
 
     assert captured["capacity"] == {"capacity_fingerprint": "w1"}
     assert captured["budget"] == {"fingerprint": "w2"}
+
+
+def test_emit_uncertainty_reserve_warning(basic_agent_run_info):
+    basic_agent_run_info.safe_input_budget_snapshot = {
+        "warnings": ["uncertainty_reserve_active"],
+        "fingerprint": "w2",
+        "w1_fingerprint": "w1",
+        "uncertainty_reserve_tokens": 12800,
+        "hard_input_budget_tokens": 114200,
+    }
+
+    run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_called_once()
+    _, process_type, content = basic_agent_run_info.observer.add_message.call_args[0]
+    assert process_type == ProcessType.OTHER
+    payload = json.loads(content)
+    assert payload["code"] == "uncertainty_reserve_active"
+    assert payload["budget_fingerprint"] == "w2"
+    assert payload["uncertainty_reserve_tokens"] == 12800
+
+
+def test_emit_uncertainty_reserve_warning_noops_without_warning(basic_agent_run_info):
+    basic_agent_run_info.safe_input_budget_snapshot = {
+        "warnings": [],
+        "fingerprint": "w2",
+    }
+
+    run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_not_called()
 
     # Ensure no MCP-specific behaviour occurred
     basic_agent_run_info.observer.add_message.assert_not_called()
