@@ -166,13 +166,14 @@ class TestUnstructuredProcessor:
         params = processor.default_params.copy()
 
         result = processor._prepare_partition_kwargs(
-            file_data, "basic", params)
+            file_data, "basic", params, "sample.txt")
 
         assert result["max_characters"] == 1536
         assert result["new_after_n_chars"] == 1024
         assert result["strategy"] == "fast"
         assert result["chunking_strategy"] == "basic"
         assert isinstance(result["file"], io.BytesIO)
+        assert result["metadata_filename"] == "sample.txt"
 
     def test_prepare_partition_kwargs_by_title(self, processor):
         """Test preparing partition kwargs with by_title strategy"""

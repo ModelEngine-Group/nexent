@@ -34,12 +34,15 @@ import {
 } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { modelService } from "@/services/modelService";
 import log from "@/lib/logger";
+import { MODEL_TYPES } from "@/const/modelConfig";
 import {
   isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
   isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
 } from "@/lib/knowledgeBaseCompatibility";
 import { isZhLocale, getLocalizedDescription, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
+import { ModelOption, ModelType } from "@/types/modelConfig";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -66,6 +69,24 @@ const TOOLS_SUPPORTING_RERANK = [
   "dify_search",
   "datamate_search",
 ];
+
+const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
+  analyze_text_file: MODEL_TYPES.LLM,
+  analyze_image: MODEL_TYPES.VLM,
+  analyze_audio: MODEL_TYPES.VLM3,
+  analyze_video: MODEL_TYPES.VLM3,
+};
+
+const ANALYZE_TOOL_MODEL_DESCRIPTIONS: Record<string, string> = {
+  analyze_text_file:
+    "Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used.",
+  analyze_image:
+    "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
+  analyze_audio:
+    "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+  analyze_video:
+    "Optional Nexent video understanding model ID to use for video analysis. If omitted, the default video understanding model is used.",
+};
 
 function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
   if (!toolName || !TOOLS_SUPPORTING_RERANK.includes(toolName)) return params;
@@ -99,6 +120,38 @@ function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
   return next;
 }
 
+function withAnalyzeToolModelParam(params: ToolParam[], toolName?: string): ToolParam[] {
+  if (!toolName || !ANALYZE_TOOL_MODEL_TYPES[toolName]) return params;
+
+  const normalizedParams = params.map((param) => {
+    if (param.name !== "selected_model_id") return param;
+    const value =
+      param.value === "" || param.value === undefined || param.value === null
+        ? undefined
+        : Number(param.value);
+    return { ...param, value };
+  });
+
+  if (normalizedParams.some((param) => param.name === "selected_model_id")) {
+    return normalizedParams;
+  }
+
+  return [
+    ...normalizedParams,
+    {
+      name: "selected_model_id",
+      type: "number",
+      required: false,
+      value: undefined,
+      description: ANALYZE_TOOL_MODEL_DESCRIPTIONS[toolName],
+    },
+  ];
+}
+
+function withExtraToolParams(params: ToolParam[], toolName?: string): ToolParam[] {
+  return withAnalyzeToolModelParam(withRerankParams(params, toolName), toolName);
+}
+
 export default function ToolConfigModal({
   isOpen,
   onCancel,
@@ -128,6 +181,29 @@ export default function ToolConfigModal({
 
   // Use React Query for config data
   const { data: configData } = useConfig();
+  const analyzeToolModelType = tool?.name
+    ? ANALYZE_TOOL_MODEL_TYPES[tool.name]
+    : undefined;
+  const isAnalyzeToolWithModelSelection = Boolean(analyzeToolModelType);
+  const {
+    data: registeredModels = [],
+    isFetching: registeredModelsLoading,
+  } = useQuery<ModelOption[]>({
+    queryKey: ["models", "registered", "toolConfig", analyzeToolModelType],
+    queryFn: () => modelService.getAllModels(),
+    enabled: isOpen && isAnalyzeToolWithModelSelection,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
+  const analyzeToolModelOptions = useMemo(() => {
+    if (!analyzeToolModelType) return [];
+    return registeredModels
+      .filter((model) => model.type === analyzeToolModelType)
+      .map((model) => ({
+        value: model.id,
+        label: model.displayName || model.name,
+      }));
+  }, [registeredModels, analyzeToolModelType]);
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
@@ -672,7 +748,7 @@ export default function ToolConfigModal({
     // If server_url already has a saved value, use it
     if (serverUrlParam?.value) {
       // Initialize form with saved values (including server_url)
-      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      const paramsWithRerank = withExtraToolParams(initialParams, tool.name);
       setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
       paramsWithRerank.forEach((param, index) => {
@@ -716,7 +792,7 @@ export default function ToolConfigModal({
         return param;
       });
 
-      const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+      const paramsWithRerank = withExtraToolParams(updatedParams, tool.name);
       setCurrentParams(paramsWithRerank);
 
       const formValues: Record<string, any> = {};
@@ -726,7 +802,7 @@ export default function ToolConfigModal({
       form.setFieldsValue(formValues);
     } else {
       // Either no default available OR user has modified the URL, initialize with initialParams
-      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      const paramsWithRerank = withExtraToolParams(initialParams, tool.name);
       setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
       paramsWithRerank.forEach((param, index) => {
@@ -804,7 +880,7 @@ export default function ToolConfigModal({
       return param;
     });
 
-    const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+    const paramsWithRerank = withExtraToolParams(updatedParams, tool.name);
     setCurrentParams(paramsWithRerank);
 
     const formValues: Record<string, any> = {};
@@ -844,7 +920,7 @@ export default function ToolConfigModal({
 
     // Initialize form values
     const paramsWithDefaults = applyInitParamDefaults(initialParams);
-    const paramsWithRerank = withRerankParams(paramsWithDefaults, tool?.name);
+    const paramsWithRerank = withExtraToolParams(paramsWithDefaults, tool?.name);
     setCurrentParams(paramsWithRerank);
     const formValues: Record<string, any> = {};
     paramsWithRerank.forEach((param, index) => {
@@ -1452,6 +1528,22 @@ export default function ToolConfigModal({
 
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
+
+    if (param.name === "selected_model_id" && isAnalyzeToolWithModelSelection) {
+      return (
+        <Select
+          placeholder="未选择时使用默认模型"
+          options={analyzeToolModelOptions}
+          loading={registeredModelsLoading}
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          notFoundContent={
+            registeredModelsLoading ? undefined : "暂无可选模型"
+          }
+        />
+      );
+    }
 
     // Special handling for rerank_model_name parameter - show model selector
     if (param.name === "rerank_model_name") {

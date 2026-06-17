@@ -455,6 +455,12 @@ def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
             key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     timeout_seconds = main_model_config.get(
         "timeout_seconds") if main_model_config else None
+    logger.info(
+        "Using LLM model for analyze_text_file: model_id=%s, display_name=%s, model_name=%s",
+        model_id,
+        main_model_config.get("display_name") if main_model_config else None,
+        get_model_name_from_config(main_model_config) if main_model_config else None,
+    )
     long_text_to_text_model = OpenAILongContextModel(
         observer=MessageObserver(),
         model_id=get_model_name_from_config(main_model_config),

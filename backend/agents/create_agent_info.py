@@ -510,6 +510,7 @@ async def create_agent_config(
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    model_info = None
     model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
@@ -518,6 +519,14 @@ async def create_agent_config(
             model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
+
+    logger.info(
+        "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
+        agent_id,
+        model_id_to_use,
+        model_info.get("display_name") if model_info else model_name,
+        model_info.get("model_name") if model_info else model_name,
+    )
 
     # Use agent-level setting for context management, default to False.
     # When ContextManager is disabled, do not attach context_components because
