@@ -14,7 +14,9 @@ function formatNumber(n: number): string {
 }
 
 export function TokenUsageIndicator({ latestMetrics }: TokenUsageIndicatorProps) {
-  const DEFAULT_THRESHOLD = 32000;
+  // Matches backend _TOKEN_THRESHOLD_LEGACY_FALLBACK; shown only when the
+  // backend stream does not carry a real token_threshold (rare once W2 ships).
+  const DEFAULT_THRESHOLD = 81920;
 
   const estimated_context_tokens = latestMetrics?.estimated_context_tokens ?? null;
   const token_threshold = latestMetrics?.token_threshold ?? null;

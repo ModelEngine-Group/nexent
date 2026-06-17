@@ -341,6 +341,7 @@
   "agent.provideRunSummary.error": "请选择是否提供运行摘要",
   "agent.requestedOutputTokens": "输出预留",
   "agent.requestedOutputTokens.error": "输出预留必须为正整数",
+  "agent.requestedOutputTokens.tooltip": "每次回复模型最多可输出的 token 数。该值从模型的上下文窗口中预留，作为本轮回答空间；剩余空间分配给输入（系统提示词 + 历史对话）。设大→回答更长但输入预算变小，更早触发上下文压缩；设小→历史保留更多但回答可能被截断。留空表示使用模型的默认输出预留值。",
   "agent.description": "智能体描述",
   "agent.userGroup": "用户组",
   "agent.userGroup.empty": "暂无用户组",

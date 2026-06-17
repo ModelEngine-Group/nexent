@@ -940,6 +940,7 @@ export default function AgentGenerateDetail({}) {
                           <Form.Item
                             name="requestedOutputTokens"
                             label={t("agent.requestedOutputTokens")}
+                            tooltip={t("agent.requestedOutputTokens.tooltip")}
                             rules={[
                               {
                                 type: "number",

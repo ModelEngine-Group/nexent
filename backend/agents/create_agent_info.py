@@ -53,10 +53,11 @@ logger.setLevel(logging.DEBUG)
 
 # Safe fallback for context-manager token_threshold when no capacity is known.
 # Used only when the resolver fails (uncataloged model with no operator-supplied
-# hard capacity). Picks a moderate value that lets agents continue while
-# admins backfill capacity columns; will be removed once enforcement phase
-# requires snapshots end to end.
-_TOKEN_THRESHOLD_LEGACY_FALLBACK = 8192
+# hard capacity). Sized to fit most modern 32K+ LLMs without aggressive
+# early compression; an undersized model will overflow at request time and
+# surface as a clear provider error rather than silent truncation. Will be
+# removed once enforcement phase requires snapshots end to end.
+_TOKEN_THRESHOLD_LEGACY_FALLBACK = 81920
 
 _OPERATOR_OVERRIDE_FIELDS = (
     "context_window_tokens",
