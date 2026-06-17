@@ -101,6 +101,28 @@ without grepping backend logs. Today:
 - The only log message is a backend WARNING aimed at platform
   operators who typically cannot edit per-tenant model records.
 
+**Production evidence (2026-06-17, dev deployment):** a snapshot of
+`model_record_t` on the active development cluster showed 7 non-deleted
+rows total, of which 6 carried `model_factory = 'OpenAI-API-Compatible'`
+— the manual-add default per CM-031. The W2 catalog-backfill migration
+matched only one row (`glm-5.1` on `dashscope`), leaving the LLM the
+operator was actively chatting with (`glm-5`) bare and silently
+running without CM-030 enforcement. This is not an edge case: in the
+absence of W17, the default-factory path is the dominant path, and
+the bare-row population grows monotonically with normal usage.
+
+### Scope: LLM and VLM Only
+
+This visibility layer is scoped to rows where `model_type IN ('llm',
+'vlm')`. Embedding, speech-to-text, and text-to-speech models share
+the same `context_window_tokens` / `max_output_tokens` columns but do
+not participate in the W1 capacity resolver or the W2 dispatch path,
+so a NULL on those rows is not a missed enforcement and must not
+surface as a warning. The badge, the agent-edit selector notice, the
+dashboard widget, and the `/capacity-coverage` endpoint all apply the
+`model_type IN ('llm', 'vlm')` filter at the data layer; downstream UI
+treats this as an invariant rather than a runtime check.
+
 ### Solution Surfaces (Three UI Touchpoints)
 
 #### 1. Model Management List Page Badge
