@@ -173,7 +173,13 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.requested_output_tokens IS
   per the repository's standard migration convention.
 - **Frontend:** the agent-edit form gains a numeric input bound to this
   column. Placeholder text shows the resolved model-level default; an
-  empty input persists `NULL`.
+  empty input persists `NULL`. The Form.Item carries a conditional max
+  rule equal to the currently selected model's `max_output_tokens` so
+  the upper-bound violation is caught at save time, not only at agent
+  run time; switching the selected model re-runs validation so an
+  already-filled value that exceeds the new ceiling is flagged
+  immediately. The backend `_validate_requested_output_tokens_for_agent`
+  check remains as defense-in-depth.
 
 ### `tenant_config_t` storage for `soft_limit_ratio`
 
