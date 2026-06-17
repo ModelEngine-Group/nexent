@@ -1716,6 +1716,17 @@ CREATE TABLE IF NOT EXISTS nexent.model_monitoring_record_t (
     counting_mode       VARCHAR(20),
     unknown_capabilities JSONB,
     capacity_fingerprint VARCHAR(64),
+    budget_fingerprint VARCHAR(64),
+    budget_w1_fingerprint VARCHAR(64),
+    budget_requested_output_tokens INT4,
+    budget_output_reserve_source VARCHAR(32),
+    budget_provider_input_limit_tokens INT4,
+    budget_uncertainty_reserve_tokens INT4,
+    budget_uncertainty_reserve_basis VARCHAR(64),
+    budget_soft_limit_ratio FLOAT,
+    budget_soft_input_budget_tokens INT4,
+    budget_hard_input_budget_tokens INT4,
+    budget_warnings JSONB,
     generation_rate     FLOAT,
     is_streaming        BOOLEAN         DEFAULT FALSE,
     is_success          BOOLEAN         DEFAULT TRUE,
@@ -1756,6 +1767,17 @@ COMMENT ON COLUMN nexent.model_monitoring_record_t.tokenizer_family IS 'Tokenize
 COMMENT ON COLUMN nexent.model_monitoring_record_t.counting_mode IS 'Token counting mode for the request: exact or estimated';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.unknown_capabilities IS 'Structured list of capacity capabilities unknown at resolution time';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.capacity_fingerprint IS 'Fingerprint of the resolved model capacity snapshot';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_fingerprint IS 'Fingerprint of the resolved W2 safe input budget snapshot';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_w1_fingerprint IS 'W1 capacity fingerprint consumed by the W2 budget snapshot';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_requested_output_tokens IS 'W2 trusted requested output tokens used at dispatch';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_output_reserve_source IS 'Source of the W2 requested output token reserve';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_provider_input_limit_tokens IS 'Provider input limit after applying the W2 output reserve';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_uncertainty_reserve_tokens IS 'Additional W2 uncertainty reserve deducted from input budget';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_uncertainty_reserve_basis IS 'Basis used for the W2 uncertainty reserve';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_soft_limit_ratio IS 'W2 soft input budget ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_soft_input_budget_tokens IS 'W2 soft input budget where proactive compression begins';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_hard_input_budget_tokens IS 'W2 hard input budget consumed by W3 final fit';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_warnings IS 'Structured W2 budget warnings active for this request';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.generation_rate IS 'Token generation rate in tokens per second';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.is_streaming IS 'Whether the request used streaming response';
 COMMENT ON COLUMN nexent.model_monitoring_record_t.is_success IS 'Whether the request completed successfully';

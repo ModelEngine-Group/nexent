@@ -283,6 +283,30 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
     mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
 
+
+def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
+    captured = {}
+    basic_agent_run_info.capacity_snapshot = {"capacity_fingerprint": "w1"}
+    basic_agent_run_info.safe_input_budget_snapshot = {"fingerprint": "w2"}
+
+    monkeypatch.setattr(
+        run_agent,
+        "set_monitoring_capacity_snapshot",
+        lambda snapshot: captured.setdefault("capacity", snapshot),
+    )
+    monkeypatch.setattr(
+        run_agent,
+        "set_monitoring_safe_input_budget_snapshot",
+        lambda snapshot: captured.setdefault("budget", snapshot),
+    )
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert captured["capacity"] == {"capacity_fingerprint": "w1"}
+    assert captured["budget"] == {"fingerprint": "w2"}
+
     # Ensure no MCP-specific behaviour occurred
     basic_agent_run_info.observer.add_message.assert_not_called()
 

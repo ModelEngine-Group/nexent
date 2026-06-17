@@ -118,6 +118,9 @@ ssl_verify=True, model_factory: Optional[str] = None,
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
+            trusted_budget_snapshot = (
+                safe_input_budget_snapshot or self.safe_input_budget_snapshot
+            )
             invocation_parameters = {
                 "temperature": self.temperature,
                 "top_p": self.top_p,
@@ -133,6 +136,9 @@ ssl_verify=True, model_factory: Optional[str] = None,
                 else "input.value"
             )
             trace_attributes[input_attr_key] = messages or []
+            trace_attributes.update(
+                self._safe_input_budget_trace_attributes(trusted_budget_snapshot)
+            )
 
             with self._monitoring.trace_llm_request(
                 f"{self.display_name or self.model_id}.generate",
@@ -394,6 +400,26 @@ ssl_verify=True, model_factory: Optional[str] = None,
         raise TypeError(
             "safe_input_budget_snapshot must be a SafeInputBudgetSnapshot or dict"
         )
+
+    @classmethod
+    def _safe_input_budget_trace_attributes(
+        cls,
+        snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        snapshot = cls._coerce_safe_input_budget_snapshot(snapshot)
+        if snapshot is None:
+            return {}
+        return {
+            "w2.budget_fingerprint": snapshot.fingerprint,
+            "w2.w1_fingerprint": snapshot.w1_fingerprint,
+            "w2.requested_output_tokens": snapshot.requested_output_tokens,
+            "w2.output_reserve_source": snapshot.output_reserve_source,
+            "w2.provider_input_limit_tokens": snapshot.provider_input_limit_tokens,
+            "w2.soft_input_budget_tokens": snapshot.soft_input_budget_tokens,
+            "w2.hard_input_budget_tokens": snapshot.hard_input_budget_tokens,
+            "w2.uncertainty_reserve_tokens": snapshot.uncertainty_reserve_tokens,
+            "w2.uncertainty_reserve_basis": snapshot.uncertainty_reserve_basis,
+        }
 
     async def check_connectivity(self) -> bool:
         """

@@ -136,6 +136,17 @@ def _resolve_safe_input_budget(
         requested_output_tokens=agent_requested_output_tokens,
         output_reserve_source=output_reserve_source,
     )
+    logger.info(
+        "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
+        "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
+        tenant_id,
+        snapshot.model_name,
+        snapshot.requested_output_tokens,
+        snapshot.soft_input_budget_tokens,
+        snapshot.hard_input_budget_tokens,
+        snapshot.fingerprint,
+        list(snapshot.warnings),
+    )
     return _safe_input_budget_for_monitoring(snapshot)
 
 

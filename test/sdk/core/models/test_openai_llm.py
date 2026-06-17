@@ -1432,6 +1432,18 @@ def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
     openai_model_instance.client.chat.completions.create.assert_not_called()
 
 
+def test_safe_input_budget_trace_attributes_are_prefixed():
+    attrs = ImportedOpenAIModel._safe_input_budget_trace_attributes(
+        _safe_input_budget_snapshot(256)
+    )
+
+    assert attrs["w2.budget_fingerprint"] == "w2fingerprint"
+    assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
+    assert attrs["w2.requested_output_tokens"] == 256
+    assert attrs["w2.soft_input_budget_tokens"] == 800
+    assert attrs["w2.hard_input_budget_tokens"] == 1000
+
+
 def test_call_without_tracker_creates_tracker(openai_model_instance):
     """When no _token_tracker is passed, __call__ creates one from monitoring manager."""
     mock_tracker = MagicMock()
