@@ -46,6 +46,41 @@ class TestBuildA2AHeaders:
         headers = build_a2a_headers(api_key="")
         assert "Authorization" not in headers
 
+    def test_headers_with_custom_headers(self):
+        """Test that custom headers are merged into the result."""
+        from backend.utils.a2a_http_client import build_a2a_headers
+
+        custom = {"X-Tenant-Id": "tenant-42", "X-Request-Source": "nexent"}
+        headers = build_a2a_headers(custom_headers=custom)
+        assert headers["Content-Type"] == "application/json"
+        assert headers["X-Tenant-Id"] == "tenant-42"
+        assert headers["X-Request-Source"] == "nexent"
+
+    def test_custom_headers_do_not_override_content_type(self):
+        """Test that custom headers can override base headers when explicitly set."""
+        from backend.utils.a2a_http_client import build_a2a_headers
+
+        custom = {"Content-Type": "text/plain"}
+        headers = build_a2a_headers(custom_headers=custom)
+        # Custom headers applied last, so they win
+        assert headers["Content-Type"] == "text/plain"
+
+    def test_headers_with_api_key_and_custom_headers(self):
+        """Test combination of api_key and custom_headers."""
+        from backend.utils.a2a_http_client import build_a2a_headers
+
+        custom = {"X-Custom": "value"}
+        headers = build_a2a_headers(api_key="my-key", custom_headers=custom)
+        assert headers["Authorization"] == "Bearer my-key"
+        assert headers["X-Custom"] == "value"
+
+    def test_custom_headers_none_is_safe(self):
+        """Test that passing custom_headers=None does not raise."""
+        from backend.utils.a2a_http_client import build_a2a_headers
+
+        headers = build_a2a_headers(api_key="key", custom_headers=None)
+        assert "X-Custom" not in headers
+
 
 class TestA2AHttpClientInit:
     """Test class for A2AHttpClient initialization."""

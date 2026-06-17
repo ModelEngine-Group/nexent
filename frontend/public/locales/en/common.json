@@ -2727,6 +2727,15 @@
   "a2a.service.updateServerSettingsFailed": "Failed to update settings",
   "a2a.service.listServerAgentsFailed": "Failed to get A2A Server list",
   "a2a.service.chatFailed": "Failed to send chat message",
+  "a2a.service.updateSettingsFailed": "Failed to update agent settings",
+
+  "a2a.settings.timeout": "Timeout",
+  "a2a.settings.seconds": "s",
+  "a2a.settings.customHeaders": "Custom Headers",
+  "a2a.settings.headerKey": "Header Name",
+  "a2a.settings.headerValue": "Header Value",
+  "a2a.settings.updateSuccess": "Settings updated successfully",
+  "a2a.settings.updateFailed": "Failed to update settings",
 
   "collaborativeAgent.internalAgents": "Internal Agents",
   "collaborativeAgent.externalAgents": "External Agents",

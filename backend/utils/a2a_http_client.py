@@ -276,7 +276,7 @@ class A2AHttpClient:
             raise
 
 
-def build_a2a_headers(api_key: Optional[str] = None) -> Dict[str, str]:
+def build_a2a_headers(api_key: Optional[str] = None, custom_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """Build HTTP headers for A2A requests."""
     headers = {
         "Content-Type": CONTENT_TYPE_JSON,
@@ -285,4 +285,6 @@ def build_a2a_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    if custom_headers:
+        headers.update(custom_headers)
     return headers

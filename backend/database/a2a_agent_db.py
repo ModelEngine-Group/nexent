@@ -244,6 +244,8 @@ def create_external_agent_from_url(
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
             "base_url": agent.base_url,
+            "custom_headers": agent.custom_headers,
+            "timeout": agent.timeout,
             "is_available": agent.is_available,
             "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
             "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
@@ -351,6 +353,8 @@ def create_external_agent_from_nacos(
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
             "base_url": agent.base_url,
+            "custom_headers": agent.custom_headers,
+            "timeout": agent.timeout,
             "is_available": agent.is_available,
             "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
             "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
@@ -392,6 +396,8 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
             "nacos_config_id": agent.nacos_config_id,
             "nacos_agent_name": agent.nacos_agent_name,
             "raw_card": agent.raw_card,
+            "custom_headers": agent.custom_headers,
+            "timeout": agent.timeout,
             "is_available": agent.is_available,
             "last_check_at": agent.last_check_at.isoformat() if agent.last_check_at else None,
             "last_check_result": agent.last_check_result,
@@ -447,6 +453,8 @@ def list_external_agents(
                 "source_type": agent.source_type,
                 "source_url": agent.source_url,
                 "base_url": agent.base_url,
+                "custom_headers": agent.custom_headers,
+                "timeout": agent.timeout,
                 "is_available": agent.is_available,
                 "last_check_result": agent.last_check_result,
                 "create_time": agent.create_time.isoformat() if agent.create_time else None,
@@ -574,6 +582,68 @@ def update_external_agent_protocol(
             "nacos_config_id": agent.nacos_config_id,
             "nacos_agent_name": agent.nacos_agent_name,
             "raw_card": agent.raw_card,
+            "custom_headers": agent.custom_headers,
+            "timeout": agent.timeout,
+            "is_available": agent.is_available,
+            "last_check_at": agent.last_check_at.isoformat() if agent.last_check_at else None,
+            "last_check_result": agent.last_check_result,
+            "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
+            "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
+            "create_time": agent.create_time.isoformat() if agent.create_time else None,
+            "update_time": agent.update_time.isoformat() if agent.update_time else None,
+        }
+
+
+def update_external_agent_settings(
+    external_agent_id: int,
+    tenant_id: str,
+    custom_headers: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """Update user-configurable settings for an external agent.
+
+    Args:
+        external_agent_id: The external agent database ID.
+        tenant_id: Tenant ID for isolation.
+        custom_headers: Custom HTTP headers to send with requests.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Updated agent information dict or None if not found.
+    """
+    with _get_db_session() as session:
+        agent = session.query(A2AExternalAgent).filter(
+            A2AExternalAgent.id == external_agent_id,
+            A2AExternalAgent.tenant_id == tenant_id,
+            A2AExternalAgent.delete_flag != 'Y'
+        ).first()
+
+        if not agent:
+            return None
+
+        if custom_headers is not None:
+            agent.custom_headers = custom_headers
+        if timeout is not None:
+            agent.timeout = timeout
+
+        agent.updated_time = datetime.now(timezone.utc)
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "description": agent.description,
+            "version": agent.version,
+            "agent_url": agent.agent_url,
+            "protocol_type": agent.protocol_type,
+            "streaming": agent.streaming,
+            "supported_interfaces": agent.supported_interfaces,
+            "source_type": agent.source_type,
+            "source_url": agent.source_url,
+            "nacos_config_id": agent.nacos_config_id,
+            "nacos_agent_name": agent.nacos_agent_name,
+            "raw_card": agent.raw_card,
+            "custom_headers": agent.custom_headers,
+            "timeout": agent.timeout,
             "is_available": agent.is_available,
             "last_check_at": agent.last_check_at.isoformat() if agent.last_check_at else None,
             "last_check_result": agent.last_check_result,
@@ -855,6 +925,8 @@ def query_external_sub_agents(
                 "streaming": agent.streaming,
                 "supported_interfaces": agent.supported_interfaces,
                 "raw_card": agent.raw_card,
+                "custom_headers": agent.custom_headers,
+                "timeout": agent.timeout,
                 "is_enabled": relation.is_enabled,
             }
             for relation, agent in results

@@ -1573,7 +1573,7 @@ class TestCallAgentStreaming:
                     async for _ in result_gen:
                         pass
 
-                    mock_headers.assert_called_once_with("test-key")
+                    mock_headers.assert_called_once_with("test-key", custom_headers={})
 
     @pytest.mark.asyncio
     async def test_raises_error_on_client_error(self):

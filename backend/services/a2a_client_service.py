@@ -453,6 +453,36 @@ class A2AClientService:
 
         return result
 
+    def update_agent_settings(
+        self,
+        external_agent_id: int,
+        tenant_id: str,
+        custom_headers: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update user-configurable settings for an external agent.
+
+        Args:
+            external_agent_id: External agent database ID.
+            tenant_id: Tenant ID for isolation.
+            custom_headers: Custom HTTP headers to send with requests.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Updated agent information dict or None if not found.
+        """
+        result = a2a_agent_db.update_external_agent_settings(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            custom_headers=custom_headers,
+            timeout=timeout,
+        )
+
+        if result:
+            logger.info(f"Updated agent {external_agent_id} settings: custom_headers={custom_headers is not None}, timeout={timeout}")
+
+        return result
+
     async def refresh_agent_card(
         self,
         external_agent_id: int,
@@ -532,36 +562,15 @@ class A2AClientService:
                 new_description = card.get("description")
                 new_supported_interfaces = card.get("supportedInterfaces", [])
 
-                # Extract new protocol type from the card
-                new_protocol_type = _extract_protocol_type(new_supported_interfaces)
-                current_protocol_type = agent.get("protocol_type")
-
-                # Determine if we need to update agent_url and protocol_type
+                # Determine if we need to update agent_url
                 # Update agent_url if it changed in the remote card
                 update_agent_url = new_url is not None and new_url != agent_url
 
-                # Update protocol_type if it changed in the remote card
-                update_protocol_type = new_protocol_type != current_protocol_type
+                # NOTE: protocol_type is a user-configured setting and must NOT be
+                # overridden when refreshing the agent card.  Only card metadata
+                # (name, description, supported_interfaces) is updated here.
 
-                # When protocol_type changes, we need to find the corresponding interface URL
-                if update_protocol_type:
-                    logger.info(
-                        f"Protocol type changed for agent {external_agent_id}: "
-                        f"{current_protocol_type} -> {new_protocol_type}"
-                    )
-                    # The database function will handle finding the correct interface URL
-                    result = a2a_agent_db.refresh_external_agent_cache(
-                        external_agent_id=external_agent_id,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        new_raw_card=card,
-                        new_agent_url=new_url if update_agent_url else None,
-                        new_name=new_name,
-                        new_description=new_description,
-                        new_supported_interfaces=new_supported_interfaces,
-                        new_protocol_type=new_protocol_type
-                    )
-                elif update_agent_url:
+                if update_agent_url:
                     # Only agent_url changed
                     logger.info(
                         f"Agent URL changed for agent {external_agent_id}: "
@@ -707,7 +716,8 @@ class A2AClientService:
 
             logger.info(f"Calling external A2A agent {external_agent_id}: url={endpoint_url}, protocol={protocol_type}, payload={payload}")
 
-            headers = build_a2a_headers()
+            custom_headers = agent.get("custom_headers") or {}
+            headers = build_a2a_headers(custom_headers=custom_headers)
             async with A2AHttpClient() as client:
                 response = await client.post_json(endpoint_url, payload, headers)
 
@@ -776,7 +786,8 @@ class A2AClientService:
 
         logger.info(f"Calling external A2A agent {external_agent_id} (streaming): url={endpoint_url}, protocol={protocol_type}, payload={payload}")
 
-        headers = build_a2a_headers(api_key)
+        custom_headers = agent.get("custom_headers") or {}
+        headers = build_a2a_headers(api_key, custom_headers=custom_headers)
 
         try:
             async with A2AHttpClient() as client:

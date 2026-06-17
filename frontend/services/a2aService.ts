@@ -18,11 +18,14 @@ export interface A2AExternalAgent {
   version?: string;
   streaming?: boolean;
   supported_interfaces?: Record<string, any>[];
+  protocol_type?: string;
   source_type: 'url' | 'nacos';
   source_url?: string;
   nacos_config_id?: string;
   nacos_agent_name?: string;
   raw_card?: Record<string, any>;
+  custom_headers?: Record<string, string> | null;
+  timeout?: number | null;
   is_available: boolean;
   last_check_at?: string;
   last_check_result?: string;
@@ -297,6 +300,36 @@ export const a2aClientService = {
     } catch (error) {
       log.error('Failed to update agent protocol:', error);
       return { success: false, message: t('a2a.service.updateProtocolFailed') };
+    }
+  },
+
+  /**
+   * Update user-configurable settings (custom headers, timeout) for an external agent
+   */
+  async updateAgentSettings(agentId: string, settings: {
+    custom_headers?: Record<string, string> | null;
+    timeout?: number | null;
+  }): Promise<{
+    success: boolean;
+    data?: A2AExternalAgent;
+    message?: string;
+  }> {
+    try {
+      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.agentSettings(agentId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        return { success: true, data: data.data };
+      }
+
+      return { success: false, message: data.detail || t('a2a.service.updateSettingsFailed') };
+    } catch (error) {
+      log.error('Failed to update agent settings:', error);
+      return { success: false, message: t('a2a.service.updateSettingsFailed') };
     }
   },
 

@@ -46,6 +46,18 @@ class UpdateAgentProtocolRequest(BaseModel):
     )
 
 
+class UpdateAgentSettingsRequest(BaseModel):
+    """Request to update user-configurable settings for an external A2A agent."""
+    custom_headers: Optional[dict] = Field(
+        default=None,
+        description="Custom HTTP headers as JSON object to send with agent requests"
+    )
+    timeout: Optional[float] = Field(
+        default=None,
+        description="Request timeout in seconds (default: 300)"
+    )
+
+
 class TestNacosConnectionRequest(BaseModel):
     """Request to test Nacos connectivity without saving the config."""
     nacos_addr: str = Field(description="Nacos server address (e.g., http://nacos-server:8848)")
@@ -325,6 +337,59 @@ async def update_agent_protocol(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update agent protocol"
+        )
+
+
+@router.put("/agents/{external_agent_id}/settings")
+async def update_agent_settings(
+    external_agent_id: int,
+    request: UpdateAgentSettingsRequest,
+    authorization: Annotated[Optional[str], Header()] = None,
+    http_request: Request = None
+):
+    """Update user-configurable settings for an external A2A agent.
+
+    Updates custom HTTP headers and/or request timeout.
+    These settings are preserved across agent card refreshes.
+
+    Args:
+        external_agent_id: The external agent database ID.
+        request: Request containing the settings to update.
+    """
+    try:
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+
+        result = a2a_client_service.update_agent_settings(
+            external_agent_id=external_agent_id,
+            tenant_id=tenant_id,
+            custom_headers=request.custom_headers,
+            timeout=request.timeout,
+        )
+
+        if not result:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Agent {external_agent_id} not found"
+            )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": result}
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Invalid settings: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Update agent settings failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update agent settings"
         )
 
 

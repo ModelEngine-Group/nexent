@@ -169,6 +169,10 @@ class ExternalA2AAgentConfig(BaseModel):
         default=PROTOCOL_JSONRPC
     )
     timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    custom_headers: Optional[Dict[str, Any]] = Field(
+        description="Custom HTTP headers to include in agent requests",
+        default=None
+    )
     raw_card: Optional[Dict[str, Any]] = Field(
         description="Raw Agent Card containing skills and capabilities",
         default=None
@@ -225,6 +229,7 @@ class ExternalA2AAgentConfig(BaseModel):
             protocol_version=self.protocol_version,
             protocol_type=self.protocol_type,
             timeout=self.timeout,
+            custom_headers=self.custom_headers,
             raw_card=self.raw_card
         )
 

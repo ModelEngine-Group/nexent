@@ -18,6 +18,8 @@ import {
   Select,
   Popover,
   Radio,
+  InputNumber,
+  Divider,
 } from "antd";
 import {
   Globe,
@@ -85,46 +87,95 @@ function extractAvailableProtocols(supportedInterfaces?: Record<string, any>[]):
   return protocols.size > 0 ? Array.from(protocols) : ["JSONRPC"];
 }
 
-// Agent Protocol Setting Popover Component
-interface AgentProtocolSettingProps {
+// Agent Settings Popover Component (protocol, custom headers, timeout)
+interface AgentSettingsProps {
   agent: A2AExternalAgent;
   onProtocolChange: (agentId: string, protocolType: string) => void;
+  onSettingsChange: (agentId: string, settings: { custom_headers?: Record<string, string> | null; timeout?: number | null }) => void;
 }
 
-function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtocolSettingProps>) {
+function AgentSettings({ agent, onProtocolChange, onSettingsChange }: Readonly<AgentSettingsProps>) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState(
-    (agent as any).protocol_type || "JSONRPC"
+    agent.protocol_type || "JSONRPC"
   );
+  const [timeout, setTimeout] = useState<number>(agent.timeout ?? 300);
+  // custom_headers stored as key-value pairs for editing
+  const [headerPairs, setHeaderPairs] = useState<{ key: string; value: string }[]>(() => {
+    const h = agent.custom_headers || {};
+    return Object.entries(h).map(([key, value]) => ({ key, value }));
+  });
   const [saving, setSaving] = useState(false);
 
   const availableProtocols = extractAvailableProtocols(agent.supported_interfaces);
 
+  // Sync local state when the agent prop changes (e.g. after list reload)
   useEffect(() => {
-    setSelectedProtocol((agent as any).protocol_type || "JSONRPC");
-  }, [(agent as any).protocol_type]);
+    setSelectedProtocol(agent.protocol_type || "JSONRPC");
+  }, [agent.protocol_type]);
 
-  const handleSave = () => {
+  useEffect(() => {
+    setTimeout(agent.timeout ?? 300);
+  }, [agent.timeout]);
+
+  useEffect(() => {
+    const h = agent.custom_headers || {};
+    setHeaderPairs(Object.entries(h).map(([key, value]) => ({ key, value })));
+  }, [agent.custom_headers]);
+
+  const addHeaderPair = () => {
+    setHeaderPairs([...headerPairs, { key: "", value: "" }]);
+  };
+
+  const removeHeaderPair = (index: number) => {
+    setHeaderPairs(headerPairs.filter((_, i) => i !== index));
+  };
+
+  const updateHeaderPair = (index: number, field: "key" | "value", val: string) => {
+    const updated = [...headerPairs];
+    updated[index] = { ...updated[index], [field]: val };
+    setHeaderPairs(updated);
+  };
+
+  const handleSave = async () => {
     setSaving(true);
-    onProtocolChange(String(agent.id), selectedProtocol);
-    setSaving(false);
-    setOpen(false);
+    try {
+      // Save protocol if changed
+      if (selectedProtocol !== (agent.protocol_type || "JSONRPC")) {
+        onProtocolChange(String(agent.id), selectedProtocol);
+      }
+
+      // Build custom_headers object from pairs (skip empty keys)
+      const custom_headers: Record<string, string> = {};
+      for (const { key, value } of headerPairs) {
+        if (key.trim()) {
+          custom_headers[key.trim()] = value;
+        }
+      }
+
+      onSettingsChange(String(agent.id), {
+        custom_headers: Object.keys(custom_headers).length > 0 ? custom_headers : null,
+        timeout: timeout,
+      });
+    } finally {
+      setSaving(false);
+      setOpen(false);
+    }
   };
 
   return (
     <Popover
       content={
-        <div style={{ minWidth: 200 }}>
-          <div style={{ marginBottom: 12 }}>
-            <Text type="secondary" className="text-xs">
-              {t("a2a.protocol.selectProtocol")}
-            </Text>
+        <div style={{ minWidth: 280, maxWidth: 360 }}>
+          {/* Protocol */}
+          <div style={{ marginBottom: 8 }}>
+            <Text strong className="text-xs">{t("a2a.protocol.selectProtocol")}</Text>
           </div>
           <Radio.Group
             value={selectedProtocol}
             onChange={(e) => setSelectedProtocol(e.target.value)}
-            style={{ display: "flex", flexDirection: "column", gap: 8 }}
+            style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}
           >
             {PROTOCOL_TYPES.map((protocol) => {
               const isAvailable = availableProtocols.includes(protocol.value);
@@ -138,16 +189,67 @@ function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtoco
                   <Space>
                     <span>{protocol.label}</span>
                     {!isAvailable && (
-                      <Tag color="default" style={{ marginLeft: 8 }}>
-                        N/A
-                      </Tag>
+                      <Tag color="default" style={{ marginLeft: 4, fontSize: 10 }}>N/A</Tag>
                     )}
                   </Space>
                 </Radio>
               );
             })}
           </Radio.Group>
-          <div style={{ marginTop: 12, textAlign: "right" }}>
+
+          <Divider style={{ margin: "10px 0" }} />
+
+          {/* Timeout */}
+          <div style={{ marginBottom: 8 }}>
+            <Text strong className="text-xs">{t("a2a.settings.timeout")}</Text>
+          </div>
+          <InputNumber
+            min={1}
+            max={3600}
+            value={timeout}
+            onChange={(v) => setTimeout(v ?? 300)}
+            addonAfter={t("a2a.settings.seconds")}
+            style={{ width: "100%", marginBottom: 16 }}
+          />
+
+          <Divider style={{ margin: "10px 0" }} />
+
+          {/* Custom Headers */}
+          <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Text strong className="text-xs">{t("a2a.settings.customHeaders")}</Text>
+            <Button type="link" size="small" icon={<Plus size={12} />} onClick={addHeaderPair}>
+              {t("common.add")}
+            </Button>
+          </div>
+          <div style={{ maxHeight: 160, overflowY: "auto" }}>
+            {headerPairs.map((pair, index) => (
+              <div key={index} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                <Input
+                  placeholder={t("a2a.settings.headerKey")}
+                  value={pair.key}
+                  onChange={(e) => updateHeaderPair(index, "key", e.target.value)}
+                  size="small"
+                  style={{ flex: 1 }}
+                />
+                <Input
+                  placeholder={t("a2a.settings.headerValue")}
+                  value={pair.value}
+                  onChange={(e) => updateHeaderPair(index, "value", e.target.value)}
+                  size="small"
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<Trash2 size={12} />}
+                  onClick={() => removeHeaderPair(index)}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 14, textAlign: "right" }}>
             <Space>
               <Button size="small" onClick={() => setOpen(false)}>
                 {t("common.cancel")}
@@ -285,6 +387,17 @@ export default function A2AAgentDiscoveryModal({
     }
   };
 
+  // Update agent settings (custom headers, timeout)
+  const handleSettingsChange = async (agentId: string, settings: { custom_headers?: Record<string, string> | null; timeout?: number | null }) => {
+    const result = await a2aClientService.updateAgentSettings(agentId, settings);
+    if (result.success) {
+      messageApi.success(t("a2a.settings.updateSuccess"));
+      loadAgents();
+    } else {
+      messageApi.error(result.message || t("a2a.settings.updateFailed"));
+    }
+  };
+
   // Add to local agent
   const handleAddToLocalAgent = async (agent: A2AExternalAgent) => {
     if (!localAgentId) {
@@ -393,9 +506,10 @@ export default function A2AAgentDiscoveryModal({
               loading={refreshingId === String(record.id)}
             />
           </Tooltip>
-          <AgentProtocolSetting
+          <AgentSettings
             agent={record}
             onProtocolChange={handleProtocolChange}
+            onSettingsChange={handleSettingsChange}
           />
           <Tooltip title={t("a2a.chat.title")}>
             <Button

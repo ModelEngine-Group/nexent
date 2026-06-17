@@ -880,6 +880,10 @@ class A2AExternalAgent(TableBase):
     # Full original Agent Card
     raw_card = Column(JSON, doc="Full original Agent Card JSON from discovery")
 
+    # User-configurable settings (not overridden on card refresh)
+    custom_headers = Column(JSON, doc="Custom HTTP headers as JSON object for A2A agent requests")
+    timeout = Column(Float, default=300.0, doc="Request timeout in seconds for calling this agent")
+
     # Cache management
     cached_at = Column(TIMESTAMP(timezone=False), doc="Timestamp when Agent Card was cached")
     cache_expires_at = Column(TIMESTAMP(timezone=False), doc="Timestamp when cache expires")

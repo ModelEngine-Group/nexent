@@ -2789,6 +2789,15 @@
   "a2a.service.updateProtocolFailed": "更新协议失败",
   "a2a.service.listServerAgentsFailed": "获取 A2A Server 列表失败",
   "a2a.service.chatFailed": "发送聊天消息失败",
+  "a2a.service.updateSettingsFailed": "更新 Agent 设置失败",
+
+  "a2a.settings.timeout": "超时时间",
+  "a2a.settings.seconds": "秒",
+  "a2a.settings.customHeaders": "自定义请求头",
+  "a2a.settings.headerKey": "请求头名称",
+  "a2a.settings.headerValue": "请求头值",
+  "a2a.settings.updateSuccess": "设置更新成功",
+  "a2a.settings.updateFailed": "设置更新失败",
 
   "collaborativeAgent.internalAgents": "内部 Agent",
   "collaborativeAgent.externalAgents": "外部 Agent",

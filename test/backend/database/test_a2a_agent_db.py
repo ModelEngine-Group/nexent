@@ -127,6 +127,7 @@ def _make_ext_agent_cls():
         'protocol_type', 'streaming', 'supported_interfaces', 'source_type',
         'nacos_config_id', 'nacos_agent_name', 'base_url', 'raw_card', 'is_available',
         'last_check_at', 'last_check_result', 'cached_at', 'cache_expires_at',
+        'custom_headers', 'timeout',
         'create_time', 'update_time', 'delete_flag', 'tenant_id',
     ])
 
