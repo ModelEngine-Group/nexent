@@ -189,15 +189,23 @@ def _resolve_input_budget(
             snapshot,
         )
     except ProviderCapabilityUnknown:
-        logger.info(
-            "Capacity unknown for (%s, %s); falling back to %s for token_threshold. "
-            "Backfill model_record_t capacity columns or extend the capability profile catalog.",
+        logger.warning(
+            "W2 enforcement disabled for model_id=%s (%s/%s): no W1 capacity "
+            "snapshot available. CM-030 output-token enforcement and CM-013 "
+            "trusted-dispatch fingerprint check will be skipped for requests "
+            "using this model. Remediation: re-save the model through the "
+            "Nexent UI (the Add/Edit form now requires context_window_tokens "
+            "and max_output_tokens), or set model_factory to a W1 catalog "
+            "provider key, or wait for W17. Falling back to %s for "
+            "token_threshold.",
+            model_info.get("model_id") if isinstance(model_info, dict) else None,
             provider, model_id, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
         )
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
     except ResolverError as exc:
         logger.warning(
-            "Capacity resolution failed for (%s, %s): %s. Falling back to %s.",
+            "Capacity resolution failed for (%s, %s): %s. Falling back to %s. "
+            "W2 enforcement disabled for this model.",
             provider, model_id, exc, _TOKEN_THRESHOLD_LEGACY_FALLBACK,
         )
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
