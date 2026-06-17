@@ -333,6 +333,7 @@ class AgentInfo(TableBase):
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
     enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
+    verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
 

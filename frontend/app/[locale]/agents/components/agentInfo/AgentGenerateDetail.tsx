@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import {
   AgentConfigUpdate,
+  DEFAULT_AGENT_VERIFICATION_CONFIG,
   PromptTemplate,
 } from "@/types/agentConfig";
 import {
@@ -170,6 +171,7 @@ export default function AgentGenerateDetail({}) {
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
       provideRunSummary: editedAgent.provide_run_summary || false,
+      verificationEnabled: editedAgent.verification_config?.enabled ?? true,
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:editedAgent.business_logic_model_name,
       businessLogicModelId: editedAgent.business_logic_model_id,
@@ -807,7 +809,7 @@ export default function AgentGenerateDetail({}) {
                       </Can>
 
                       <Row gutter={16}>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="agentAuthor"
                             label={t("agent.author")}
@@ -826,7 +828,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="mainAgentModel"
                             label={t("businessLogic.config.model")}
@@ -919,6 +921,33 @@ export default function AgentGenerateDetail({}) {
                               ]}
                               onChange={(value) => {
                                 updateAgentConfig({ provide_run_summary: value });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item
+                            name="verificationEnabled"
+                            label={t("agent.verification")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.verification.error"),
+                              },
+                            ]}
+                          >
+                            <Select
+                              options={[
+                                { value: true, label: t("common.yes") },
+                                { value: false, label: t("common.no") },
+                              ]}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  verification_config: {
+                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+                                    enabled: value,
+                                  },
+                                });
                               }}
                             />
                           </Form.Item>

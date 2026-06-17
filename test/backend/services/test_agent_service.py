@@ -505,6 +505,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     mock_check_availability.assert_called_once()
 
 
+@patch('backend.services.agent_service.query_current_version_no')
 @patch('backend.services.agent_service.SkillService')
 @patch('backend.services.agent_service.query_external_sub_agents')
 @patch('backend.services.agent_service.check_agent_availability')
@@ -513,7 +514,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
+async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service, mock_query_current_version_no):
     """
     Test get_agent_info_impl with explicit version_no parameter.
 
@@ -549,6 +550,9 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
     # Mock check_agent_availability - agent is available
     mock_check_availability.return_value = (True, [])
 
+    # Mock query_current_version_no - return 5 as the current version
+    mock_query_current_version_no.return_value = 5
+
     # Execute with explicit version_no
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant", version_no=5)
 
@@ -566,7 +570,8 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "prompt_template_id": 0,
         "prompt_template_name": "system_default",
         "is_available": True,
-        "unavailable_reasons": []
+        "unavailable_reasons": [],
+        "current_version_no": 5
     }
     assert result == expected_result
     # Verify version_no is passed correctly
@@ -576,6 +581,8 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
     mock_query_sub_agents_id.assert_called_once_with(
         main_agent_id=123, tenant_id="test_tenant")
     mock_check_availability.assert_called_once()
+    # Verify query_current_version_no is called for version_no > 0
+    mock_query_current_version_no.assert_called_once_with(123, "test_tenant")
 
 
 @patch('backend.services.agent_service.get_model_by_model_id')

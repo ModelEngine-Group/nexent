@@ -24,11 +24,50 @@ export type AgentConfigUpdate = Partial<Pick<
   | "business_logic_model_name"
   | "prompt_template_id"
   | "prompt_template_name"
+  | "verification_config"
   | "group_ids"
   | "ingroup_permission"
   | "greeting_message"
   | "example_questions"
 >>;
+
+export interface AgentVerificationConfig {
+  enabled: boolean;
+  step_verification_enabled: boolean;
+  final_verification_enabled: boolean;
+  llm_verification_enabled?: boolean;
+  max_final_rounds: number;
+  strictness: "lenient" | "balanced" | "strict";
+  fail_policy: "repair_then_controlled_summary" | "warn";
+  pass_score?: number;
+  critical_events: Array<
+    | "tool_precheck"
+    | "tool_result"
+    | "retrieval"
+    | "code_execution"
+    | "handoff"
+    | "final_answer"
+  >;
+}
+
+export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
+  enabled: true,
+  step_verification_enabled: true,
+  final_verification_enabled: true,
+  llm_verification_enabled: true,
+  max_final_rounds: 2,
+  strictness: "balanced",
+  fail_policy: "repair_then_controlled_summary",
+  pass_score: 0.75,
+  critical_events: [
+    "tool_precheck",
+    "tool_result",
+    "retrieval",
+    "code_execution",
+    "handoff",
+    "final_answer",
+  ],
+};
 
 // ========== Core Interfaces ==========
 
@@ -44,6 +83,7 @@ export interface Agent {
   max_step: number;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
+  verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[];  // Skills configured for this agent
   duty_prompt?: string;
