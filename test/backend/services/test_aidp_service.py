@@ -88,7 +88,7 @@ class TestFetchAidpKnowledgeBasesImpl:
         aidp_service_module.http_client_manager = mock_manager
 
         result = aidp_service_module.fetch_aidp_knowledge_bases_impl(
-            base_url="http://127.0.0.1:30081",
+            server_url="http://127.0.0.1:30081",
             api_key="jwt-token",
             page=2,
             page_size=15,
@@ -104,7 +104,7 @@ class TestFetchAidpKnowledgeBasesImpl:
         )
 
     @pytest.mark.parametrize(
-        "base_url,api_key,error_code",
+        "server_url,api_key,error_code",
         [
             ("", "token", ErrorCode.AIDP_CONFIG_INVALID),
             ("ftp://example.com", "token", ErrorCode.AIDP_CONFIG_INVALID),
@@ -114,13 +114,13 @@ class TestFetchAidpKnowledgeBasesImpl:
     def test_fetch_invalid_config(
         self,
         aidp_service_module,
-        base_url: str,
+        server_url: str,
         api_key: str,
         error_code: ErrorCode,
     ):
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.fetch_aidp_knowledge_bases_impl(
-                base_url=base_url,
+                server_url=server_url,
                 api_key=api_key,
             )
 
@@ -147,7 +147,7 @@ class TestFetchAidpKnowledgeBasesImpl:
 
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.fetch_aidp_knowledge_bases_impl(
-                base_url="http://127.0.0.1:30081",
+                server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
             )
 
@@ -172,7 +172,7 @@ class TestFetchAidpKnowledgeBasesImpl:
 
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.fetch_aidp_knowledge_bases_impl(
-                base_url="http://127.0.0.1:30081",
+                server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
             )
 
@@ -195,7 +195,7 @@ class TestFetchAidpKnowledgeBasesImpl:
 
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.fetch_aidp_knowledge_bases_impl(
-                base_url="http://127.0.0.1:30081",
+                server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
             )
 
@@ -217,7 +217,7 @@ class TestFetchAidpKnowledgeBasesImpl:
 
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.fetch_aidp_knowledge_bases_impl(
-                base_url="http://127.0.0.1:30081",
+                server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
             )
 

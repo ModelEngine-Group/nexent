@@ -204,8 +204,8 @@ sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
 # Mock supabase before utils.auth_utils is imported
-supabase_mock = MagicMock()
-sys.modules['supabase'] = supabase_mock
+from conftest import install_supabase_mock
+install_supabase_mock()
 
 # Mock nexent.core.utils.observer before services.skill_service is imported
 nexent_core_utils = _create_package_mock('nexent.core.utils')
@@ -472,6 +472,42 @@ backend_services_module = importlib.import_module(
     'backend.services.tool_configuration_service')
 # Ensure services package can resolve tool_configuration_service for patching
 sys.modules['services.tool_configuration_service'] = backend_services_module
+# Pre-load backend.services.file_management_service so that patch targets of
+# the form ``backend.services.file_management_service.*`` resolve correctly.
+# Without this, the empty ``backend.services.__init__`` means the package has
+# no ``file_management_service`` attribute, causing ``AttributeError: module
+# 'backend.services' has no attribute 'file_management_service'`` when
+# ``@patch`` tries to walk the dotted path.
+try:
+    backend_file_management_module = importlib.import_module(
+        'backend.services.file_management_service')
+    sys.modules['services.file_management_service'] = backend_file_management_module
+except Exception:
+    # If file_management_service cannot be imported in this isolated test
+    # environment, fall back to a stub so patches that target the module
+    # still have something to attach to.
+    backend_file_management_module = types.ModuleType(
+        'backend.services.file_management_service')
+    backend_file_management_module.MODEL_CONFIG_MAPPING = {}
+    backend_file_management_module.get_llm_model = MagicMock()
+    backend_file_management_module.validate_urls_access = MagicMock(
+        return_value=True)
+    sys.modules['backend.services.file_management_service'] = (
+        backend_file_management_module)
+    sys.modules['services.file_management_service'] = (
+        backend_file_management_module)
+# Expose the file_management_service submodule as an attribute of the
+# ``backend.services`` package so ``@patch('backend.services.file_management_service.*')``
+# can resolve the path.
+backend_services_pkg = sys.modules.get('backend.services')
+if backend_services_pkg is not None and not hasattr(
+    backend_services_pkg, 'file_management_service'
+):
+    setattr(
+        backend_services_pkg,
+        'file_management_service',
+        backend_file_management_module,
+    )
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient

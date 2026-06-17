@@ -7,6 +7,7 @@ import os
 import sys
 import shutil
 import tempfile
+import types
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch as _patch
@@ -115,3 +116,52 @@ def tmp_path():
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
+
+
+def install_supabase_mock():
+    """Install a structured supabase package mock into ``sys.modules``.
+
+    ``backend.utils.auth_utils`` imports ``from supabase.lib.client_options
+    import SyncClientOptions`` at module load time. Test files that simply
+    replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
+    import to fail (the mock has no ``.lib.client_options`` attribute),
+    which in turn makes every test that transitively imports ``auth_utils``
+    (for example anything that imports ``services.user_service``) fail
+    during collection.
+
+    This helper installs a package-like mock that exposes the attributes
+    used by the production code paths we exercise in unit tests, while
+    still letting tests override individual functions via ``monkeypatch``
+    or ``patch``.
+    """
+    supabase_mock = MagicMock()
+    supabase_mock.create_client = MagicMock()
+
+    supabase_lib_mock = types.ModuleType("supabase.lib")
+    supabase_client_options_mock = types.ModuleType(
+        "supabase.lib.client_options"
+    )
+
+    class _SyncClientOptions:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+    supabase_client_options_mock.SyncClientOptions = _SyncClientOptions
+    supabase_lib_mock.client_options = supabase_client_options_mock
+    supabase_mock.lib = supabase_lib_mock
+
+    sys.modules['supabase'] = supabase_mock
+    sys.modules['supabase.lib'] = supabase_lib_mock
+    sys.modules['supabase.lib.client_options'] = supabase_client_options_mock
+
+    return supabase_mock
+
+
+# Install a sane supabase mock up front so test files that import
+# ``backend.utils.auth_utils`` (directly or transitively) succeed during
+# collection, even before their own module-level mocks run. Individual
+# test files can override ``sys.modules['supabase']`` with their own mock
+# and call this helper to re-install the structured attributes.
+if 'supabase' not in sys.modules:
+    install_supabase_mock()

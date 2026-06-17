@@ -16,20 +16,21 @@ import {
 } from "antd";
 import { useTranslation } from "react-i18next";
 
+import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 
 const { Text } = Typography;
 
 interface AidpKnowledgeSelectorModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: (selected: { datasetIds: string[]; displayNames: string[] }) => void;
-  selectedDatasetIds: string[];
-  serverUrl: string;
-  apiKey: string;
-  title?: string;
-  maxSelect?: number;
+  readonly isOpen: boolean;
+  readonly onClose: () => void;
+  readonly onConfirm: (selected: { datasetIds: string[]; displayNames: string[] }) => void;
+  readonly selectedDatasetIds: string[];
+  readonly serverUrl: string;
+  readonly apiKey: string;
+  readonly title?: string;
+  readonly maxSelect?: number;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -160,6 +161,7 @@ export default function AidpKnowledgeSelectorModal({
 
         setTotal(newTotal);
       } catch (error) {
+        log.error("Failed to load AIDP knowledge bases:", error);
         message.error(t("toolConfig.aidp.selector.loadFailed"));
         if (nextPage === 1) {
           setAllLoadedItems([]);
@@ -178,13 +180,15 @@ export default function AidpKnowledgeSelectorModal({
   const triggerLoad = useCallback(() => {
     setPage(1);
     // Read latest selectedDatasetIds from ref to avoid stale closure
-    void loadPage(1, pageSize);
+    loadPage(1, pageSize).catch(() => {
+      // Error already surfaced via message.error in loadPage.
+    });
   }, [pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isOpen) return;
     // Touch selectedDatasetIdsRef to ensure latest value is read inside loadPage
-    void selectedDatasetIdsRef.current;
+    selectedDatasetIdsRef.current;
     triggerLoad();
   }, [isOpen, serverUrl, apiKey, selectedDatasetIds, triggerLoad]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -193,7 +197,9 @@ export default function AidpKnowledgeSelectorModal({
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
-    void loadPage(page, pageSize);
+    loadPage(page, pageSize).catch(() => {
+      // Error already surfaced via message.error in loadPage.
+    });
   }, [page, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
@@ -238,6 +244,71 @@ export default function AidpKnowledgeSelectorModal({
 
   const displayNames = tempSelectedIds.map((id) => nameMap.current.get(id) || id);
 
+  const renderRow = (item: AidpKnowledgeBaseItem) => {
+    const id = String(item.kds_id);
+    const checked = tempSelectedIds.includes(id);
+    const disableUnchecked =
+      !checked && tempSelectedIds.length >= maxSelect;
+    return (
+      <div key={id} className="px-4 py-3">
+        <div className="flex w-full items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex items-center gap-2">
+              <Checkbox
+                checked={checked}
+                disabled={disableUnchecked}
+                onChange={(e) =>
+                  handleToggle(item, e.target.checked)
+                }
+              >
+                {item.kds_name || id}
+              </Checkbox>
+              <Tag>{id}</Tag>
+            </div>
+            {item.description && (
+              <Text type="secondary">{item.description}</Text>
+            )}
+          </div>
+          <Space size={8}>
+            <Tag>
+              {t(
+                "toolConfig.aidp.selector.documentCount",
+                { count: item.document_count || 0 }
+              )}
+            </Tag>
+            <Tag>
+              {t("toolConfig.aidp.selector.chunkCount", {
+                count: item.chunk_count || 0,
+              })}
+            </Tag>
+          </Space>
+        </div>
+      </div>
+    );
+  };
+
+  const renderListContent = (
+    isLoading: boolean,
+    items: AidpKnowledgeBaseItem[],
+    visibleItems: AidpKnowledgeBaseItem[]
+  ) => {
+    if (isLoading && items.length === 0) {
+      return (
+        <div className="flex justify-center py-12">
+          <Spin />
+        </div>
+      );
+    }
+    if (visibleItems.length === 0) {
+      return <Empty description={t("toolConfig.aidp.selector.empty")} />;
+    }
+    return (
+      <div className="divide-y divide-gray-100 rounded-md border border-gray-200 bg-white">
+        {visibleItems.map(renderRow)}
+      </div>
+    );
+  };
+
   return (
     <Modal
       title={title || t("toolConfig.aidp.selector.title")}
@@ -271,7 +342,9 @@ export default function AidpKnowledgeSelectorModal({
           <Button
             onClick={() => {
               setPage(1);
-              void loadPage(1, pageSize);
+              loadPage(1, pageSize).catch(() => {
+                // Error already surfaced via message.error in loadPage.
+              });
             }}
           >
             {t("knowledgeBase.button.sync")}
@@ -296,58 +369,7 @@ export default function AidpKnowledgeSelectorModal({
         )}
 
         <div style={{ minHeight: 420 }}>
-          {loading && allLoadedItems.length === 0 ? (
-            <div className="flex justify-center py-12">
-              <Spin />
-            </div>
-          ) : filteredItems.length === 0 ? (
-            <Empty description={t("toolConfig.aidp.selector.empty")} />
-          ) : (
-            <div className="divide-y divide-gray-100 rounded-md border border-gray-200 bg-white">
-              {filteredItems.map((item) => {
-                const id = String(item.kds_id);
-                const checked = tempSelectedIds.includes(id);
-                const disableUnchecked =
-                  !checked && tempSelectedIds.length >= maxSelect;
-                return (
-                  <div key={id} className="px-4 py-3">
-                    <div className="flex w-full items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex items-center gap-2">
-                          <Checkbox
-                            checked={checked}
-                            disabled={disableUnchecked}
-                            onChange={(e) =>
-                              handleToggle(item, e.target.checked)
-                            }
-                          >
-                            {item.kds_name || id}
-                          </Checkbox>
-                          <Tag>{id}</Tag>
-                        </div>
-                        {item.description && (
-                          <Text type="secondary">{item.description}</Text>
-                        )}
-                      </div>
-                      <Space size={8}>
-                        <Tag>
-                          {t(
-                            "toolConfig.aidp.selector.documentCount",
-                            { count: item.document_count || 0 }
-                          )}
-                        </Tag>
-                        <Tag>
-                          {t("toolConfig.aidp.selector.chunkCount", {
-                            count: item.chunk_count || 0,
-                          })}
-                        </Tag>
-                      </Space>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {renderListContent(loading, allLoadedItems, filteredItems)}
         </div>
 
         <div className="flex justify-end">

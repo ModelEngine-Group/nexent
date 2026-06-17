@@ -54,7 +54,9 @@ def aidp_module():
 
     class DummyTool:
         def __init__(self, *args, **kwargs):
-            pass
+            # Intentionally empty: stand-in for smolagents Tool that skips
+            # validation in unit tests.
+            return
 
     smolagents_tools_mod.Tool = DummyTool
     register_module("smolagents.tools", smolagents_tools_mod)
@@ -121,7 +123,7 @@ def aidp_tool(aidp_module, mock_observer):
     mock_client = MagicMock()
     aidp_module.http_client_manager.get_sync_client.return_value = mock_client
     tool = aidp_module.AidpSearchTool(
-        base_url="https://aidp.example.com/",
+        server_url="https://aidp.example.com/",
         api_key="jwt-token",
         kds_list='["kb1", "kb2"]',
         search_method="hybrid_search",
@@ -171,7 +173,7 @@ class TestAidpSearchToolInit:
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
 
         tool = aidp_module.AidpSearchTool(
-                base_url="https://aidp.example.com/",
+                server_url="https://aidp.example.com/",
                 api_key="jwt-token",
                 kds_list='["kb1", "kb2"]',
                 search_method="vector_search",
@@ -193,23 +195,23 @@ class TestAidpSearchToolInit:
         assert tool.reranking_mode == "high_accuracy"
         assert tool.rewrite_enable is True
         assert tool.related_search_enable is True
-        assert tool.score_threshold == 1.0
+        assert tool.score_threshold == pytest.approx(1.0)
         assert tool.top_k == 100
         assert tool.multi_modal is True
         assert tool.observer == mock_observer
         assert tool.running_prompt_en == "Searching AIDP knowledge base..."
 
     @pytest.mark.parametrize(
-        "base_url,api_key,kds_list,expected_error",
+        "server_url,api_key,kds_list,expected_error",
         [
-            ("", "jwt-token", '["kb1"]', "base_url is required and must be a non-empty string"),
+            ("", "jwt-token", '["kb1"]', "server_url is required and must be a non-empty string"),
             ("https://aidp.example.com", "", '["kb1"]', "api_key is required and must be a non-empty string"),
             ("https://aidp.example.com", "jwt-token", "[]", "kds_list must be a list of 1-10 knowledge base IDs"),
         ],
     )
     def test_init_invalid_required_values(
         self,
-        base_url,
+        server_url,
         api_key,
         kds_list,
         expected_error,
@@ -218,7 +220,7 @@ class TestAidpSearchToolInit:
     ):
         with pytest.raises(ValueError) as exc_info:
             aidp_module.AidpSearchTool(
-                base_url=base_url,
+                server_url=server_url,
                 api_key=api_key,
                 kds_list=kds_list,
                 observer=mock_observer,
@@ -229,7 +231,7 @@ class TestAidpSearchToolInit:
     def test_init_invalid_json_kds_list(self, aidp_module, mock_observer):
         with pytest.raises(ValueError) as exc_info:
             aidp_module.AidpSearchTool(
-                base_url="https://aidp.example.com",
+                server_url="https://aidp.example.com",
                 api_key="jwt-token",
                 kds_list="not-json",
                 observer=mock_observer,
@@ -242,7 +244,7 @@ class TestAidpSearchToolInit:
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
 
         tool = aidp_module.AidpSearchTool(
-                base_url="https://aidp.example.com",
+                server_url="https://aidp.example.com",
                 api_key="jwt-token",
                 kds_list='["kb1"]',
                 search_method="bad-method",
@@ -355,7 +357,6 @@ class TestAidpSearchToolForward:
         assert "AIDP search error: No results found!" in str(exc_info.value)
 
     def test_forward_http_error_raises_wrapped_exception(self, aidp_tool):
-        request = httpx.Request("POST", "https://aidp.example.com")
         aidp_tool._mock_http_client.post.side_effect = httpx.HTTPError("boom")
 
         with pytest.raises(Exception) as exc_info:

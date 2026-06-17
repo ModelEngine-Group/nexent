@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Database, X, Server } from "lucide-react";
 
@@ -32,8 +32,65 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     source_type === "datamate" ||
     source_type === "aidp" ||
     searchType === "aidp_search";
-  const datamateFileId = result.score_details?.datamate_file_id;
-  const datamateBaseUrl = result.score_details?.datamate_base_url;
+  const datamateDatasetId =
+    result.score_details?.datamate_dataset_id ||
+    result.score_details?.dataset_id;
+  const datamateFileId =
+    result.score_details?.datamate_file_id ||
+    result.score_details?.file_id;
+  const datamateBaseUrl =
+    result.score_details?.datamate_base_url ||
+    result.score_details?.datamate_baseUrl ||
+    result.score_details?.base_url;
+
+  const resolveSourceLabel = (): string => {
+    if (source_type === "datamate") {
+      return t("chatRightPanel.source.datamate", "Source: Datamate");
+    }
+    if (source_type === "aidp" || searchType === "aidp_search") {
+      return t("chatRightPanel.source.aidp", "Source: AIDP");
+    }
+    if (source_type === "file") {
+      return t("chatRightPanel.source.nexent", "Source: Nexent");
+    }
+    return "";
+  };
+
+  const downloadDatamateFile = async () => {
+    if (!appConfig?.modelEngineEnabled) {
+      message.error("DataMate download not available: ModelEngine is not enabled");
+      return;
+    }
+    if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
+      if (!url || url === "#") {
+        message.error(
+          t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information")
+        );
+        return;
+      }
+    }
+    await storageService.downloadDatamateFile({
+      url: url !== "#" ? url : undefined,
+      baseUrl: datamateBaseUrl,
+      datasetId: datamateDatasetId,
+      fileId: datamateFileId,
+      filename: filename || undefined,
+    });
+    message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+  };
+
+  const downloadObjectFile = async () => {
+    let objectName: string | undefined;
+    if (url && url !== "#") {
+      objectName = extractObjectNameFromUrl(url) || undefined;
+    }
+    if (!objectName) {
+      message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
+      return;
+    }
+    await storageService.downloadFile(objectName, filename || "download");
+    message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+  };
 
   // Handle file download
   const handleFileDownload = async (e: React.MouseEvent) => {
@@ -48,40 +105,10 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     setIsDownloading(true);
     try {
       if (source_type === "datamate") {
-        if (!appConfig?.modelEngineEnabled) {
-          message.error("DataMate download not available: ModelEngine is not enabled");
-          return;
-        }
-        if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
-          if (!url || url === "#") {
-            message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
-            return;
-          }
-        }
-        await storageService.downloadDatamateFile({
-          url: url !== "#" ? url : undefined,
-          baseUrl: datamateBaseUrl,
-          datasetId: datamateDatasetId,
-          fileId: datamateFileId,
-          filename: filename || undefined,
-        });
-        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+        await downloadDatamateFile();
         return;
       }
-
-      let objectName: string | undefined = undefined;
-
-      if (url && url !== "#") {
-        objectName = extractObjectNameFromUrl(url) || undefined;
-      }
-
-      if (!objectName) {
-        message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
-        return;
-      }
-
-      await storageService.downloadFile(objectName, filename || "download");
-      message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+      await downloadObjectFile();
     } catch (error) {
       log.error("Failed to download file:", error);
       message.error(t("chatRightPanel.fileDownloadError", "Failed to download file. Please try again."));
@@ -90,65 +117,66 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     }
   };
 
+  const titleStyle = {
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical" as const,
+    overflow: "hidden" as const,
+    wordBreak: "break-word" as const,
+  };
+
+  const titleContent = isDownloading ? (
+    <span className="inline-flex items-center gap-1">
+      <span className="animate-spin">⏳</span>
+      {t("chatRightPanel.downloading", "Downloading...")}
+    </span>
+  ) : (
+    title
+  );
+
+  let titleNode: React.ReactNode;
+  if (source_type === "url") {
+    titleNode = (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-blue-600 hover:underline block text-base"
+        style={titleStyle}
+        title={title}
+      >
+        {title}
+      </a>
+    );
+  } else if (isKnowledgeResult) {
+    titleNode = (
+      <a
+        href="#"
+        onClick={handleFileDownload}
+        className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
+        style={titleStyle}
+        title={title}
+      >
+        {titleContent}
+      </a>
+    );
+  } else {
+    titleNode = (
+      <div
+        className="font-medium text-base"
+        style={titleStyle}
+        title={title}
+      >
+        {title}
+      </div>
+    );
+  }
+
   return (
     <div className="p-3 rounded-lg border border-gray-200 text-xs hover:bg-gray-50 transition-colors overflow-hidden">
       <div className="flex flex-col">
         <div>
-          {source_type === "url" ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-blue-600 hover:underline block text-base"
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-word",
-              }}
-              title={title}
-            >
-              {title}
-            </a>
-          ) : isKnowledgeResult ? (
-            <a
-              href="#"
-              onClick={handleFileDownload}
-              className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-word",
-              }}
-              title={title}
-            >
-              {isDownloading ? (
-                <span className="inline-flex items-center gap-1">
-                  <span className="animate-spin">⏳</span>
-                  {t("chatRightPanel.downloading", "Downloading...")}
-                </span>
-              ) : (
-                title
-              )}
-            </a>
-          ) : (
-            <div
-              className="font-medium text-base"
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-word",
-              }}
-              title={title}
-            >
-              {title}
-            </div>
-          )}
+          {titleNode}
 
           {published_date && (
             <div className="text-gray-500 mt-1 text-sm">
@@ -172,7 +200,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
             className="flex flex-col overflow-hidden"
             style={{ flex: 1, minWidth: 0 }}
           >
-            {source_type === "file" || source_type === "datamate" ? (
+            {isKnowledgeResult ? (
               <>
                 <div className="flex items-center min-w-0">
                   <div className="w-3 h-3 flex-shrink-0 mr-1">
@@ -196,13 +224,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
                     <Server className="w-full h-full" />
                   </div>
                   <div className="text-xs text-gray-500">
-                    {source_type === "datamate"
-                      ? t("chatRightPanel.source.datamate", "Source: Datamate")
-                      : source_type === "aidp" || searchType === "aidp_search"
-                      ? t("chatRightPanel.source.aidp", "Source: AIDP")
-                      : source_type === "file"
-                      ? t("chatRightPanel.source.nexent", "Source: Nexent")
-                      : ""}
+                    {resolveSourceLabel()}
                   </div>
                 </div>
               </>

@@ -214,16 +214,16 @@ export default function ToolTestPanel({
     // Determine which field to sync based on tool type
     const isHaotianOrIdata = toolKbType === "haotian_search" || toolKbType === "idata_search";
     const isAidp = toolKbType === "aidp_search";
-    const fieldName = isAidp
-      ? `param_kds_list`
-      : isHaotianOrIdata
-        ? `param_dataset_ids`
-        : `param_index_names`;
-    const stateKey = isAidp
-      ? "kds_list"
-      : isHaotianOrIdata
-        ? "dataset_ids"
-        : "index_names";
+    const resolveFieldAndStateKey = (): { field: string; key: string } => {
+      if (isAidp) {
+        return { field: "param_kds_list", key: "kds_list" };
+      }
+      if (isHaotianOrIdata) {
+        return { field: "param_dataset_ids", key: "dataset_ids" };
+      }
+      return { field: "param_index_names", key: "index_names" };
+    };
+    const { field: fieldName, key: stateKey } = resolveFieldAndStateKey();
     const currentValue = form.getFieldValue(fieldName);
 
     // Only update if the value is different

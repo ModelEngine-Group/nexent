@@ -209,7 +209,8 @@ sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
 # Mock supabase
-sys.modules['supabase'] = MagicMock()
+from conftest import install_supabase_mock
+install_supabase_mock()
 
 # Mock services modules
 sys.modules['services'] = _create_package_mock('services')

@@ -50,8 +50,8 @@ patch('backend.database.client.minio_client', minio_client_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Patch supabase to avoid import errors
-supabase_mock = MagicMock()
-sys.modules['supabase'] = supabase_mock
+from conftest import install_supabase_mock as _install_supabase_mock
+supabase_mock = _install_supabase_mock()
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import

@@ -4,6 +4,7 @@ Handles API calls to AIDP for paginated knowledge base listing.
 """
 import logging
 from typing import Any, Dict
+from urllib.parse import urljoin
 
 import httpx
 
@@ -23,7 +24,7 @@ def _validate_params(server_url: str, api_key: str) -> str:
             ErrorCode.AIDP_CONFIG_INVALID,
             "AIDP server_url is required and must be a non-empty string",
         )
-    if not (server_url.startswith("http://") or server_url.startswith("https://")):
+    if not server_url.startswith(("http://", "https://")):
         raise AppException(
             ErrorCode.AIDP_CONFIG_INVALID,
             "AIDP server_url must start with http:// or https://",
@@ -50,8 +51,9 @@ def fetch_aidp_knowledge_bases_impl(
         "Content-Type": "application/json",
     }
 
-    list_url = f"{_LIST_PATH}?page={page}&page_size={page_size}"
-    logger.info("Fetching AIDP knowledge bases from %s (base: %s)", list_url, normalized_url)
+    list_path = f"{_LIST_PATH}?page={page}&page_size={page_size}"
+    list_url = urljoin(f"{normalized_url}/", list_path)
+    logger.info("Fetching AIDP knowledge bases from %s", list_url)
 
     try:
         client = http_client_manager.get_sync_client(
@@ -69,13 +71,13 @@ def fetch_aidp_knowledge_bases_impl(
             )
         return result
     except httpx.RequestError as e:
-        logger.error("AIDP request failed: %s", e)
+        logger.exception("AIDP request failed: %s", e)
         raise AppException(
             ErrorCode.AIDP_CONNECTION_ERROR,
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        logger.error(
+        logger.exception(
             "AIDP API HTTP error: %s, status_code: %s",
             e,
             e.response.status_code,
@@ -90,7 +92,7 @@ def fetch_aidp_knowledge_bases_impl(
             f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
         )
     except ValueError as e:
-        logger.error("Failed to parse AIDP API response: %s", e)
+        logger.exception("Failed to parse AIDP API response: %s", e)
         raise AppException(
             ErrorCode.AIDP_SERVICE_ERROR,
             f"Failed to parse AIDP API response: {str(e)}",

@@ -6,7 +6,7 @@ Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_
 """
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urljoin
 
 import httpx
@@ -28,10 +28,34 @@ _VALID_RERANK_MODES = {"performance", "high_accuracy"}
 _MAX_KDS = 10
 
 
+class AidpSearchError(RuntimeError):
+    """Raised when the AIDP search tool cannot complete a request."""
+
+
 def _resolve_field_default(value: Any, fallback: Any) -> Any:
     if isinstance(value, FieldInfo):
         return fallback if value.default is ... else value.default
     return fallback if value is None else value
+
+
+def _parse_kds_list(kds_list: str) -> List[str]:
+    """Parse and validate the JSON-encoded knowledge base ID list."""
+    try:
+        parsed_kds = json.loads(kds_list) if isinstance(kds_list, str) else kds_list
+    except json.JSONDecodeError as e:
+        raise ValueError(f"kds_list must be a valid JSON array: {e}") from e
+    if not isinstance(parsed_kds, list) or not (1 <= len(parsed_kds) <= _MAX_KDS):
+        raise ValueError(f"kds_list must be a list of 1-{_MAX_KDS} knowledge base IDs")
+    return [str(k) for k in parsed_kds]
+
+
+def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
+    """Coerce ``raw`` to one of ``valid`` or fall back to ``default``."""
+    value = raw or default
+    if value not in valid:
+        logger.warning("Invalid %s '%s', defaulting to %s", label, value, default)
+        return default
+    return value
 
 
 class AidpSearchTool(Tool):
@@ -133,35 +157,16 @@ class AidpSearchTool(Tool):
         if not api_key or not isinstance(api_key, str):
             raise ValueError("api_key is required and must be a non-empty string")
 
-        try:
-            parsed_kds = json.loads(kds_list) if isinstance(kds_list, str) else kds_list
-            if not isinstance(parsed_kds, list) or not (1 <= len(parsed_kds) <= _MAX_KDS):
-                raise ValueError(
-                    f"kds_list must be a list of 1-{_MAX_KDS} knowledge base IDs"
-                )
-            self.kds_list: List[str] = [str(k) for k in parsed_kds]
-        except json.JSONDecodeError as e:
-            raise ValueError(f"kds_list must be a valid JSON array: {e}")
-
-        method = search_method or "hybrid_search"
-        if method not in _VALID_SEARCH_METHODS:
-            logger.warning(
-                "Invalid search_method '%s', defaulting to hybrid_search", method
-            )
-            method = "hybrid_search"
-
-        mode = reranking_mode or "performance"
-        if mode not in _VALID_RERANK_MODES:
-            logger.warning(
-                "Invalid reranking_mode '%s', defaulting to performance", mode
-            )
-            mode = "performance"
-
+        self.kds_list: List[str] = _parse_kds_list(kds_list)
         self.base_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.search_method = method
+        self.search_method = _coerce_choice(
+            search_method, _VALID_SEARCH_METHODS, "hybrid_search", "search_method"
+        )
+        self.reranking_mode = _coerce_choice(
+            reranking_mode, _VALID_RERANK_MODES, "performance", "reranking_mode"
+        )
         self.reranking_enable = bool(_resolve_field_default(reranking_enable, False))
-        self.reranking_mode = mode
         self.rewrite_enable = bool(_resolve_field_default(rewrite_enable, False))
         self.related_search_enable = bool(_resolve_field_default(related_search_enable, False))
         resolved_score_threshold = _resolve_field_default(score_threshold, 0.0)
@@ -208,21 +213,105 @@ class AidpSearchTool(Tool):
             raise ValueError("Invalid AIDP response: result field missing or not a list")
         return records
 
+    def _emit_running_prompt(self, query: str) -> None:
+        """Push the running prompt + query card to the observer if any."""
+        if not self.observer:
+            return
+        prompt = (
+            self.running_prompt_zh
+            if self.observer.lang == "zh"
+            else self.running_prompt_en
+        )
+        self.observer.add_message("", ProcessType.TOOL, prompt)
+        card_content = [{"icon": "search", "text": query.strip()}]
+        self.observer.add_message(
+            "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)
+        )
+
+    def _build_chunk_message(self, chunk: Dict[str, Any], idx: int):
+        """Build a SearchResultTextMessage for a single record chunk."""
+        chunk_type = str(chunk.get("chunk_type", "text") or "text")
+        title = str(chunk.get("title") or "")
+        text = str(chunk.get("text") or "")
+        file_url = str(chunk.get("file_url") or "")
+        chunk_id = chunk.get("id")
+        score = chunk.get("score")
+        pages = chunk.get("pages", [])
+        metadata = chunk.get("metadata", {})
+        return SearchResultTextMessage(
+            title=title,
+            text=text,
+            source_type="file",
+            url=file_url,
+            filename=title,
+            published_date="",
+            score=str(score) if score is not None else None,
+            score_details={
+                "chunk_id": chunk_id,
+                "chunk_type": chunk_type,
+                "pages": pages,
+                "file_url": file_url,
+                "metadata": metadata,
+            },
+            cite_index=self.record_ops + idx,
+            search_type=self.name,
+            tool_sign=self.tool_sign,
+        )
+
+    def _process_records(self, records: List[Dict[str, Any]]):
+        """Convert raw response records into dual-channel messages and return
+        ``(search_results_return, images_url)``."""
+        search_results_json: List[Dict[str, Any]] = []
+        search_results_return: List[Dict[str, Any]] = []
+        images_url: List[str] = []
+
+        for idx, chunk in enumerate(records[: self.top_k]):
+            msg = self._build_chunk_message(chunk, idx)
+            search_results_json.append(msg.to_dict())
+            search_results_return.append(msg.to_model_dict())
+            chunk_type = str(chunk.get("chunk_type", "text") or "text")
+            file_url = str(chunk.get("file_url") or "")
+            if chunk_type == "image" and file_url:
+                images_url.append(file_url)
+
+        return search_results_json, search_results_return, images_url
+
+    def _emit_results(self, search_results_json, images_url) -> None:
+        """Forward the structured results to the observer if present."""
+        if not self.observer:
+            return
+        self.observer.add_message(
+            "",
+            ProcessType.SEARCH_CONTENT,
+            json.dumps(search_results_json, ensure_ascii=False),
+        )
+        if images_url:
+            self.observer.add_message(
+                "",
+                ProcessType.PICTURE_WEB,
+                json.dumps({"images_url": images_url}, ensure_ascii=False),
+            )
+
+    def _execute_request(self, query: str):
+        """POST to the AIDP FusionSearch endpoint and return parsed records."""
+        url = self._build_retrieve_url()
+        payload = self._build_retrieve_payload(query.strip())
+        resp = self._http_client.post(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        return self._parse_response(resp.json())
+
     def forward(self, query: str) -> str:
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
 
-        if self.observer:
-            prompt = (
-                self.running_prompt_zh
-                if self.observer.lang == "zh"
-                else self.running_prompt_en
-            )
-            self.observer.add_message("", ProcessType.TOOL, prompt)
-            card_content = [{"icon": "search", "text": query.strip()}]
-            self.observer.add_message(
-                "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)
-            )
+        self._emit_running_prompt(query)
 
         logger.info(
             "AidpSearchTool called query='%s' kds_list=%s method=%s top_k=%d",
@@ -232,85 +321,21 @@ class AidpSearchTool(Tool):
             self.top_k,
         )
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-
         try:
-            url = self._build_retrieve_url()
-            payload = self._build_retrieve_payload(query.strip())
-            resp = self._http_client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-
-            records = self._parse_response(data)
-            if not records:
-                raise ValueError(
-                    "No results found! Try a less restrictive or shorter query."
-                )
-
-            search_results_json: List[Dict[str, Any]] = []
-            search_results_return: List[Dict[str, Any]] = []
-            images_url: List[str] = []
-
-            for idx, chunk in enumerate(records[: self.top_k]):
-                chunk_type = str(chunk.get("chunk_type", "text") or "text")
-                title = str(chunk.get("title") or "")
-                text = str(chunk.get("text") or "")
-                file_url = str(chunk.get("file_url") or "")
-                chunk_id = chunk.get("id")
-                score = chunk.get("score")
-                pages = chunk.get("pages", [])
-                metadata = chunk.get("metadata", {})
-
-                msg = SearchResultTextMessage(
-                    title=title,
-                    text=text,
-                    source_type="file",
-                    url=file_url,
-                    filename=title,
-                    published_date="",
-                    score=str(score) if score is not None else None,
-                    score_details={
-                        "chunk_id": chunk_id,
-                        "chunk_type": chunk_type,
-                        "pages": pages,
-                        "file_url": file_url,
-                        "metadata": metadata,
-                    },
-                    cite_index=self.record_ops + idx,
-                    search_type=self.name,
-                    tool_sign=self.tool_sign,
-                )
-                search_results_json.append(msg.to_dict())
-                search_results_return.append(msg.to_model_dict())
-
-                if chunk_type == "image" and file_url:
-                    images_url.append(file_url)
-
-            self.record_ops += len(search_results_return)
-
-            if self.observer:
-                self.observer.add_message(
-                    "",
-                    ProcessType.SEARCH_CONTENT,
-                    json.dumps(search_results_json, ensure_ascii=False),
-                )
-                if images_url:
-                    self.observer.add_message(
-                        "",
-                        ProcessType.PICTURE_WEB,
-                        json.dumps({"images_url": images_url}, ensure_ascii=False),
-                    )
-
-            return json.dumps(search_results_return, ensure_ascii=False)
-
+            records = self._execute_request(query)
         except httpx.HTTPError as e:
-            error_msg = f"AIDP HTTP error: {e}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        except Exception as e:
-            error_msg = f"AIDP search error: {e}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
+            logger.exception("AIDP HTTP error: %s", e)
+            raise AidpSearchError(f"AIDP HTTP error: {e}") from e
+        except ValueError as e:
+            logger.exception("AIDP search error: %s", e)
+            raise AidpSearchError(f"AIDP search error: {e}") from e
+
+        if not records:
+            raise AidpSearchError(
+                "AIDP search error: No results found! Try a less restrictive or shorter query."
+            )
+
+        search_results_json, search_results_return, images_url = self._process_records(records)
+        self.record_ops += len(search_results_return)
+        self._emit_results(search_results_json, images_url)
+        return json.dumps(search_results_return, ensure_ascii=False)

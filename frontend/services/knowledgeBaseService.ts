@@ -449,7 +449,7 @@ class KnowledgeBaseService {
     pageSize: number = 20
   ): Promise<AidpKnowledgeBaseListResponse> {
     try {
-      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, window.location.origin);
+      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
       url.searchParams.set("server_url", serverUrl);
       url.searchParams.set("api_key", apiKey);
       url.searchParams.set("page", String(page));
