@@ -804,6 +804,7 @@
   "model.dialog.capacity.tokenizerFamily.tooltip": "此模型使用的Token计数策略。",
   "model.dialog.capacity.error.positiveInteger": "容量数字字段必须为空或正整数。",
   "model.dialog.capacity.error.outputExceedsWindow": "最大输出Token数不能超过上下文窗口。",
+  "model.dialog.capacity.error.inputExceedsWindow": "最大输入Token数不能超过上下文窗口（超出部分会被自动忽略，请直接调整数值）。",
   "model.dialog.capacity.error.reserveExceedsOutput": "输出预留Token数不能超过最大输出Token数。",
   "model.dialog.capacity.error.requiredMissing": "上下文窗口和最大输入Token数为必填项。",
   "model.dialog.capacity.deprecatedMaxTokens": "max_tokens 已废弃，请使用 max_output_tokens。",

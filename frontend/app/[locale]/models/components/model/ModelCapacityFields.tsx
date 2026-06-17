@@ -99,6 +99,7 @@ export const validateCapacityForm = (
   }
 
   const contextWindowTokens = toOptionalPositiveInt(value.contextWindowTokens);
+  const maxInputTokens = toOptionalPositiveInt(value.maxInputTokens);
   const maxOutputTokens = toOptionalPositiveInt(value.maxOutputTokens);
   const defaultOutputReserveTokens = toOptionalPositiveInt(
     value.defaultOutputReserveTokens
@@ -110,6 +111,14 @@ export const validateCapacityForm = (
     maxOutputTokens > contextWindowTokens
   ) {
     return "model.dialog.capacity.error.outputExceedsWindow";
+  }
+
+  if (
+    contextWindowTokens !== undefined &&
+    maxInputTokens !== undefined &&
+    maxInputTokens > contextWindowTokens
+  ) {
+    return "model.dialog.capacity.error.inputExceedsWindow";
   }
 
   if (

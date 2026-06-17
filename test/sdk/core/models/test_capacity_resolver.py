@@ -300,6 +300,33 @@ def test_requested_output_must_be_positive():
         )
 
 
+def test_max_input_tokens_above_context_window_is_rejected():
+    with pytest.raises(InvalidCapacityConfiguration) as exc_info:
+        resolve_capacity(
+            model_id="bad", provider="x",
+            operator_overrides={
+                "context_window_tokens": 128_000,
+                "max_input_tokens": 200_000,
+            },
+            capability_profiles={},
+        )
+    assert "max_input_tokens" in str(exc_info.value)
+    assert "exceeds context_window_tokens" in str(exc_info.value)
+
+
+def test_max_input_tokens_equal_to_context_window_is_allowed():
+    snap = resolve_capacity(
+        model_id="ok", provider="x",
+        operator_overrides={
+            "context_window_tokens": 128_000,
+            "max_input_tokens": 128_000,
+            "max_output_tokens": 4_096,
+        },
+        capability_profiles={},
+    )
+    assert snap.max_input_tokens == 128_000
+
+
 def test_unknown_capabilities_includes_tokenizer_when_estimated():
     catalog = _catalog(_gpt4o_profile())
     snap = resolve_capacity(

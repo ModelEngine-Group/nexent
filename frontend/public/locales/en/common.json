@@ -833,6 +833,7 @@
   "model.dialog.capacity.tokenizerFamily.tooltip": "Token counting strategy used for this model.",
   "model.dialog.capacity.error.positiveInteger": "Capacity numeric fields must be positive integers or empty.",
   "model.dialog.capacity.error.outputExceedsWindow": "Max output tokens cannot exceed the context window.",
+  "model.dialog.capacity.error.inputExceedsWindow": "Max input tokens cannot exceed the context window (any excess is silently clipped, so please adjust the value directly).",
   "model.dialog.capacity.error.reserveExceedsOutput": "Output reserve cannot exceed max output tokens.",
   "model.dialog.capacity.error.requiredMissing": "Context window and max input tokens are required.",
   "model.dialog.capacity.deprecatedMaxTokens": "max_tokens is deprecated; use max_output_tokens.",

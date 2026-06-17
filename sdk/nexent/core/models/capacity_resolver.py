@@ -263,6 +263,18 @@ def resolve_capacity(
             f"({context_window_tokens})"
         )
 
+    if (
+        max_input_tokens is not None
+        and context_window_tokens is not None
+        and max_input_tokens > context_window_tokens
+    ):
+        raise InvalidCapacityConfiguration(
+            f"max_input_tokens ({max_input_tokens}) exceeds context_window_tokens "
+            f"({context_window_tokens}); operators who fill an input cap above the "
+            f"window will be silently clipped by the derived provider_input_limit, "
+            f"so the override never takes effect"
+        )
+
     if requested_output_tokens is None:
         requested_output_tokens = (
             default_output_reserve_tokens
