@@ -32,7 +32,7 @@ BEGIN
            default_output_reserve_tokens = 4096
      WHERE LOWER(model_factory) = 'openai'
        AND model_name = 'gpt-4o'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -44,7 +44,7 @@ BEGIN
            default_output_reserve_tokens = 8192
      WHERE LOWER(model_factory) = 'openai'
        AND model_name = 'gpt-4.1'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -56,7 +56,7 @@ BEGIN
            default_output_reserve_tokens = 4096
      WHERE LOWER(model_factory) = 'dashscope'
        AND model_name = 'qwen-plus'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -68,7 +68,7 @@ BEGIN
            default_output_reserve_tokens = 4096
      WHERE LOWER(model_factory) = 'dashscope'
        AND model_name = 'qwen-turbo'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -80,7 +80,7 @@ BEGIN
            default_output_reserve_tokens = 8192
      WHERE LOWER(model_factory) = 'dashscope'
        AND model_name = 'glm-5.1'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -92,7 +92,7 @@ BEGIN
            default_output_reserve_tokens = 8192
      WHERE LOWER(model_factory) = 'silicon'
        AND model_name = 'deepseek-ai/DeepSeek-V4-Flash'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -104,7 +104,7 @@ BEGIN
            default_output_reserve_tokens = 8192
      WHERE LOWER(model_factory) = 'silicon'
        AND model_name = 'Qwen/Qwen3.6-27B'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
@@ -116,7 +116,7 @@ BEGIN
            default_output_reserve_tokens = 8192
      WHERE LOWER(model_factory) = 'silicon'
        AND model_name = 'Pro/moonshotai/Kimi-K2.6'
-       AND deleted_flag = 0
+       AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
