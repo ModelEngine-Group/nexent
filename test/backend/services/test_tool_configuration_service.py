@@ -3122,7 +3122,7 @@ class TestValidateLocalToolAnalyzeImage:
         )
 
         assert result == "analyze image result"
-        mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1")
+        mock_get_vlm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
         mock_tool_class.assert_called_once()
         call_kwargs = mock_tool_class.call_args.kwargs
         assert 'vlm_model' in call_kwargs
@@ -3196,7 +3196,7 @@ class TestValidateLocalToolAnalyzeAudioVideo:
         )
 
         assert result == f"{tool_name} result"
-        mock_get_video_model.assert_called_once_with(tenant_id="tenant1")
+        mock_get_video_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
         call_kwargs = mock_tool_class.call_args.kwargs
         assert call_kwargs["vlm_model"] == "mock_video_model"
         assert "storage_client" in call_kwargs
@@ -3507,7 +3507,7 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls
-        mock_get_llm_model.assert_called_once_with(tenant_id="tenant1")
+        mock_get_llm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_analyze_text_file_missing_tenant_id(self, mock_get_class):
@@ -3612,6 +3612,8 @@ class TestGetLlmModel:
             max_context_tokens=4096,
             ssl_verify=True,
             timeout_seconds=None,
+            model_factory=None,
+            display_name=None,
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
@@ -3686,6 +3688,8 @@ class TestGetLlmModel:
             max_context_tokens=4096,
             ssl_verify=True,
             timeout_seconds=30,
+            model_factory=None,
+            display_name=None,
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
