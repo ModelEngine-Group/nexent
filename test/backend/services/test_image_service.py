@@ -344,7 +344,9 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
         top_p=0.7,
         frequency_penalty=0.5,
         max_tokens=512,
-        ssl_verify=True
+        ssl_verify=True,
+        model_factory=None,
+        display_name=None
     )
     assert result == mock_model_instance
 
