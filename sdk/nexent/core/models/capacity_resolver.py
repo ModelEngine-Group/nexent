@@ -185,7 +185,16 @@ _OVERRIDABLE_FIELDS = (
     "tokenizer_family",
 )
 
-_DEFAULT_REQUESTED_OUTPUT_TOKENS = 1024
+# Last-resort fallback when neither the agent nor the model record sets a
+# requested_output_tokens / default_output_reserve_tokens. 1024 was too small
+# in practice: tool-using agents often write multi-hundred-token JSON tool
+# calls plus a few hundred tokens of thought per step, and 1024 produced
+# mid-JSON truncation that surfaced to users as "tool failed" instead of a
+# capacity-config issue. 4096 covers the median single-turn output reliably
+# without overshooting tiny-output models — those still get caught by the
+# RequestedOutputExceedsCap check (capacity_resolver line 276-283 and
+# the agent-edit form rule).
+_DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096
 
 
 def resolve_capacity(
