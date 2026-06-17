@@ -1907,8 +1907,15 @@ class ElasticSearchService:
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
     ):
-        """
-        Update a chunk document.
+        """Update a chunk document.
+
+        When the payload changes ``content``, the embedding vector is
+        regenerated using the knowledge base's currently configured
+        embedding model and persisted alongside the text so that the
+        stored vector cannot drift out of sync with the stored text.
+        Metadata-only updates (no ``content`` in payload, or ``content=None``)
+        skip the embedding call. Any failure during embedding resolution or
+        generation aborts the entire update.
         """
         try:
             update_fields = chunk_request.dict(
@@ -1927,6 +1934,35 @@ class ElasticSearchService:
 
             if not update_payload:
                 raise ValueError("No update fields supplied.")
+
+            new_content = update_fields.get("content")
+            if "content" in update_fields and new_content is not None:
+                if not tenant_id:
+                    raise ValueError(
+                        "tenant_id is required to re-embed updated chunk content.")
+                knowledge_record = get_knowledge_record({
+                    "index_name": index_name,
+                    "tenant_id": tenant_id,
+                })
+                if not knowledge_record:
+                    raise ValueError(
+                        f"Knowledge base record for index '{index_name}' not found.")
+                embedding_model_id = knowledge_record.get("embedding_model_id")
+                if not embedding_model_id:
+                    raise ValueError(
+                        f"No embedding model configured for index '{index_name}'.")
+                embedding_model, _ = get_embedding_model_by_id(
+                    tenant_id, embedding_model_id)
+                if embedding_model is None:
+                    raise ValueError(
+                        f"Failed to resolve embedding model {embedding_model_id} "
+                        f"for index '{index_name}'.")
+                embeddings = embedding_model.get_embeddings(new_content)
+                if not embeddings:
+                    raise ValueError(
+                        "Embedding generation returned no vector for updated content.")
+                update_payload["embedding"] = embeddings[0]
+                update_payload["embedding_model_id"] = embedding_model_id
 
             result = vdb_core.update_chunk(
                 index_name, chunk_id, update_payload)

@@ -311,7 +311,8 @@ class ChunkCreateRequest(BaseModel):
 class ChunkUpdateRequest(BaseModel):
     """Request payload for chunk updates."""
 
-    content: Optional[str] = Field(None, description="Updated chunk content")
+    content: Optional[str] = Field(
+        None, min_length=1, description="Updated chunk content")
     title: Optional[str] = Field(None, description="Updated chunk title")
     filename: Optional[str] = Field(None, description="Updated file name")
     path_or_url: Optional[str] = Field(
