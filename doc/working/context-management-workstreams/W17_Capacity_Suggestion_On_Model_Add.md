@@ -75,6 +75,227 @@ Values that used to be invisible:
 - A miss remains non-blocking but is observable through endpoint metrics and
   debug logs; the UI keeps the existing empty capacity form.
 
+## Visibility for Existing Bare-Capacity Models
+
+W17 also takes on the complementary mission of surfacing **existing**
+model rows whose capacity columns are still NULL — the legacy rows
+created before W1 step 7 made `context_window_tokens` and
+`max_output_tokens` required in the Add/Edit forms. Without W17,
+these rows silently disable W2 output-token enforcement and the W1→W2
+dispatch consistency check, and the only signal today is a backend
+WARNING that the model administrator and agent author never see.
+
+### Problem Statement
+
+The remediation path for a legacy bare-capacity row is identical to
+the W17 add-time flow: open the model, fill in capacity, save. What is
+missing is a way for the people who can take that action — model
+administrators and agent authors — to **discover** which rows need it
+without grepping backend logs. Today:
+
+- The model management list page renders bare rows identically to
+  configured rows; nothing in the UI says enforcement is off.
+- The agent-edit "select model" dropdown ranks bare models the same as
+  configured ones; an agent author can unknowingly attach an
+  unprotected model to a high-traffic agent.
+- The only log message is a backend WARNING aimed at platform
+  operators who typically cannot edit per-tenant model records.
+
+### Solution Surfaces (Three UI Touchpoints)
+
+#### 1. Model Management List Page Badge
+
+In the LLM/VLM list view, render a small yellow warning badge next to
+any row whose capacity is incomplete. The badge:
+
+- Sits inline with the model name, not at the end of the row, so it
+  is visible in narrow viewports and in dense lists.
+- Uses the existing icon set (warning triangle); never red, because
+  the model is still usable — only enforcement is off.
+- Shows a tooltip on hover: "Output token cap is not enforced for
+  this model. Click to fill capacity values now." (i18n keys below.)
+- Clicking the badge opens the same `ModelEditDialog` that the
+  existing pencil/gear control opens, with the capacity panel
+  pre-expanded and (if W17 suggestion can match) the suggestion
+  prefilled.
+
+The badge condition is `context_window_tokens IS NULL OR
+max_output_tokens IS NULL`, matching the W1 resolver's
+`ProviderCapabilityUnknown` gate. Both fields, not just one, because
+either NULL produces `ProviderCapabilityUnknown` at request time.
+
+#### 2. Agent-Edit Model Selector Warning
+
+When an agent author opens the model dropdown on the agent-edit
+page, items backed by bare-capacity rows render with the same
+warning triangle and a one-line subtitle: "Output cap not enforced
+— configure capacity in Model Management." Items remain selectable
+(degraded behavior is preferable to blocking agent authorship).
+
+If the author selects a bare-capacity model, the agent-edit form
+shows a non-blocking inline notice above the save button: "The
+selected model has no capacity configured. The agent will run, but
+output-token enforcement and budget consistency checks are off
+until capacity is set in Model Management." This notice **does not**
+include a link to the Model Management page if the current agent
+author lacks model-management permission; in that case it instead
+shows: "Ask a model administrator to configure capacity for
+`<model_name>`."
+
+#### 3. Dashboard Widget for Operators
+
+In the system dashboard (the existing operator landing page used by
+platform admins), add a small "Model capacity coverage" widget
+showing:
+
+- Number of bare-capacity LLM/VLM rows / total rows.
+- A "View all" link that opens Model Management filtered to bare
+  rows.
+
+The widget hides itself when the count is zero. No alerting; the
+widget is observability, not paging.
+
+### Backend Endpoint Contract
+
+```text
+GET /api/v1/models/capacity-coverage
+```
+
+Read-only, idempotent. Tenant-scoped by the bearer token's tenant
+claim. Returns:
+
+| Field | Direction | Type | Notes |
+| --- | --- | --- | --- |
+| `total_llm_vlm` | out | integer | Count of non-deleted LLM/VLM rows in tenant |
+| `bare_count` | out | integer | Count where `context_window_tokens IS NULL OR max_output_tokens IS NULL` |
+| `bare_models` | out | array | Per-row identification |
+
+Each `bare_models[]` entry:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `model_id` | integer | DB primary key |
+| `model_name` | string | Raw display value |
+| `model_factory` | string | Current value, often `OpenAI-API-Compatible` |
+| `model_type` | string | `llm` or `vlm` |
+| `suggestion_available` | boolean | Whether `/suggest-capacity` can prefill |
+
+The endpoint is intentionally small. Frontend filters and sorts
+locally. There is no pagination — at the row counts this endpoint
+targets (typically < 100 per tenant), a simple list is sufficient
+and operator filters are local-only.
+
+`suggestion_available` is precomputed by a non-blocking call to the
+W17 catalog matcher for each bare row. Provider-discovery suggestion
+is **not** attempted from this endpoint (it would require credentials
+and network calls scaled by row count); only catalog matching runs.
+If the W17 feature flag is off, `suggestion_available` is always
+`false` and the field is informational only.
+
+### Frontend Implementation
+
+The visibility work shares the same flag as the rest of W17
+(`CAPACITY_SUGGESTION_ENABLED`). When off:
+
+- The list-page badge still renders (the badge does not depend on
+  suggestion; it depends only on the bare condition).
+- The agent-edit dropdown warning still renders.
+- The dashboard widget still renders.
+- The "Click to fill" affordance opens the existing `ModelEditDialog`
+  without prefill; the operator types values from scratch.
+
+When on, the same controls additionally prefill suggested values
+from W17's catalog match.
+
+Files touched (new sub-list, not replacing the existing
+Repository Touchpoints section):
+
+- `frontend/app/[locale]/models/components/model/ModelList.tsx`
+  (badge column)
+- `frontend/app/[locale]/setup/components/agentInfo/AgentGenerateDetail.tsx`
+  (selector subtitle and inline notice)
+- `frontend/app/[locale]/dashboard/ModelCapacityCoverageWidget.tsx`
+  (new)
+- `frontend/services/modelService.ts`
+  (`getCapacityCoverage()` method)
+- `backend/apps/model_managment_app.py`
+  (new GET route)
+- `backend/services/model_management_service.py`
+  (`get_capacity_coverage(tenant_id)` query)
+
+### Localization Strings (Additional to the W17 Set Above)
+
+- `model.list.capacityWarning.badgeTooltip`
+- `model.list.capacityWarning.tooltipAction`
+- `agent.modelSelector.bareCapacity.subtitle`
+- `agent.modelSelector.bareCapacity.formNotice`
+- `agent.modelSelector.bareCapacity.formNoticeNoPermission`
+- `dashboard.capacityCoverage.title`
+- `dashboard.capacityCoverage.subtitle`
+- `dashboard.capacityCoverage.viewAll`
+
+### Tests
+
+Unit:
+
+- `get_capacity_coverage` returns correct `bare_count` against a
+  fixture with mixed configured/bare rows; `bare_models[]` excludes
+  embedding/rerank rows; deleted rows excluded.
+- `suggestion_available` is true for rows whose `model_name` and
+  `model_factory` would catalog-match (or fuzzy-match) and false
+  otherwise.
+
+Integration:
+
+- `GET /api/v1/models/capacity-coverage` with one configured
+  `openai/gpt-4o` row and one bare row returns
+  `bare_count = 1`, `total_llm_vlm = 2`, and the bare row's
+  `model_id` in `bare_models[]`.
+- Cross-tenant isolation: a bare row in tenant B does not appear in
+  tenant A's response.
+
+Frontend E2E:
+
+- Model Management list page with one bare row: badge is visible
+  inline with the model name. Clicking the badge opens
+  `ModelEditDialog` with the capacity panel expanded.
+- Agent-edit page selects a bare-capacity model: inline notice
+  appears above save. Save still succeeds.
+- Dashboard widget with `bare_count = 0` is not rendered; with
+  `bare_count > 0` it shows the count and the "View all" link works.
+
+### Phase Placement Within W17
+
+This visibility work is **Phase 1.5** (between Phase 1 catalog match
+and Phase 2 connectivity integration). It ships independently of the
+suggestion-on-add UX because:
+
+- It does not require connectivity validation changes.
+- It does not require provider-discovery code.
+- It directly addresses the existing-bare-rows problem regardless of
+  whether the suggestion flag is on.
+
+If Phase 1 ships in week N, Phase 1.5 should ship in week N+1
+behind a separate small flag (`CAPACITY_COVERAGE_VISIBILITY_ENABLED`,
+default off) so it can be enabled without waiting for the suggestion
+UX, then merged into the broader W17 flag at GA.
+
+### Out of Scope for This Section
+
+- Auto-fixing bare rows. The fix path is always the operator opening
+  the edit dialog and saving. Auto-write paths are governed by the
+  catalog backfill SQL migration
+  (`docker/sql/v2.2.0_0617_backfill_w2_capacity_from_w1_catalog.sql`),
+  not by this UI work.
+- Blocking agent save when a bare-capacity model is selected.
+  Degraded behavior (warning + non-blocking) is the chosen UX so
+  agent authoring is never gated on cross-team coordination.
+- Email/Slack alerting from the dashboard widget. The widget is
+  informational; integrators may add alerting downstream if desired.
+- Surfacing the warning in the chat UI to end users. End users
+  cannot edit model capacity; presenting the warning to them would
+  create blame routing without recourse.
+
 ## Target Contract
 
 Capacity suggestion is exposed two ways:
