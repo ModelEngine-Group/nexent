@@ -481,11 +481,44 @@ try:
 except Exception:
     # If file_management_service cannot be imported in this isolated test
     # environment, fall back to a stub so patches that target the module
-    # still have something to attach to.
+    # still have something to attach to. The stub mirrors the real function
+    # so that tests like ``TestGetLlmModel`` (which import
+    # ``get_llm_model`` from this module and rely on patches of
+    # ``OpenAILongContextModel`` / ``MessageObserver`` / etc.) continue to
+    # work. All dependencies are looked up on the module's ``__dict__`` at
+    # call time so ``@patch('backend.services.file_management_service.X')``
+    # decorations override the stubs.
     backend_file_management_module = types.ModuleType(
         'backend.services.file_management_service')
     backend_file_management_module.MODEL_CONFIG_MAPPING = {}
-    backend_file_management_module.get_llm_model = MagicMock()
+    backend_file_management_module.MessageObserver = MagicMock()
+    backend_file_management_module.OpenAILongContextModel = MagicMock()
+    backend_file_management_module.get_model_name_from_config = MagicMock(
+        return_value="stub-model")
+    backend_file_management_module.tenant_config_manager = MagicMock()
+
+    def _stub_get_llm_model(tenant_id):
+        mod = backend_file_management_module
+        mapping = mod.MODEL_CONFIG_MAPPING or {}
+        config_key = mapping.get("llm", "llm_config_key")
+        manager = mod.tenant_config_manager
+        main_model_config = manager.get_model_config(
+            key=config_key, tenant_id=tenant_id)
+        timeout_seconds = (
+            main_model_config.get("timeout_seconds")
+            if main_model_config else None
+        )
+        return mod.OpenAILongContextModel(
+            observer=mod.MessageObserver(),
+            model_id=mod.get_model_name_from_config(main_model_config),
+            api_base=(main_model_config or {}).get("base_url"),
+            api_key=(main_model_config or {}).get("api_key"),
+            max_context_tokens=(main_model_config or {}).get("max_tokens"),
+            ssl_verify=(main_model_config or {}).get("ssl_verify", True),
+            timeout_seconds=timeout_seconds,
+        )
+
+    backend_file_management_module.get_llm_model = _stub_get_llm_model
     backend_file_management_module.validate_urls_access = MagicMock(
         return_value=True)
     sys.modules['backend.services.file_management_service'] = (
