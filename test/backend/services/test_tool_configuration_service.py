@@ -491,26 +491,45 @@ except Exception:
     backend_file_management_module = types.ModuleType(
         'backend.services.file_management_service')
     backend_file_management_module.MODEL_CONFIG_MAPPING = {}
+    # These MagicMock defaults exist so that ``@patch(...)`` decorators can
+    # call ``get_original()`` (which needs to read the current value on the
+    # module). When the try-branch runs the real module replaces this stub, so
+    # all the MagicMocks are shadowed by the real implementation.
     backend_file_management_module.MessageObserver = MagicMock()
     backend_file_management_module.OpenAILongContextModel = MagicMock()
     backend_file_management_module.get_model_name_from_config = MagicMock(
         return_value="stub-model")
     backend_file_management_module.tenant_config_manager = MagicMock()
+    backend_file_management_module.validate_urls_access = MagicMock(
+        return_value=True)
 
     def _stub_get_llm_model(tenant_id):
-        mod = backend_file_management_module
-        mapping = mod.MODEL_CONFIG_MAPPING or {}
+        # Look up the *real* module from sys.modules so that
+        # ``@patch('backend.services.file_management_service.X')`` decorators
+        # (which modify sys.modules['backend.services.file_management_service'])
+        # are respected. If the real module was successfully imported (try branch)
+        # we get its patched names; if the except branch runs we fall back to
+        # the stub's own MagicMock attributes.
+        real_mod = sys.modules.get('backend.services.file_management_service',
+                                  backend_file_management_module)
+        mapping = getattr(real_mod, 'MODEL_CONFIG_MAPPING', {}) or {}
         config_key = mapping.get("llm", "llm_config_key")
-        manager = mod.tenant_config_manager
-        main_model_config = manager.get_model_config(
-            key=config_key, tenant_id=tenant_id)
+        manager = getattr(real_mod, 'tenant_config_manager', None)
+        main_model_config = (
+            manager.get_model_config(key=config_key, tenant_id=tenant_id)
+            if manager else None
+        )
         timeout_seconds = (
             main_model_config.get("timeout_seconds")
             if main_model_config else None
         )
-        return mod.OpenAILongContextModel(
-            observer=mod.MessageObserver(),
-            model_id=mod.get_model_name_from_config(main_model_config),
+        OpenAIModel = getattr(real_mod, 'OpenAILongContextModel', MagicMock())
+        Observer = getattr(real_mod, 'MessageObserver', MagicMock())
+        get_name = getattr(real_mod, 'get_model_name_from_config',
+                           MagicMock(return_value="stub-model"))
+        return OpenAIModel(
+            observer=Observer(),
+            model_id=get_name(main_model_config),
             api_base=(main_model_config or {}).get("base_url"),
             api_key=(main_model_config or {}).get("api_key"),
             max_context_tokens=(main_model_config or {}).get("max_tokens"),
