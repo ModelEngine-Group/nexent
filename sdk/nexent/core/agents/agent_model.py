@@ -154,6 +154,10 @@ class AgentConfig(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
+    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved W2 safe input budget snapshot for request execution",
+        default=None,
+    )
 
 
 class AgentHistory(BaseModel):
@@ -183,6 +187,10 @@ class AgentRunInfo(BaseModel):
     )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
+    )
+    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved W2 safe input budget snapshot for request execution",
         default=None,
     )
 
