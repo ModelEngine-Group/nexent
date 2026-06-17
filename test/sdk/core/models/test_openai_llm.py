@@ -104,6 +104,20 @@ def _setup_stubs():
     smol_mod.Tool = object
     sys.modules["smolagents"] = smol_mod
     sys.modules["smolagents.models"] = smol_models
+    smol_memory = types.ModuleType("smolagents.memory")
+    smol_memory.ActionStep = type("ActionStep", (), {})
+    smol_memory.AgentMemory = type("AgentMemory", (), {})
+    smol_memory.MemoryStep = type("MemoryStep", (), {})
+    sys.modules["smolagents.memory"] = smol_memory
+    smol_monitoring = types.ModuleType("smolagents.monitoring")
+    smol_monitoring.TokenUsage = type("TokenUsage", (), {
+        "__init__": lambda self, input_tokens=0, output_tokens=0: (
+            setattr(self, "input_tokens", input_tokens),
+            setattr(self, "output_tokens", output_tokens),
+            None,
+        )[-1]
+    })
+    sys.modules["smolagents.monitoring"] = smol_monitoring
 
     # Stub OpenAIServerModel base class
     sa_mod = types.ModuleType("smolagents.models") if "smolagents.models" not in sys.modules else sys.modules["smolagents.models"]
@@ -229,6 +243,18 @@ class SimpleChatMessage:
 mock_models_module.ChatMessage = SimpleChatMessage
 mock_models_module.MessageRole = MagicMock()
 mock_smolagents.models = mock_models_module
+mock_memory_module = MagicMock()
+mock_memory_module.ActionStep = type("ActionStep", (), {})
+mock_memory_module.AgentMemory = type("AgentMemory", (), {})
+mock_memory_module.MemoryStep = type("MemoryStep", (), {})
+mock_monitoring_module = MagicMock()
+mock_monitoring_module.TokenUsage = type("TokenUsage", (), {
+    "__init__": lambda self, input_tokens=0, output_tokens=0: (
+        setattr(self, "input_tokens", input_tokens),
+        setattr(self, "output_tokens", output_tokens),
+        None,
+    )[-1]
+})
 
 # Mock monitoring modules
 monitoring_manager_mock = MagicMock()
@@ -297,6 +323,8 @@ nexent_core_utils_mock.observer.ProcessType = MockProcessType
 module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.models": mock_models_module,
+    "smolagents.memory": mock_memory_module,
+    "smolagents.monitoring": mock_monitoring_module,
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(),
@@ -1325,6 +1353,83 @@ def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
             messages=[{"role": "user", "content": "hello"}], _token_tracker=mock_tracker)
 
     mock_tracker.record_token.assert_called()
+
+
+def _safe_input_budget_snapshot(requested_output_tokens=128):
+    return {
+        "w1_fingerprint": "w1fingerprint",
+        "provider": "openai",
+        "model_name": "gpt-test",
+        "requested_output_tokens": requested_output_tokens,
+        "output_reserve_source": "model_default",
+        "provider_input_limit_tokens": 1000,
+        "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none",
+        "approved_profile_reserve_tokens": None,
+        "soft_limit_ratio": 0.8,
+        "soft_limit_ratio_source": "code_default",
+        "soft_input_budget_tokens": 800,
+        "hard_input_budget_tokens": 1000,
+        "field_sources": {},
+        "warnings": [],
+        "resolver_version": "1.0.0",
+        "fingerprint": "w2fingerprint",
+    }
+
+
+def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        stream=True,
+        messages=[],
+        max_tokens=64,
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=64,
+    )
+
+
+def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        stream=True,
+        messages=[],
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
+    with pytest.raises(openai_llm_module.CallerMaxTokensOverrideForbidden):
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+            stream=True,
+            messages=[],
+            max_tokens=128,
+        )
+
+    openai_model_instance.client.chat.completions.create.assert_not_called()
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):

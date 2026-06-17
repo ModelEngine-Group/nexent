@@ -18,7 +18,10 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
-from .capacity_budget import SafeInputBudgetSnapshot
+from .capacity_budget import (
+    CallerMaxTokensOverrideForbidden,
+    SafeInputBudgetSnapshot,
+)
 from ..utils.observer import MessageObserver, ProcessType
 
 logger = logging.getLogger("openai_llm")
@@ -31,6 +34,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
+                 safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -66,6 +70,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
         self.extra_body = extra_body or None
+        self.safe_input_budget_snapshot = safe_input_budget_snapshot
         if max_output_tokens is None and max_tokens is not None:
             logger.debug(
                 "OpenAIModel received legacy max_tokens=%s; treating as max_output_tokens. "
@@ -202,8 +207,11 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if self.max_output_tokens is not None and "max_tokens" not in completion_kwargs:
             completion_kwargs["max_tokens"] = self.max_output_tokens
 
+        trusted_budget_snapshot = (
+            safe_input_budget_snapshot or self.safe_input_budget_snapshot
+        )
         current_request = self._dispatch_chat_completion(
-            safe_input_budget_snapshot=safe_input_budget_snapshot,
+            safe_input_budget_snapshot=trusted_budget_snapshot,
             stream=True,
             **completion_kwargs,
         )
@@ -352,17 +360,40 @@ ssl_verify=True, model_factory: Optional[str] = None,
     def _dispatch_chat_completion(
         self,
         *,
-        safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+        safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
         **completion_kwargs: Any,
     ) -> Any:
         """Dispatch the OpenAI chat completion request.
 
-        W2 enforcement will assert `max_tokens` against
-        `safe_input_budget_snapshot.requested_output_tokens` here after the ADR
-        is accepted. The skeleton keeps current behavior unchanged.
+        When W2 supplied a trusted safe-input-budget snapshot, this method is
+        the provider dispatch boundary: caller `max_tokens` overrides must
+        match the snapshot, and absent values are filled from the snapshot.
         """
-        _ = safe_input_budget_snapshot
+        snapshot = self._coerce_safe_input_budget_snapshot(safe_input_budget_snapshot)
+        if snapshot is not None:
+            trusted_max_tokens = snapshot.requested_output_tokens
+            caller_max_tokens = completion_kwargs.get("max_tokens")
+            if caller_max_tokens is not None and caller_max_tokens != trusted_max_tokens:
+                raise CallerMaxTokensOverrideForbidden(
+                    snapshot_value=trusted_max_tokens,
+                    caller_value=caller_max_tokens,
+                )
+            completion_kwargs["max_tokens"] = trusted_max_tokens
         return self.client.chat.completions.create(**completion_kwargs)
+
+    @staticmethod
+    def _coerce_safe_input_budget_snapshot(
+        snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+    ) -> Optional[SafeInputBudgetSnapshot]:
+        if snapshot is None:
+            return None
+        if isinstance(snapshot, SafeInputBudgetSnapshot):
+            return snapshot
+        if isinstance(snapshot, dict):
+            return SafeInputBudgetSnapshot.model_validate(snapshot)
+        raise TypeError(
+            "safe_input_budget_snapshot must be a SafeInputBudgetSnapshot or dict"
+        )
 
     async def check_connectivity(self) -> bool:
         """

@@ -375,6 +375,11 @@ extra_body=model_config.extra_body,
 
         try:
             model = self.create_model(agent_config.model_name)
+            model.safe_input_budget_snapshot = getattr(
+                agent_config,
+                "safe_input_budget_snapshot",
+                None,
+            )
             prompt_templates = agent_config.prompt_templates
 
             try:
