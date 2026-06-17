@@ -50,8 +50,10 @@
 |---------|-------|------|---------|
 | 上下文窗口 tokens | `context_window_tokens` | 模型一次调用允许的总 token 数（input + output 合计上限） | 模型管理员，从 provider 文档抄 |
 | 最大输出 tokens | `max_output_tokens` | 模型一次回复最多输出多少 token（provider 硬上限） | 模型管理员，从 provider 文档抄 |
-| (未来) 默认输出预留 | `default_output_reserve_tokens` | 当 agent 没配 "输出预留" 时，本模型本轮预留多少 | 模型管理员（可空，留空走 SDK 默认 1024） |
-| (内部) 最大输入 tokens | `max_input_tokens` | 部分 provider 显式给的 input-only 硬上限（多数模型未公开，留空即可） | 模型管理员（一般留空） |
+| 默认输出预留 | `default_output_reserve_tokens` | 当 agent 没配 "输出预留" 时，本模型本轮预留多少 | 模型管理员（可空，留空走 SDK 默认 4096） |
+| 最大输入 tokens | `max_input_tokens` | 部分 provider 显式给的 input-only 硬上限（多数模型未公开，留空即可）；如果填了，会再做 `min(max_input, context_window − requested_output)` | 模型管理员（一般留空） |
+
+> **UI 入口可见性**：`maxInputTokens`、`maxOutputTokens` 在 Add / Edit 两种模式都可见；`defaultOutputReserveTokens` **当前只在 Edit 模式渲染**（`ModelCapacityFields.tsx:277` 的 `isAddMode` 分支）。所以新加模型这一列默认 NULL，runtime 走 SDK 4096 默认；要按模型精调，必须先 Add，再 Edit 进去补这一列。这是当前的 UX 折中，W17 会进一步在 catalog 命中时自动 prefill 这个值。
 
 ### 2.2 Agent 编辑 UI（Agent 作者配置）→ `agent_t` 列
 
@@ -59,7 +61,7 @@
 |---------|-------|------|
 | 输出预留 | `requested_output_tokens` | 本 agent 每次调用模型时，从上下文窗口里切多少给输出 |
 
-留空 → fallback 到模型的 `default_output_reserve_tokens` → 再 fallback 到 SDK 默认值。
+留空 → fallback 到模型的 `default_output_reserve_tokens` → 再 fallback 到 SDK 默认 4096。Form.Item 有条件性 max rule（max = 当前所选模型的 `max_output_tokens`），保存时拦截超限；切换模型时立刻重新校验已填值。
 
 ### 2.3 API 请求 body（单次请求覆盖）
 
@@ -101,12 +103,21 @@
        ↓ 没填则
 3. 模型列 (model_record_t.default_output_reserve_tokens)
        ↓ 没填则
-4. SDK 默认 (_DEFAULT_REQUESTED_OUTPUT_TOKENS, 一般 1024)
+4. SDK 默认 (_DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096)
 ```
+
+**关于 SDK 默认 4096**：早期版本是 1024，太小 —— tool-use agent 一步常常写几百 token 的 JSON tool call 加几百 token 的 thought，1024 经常在 JSON 中间被截断，错误暴露为"工具调用失败"，让运维很难追到根因。4096 覆盖大多数单轮输出；不够再用上面三层 override 覆盖。
+
+**关于 model_record_t.default_output_reserve_tokens（第 3 层）的 UI 入口**：
+- **Add 模式**：当前**不渲染**该字段，新加模型这一列会是 NULL，runtime 会一路 fallback 到第 4 层（4096）
+- **Edit 模式**：渲染该字段；管理员可手填具体值
+- 后果：新加的模型如果不再回 edit 面板补一刀，永远走 4096 默认；这对多数场景够用，但写报告 / 长代码 / 复杂表格类 agent 仍可能截断 —— 建议管理员在 edit 模式按模型实际 max_output_tokens 配一个合适值（一般取 `max_output / 2` 或 `max_output` 本身）
 
 **校验**：最终值必须满足 `0 < requested ≤ max_output_tokens`。超过 → 抛 `RequestedOutputExceedsCap`，dispatch 失败。
 
-> 当前 UI 没在保存时做这条上限校验，违例只在 runtime 出现 —— 这是已知 UX gap，TODO 加一条 frontend rule。
+**UI 防线**（两端都有）：
+- Agent 编辑面板的"输出预留" Form.Item 启用条件性 max rule（max = 当前所选模型的 `max_output_tokens`），保存时拦截违例；切换模型时立即重新校验已填值
+- 后端 `_validate_requested_output_tokens_for_agent` 在 API 保存 agent 时也独立校验，作为 defense-in-depth
 
 `soft_limit_ratio` 也有类似 override 链：单次请求 body > tenant_config_t > 默认 0.8。
 
@@ -147,20 +158,22 @@ soft_input_budget       = floor(983616 × 0.8) = 786892
 
 观察：模型可以写到 16K 长回复；输入到 786K 才开始压；hard 几乎拉满。
 
-### 例 3：Agent 配置超限
+### 例 3：Agent 配置超限（UI 保存时拦下）
 
 **模型**（glm-5）：context_window=128000, max_output=8192
 **Agent**："输出预留" 填 16384（**超过模型 8K 上限**）
 
 ```
-保存到 DB ✓（UI 没拦）
-runtime 调用 resolve_capacity()
-  → check: 16384 > 8192
-  → raise RequestedOutputExceedsCap
-dispatch 失败，agent 用户看到错误
+点保存
+  → Form.Item 条件性 max rule 触发（max=8192）
+  → InputNumber max=8192 同步拦截
+  → 显示 i18n 错误："输出预留不能超过该模型的最大输出 tokens（8192）"
+  → 表单不提交，agent 不会保存进入运行
 ```
 
-修法：要么把 agent "输出预留" 调回 ≤ 8192，要么管理员把模型 `max_output_tokens` 调大（前提是 provider 实际支持）。
+修法：把 agent "输出预留" 调回 ≤ 8192；如确实需要长回复，管理员去模型管理把 `max_output_tokens` 调大（前提是 provider 实际支持）。
+
+> 历史背景：早期版本 UI 不做这条校验，违例 row 能保存到 DB，runtime 才在 `capacity_resolver.py:280` 抛 `RequestedOutputExceedsCap` —— 表现为"agent 莫名其妙不回话"。当前版本前端 + 后端 `_validate_requested_output_tokens_for_agent` 双重防护，已不会出现这种隐蔽失败。
 
 ### 例 4：裸模型 fallback
 
@@ -184,12 +197,15 @@ dispatch 时 CM-030 不生效（没有 W2 snapshot 强制 max_tokens）
 
 | 现象 | 原因 | 解法 |
 |------|------|------|
-| Agent 莫名失败，日志有 `RequestedOutputExceedsCap` | Agent "输出预留" > 模型 `max_output_tokens` | UI 调小预留；或后台调大模型 max_output |
+| Agent 编辑 UI："输出预留不能超过该模型的最大输出 tokens（X）" | 当前所选模型 `max_output_tokens` < 你填的值 | 调小预留；或换模型；或管理员调大模型的 max_output |
+| 模型管理 UI："最大输入 Token 数不能超过上下文窗口" | `max_input_tokens > context_window_tokens` 时静默被 min() 钳掉，且管理员的 override 不生效 | 把 max_input 调到 ≤ context_window；多数模型留空即可 |
+| 模型管理 UI："最大输出 Token 数不能超过上下文窗口" / "输出预留 Token 数不能超过最大输出 Token 数" | 字段之间存在不一致 | 按提示调整对应字段 |
 | `W2 uncertainty reserve active` WARNING 持续出现 | 模型 capability 某些字段标记 unknown（典型：`max_input_tokens`、tokenizer_family 缺失） | 不必处理；CM-016 设计：宁愿保守也不溢出 |
 | 后端日志：`Output token cap ... not enforced for model 'X'` | 模型 row 是裸 capacity（NULL） | UI 编辑该模型填上下文窗口 + 最大输出 |
 | 前端 indicator 显示 `XX/32k*`，星号 | 后端没发 `token_threshold`（snapshot 路径不通） | 同上：补 capacity；或确认 W2 链路 |
 | `soft_input_budget` 看起来比想象的低 | `soft_limit_ratio` 被租户调低（< 0.8） | 看 `tenant_config_t.soft_limit_ratio`；想激进就拉到 0.9 |
-| 模型回复总是被截断 | `requested_output_tokens` 太小，模型还没说完就到上限 | UI 调大"输出预留"；或单次请求 body 临时覆盖 |
+| 模型回复总是被截断（输出半句话 / JSON 半截） | `requested_output_tokens` 太小（fallback 到 4096、或 model default 配小了、或 agent 显式设了小值） | 优先：agent 编辑设大"输出预留"；其次：管理员去模型 edit 给 `default_output_reserve_tokens` 填合理值；单次需要长输出可以 API body 临时覆盖 |
+| 新加模型的 agent 输出经常 4K 截断 | Add 模式不渲染 `defaultOutputReserveTokens` → DB 这一列 NULL → fallback 到 4096 | 去模型 edit 模式补 `default_output_reserve_tokens`；或等 W17 catalog 自动 prefill |
 | 上下文还有很多空间但已开始压缩 | `hard - soft` 间距 = 20%（默认）正在工作 | 这是设计；不想压可调高 ratio |
 
 ---
