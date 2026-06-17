@@ -190,6 +190,15 @@ export default function AgentGenerateDetail({}) {
 
   }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
 
+  // Re-validate requested output tokens when the selected model's max changes,
+  // so switching to a model with a lower cap surfaces the violation immediately
+  // instead of waiting until save.
+  useEffect(() => {
+    if (form.getFieldValue("requestedOutputTokens") != null) {
+      form.validateFields(["requestedOutputTokens"]).catch(() => {});
+    }
+  }, [form, selectedMainAgentModel?.maxOutputTokens]);
+
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
 
@@ -947,10 +956,23 @@ export default function AgentGenerateDetail({}) {
                                 min: 1,
                                 message: t("agent.requestedOutputTokens.error"),
                               },
+                              ...(selectedMainAgentModel?.maxOutputTokens
+                                ? [
+                                    {
+                                      type: "number" as const,
+                                      max: selectedMainAgentModel.maxOutputTokens,
+                                      message: t(
+                                        "agent.requestedOutputTokens.maxError",
+                                        { max: selectedMainAgentModel.maxOutputTokens }
+                                      ),
+                                    },
+                                  ]
+                                : []),
                             ]}
                           >
                             <InputNumber
                               min={1}
+                              max={selectedMainAgentModel?.maxOutputTokens}
                               precision={0}
                               placeholder={
                                 selectedMainAgentModel?.defaultOutputReserveTokens
