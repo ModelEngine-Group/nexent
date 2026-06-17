@@ -319,11 +319,6 @@ deployment_validate() {
     deployment_error "Local config schemaVersion $DEPLOYMENT_LOADED_SCHEMA_VERSION is incompatible with $DEPLOYMENT_SCHEMA_VERSION. Re-run with --reconfigure."
     return 1
   fi
-  if [ -n "$DEPLOYMENT_LOADED_APP_VERSION" ] && [ -n "${APP_VERSION:-}" ] && [ -z "${DEPLOYMENT_APP_VERSION_EXPLICIT:-}" ] && [ "$DEPLOYMENT_LOADED_APP_VERSION" != "$APP_VERSION" ]; then
-    deployment_error "Local config appVersion $DEPLOYMENT_LOADED_APP_VERSION does not match current appVersion $APP_VERSION. Re-run with --reconfigure or pass --app-version."
-    return 1
-  fi
-
   local old_ifs="$IFS"
   local component
   IFS=','
