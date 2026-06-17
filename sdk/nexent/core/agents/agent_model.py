@@ -123,6 +123,14 @@ class AgentConfig(BaseModel):
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
     max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
+    requested_output_tokens: Optional[int] = Field(
+        description=(
+            "Per-agent W2 output reserve override. None means inherit the "
+            "resolved model-level default."
+        ),
+        default=None,
+        ge=1,
+    )
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)

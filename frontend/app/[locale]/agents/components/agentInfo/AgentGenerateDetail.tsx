@@ -153,6 +153,15 @@ export default function AgentGenerateDetail({}) {
     }));
   }, [filteredGroups]);
 
+  const selectedMainAgentModel = useMemo(() => {
+    return availableLlmModels.find(
+      (model) =>
+        model.id === editedAgent.model_id ||
+        model.displayName === editedAgent.model ||
+        model.name === editedAgent.model
+    );
+  }, [availableLlmModels, editedAgent.model, editedAgent.model_id]);
+
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
@@ -163,6 +172,7 @@ export default function AgentGenerateDetail({}) {
       mainAgentModel: editedAgent.model,
       mainAgentModelId: editedAgent.model_id,
       mainAgentMaxStep: editedAgent.max_step || 15,
+      requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -919,6 +929,39 @@ export default function AgentGenerateDetail({}) {
                               ]}
                               onChange={(value) => {
                                 updateAgentConfig({ provide_run_summary: value });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <Form.Item
+                            name="requestedOutputTokens"
+                            label={t("agent.requestedOutputTokens")}
+                            rules={[
+                              {
+                                type: "number",
+                                min: 1,
+                                message: t("agent.requestedOutputTokens.error"),
+                              },
+                            ]}
+                          >
+                            <InputNumber
+                              min={1}
+                              precision={0}
+                              placeholder={
+                                selectedMainAgentModel?.defaultOutputReserveTokens
+                                  ? String(selectedMainAgentModel.defaultOutputReserveTokens)
+                                  : undefined
+                              }
+                              style={{ width: "100%" }}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  requested_output_tokens:
+                                    typeof value === "number" ? value : null,
+                                });
                               }}
                             />
                           </Form.Item>

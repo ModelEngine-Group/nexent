@@ -481,6 +481,7 @@ class AgentInfoRequest(BaseModel):
     model_name: Optional[str] = None
     model_id: Optional[int] = None
     max_steps: Optional[int] = Field(default=None, ge=1, le=30)
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
@@ -571,6 +572,7 @@ class ExportAndImportAgentInfo(BaseModel):
     business_description: str
     author: Optional[str] = None
     max_steps: int
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: bool
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
