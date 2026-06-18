@@ -135,7 +135,6 @@ export const useSaveGuard = () => {
         model_id: currentEditedAgent.model_id ?? undefined,
         max_steps: currentEditedAgent.max_step,
         provide_run_summary: currentEditedAgent.provide_run_summary,
-        verification_config: currentEditedAgent.verification_config,
         enabled: true,
         business_description: currentEditedAgent.business_description,
         duty_prompt: currentEditedAgent.duty_prompt,
@@ -150,8 +149,6 @@ export const useSaveGuard = () => {
         related_agent_ids: relatedAgentIds,
         related_external_agent_ids: relatedExternalAgentIds,
         ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
-        greeting_message: currentEditedAgent.greeting_message,
-        example_questions: currentEditedAgent.example_questions,
       });
 
       if (result.success) {

@@ -76,7 +76,7 @@ def create_new_index(
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
         request: Dict[str, Any] = Body(
-            None, description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"),
+            None, description="Request body with optional fields (ingroup_permission, group_ids, embedding_model_name)"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -89,13 +89,11 @@ def create_new_index(
         group_ids = None
         embedding_model_name: Optional[str] = None
         is_multimodal: Optional[bool] = None
-        preserve_source_file: Optional[bool] = None
         if request:
             ingroup_permission = request.get("ingroup_permission")
             group_ids = request.get("group_ids")
             embedding_model_name = request.get("embeddingModel")
             is_multimodal = request.get("is_multimodal")
-            preserve_source_file = request.get("preserve_source_file")
 
         # Treat path parameter as user-facing knowledge base name for new creations
         return ElasticSearchService.create_knowledge_base(
@@ -108,7 +106,6 @@ def create_new_index(
             group_ids=group_ids,
             embedding_model_name=embedding_model_name,
             is_multimodal=is_multimodal,
-            preserve_source_file=preserve_source_file,
         )
     except Exception as e:
         raise HTTPException(
@@ -508,70 +505,54 @@ async def get_index_files(
 
 
 @router.delete("/{index_name}/documents")
-async def delete_documents(
+def delete_documents(
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: str = Query(...,
                                  description="Path or URL of documents to delete"),
-        scope: str = Query(
-            "full",
-            description=(
-                "source_only: delete MinIO source only, keep ES chunks/vectors; "
-                "full: delete ES documents, MinIO source, and Redis task records"
-            ),
-        ),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
 ):
-    """Delete a document by scope: source file only or full removal from the index."""
+    """Delete documents by path or URL and clean up related Redis records"""
     try:
-        result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
-        )
+        # First delete the documents using existing service
+        result = ElasticSearchService.delete_documents(
+            index_name, path_or_url, vdb_core)
 
-        if scope == "full":
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for document %s in index %s: %s",
-                    path_or_url,
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+        # Then clean up Redis records related to this specific document
+        try:
+            redis_service = get_redis_service()
+            redis_cleanup_result = redis_service.delete_document_records(
+                index_name, path_or_url)
+
+            # Add Redis cleanup info to the result
+            result["redis_cleanup"] = redis_cleanup_result
+
+            # Update the message to include Redis cleanup info
+            original_message = result.get(
+                "message", "Documents deleted successfully")
+            result["message"] = (
+                f"{original_message}. "
+                f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
+                f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
+                f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
+            )
+
+            if redis_cleanup_result.get("errors"):
+                result["redis_warnings"] = redis_cleanup_result["errors"]
+
+        except Exception as redis_error:
+            logger.warning(
+                f"Redis cleanup failed for document {path_or_url} in index {index_name}: {str(redis_error)}")
+            result["redis_cleanup_error"] = str(redis_error)
+            original_message = result.get(
+                "message", "Documents deleted successfully")
+            result[
+                "message"] = f"{original_message}, but Redis cleanup encountered an error: {str(redis_error)}"
 
         return result
 
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
-        )
     except Exception as e:
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error delete indexing documents: {e}",
-        )
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error delete indexing documents: {e}")
 
 
 @router.get("/{index_name}/documents/{path_or_url:path}/error-info")

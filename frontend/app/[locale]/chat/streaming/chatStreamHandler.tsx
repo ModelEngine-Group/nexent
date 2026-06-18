@@ -148,7 +148,6 @@ export const handleStreamResponse = async (
     | typeof chatConfig.contentTypes.SEARCH_CONTENT
     | typeof chatConfig.contentTypes.CARD
     | typeof chatConfig.contentTypes.MEMORY_SEARCH
-    | typeof chatConfig.contentTypes.VERIFICATION
     | typeof chatConfig.contentTypes.PREPROCESS
     | null = null;
   let lastModelOutputIndex = -1; // Track the index of the last model output in currentStep.contents
@@ -796,36 +795,6 @@ export const handleStreamResponse = async (
                   });
                   break;
 
-                case chatConfig.messageTypes.VERIFICATION:
-                  if (!currentStep) {
-                    currentStep = {
-                      id: `step-verification-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 9)}`,
-                      title: "Verification",
-                      content: "",
-                      expanded: true,
-                      contents: [],
-                      metrics: null,
-                      thinking: { content: "", expanded: true },
-                      code: { content: "", expanded: true },
-                      output: { content: "", expanded: true },
-                    };
-                  }
-
-                  currentStep.contents.push({
-                    id: `verification-${Date.now()}-${Math.random()
-                      .toString(36)
-                      .substring(2, 7)}`,
-                    type: chatConfig.messageTypes.VERIFICATION,
-                    subType: "verification",
-                    content: messageContent,
-                    expanded: true,
-                    timestamp: Date.now(),
-                  });
-                  lastContentType = chatConfig.contentTypes.VERIFICATION;
-                  break;
-
                 case chatConfig.messageTypes.MEMORY_SEARCH:
                   // If there's no currentStep, create one
                   if (!currentStep) {
@@ -971,43 +940,6 @@ export const handleStreamResponse = async (
                       t("chatStreamHandler.parseMaxStepsDataFailed"),
                       e
                     );
-                  }
-                  break;
-
-                case chatConfig.messageTypes.SKILL_FILES:
-                  // Process skill-generated file uploads (e.g., documents created by skills)
-                  try {
-                    const skillFilesData = JSON.parse(messageContent);
-                    const skillUploads = skillFilesData.skill_file_uploads || [];
-
-                    // Convert uploads to AttachmentItem format
-                    const newAttachments = skillUploads
-                      .filter((upload: any) => upload.status === "success")
-                      .map((upload: any) => ({
-                        type: "file",
-                        name: upload.file_name || "document",
-                        size: upload.file_size || 0,
-                        object_name: upload.object_name,
-                        url: upload.preview_url || upload.presigned_url || upload.object_name,
-                        contentType: upload.mime_type,
-                      }));
-
-                    if (newAttachments.length > 0) {
-                      setMessages((prev) => {
-                        const newMessages = [...prev];
-                        const lastMsg = newMessages[newMessages.length - 1];
-                        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
-                          const existingAttachments = lastMsg.attachments || [];
-                          newMessages[newMessages.length - 1] = {
-                            ...lastMsg,
-                            attachments: [...existingAttachments, ...newAttachments],
-                          };
-                        }
-                        return newMessages;
-                      });
-                    }
-                  } catch (e) {
-                    log.error(t("chatStreamHandler.streamResponseError"), e);
                   }
                   break;
 

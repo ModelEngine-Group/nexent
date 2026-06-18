@@ -37,7 +37,6 @@ export interface KnowledgeBase {
   tenant_id?: string;
   summaryFrequency?: string | null;
   lastSummaryTime?: string | null;
-  preserve_source_file?: boolean;
 }
 
 // Create knowledge base parameter type
@@ -50,7 +49,6 @@ export interface KnowledgeBaseCreateParams {
   ingroup_permission?: string;
   group_ids?: number[];
   is_multimodal?: boolean;
-  preserve_source_file?: boolean;
 }
 
 // Document type

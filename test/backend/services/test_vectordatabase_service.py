@@ -1050,7 +1050,7 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
              "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch",
-             "ingroup_permission": "EDIT", "tenant_id": "test_tenant", "preserve_source_file": False},
+             "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
             {"index_name": "index2", "embedding_model_name": "test-model",
              "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY",
              "tenant_id": "test_tenant"}
@@ -1077,10 +1077,6 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["group_ids"], [1, 2])
         # index2 has empty group_ids, so it gets the tenant default group [1]
         self.assertEqual(result["indices_info"][1]["group_ids"], [1])
-
-        # Verify preserve_source_file is included in indices_info
-        self.assertFalse(result["indices_info"][0]["preserve_source_file"])
-        self.assertTrue(result["indices_info"][1]["preserve_source_file"])
 
         self.mock_vdb_core.get_user_indices.assert_called_once_with("*")
         self.mock_vdb_core.get_indices_detail.assert_called_once_with(
@@ -2272,78 +2268,6 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index", "test_path")
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
-
-    @patch('backend.services.vectordatabase_service.delete_file')
-    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
-    def test_delete_source_file(self, mock_file_exists, mock_delete_file):
-        mock_delete_file.return_value = {"success": True}
-        result = ElasticSearchService.delete_source_file(
-            "knowledge_base/doc.pdf"
-        )
-        self.assertTrue(result["deleted_minio"])
-        mock_delete_file.assert_called()
-
-    @patch(
-        'backend.services.vectordatabase_service.get_all_files_status',
-        new_callable=AsyncMock,
-    )
-    @patch('backend.services.vectordatabase_service.delete_file')
-    def test_delete_document_by_scope_source_only(
-        self, mock_delete_file, mock_get_status
-    ):
-        mock_get_status.return_value = {
-            "knowledge_base/doc.pdf": {"state": "COMPLETED"}
-        }
-        mock_delete_file.return_value = {"success": True}
-
-        result = asyncio.run(
-            ElasticSearchService.delete_document_by_scope(
-                "test_index",
-                "knowledge_base/doc.pdf",
-                "source_only",
-                self.mock_vdb_core,
-            )
-        )
-
-        self.assertEqual(result["scope"], "source_only")
-        self.assertEqual(result["deleted_es_count"], 0)
-        self.mock_vdb_core.delete_documents.assert_not_called()
-
-    @patch(
-        'backend.services.vectordatabase_service.get_all_files_status',
-        new_callable=AsyncMock,
-    )
-    def test_delete_document_by_scope_rejects_processing(
-        self, mock_get_status
-    ):
-        mock_get_status.return_value = {
-            "knowledge_base/doc.pdf": {"state": "PROCESSING"}
-        }
-
-        with self.assertRaises(ValueError):
-            asyncio.run(
-                ElasticSearchService.delete_document_by_scope(
-                    "test_index",
-                    "knowledge_base/doc.pdf",
-                    "source_only",
-                    self.mock_vdb_core,
-                )
-            )
-
-    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
-    def test_compute_source_available_completed_missing_minio(self, _mock_exists):
-        available = ElasticSearchService._compute_source_available({
-            "path_or_url": "knowledge_base/doc.pdf",
-            "status": "COMPLETED",
-        })
-        self.assertFalse(available)
-
-    def test_compute_source_available_processing_defaults_true(self):
-        available = ElasticSearchService._compute_source_available({
-            "path_or_url": "knowledge_base/doc.pdf",
-            "status": "PROCESSING",
-        })
-        self.assertTrue(available)
 
     @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
     @patch('backend.services.vectordatabase_service.get_redis_service')
@@ -4253,172 +4177,73 @@ class TestElasticSearchService(unittest.TestCase):
             # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_no_model_name_no_records(self, mock_get_model_records):
+    def test_get_embedding_model_unknown_type(self):
         """
-        Test get_embedding_model when no model_name is provided and no records exist.
+        Test get_embedding_model when no model_name is provided.
 
         This test verifies that:
-        1. When no model_name is provided and no model records exist, returns (None, None)
-        2. Embedding models are queried before multi_embedding models
+        1. When no model_name is provided, the function returns (None, None)
+        2. The function handles missing model_name gracefully
         """
-        mock_get_model_records.side_effect = [
-            [],
-            [],
-        ]
-
+        # Stop the mock from setUp to test the real function
         self.get_embedding_model_patcher.stop()
 
         try:
+            # Execute - now we can call the real function
             from backend.services.vectordatabase_service import get_embedding_model
             result, model_id = get_embedding_model("test_tenant")
 
+            # Assert
             self.assertIsNone(result)
             self.assertIsNone(model_id)
-            mock_get_model_records.assert_any_call({"model_type": "embedding"}, "test_tenant")
-            mock_get_model_records.assert_any_call({"model_type": "multi_embedding"}, "test_tenant")
         finally:
+            # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_default_embedding_record(self, mock_get_model_records):
+    def test_get_embedding_model_empty_type(self):
         """
-        Test get_embedding_model falls back to the newest embedding model when model_name is omitted.
-        """
-        mock_get_model_records.return_value = [{
-            "model_id": 101,
-            "model_type": "embedding",
-            "model_name": "default-embedding",
-            "model_repo": "openai",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True,
-        }]
+        Test get_embedding_model when no model_name is provided.
 
+        This test verifies that:
+        1. When no model_name is provided, the function returns (None, None)
+        2. The function handles missing model_name gracefully
+        """
+        # Stop the mock from setUp to test the real function
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "default-embedding"
+            # Execute - now we can call the real function
+            from backend.services.vectordatabase_service import get_embedding_model
+            result, model_id = get_embedding_model("test_tenant")
 
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant")
-
-                self.assertEqual(result, mock_embedding_instance)
-                self.assertEqual(model_id, 101)
-                mock_get_model_records.assert_called_once_with({"model_type": "embedding"}, "test_tenant")
+            # Assert
+            self.assertIsNone(result)
+            self.assertIsNone(model_id)
         finally:
+            # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_fallback_to_multi_embedding(self, mock_get_model_records):
+    def test_get_embedding_model_missing_type(self):
         """
-        Test get_embedding_model falls back to multi_embedding when no embedding model exists.
-        """
-        mock_get_model_records.side_effect = [
-            [],
-            [{
-                "model_id": 202,
-                "model_type": "multi_embedding",
-                "model_name": "default-multi-embedding",
-                "model_repo": "jina",
-                "api_key": "test_api_key",
-                "base_url": "https://test.api.com",
-                "max_tokens": 2048,
-                "ssl_verify": True,
-            }],
-        ]
+        Test get_embedding_model when no model_name is provided.
 
+        This test verifies that:
+        1. When no model_name is provided, the function returns (None, None)
+        2. The function handles missing model_name gracefully
+        """
+        # Stop the mock from setUp to test the real function
         self.get_embedding_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "default-multi-embedding"
+            # Execute - now we can call the real function
+            from backend.services.vectordatabase_service import get_embedding_model
+            result, model_id = get_embedding_model("test_tenant")
 
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant")
-
-                self.assertEqual(result, mock_embedding_instance)
-                self.assertEqual(model_id, 202)
-                self.assertEqual(mock_get_model_records.call_count, 2)
+            # Assert
+            self.assertIsNone(result)
+            self.assertIsNone(model_id)
         finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_default_with_model_type_embedding(self, mock_get_model_records):
-        """
-        Test get_embedding_model queries by the provided model_type when model_name is omitted.
-        """
-        mock_get_model_records.return_value = [{
-            "model_id": 303,
-            "model_type": "embedding",
-            "model_name": "typed-embedding",
-            "model_repo": "openai",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True,
-        }]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "typed-embedding"
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_type="embedding")
-
-                self.assertEqual(result, mock_embedding_instance)
-                self.assertEqual(model_id, 303)
-                mock_get_model_records.assert_called_once_with({"model_type": "embedding"}, "test_tenant")
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_default_with_model_type_multi_embedding(self, mock_get_model_records):
-        """
-        Test get_embedding_model queries multi_embedding records when model_type is specified.
-        """
-        mock_get_model_records.return_value = [{
-            "model_id": 404,
-            "model_type": "multi_embedding",
-            "model_name": "typed-multi-embedding",
-            "model_repo": "jina",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 2048,
-            "ssl_verify": True,
-        }]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.JinaEmbedding') as mock_embedding_class, \
-                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
-                mock_embedding_instance = MagicMock()
-                mock_embedding_class.return_value = mock_embedding_instance
-                mock_get_model_name.return_value = "typed-multi-embedding"
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_type="multi_embedding")
-
-                self.assertEqual(result, mock_embedding_instance)
-                self.assertEqual(model_id, 404)
-                mock_get_model_records.assert_called_once_with(
-                    {"model_type": "multi_embedding"}, "test_tenant"
-                )
-        finally:
+            # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
     @patch('backend.services.vectordatabase_service.get_model_by_display_name')

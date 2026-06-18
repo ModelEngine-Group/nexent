@@ -5,7 +5,6 @@ import types
 from http import HTTPStatus
 
 import pytest
-from pydantic import BaseModel
 
 
 BACKEND_PATH = os.path.abspath(
@@ -19,7 +18,6 @@ def _reset_prompt_template_app_modules():
     sys.modules.pop("apps.prompt_template_app", None)
     sys.modules.pop("services.prompt_template_service", None)
     sys.modules.pop("utils.auth_utils", None)
-    sys.modules.pop("consts.model", None)
 
 
 @pytest.fixture
@@ -37,17 +35,6 @@ def prompt_template_app_module(monkeypatch):
     ]:
         setattr(service_module, name, lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "services.prompt_template_service", service_module)
-
-    class PromptTemplateRequest(BaseModel):
-        template_name: str
-        description: str
-        template_type: str
-        template_content_zh: dict
-        template_content_en: dict
-
-    consts_model_module = types.ModuleType("consts.model")
-    consts_model_module.PromptTemplateRequest = PromptTemplateRequest
-    monkeypatch.setitem(sys.modules, "consts.model", consts_model_module)
 
     auth_module = types.ModuleType("utils.auth_utils")
     auth_module.get_current_user_id = lambda authorization: ("user-1", "tenant-1")

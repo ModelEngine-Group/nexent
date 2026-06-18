@@ -24,50 +24,9 @@ export type AgentConfigUpdate = Partial<Pick<
   | "business_logic_model_name"
   | "prompt_template_id"
   | "prompt_template_name"
-  | "verification_config"
   | "group_ids"
   | "ingroup_permission"
-  | "greeting_message"
-  | "example_questions"
 >>;
-
-export interface AgentVerificationConfig {
-  enabled: boolean;
-  step_verification_enabled: boolean;
-  final_verification_enabled: boolean;
-  llm_verification_enabled?: boolean;
-  max_final_rounds: number;
-  strictness: "lenient" | "balanced" | "strict";
-  fail_policy: "repair_then_controlled_summary" | "warn";
-  pass_score?: number;
-  critical_events: Array<
-    | "tool_precheck"
-    | "tool_result"
-    | "retrieval"
-    | "code_execution"
-    | "handoff"
-    | "final_answer"
-  >;
-}
-
-export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
-  enabled: true,
-  step_verification_enabled: true,
-  final_verification_enabled: true,
-  llm_verification_enabled: true,
-  max_final_rounds: 2,
-  strictness: "balanced",
-  fail_policy: "repair_then_controlled_summary",
-  pass_score: 0.75,
-  critical_events: [
-    "tool_precheck",
-    "tool_result",
-    "retrieval",
-    "code_execution",
-    "handoff",
-    "final_answer",
-  ],
-};
 
 // ========== Core Interfaces ==========
 
@@ -83,7 +42,6 @@ export interface Agent {
   max_step: number;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
-  verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[];  // Skills configured for this agent
   duty_prompt?: string;
@@ -109,8 +67,6 @@ export interface Agent {
   prompts_hidden?: boolean;
   current_version_no?: number;
   is_a2a_server?: boolean;
-  greeting_message?: string;
-  example_questions?: string[];
 }
 
 export interface Tool {
@@ -504,14 +460,11 @@ export interface GeneratePromptParams {
 export interface OptimizePromptSectionParams {
   agent_id: number;
   task_description: string;
-  model_id: number;
+  model_id: string;
   section_type: "duty" | "constraint" | "few_shots";
   section_title: string;
   current_content: string;
   feedback: string;
-  mode?: "general" | "insert" | "select";
-  start_pos?: number;
-  end_pos?: number;
   tool_ids?: number[];
   sub_agent_ids?: number[];
   knowledge_base_display_names?: string[];
@@ -519,32 +472,6 @@ export interface OptimizePromptSectionParams {
 
 export interface OptimizePromptSectionResponse {
   section_type: "duty" | "constraint" | "few_shots";
-  section_title: string;
-  original_content: string;
-  optimized_content: string;
-}
-
-export interface BadCaseItem {
-  question: string;
-  answer: string;
-  label?: string;
-  reason?: string;
-}
-
-export interface OptimizePromptBadCaseParams {
-  agent_id: number;
-  model_id: number;
-  current_content: string;
-  bad_cases: BadCaseItem[];
-  section_type: string;
-  section_title: string;
-  tool_ids?: number[];
-  sub_agent_ids?: number[];
-  knowledge_base_display_names?: string[];
-}
-
-export interface OptimizePromptBadCaseResponse {
-  section_type: string;
   section_title: string;
   original_content: string;
   optimized_content: string;

@@ -52,27 +52,6 @@ _conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
 
-ALLOWED_SKILL_UPLOAD_ROOT = Path("/mnt/nexent").resolve()
-
-
-def is_allowed_skill_upload_path(file_path: str) -> bool:
-    """Return True when a local file path is under the allowed skill upload root."""
-    if not file_path:
-        return False
-
-    try:
-        candidate_path = Path(file_path).resolve()
-    except Exception:
-        return False
-
-    try:
-        candidate_path.relative_to(ALLOWED_SKILL_UPLOAD_ROOT)
-        return True
-    except ValueError:
-        return False
-
-
-
 
 def resolve_minio_upload_folder(
     folder: Optional[str],
@@ -104,11 +83,6 @@ def resolve_minio_upload_folder(
     if folder == "knowledge_base":
         return "knowledge_base"
 
-    if folder == "skill-files":
-        if user_id:
-            return f"skill-files/{user_id}"
-        return "skill-files"
-
     if user_id:
         return f"attachments/{user_id}"
 
@@ -127,6 +101,7 @@ def check_file_access(
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
     - images_in_attachments/*: All authenticated users can access
+    - preview/*: Accessible if the original file is accessible
 
     Args:
         object_name: File object name in storage
@@ -149,10 +124,6 @@ def check_file_access(
         # Extracted image files used by knowledge-base image chunks.
         # Keep them readable for authenticated users to avoid broken image citations.
         return True
-
-    if object_name.startswith("skill-files/"):
-        # Generated documents are private to the uploader and must stay user-scoped.
-        return object_name.startswith(f"skill-files/{user_id}/")
 
     # Check if file is in user's attachments folder
     # Pattern: attachments/{user_id}/*
@@ -386,19 +357,13 @@ async def upload_to_minio(
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
 
-            # Store original filename before upload
-            original_filename = f.filename or ""
-
             # Upload file
             result = upload_fileobj(
                 file_obj=file_obj,
-                file_name=original_filename,
+                file_name=f.filename or "",
                 prefix=actual_folder,
                 file_size=len(file_content)
             )
-
-            # Preserve original filename in result (upload_fileobj uses it for object name generation)
-            result["original_file_name"] = original_filename
 
             # Reset file pointer for potential re-reading
             await f.seek(0)
@@ -411,7 +376,6 @@ async def upload_to_minio(
             results.append({
                 "success": False,
                 "file_name": f.filename,
-                "original_file_name": f.filename,
                 "error": "An error occurred while processing the file."
             })
     return results

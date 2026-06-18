@@ -49,17 +49,6 @@ def _remove_audit_fields_for_insert(data: dict) -> None:
     data.pop('delete_flag', None)
 
 
-def _build_sub_agent_relations(relations: List[dict]) -> List[dict]:
-    """Map relation snapshots to sub-agent relation payloads for API responses."""
-    return [
-        {
-            'agent_id': r['selected_agent_id'],
-            'version_no': r.get('selected_agent_version_no'),
-        }
-        for r in relations
-    ]
-
-
 def publish_version_impl(
     agent_id: int,
     tenant_id: str,
@@ -103,18 +92,11 @@ def publish_version_impl(
         _remove_audit_fields_for_insert(tool_snapshot)
         insert_tool_snapshot(tool_snapshot)
 
-    # Insert relation snapshots with pinned child agent versions
+    # Insert relation snapshots
     for rel in relations_draft:
-        child_id = rel['selected_agent_id']
-        child_version = query_current_version_no(child_id, tenant_id)
-        if child_version is None:
-            raise ValueError(
-                f"Sub-agent {child_id} has no published version; publish the sub-agent first."
-            )
         rel_snapshot = rel.copy()
         rel_snapshot.pop('version_no', None)
         rel_snapshot['version_no'] = new_version_no
-        rel_snapshot['selected_agent_version_no'] = child_version
         _remove_audit_fields_for_insert(rel_snapshot)
         insert_relation_snapshot(rel_snapshot)
 
@@ -289,7 +271,6 @@ def get_version_detail_impl(
 
     # Extract sub_agent_id_list from relations
     result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
-    result['sub_agent_relations'] = _build_sub_agent_relations(relations_snapshot)
 
     # Get skill instances for this version (from ag_skill_instance_t with version_no)
     from database import skill_db as skill_db_module
@@ -729,7 +710,6 @@ def _get_version_detail_or_draft(
         # Add tools (only enabled tools)
         result['tools'] = [t for t in tools_draft if t.get('enabled', True)]
         result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_draft]
-        result['sub_agent_relations'] = _build_sub_agent_relations(relations_draft)
 
         # Get draft skill instances (version_no=0)
         skills_draft = skill_db_module.query_skill_instances_by_agent_id(
@@ -803,11 +783,12 @@ async def list_published_agents_impl(
             CAN_EDIT_ALL_USER_ROLES,
             get_user_tenant_by_user_id,
             query_group_ids_by_user,
+            PERMISSION_EDIT,
+            PERMISSION_READ,
             get_model_by_model_id,
             check_agent_availability,
             _apply_duplicate_name_availability_rules,
         )
-        from services.asset_owner_visibility import resolve_agent_list_permission
         from database.agent_version_db import query_agent_snapshot
 
         # Get user role for permission check
@@ -877,10 +858,9 @@ async def list_published_agents_impl(
 
             # Extract sub_agent_id_list from relations
             agent_info['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
-            agent_info['sub_agent_relations'] = _build_sub_agent_relations(relations_snapshot)
 
-            # Add current version info
-            agent_info['current_version_no'] = current_version_no
+            # Add published version info
+            agent_info['published_version_no'] = current_version_no
 
             # Check agent availability using the shared function
             _, unavailable_reasons = check_agent_availability(
@@ -913,12 +893,7 @@ async def list_published_agents_impl(
                     model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
                 model_info = model_cache.get(model_id)
 
-            permission = resolve_agent_list_permission(
-                user_role=user_role,
-                agent=agent,
-                user_id=user_id,
-                can_edit_all=can_edit_all,
-            )
+            permission = PERMISSION_EDIT if can_edit_all or str(agent.get("created_by")) == str(user_id) else PERMISSION_READ
 
             simple_agent_list.append({
                 "agent_id": agent.get("agent_id"),
@@ -934,9 +909,7 @@ async def list_published_agents_impl(
                 "is_new": agent.get("is_new", False),
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
-                "current_version_no": agent.get("current_version_no"),
-                "greeting_message": agent.get("greeting_message"),
-                "example_questions": agent.get("example_questions"),
+                "published_version_no": agent.get("published_version_no"),
             })
 
         return simple_agent_list

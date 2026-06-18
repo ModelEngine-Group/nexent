@@ -720,7 +720,7 @@ def test_export_agent_api_success(mocker, mock_auth_header):
     """Test export_agent_api success case returning JSON."""
     mock_export_agent = mocker.patch(
         "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
-    mock_export_agent.return_value = {"agent_id": 123, "name": "Test Agent"}
+    mock_export_agent.return_value = '{"agent_id": 123, "name": "Test Agent"}'
 
     response = config_client.post(
         "/agent/export",

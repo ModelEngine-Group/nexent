@@ -16,8 +16,8 @@ import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
 import { resolveS3UrlToDataUrl } from "@/services/storageService";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
-import { CopyButton } from "@/components/common/copyButton";
-import { Diagram } from "@/components/common/Diagram";
+import { CopyButton } from "@/components/ui/copyButton";
+import { Diagram } from "@/components/ui/Diagram";
 
 interface MarkdownRendererProps {
   content: string;

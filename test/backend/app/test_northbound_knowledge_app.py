@@ -58,15 +58,6 @@ class _ElasticSearchServiceStub:
         return {"indices": ["kb1"]}
 
     @staticmethod
-    async def delete_document_by_scope(index_name, path_or_url, scope, vdb_core):
-        return {
-            "status": "success",
-            "message": "Documents deleted successfully",
-            "scope": scope,
-            "deleted_es_count": 1,
-        }
-
-    @staticmethod
     def delete_documents(index_name, path_or_url, vdb_core):
         return {"message": "Documents deleted successfully", "deleted": 1}
 
@@ -247,10 +238,7 @@ class TestDeleteDocuments:
 
         response = client.delete(
             "/nb/v1/knowledge/indices/kb1/documents",
-            params={
-                "path_or_url": "minio://path/doc.pdf",
-                "scope": "full",
-            },
+            params={"path_or_url": "minio://path/doc.pdf"},
         )
 
         assert response.status_code == 200

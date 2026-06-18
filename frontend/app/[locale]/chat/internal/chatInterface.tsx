@@ -113,14 +113,6 @@ export function ChatInterface() {
 
   // Add agent selection state
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [agentGreeting, setAgentGreeting] = useState<string | null>(null);
-  const [agentExampleQuestions, setAgentExampleQuestions] = useState<string[]>([]);
-
-  const handleAgentSelectWithGreeting = (agentId: string | null, greeting?: string, exampleQuestions?: string[]) => {
-    setSelectedAgentId(agentId);
-    setAgentGreeting(greeting || null);
-    setAgentExampleQuestions(exampleQuestions || []);
-  };
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
@@ -1305,11 +1297,9 @@ export function ChatInterface() {
                 currentConversationId={conversationManagement.selectedConversationId ?? undefined}
                 shouldScrollToBottom={shouldScrollToBottom}
                 selectedAgentId={selectedAgentId}
-                onAgentSelect={handleAgentSelectWithGreeting}
+                onAgentSelect={setSelectedAgentId}
                 onCitationHover={clearCompletedIndicator}
                 onScroll={clearCompletedIndicator}
-                agentGreeting={agentGreeting}
-                agentExampleQuestions={agentExampleQuestions}
               />
             </div>
 

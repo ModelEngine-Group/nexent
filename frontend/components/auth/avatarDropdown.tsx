@@ -3,14 +3,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
-import {
-  UserRound,
-  LogOut,
-  LogIn,
-  UserRoundPlus,
-  UserCircle,
-  Power,
-} from "lucide-react";
+import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
 
@@ -113,8 +106,6 @@ export function AvatarDropdown() {
     );
   }
 
-  const isCasUser = user.authProvider === "cas";
-
   // User has logged in, show user menu
   const menuItems: ItemType[] = [
     {
@@ -168,12 +159,8 @@ export function AvatarDropdown() {
       icon: <Power size={16} />,
       label: t("auth.revoke"),
       // danger: true,
-      disabled: isCasUser,
-      className: isCasUser
-        ? "cursor-not-allowed opacity-50"
-        : "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
+      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
       onClick: () => {
-        if (isCasUser) return;
         setIsDeleteModalOpen(true);
       },
     },
@@ -208,11 +195,7 @@ export function AvatarDropdown() {
         }}
         onCancel={() => setIsDeleteModalOpen(false)}
         loading={isLoading}
-        disabled={
-          isCasUser ||
-          user.role === USER_ROLES.ADMIN ||
-          user.role === USER_ROLES.SU
-        }
+        disabled={user.role === USER_ROLES.ADMIN || user.role === USER_ROLES.SU}
       />
     </ConfigProvider>
   );

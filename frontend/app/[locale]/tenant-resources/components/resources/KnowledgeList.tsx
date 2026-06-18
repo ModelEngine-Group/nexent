@@ -2,10 +2,11 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Popconfirm, message, Button, Modal, Tag, Tooltip } from "antd";
+import { Table, Popconfirm, message, Button, Modal, Tag } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Edit, Trash2, BookOpen } from "lucide-react";
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { Tooltip } from "@/components/ui/tooltip";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -254,15 +255,15 @@ export default function KnowledgeList({
   ];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       <Table
         columns={columns}
         dataSource={knowledgeBases}
         loading={isLoading}
         rowKey="id"
         pagination={{ pageSize: 10 }}
-        className="flex-1 [&_.ant-table]:h-full"
-        scroll={{ y: "calc(100vh - 510px)" }}
+        scroll={{ x: 1400 }}
+        className="flex-1"
       />
 
       {/* Edit Knowledge Base Modal */}

@@ -99,10 +99,6 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             LANGUAGE["ZH"]: 'backend/prompts/utils/generate_title_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/utils/generate_title_en.yaml'
         },
-        'greeting_generate': {
-            LANGUAGE["ZH"]: 'backend/prompts/utils/greeting_generate_zh.yaml',
-            LANGUAGE["EN"]: 'backend/prompts/utils/greeting_generate_en.yaml'
-        },
         'document_summary': {
             LANGUAGE["ZH"]: 'backend/prompts/document_summary_agent_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/document_summary_agent_en.yaml'

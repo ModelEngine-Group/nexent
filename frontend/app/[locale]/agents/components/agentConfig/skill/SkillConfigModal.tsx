@@ -12,13 +12,13 @@ import {
   message,
   Tag,
   Skeleton,
-  Tooltip
 } from "antd";
 import { Settings } from "lucide-react";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { Skill, SkillParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
+import { Tooltip } from "@/components/ui/tooltip";
 import { saveSkillInstance } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import {

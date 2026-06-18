@@ -393,6 +393,7 @@ export default function AgentImportWizard({
         items: agentsWithConflicts.map(([agentKey, conflict]) => {
           const agentInfo = initialData.agent_info[agentKey] as any;
           return {
+            agent_id: agentInfo?.agent_id,
             name: conflict.renamedName || agentInfo?.name || "",
             display_name: conflict.renamedDisplayName || agentInfo?.display_name || "",
             task_description: agentInfo?.business_description || agentInfo?.description || "",

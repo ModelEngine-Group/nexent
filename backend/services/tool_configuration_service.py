@@ -782,8 +782,6 @@ def _validate_local_tool(
                 'embedding_model': embedding_model,
                 'rerank_model': rerank_model,
                 'display_name_to_index_map': display_name_to_index_map,
-                # Internal access control: restrict results to specific document paths (path_or_urls)
-                'document_paths': instantiation_params.get('document_paths'),
             }
             tool_instance = tool_class(**params)
         elif tool_name in ["dify_search", "datamate_search"]:
@@ -984,7 +982,6 @@ def import_openapi_service(
     tenant_id: str,
     user_id: str,
     service_description: str = None,
-    headers_template: Dict[str, Any] = None,
     force_update: bool = False
 ) -> Dict[str, Any]:
     """
@@ -998,7 +995,6 @@ def import_openapi_service(
         tenant_id: Tenant ID for multi-tenancy
         user_id: User ID for audit
         service_description: Optional service description (if not provided, reads from openapi_json.info.description)
-        headers_template: Optional default headers template
         force_update: If True, replace all existing tools for this service
 
     Returns:
@@ -1019,8 +1015,7 @@ def import_openapi_service(
         server_url=server_url,
         tenant_id=tenant_id,
         user_id=user_id,
-        description=service_description,
-        headers_template=headers_template,
+        description=service_description
     )
 
     logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")

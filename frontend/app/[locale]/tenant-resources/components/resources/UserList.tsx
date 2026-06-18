@@ -12,9 +12,9 @@ import {
   Popconfirm,
   message,
   Tag,
-  Tooltip 
 } from "antd";
 import { Edit, Trash2 } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import { useUserList } from "@/hooks/user/useUserList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -141,7 +141,6 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
         title: t("common.email"),
         dataIndex: "username",
         key: "username",
-        width: "50%"
       },
       {
         title: t("common.type"),
@@ -165,7 +164,6 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
               {roleLabels[role] || role}
             </Tag>;
         },
-        width: "20%"
       },
       {
         title: t("common.actions"),
@@ -199,7 +197,6 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
             </Popconfirm>
           </div>
         ),
-        width: "20%"
       },
     ],
     []
@@ -210,7 +207,7 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       <Table
         dataSource={users}
         columns={columns}
@@ -222,9 +219,10 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
           total: total,
           onChange: handlePageChange,
         }}
-        className="flex-1 [&_.ant-table]:h-full"
-        scroll={{ y: "calc(100vh - 480px)" }}
+        scroll={{ x: true }}
+        className="flex-1"
       />
+
       <Modal
         title={t("tenantResources.users.editUser")}
         open={modalVisible}

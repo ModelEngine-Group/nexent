@@ -8,6 +8,7 @@ semantic section of the system prompt is emitted by a dedicated function,
 allowing ContextManager to assemble them in the correct order.
 """
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -507,12 +508,13 @@ def _format_agent_fallback(
     return "- 当前没有可用的助手" if language == "zh" else "- No agents are currently available"
 
 
-def _format_app_context(app_name: str, app_description: str, user_id: str) -> str:
+def _format_app_context(app_name: str, app_description: str, user_id: str, time_str: str) -> str:
     """Format application context for system prompt injection."""
     lines = [
         f"Application: {app_name}",
         f"Description: {app_description}",
         f"Current user: {user_id}",
+        f"Current time: {time_str}",
     ]
     return "\n".join(lines)
 
@@ -526,6 +528,7 @@ def _format_app_context(app_name: str, app_description: str, user_id: str) -> st
 def build_skeleton_header_component(
     app_name: str,
     app_description: str,
+    time_str: str,
     user_id: str,
     language: str = "zh",
     priority: int = 100,
@@ -533,17 +536,14 @@ def build_skeleton_header_component(
     """Build SystemPromptComponent for the header section.
 
     Section: "### 基本信息" / "### Basic Information"
-    Content: Agent identity, app name/description, user_id.
-    Note: Current time is intentionally excluded from the system prompt so the
-    static system prefix can hit the LLM KV/prompt cache across requests. The
-    current time is injected on the user-message side instead (see CoreAgent.run).
+    Content: Agent identity, app name/description, time, user_id
     """
     from nexent.core.agents.agent_model import SystemPromptComponent
 
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}，用户ID为{user_id}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}，现在是{time_str}，用户ID为{user_id}"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}"
+        content = f"### Basic Information\nYou are {app_name}, {app_description}, it is {time_str} now"
 
     return SystemPromptComponent(
         content=content,
@@ -611,11 +611,6 @@ def build_skeleton_execution_flow_component(
         lines.append("   - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。")
         lines.append("   - **重要**：代码执行后，系统会返回 \"Observation:\" 标记的内容（这是真实的执行结果）。请基于这些真实结果继续下一步思考，**不要在代码执行前自行编造观察结果**。")
         lines.append("")
-        lines.append("3. 自验证：")
-        lines.append("   - 关键事件（工具调用、检索结果、代码执行、助手返回、准备最终回答）后，系统会进行显式自验证。")
-        lines.append("   - 如果自验证提示存在错误、证据不足、参数不完整或结果不可靠，必须优先修正、补充证据、重新调用工具，或清晰说明无法完成的部分。")
-        lines.append("   - 最终回答只有在自验证通过后才会展示给用户；如果系统返回 Verification feedback，请把它视为真实观察结果继续修正，不要忽略。")
-        lines.append("")
         lines.append("在思考结束后，当你认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。")
         lines.append("")
         lines.append("生成最终回答时，你需要遵循以下规范：")
@@ -656,11 +651,6 @@ def build_skeleton_execution_flow_component(
         lines.append("   - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code")
         lines.append("   - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.")
         lines.append("   - **IMPORTANT**: After code execution, the system will return content with \"Observation:\" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**")
-        lines.append("")
-        lines.append("3. Self-verification:")
-        lines.append("   - After critical events (tool calls, retrieval results, code execution, agent handoffs, and final-answer preparation), the system may run explicit verification.")
-        lines.append("   - If verification reports errors, insufficient evidence, incomplete parameters, or unreliable results, you must repair the issue, gather more evidence, call tools again, or clearly state what cannot be completed.")
-        lines.append("   - The final answer is shown to the user only after verification passes. If the system returns Verification feedback, treat it as a real observation and continue revising.")
         lines.append("")
         lines.append("After thinking, when you believe you can answer the user's question, you can generate a final answer directly to the user without generating code and stop the loop.")
         lines.append("")
@@ -1122,6 +1112,7 @@ def build_context_components(
     few_shots: Optional[str] = None,
     app_name: Optional[str] = None,
     app_description: Optional[str] = None,
+    time_str: Optional[str] = None,
     user_id: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
@@ -1176,6 +1167,7 @@ def build_context_components(
         few_shots: Example templates text
         app_name: Application name
         app_description: Application description
+        time_str: Current time string
         user_id: Current user ID
         language: Language code ('zh' or 'en')
         is_manager: Whether this is a manager agent
@@ -1196,11 +1188,12 @@ def build_context_components(
     components: List = []
 
     # 1. Header
-    if app_name and app_description and user_id:
+    if app_name and app_description and time_str and user_id:
         components.append(
             build_skeleton_header_component(
                 app_name=app_name,
                 app_description=app_description,
+                time_str=time_str,
                 user_id=user_id,
                 language=language,
             )
@@ -1335,4 +1328,5 @@ def build_app_context_string(
     Returns:
         Formatted app context string
     """
-    return _format_app_context(app_name, app_description, user_id)
+    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return _format_app_context(app_name, app_description, user_id, time_str)

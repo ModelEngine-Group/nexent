@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
-import { Tabs, Collapse, message, Tooltip, Badge } from "antd";
+import { Tabs, Collapse, message, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
@@ -307,29 +307,21 @@ export default function ToolManagement({
   // Generate Tabs configuration
   const tabItems = toolGroups.map((group) => {
     const label = t(group.label);
-    const selectedCount = group.subGroups
-      ? group.subGroups.reduce(
-          (sum, sg) => sum + sg.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length, 0)
-      : group.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length;
 
     return {
       key: group.key,
       label: (
         <Tooltip title={label} placement="right">
-          <span className="inline-flex items-center gap-1">
-            <span
-              style={{
-                maxWidth: "100px",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {label}
-            </span>
-            {selectedCount > 0 && (
-              <Badge count={selectedCount} size="small" color="blue" />
-            )}
+          <span
+            style={{
+              display: "block",
+              maxWidth: "100px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
           </span>
         </Tooltip>
       ),
@@ -359,25 +351,17 @@ export default function ToolManagement({
                   items={group.subGroups.map((subGroup, index) => ({
                     key: subGroup.key,
                     label: (
-                      <span className="inline-flex items-center gap-1">
-                        <span
-                          className="text-gray-700 font-medium"
-                          style={{
-                            paddingTop: "8px",
-                            paddingBottom: "8px",
-                            minHeight: "36px",
-                            lineHeight: "20px",
-                          }}
-                        >
-                          {subGroup.label}
-                        </span>
-                        {subGroup.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length > 0 && (
-                          <Badge
-                            count={subGroup.tools.filter(t => originalSelectedToolIdsSet.has(t.id)).length}
-                            size="small"
-                            color="blue"
-                          />
-                        )}
+                      <span
+                        className="text-gray-700 font-medium"
+                        style={{
+                          paddingTop: "8px",
+                          paddingBottom: "8px",
+                          display: "block",
+                          minHeight: "36px",
+                          lineHeight: "20px",
+                        }}
+                      >
+                        {subGroup.label}
                       </span>
                     ),
                     className: `tool-category-panel ${

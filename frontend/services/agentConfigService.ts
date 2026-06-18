@@ -200,9 +200,7 @@ export const fetchPublishedAgentList = async () => {
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
       permission: agent.permission,
-      current_version_no: agent.current_version_no,
-      greeting_message: agent.greeting_message,
-      example_questions: agent.example_questions || [],
+      published_version_no: agent.published_version_no,
     }));
 
     return {
@@ -409,7 +407,6 @@ export interface UpdateAgentInfoPayload {
   max_steps?: number;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
-  verification_config?: Record<string, any>;
   enabled?: boolean;
   business_description?: string;
   business_logic_model_name?: string;
@@ -421,8 +418,6 @@ export interface UpdateAgentInfoPayload {
   related_agent_ids?: number[];
   related_external_agent_ids?: number[];
   ingroup_permission?: string;
-  greeting_message?: string;
-  example_questions?: string[];
 }
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
@@ -774,7 +769,6 @@ export const searchAgentInfo = async (
       prompt_template_id: data.prompt_template_id ?? 0,
       prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
-      verification_config: data.verification_config,
       enabled: data.enabled,
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],
@@ -812,8 +806,6 @@ export const searchAgentInfo = async (
           })
         : [],
       skills: data.skills || [],
-      greeting_message: data.greeting_message || "",
-      example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
     };
 

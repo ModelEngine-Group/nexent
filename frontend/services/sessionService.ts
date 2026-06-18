@@ -26,10 +26,6 @@ export const sessionService = {
         body: JSON.stringify({}),
       });
 
-      if (response.status === 204) {
-        return null;
-      }
-
       if (!response.ok) {
         return null;
       }

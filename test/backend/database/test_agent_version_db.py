@@ -171,7 +171,6 @@ class MockAgentRelation:
         self.id = 1
         self.parent_agent_id = 1
         self.selected_agent_id = 2
-        self.selected_agent_version_no = 3
         self.tenant_id = "tenant1"
         self.version_no = 1
         self.delete_flag = "N"
@@ -179,7 +178,6 @@ class MockAgentRelation:
             "id": 1,
             "parent_agent_id": 1,
             "selected_agent_id": 2,
-            "selected_agent_version_no": 3,
             "tenant_id": "tenant1",
             "version_no": 1,
             "delete_flag": "N",
@@ -544,25 +542,6 @@ def test_query_agent_snapshot_success(monkeypatch, mock_session):
     assert tools_list[0]["tool_id"] == 1
     assert len(relations_list) == 1
     assert relations_list[0]["selected_agent_id"] == 2
-    assert relations_list[0]["selected_agent_version_no"] == 3
-
-
-def test_restore_agent_draft_relation_copy_preserves_selected_agent_version_no():
-    """Verify restore draft relation copy keeps selected_agent_version_no unchanged."""
-    rel = {
-        "relation_id": 10,
-        "parent_agent_id": 1,
-        "selected_agent_id": 2,
-        "selected_agent_version_no": 3,
-        "tenant_id": "tenant1",
-        "version_no": 2,
-    }
-    rel_copy = {k: v for k, v in rel.items() if k not in ("version_no",)}
-    rel_copy["version_no"] = 0
-
-    assert rel_copy["selected_agent_version_no"] == 3
-    assert rel_copy["version_no"] == 0
-    assert rel_copy["selected_agent_id"] == 2
 
 
 def test_query_agent_snapshot_no_agent(monkeypatch, mock_session):

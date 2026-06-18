@@ -40,33 +40,6 @@ global:
 
 # Optional monitoring stack. Set provider to one of:
 # otlp, phoenix, langfuse, langsmith, grafana, zipkin.
-nexent-common:
-  # Shared ConfigMap values rendered into the Kubernetes nexent-config ConfigMap.
-  config:
-    cas:
-      enabled: "false"
-      serverUrl: ""
-      validatePath: "/p3/serviceValidate"
-      callbackBaseUrl: "http://localhost:30000"
-      # Supported values:
-      # - disabled: disable CAS login entry and automatic CAS redirects.
-      # - button: show CAS as an optional login entry.
-      # - force: automatically redirect unauthenticated users to CAS login.
-      loginMode: "disabled"
-      userAttribute: ""
-      emailAttribute: "email"
-      roleAttribute: "role"
-      tenantAttribute: "tenant_id"
-      roleMapJson: ""
-      sessionMaxAgeSeconds: "3600"
-      localSessionMaxAgeSeconds: "3600"
-      renewBeforeSeconds: "300"
-      renewTimeoutSeconds: "10"
-      syntheticEmailDomain: "cas.local"
-      logoutUrl: ""
-      sslVerify: "true"
-      caBundle: ""
-
 nexent-elasticsearch:
   enabled: true
 nexent-postgresql:

@@ -111,18 +111,6 @@ In the External A2A Agent list, you can view and manage all discovered external 
 > - Batch integrate all agents from the same service registry through Nacos discovery
 > - Configure protocols to meet the requirements of different agent service providers
 
-###### Integrate [DataAgent](https://gitcode.com/datagallery/dataagent) A2A Agent via URL
-
-1. Refer to the [DataAgent documentation](https://gitcode.com/datagallery/dataagent#%F0%9F%8C%90-a2a-10-%E6%9C%8D%E5%8A%A1%E6%A8%A1%E5%BC%8F) and start DataAgent in A2A service mode.
-   > Nexent does not currently support agents that require authentication. Do not set `auth-token` when starting DataAgent.
-
-<div style="display: flex; justify-content: left;">
-  <img src="./assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
-</div>
-
-2. Refer to [Discover Agent via URL](#discover-agent-via-url) to integrate the agent. The URL is `http://<IP>:9999/.well-known/agent-card.json`.
-3. Refer to [Manage Discovered External Agents](#manage-discovered-external-agents) to configure the invocation protocol, and select HTTP + JSON for integration.
-
 ### 🛠️ Select Agent Tools
 
 Agents can use various tools to complete tasks, such as knowledge base search, file parsing, image parsing, email sending/receiving, file management, and other local tools. They can also integrate third-party MCP tools or custom tools.
