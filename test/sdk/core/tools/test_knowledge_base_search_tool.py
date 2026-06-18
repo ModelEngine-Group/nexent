@@ -495,7 +495,7 @@ class TestKnowledgeBaseSearchTool:
         # Verify title fallback
         assert len(search_results) == 1
         assert search_results[0]["title"] == "test.txt"
-        
+
     def test_forward_adds_picture_web_for_images(self, knowledge_base_search_tool, monkeypatch):
         """Forward should add picture messages when image results are present."""
         monkeypatch.setenv("DATA_PROCESS_SERVICE", "https://data-process")

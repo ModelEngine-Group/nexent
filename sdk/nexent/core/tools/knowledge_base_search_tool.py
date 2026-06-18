@@ -519,7 +519,7 @@ class KnowledgeBaseSearchTool(Tool):
             }
         except Exception as e:
             raise Exception(f"Error during semantic search: {str(e)}")
-        
+
     def _filter_images(self, images_list_url, query) -> list:
         """
         Execute image filtering operation directly using the data processing service

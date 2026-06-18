@@ -165,6 +165,11 @@ sys.modules['database.client'] = _create_stub_module(
 
 # Mock external dependencies before imports
 mock_message_observer = MagicMock()
+class MockAgentVerificationConfig:
+    @classmethod
+    def model_validate(cls, value):
+        return value or {}
+
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
 sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     "nexent.core.agents.agent_model",
@@ -174,6 +179,7 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     ToolConfig=MagicMock(),
     ExternalA2AAgentConfig=MagicMock(),
     AgentRunInfo=MagicMock(),
+    AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
     ContextComponent=_create_stub_component_class("ContextComponent"),
     ToolsComponent=_create_stub_component_class("ToolsComponent"),
@@ -254,6 +260,7 @@ sys.modules['nexent.core.agents.agent_model'].AgentConfig = mock_agent_config
 sys.modules['nexent.core.agents.agent_model'].ModelConfig = mock_model_config
 sys.modules['nexent.core.agents.agent_model'].ToolConfig = mock_tool_config
 sys.modules['nexent.core.agents.agent_model'].AgentRunInfo = mock_agent_run_info
+sys.modules['nexent.core.agents.agent_model'].AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observer
 
 # Mock BASE_BUILTIN_MODULES
@@ -1674,7 +1681,8 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY
+                context_components=ANY,
+                verification_config=ANY
             )
 
     @pytest.mark.asyncio
@@ -1745,7 +1753,8 @@ class TestCreateAgentConfig:
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
-                    context_components=ANY
+                    context_components=ANY,
+                    verification_config=ANY
                 )
 
     @pytest.mark.asyncio
@@ -2003,7 +2012,8 @@ class TestCreateAgentConfig:
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
-                context_components=ANY
+                context_components=ANY,
+                verification_config=ANY
             )
 
     @pytest.mark.asyncio

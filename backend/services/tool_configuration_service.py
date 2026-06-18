@@ -415,8 +415,9 @@ async def get_tool_from_remote_mcp_server(
                         input_schema["properties"][k]["type"] = "string"
 
                 sanitized_tool_name = _sanitize_function_name(tool.name)
+                tool_description = tool.description or ""
                 tool_info = ToolInfo(name=sanitized_tool_name,
-                                     description=tool.description,
+                                     description=tool_description,
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
@@ -799,10 +800,12 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "haotian_search":
-            # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
-            # Must explicitly pass observer=None: if omitted, Python applies the FieldInfo default
-            # (not None), causing 'FieldInfo has no attr lang' errors in forward()
+        elif tool_name in ("haotian_search", "aidp_search"):
+            # Haotian and AIDP share the same instantiation shape: drop the
+            # backend-only rerank keys and explicitly set observer=None
+            # (otherwise Python falls back to the FieldInfo default, which
+            # later triggers "'FieldInfo' has no attribute 'lang'" in
+            # forward()).
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
