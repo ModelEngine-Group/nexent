@@ -87,6 +87,7 @@ export interface SearchResult {
   text: string
   published_date: string
   source_type?: string
+  search_type?: string
   filename?: string
   score?: number
   score_details?: any

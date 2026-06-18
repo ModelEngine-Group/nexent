@@ -461,9 +461,12 @@ const messageHandlers: MessageHandler[] = [
           let baseUrl = "";
           let faviconUrl = "";
           let useDefaultIcon = false;
+          const searchType = result.search_type || "";
           let isKnowledgeBase =
             sourceType === "file" ||
             sourceType === "datamate" ||
+            sourceType === "aidp" ||
+            searchType === "aidp_search" ||
             (!sourceType && !!filename);
           let canOpenWeb = false;
 

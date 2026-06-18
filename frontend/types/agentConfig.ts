@@ -145,6 +145,20 @@ export interface ToolParam {
   depends_on?: string;
 }
 
+export interface AidpKnowledgeBaseItem {
+  kds_id: string;
+  kds_name: string;
+  description?: string;
+  document_count?: number;
+  chunk_count?: number;
+}
+
+export interface AidpKnowledgeBaseListResponse {
+  value: AidpKnowledgeBaseItem[];
+  total_count?: number;
+  next_link?: string | null;
+}
+
 export interface SkillParam {
   name: string;
   type: "string" | "number" | "boolean" | "array" | "object" | "Optional";

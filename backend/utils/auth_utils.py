@@ -6,8 +6,10 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 import jwt
+import httpx
 from fastapi import Request
 from supabase import create_client
+from supabase.lib.client_options import SyncClientOptions
 
 from consts.const import (
     ASSET_OWNER_ROLE,
@@ -249,10 +251,30 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
     return DEFAULT_TENANT_ID
 
 
+def _build_supabase_options() -> SyncClientOptions:
+    """Build ClientOptions that bypass the system HTTP proxy.
+
+    httpx 0.28 reads the Windows system proxy (e.g. Clash on 127.0.0.1:7897)
+    by default and routes every request through it. When the proxy cannot
+    reach a local service (such as GoTrue on http://localhost:8000) the
+    request hangs until the timeout, breaking login.
+
+    Pass an explicit ``httpx.Client`` with ``trust_env=False`` and
+    ``proxy=None`` so Supabase always talks to ``SUPABASE_URL`` directly.
+    """
+    http_client = httpx.Client(
+        trust_env=False,
+        proxy=None,
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        follow_redirects=True,
+    )
+    return SyncClientOptions(httpx_client=http_client)
+
+
 def get_supabase_client():
     """Get Supabase client instance with regular key (user-context operations)."""
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        return create_client(SUPABASE_URL, SUPABASE_KEY, options=_build_supabase_options())
     except Exception as e:
         logging.error(f"Failed to create Supabase client: {str(e)}")
         return None
@@ -261,7 +283,7 @@ def get_supabase_client():
 def get_supabase_admin_client():
     """Get Supabase client instance with service role key for admin operations."""
     try:
-        return create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
+        return create_client(SUPABASE_URL, SERVICE_ROLE_KEY, options=_build_supabase_options())
     except Exception as e:
         logging.error(f"Failed to create Supabase admin client: {str(e)}")
         return None

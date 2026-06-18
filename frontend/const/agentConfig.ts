@@ -123,6 +123,19 @@ export const TOOL_PARAM_OPTIONS = {
       "hybrid_search",
     ],
   },
+  // AIDP search tool
+  aidp_search: {
+    search_method: [
+      "hybrid_search",
+      "vector_search",
+      "full_text_search",
+    ],
+    reranking_mode: ["performance", "high_accuracy"],
+    multi_modal: [true, false],
+    reranking_enable: [true, false],
+    rewrite_enable: [true, false],
+    related_search_enable: [true, false],
+  },
 } as const;
 
 // Get options for a specific tool and parameter
