@@ -2,12 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Proposed |
+| Status | Accepted |
 | Owners | Model integration squad, Frontend model-management owner, Agent authoring owner |
 | Affects | [W11](../W11_Capacity_Suggestion_On_Model_Add.md), [W1](./W1_ADR_Capability_Catalog_Storage_and_Fingerprint.md), [W2](./W2_ADR_Budget_Snapshot_Overrides_and_Dispatch_Enforcement.md) |
 | Related findings | CM-031, CM-032 |
 | Date | 2026-06-18 |
-| Accepted on | Pending |
+| Accepted on | 2026-06-18 |
 | Supersedes | None |
 
 ## Signoff Status
@@ -17,7 +17,7 @@
 | Decision 1: capacity suggestion flag and user switch | Confirmed | `CAPACITY_SUGGESTION_ENABLED` controls user-facing capacity suggestions. Add/Edit capacity surfaces also expose a user-visible suggestion switch, default on. |
 | Decision 2: legacy bare-capacity visibility | Confirmed | Old LLM/VLM rows missing capacity are surfaced by default-on warnings independent of the suggestion flag. |
 | Decision 3: no automatic legacy data repair | Confirmed | W11 shows legacy `max_tokens` as evidence and guidance only. It does not infer or write capacity values without an operator save. |
-| Decision 4: catalog suggestion save semantics | Pending | Need final signoff on whether accepted catalog suggestions save capacity fields as operator-visible values in addition to canonical provider/model fields. |
+| Decision 4: catalog suggestion save semantics | Confirmed | Accepted catalog suggestions save canonical provider/model fields and the visible capacity fields. Runtime reports `profile` only when exact catalog lookup succeeds. |
 | Decision 5: provider discovery phase boundary | Confirmed | Provider discovery is deferred to Version 2. Version 1 ships catalog exact/fuzzy suggestions only. |
 | Decision 6: visibility permissions and navigation | Confirmed | Administrators get repair navigation. Ordinary agent authors see only a non-blocking warning and contact-admin copy. |
 
@@ -125,7 +125,7 @@ ownership and avoids hidden data mutation.
 
 ## Decision 4: Catalog Suggestion Save Semantics
 
-**Status:** Pending.
+**Status:** Confirmed.
 
 ### Question
 
@@ -133,17 +133,27 @@ When an operator accepts a catalog exact/fuzzy suggestion, should the save
 payload persist only the canonical `model_factory` / `model_name`, or should it
 also save the suggested capacity fields as operator-visible values?
 
-### Current Proposed Direction
+### Decision
 
 Save the canonical provider/model fields required for W1 exact lookup. Also
-allow saving the visible capacity fields as operator-confirmed values so the row
-is understandable in Model Management. At runtime, W1 exact lookup remains the
-authority for profile capacity; monitoring should report `capacity_source =
-'profile'` only when the saved provider/model actually match the catalog.
+save the visible capacity fields as operator-confirmed values so the row is
+understandable and editable in Model Management.
 
-### Decision Needed From
+At runtime, W1 exact lookup remains the authority for profile capacity.
+Monitoring reports `capacity_source = 'profile'` only when the saved
+provider/model exactly match the catalog. If the saved provider/model no longer
+match the catalog, the saved capacity fields remain available as
+operator-confirmed fallback values and monitoring must not falsely report
+`profile`.
 
-Model integration owner and monitoring owner.
+### Consequences
+
+- Accepting a catalog suggestion makes the row readable in Model Management
+  because the capacity fields are visible instead of blank.
+- Saving canonical provider/model lets runtime use the reviewed W1 catalog when
+  exact lookup succeeds.
+- Saved capacity fields do not by themselves prove a profile match; runtime
+  source remains `operator` unless exact catalog lookup succeeds.
 
 ## Decision 5: Provider Discovery Phase Boundary
 
@@ -208,14 +218,14 @@ be available when the current user cannot manage models?
 This ADR can move to Accepted when:
 
 - [x] Decisions 1-3 are recorded in the W11 English and Chinese specs.
-- [ ] Decision 4 is accepted or explicitly deferred with an implementation
+- [x] Decision 4 is accepted or explicitly deferred with an implementation
   fallback.
 - [x] Decision 5 is accepted or provider discovery is explicitly moved out of
   the first W11 implementation slice.
 - [x] Decision 6 is accepted with concrete permission and navigation behavior.
-- [ ] W11 English and Chinese specs are updated to match accepted Decision 4.
+- [x] W11 English and Chinese specs are updated to match accepted Decision 4.
 
-## Implementation Guidance While Pending
+## Implementation Guidance
 
 Implementation may start on low-risk pieces that do not depend on pending
 decisions:
@@ -226,7 +236,6 @@ decisions:
 - Bare-capacity warning, administrator repair navigation, and ordinary
   agent-author contact-admin copy.
 
-Implementation should wait for ADR acceptance before:
+Implementation should wait for a Version 2 ADR/update before:
 
 - Provider discovery or any upstream provider-capacity network calls.
-- Final save semantics that decide catalog vs operator persistence details.

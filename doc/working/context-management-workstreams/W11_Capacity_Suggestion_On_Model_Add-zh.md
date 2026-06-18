@@ -317,12 +317,12 @@ Provider 发现的可信度刻意低于已批准目录：
 
 该辅助函数也将 `_infer_model_factory` 扩展到 LLM/VLM。Embedding 记录继续使用现有 embedding 行为，但 host map 必须共享，避免 LLM/VLM 和 embedding 推断漂移。
 
-接受建议时的持久化规则：
+接受建议时的持久化规则如下。Catalog 建议会同时保存 W1 精确查找所需的规范 Provider/模型名，以及运维人员接受的可见容量字段。运行时仍然只有在保存后的 Provider/模型名精确命中 catalog 时才报告 `profile`；仅保存容量字段本身不能证明 profile 命中，它们只是运维人员确认过的 fallback 值。
 
 | 匹配类型 | 保存 `model_factory` | 保存 `model_name` | 保存容量字段 | 运行时期望 |
 | --- | --- | --- | --- | --- |
-| `catalog_exact` | `suggested_provider` | 如果已有值已规范化则保留；否则保存 `canonical_model_name` | 可选，作为运维确认后的可见值 | W1 精确 profile 匹配应产生 `capacity_source = profile` |
-| `catalog_fuzzy` | `suggested_provider` | 保存 `canonical_model_name`，除非运维人员明确保留原始名称 | 是，`capacity_source = operator` | 仅在保存规范名称时 profile 才匹配 |
+| `catalog_exact` | `suggested_provider` | 如果已有值已规范化则保留；否则保存 `canonical_model_name` | 是，作为运维确认后的可见值 | W1 精确 profile 匹配应产生运行时 `capacity_source = profile`；否则保存字段作为 operator fallback |
+| `catalog_fuzzy` | `suggested_provider` | 保存 `canonical_model_name`，除非运维人员明确保留原始名称 | 是，作为运维确认后的可见值 | 仅当保存规范名称且 W1 精确查找成功时运行时才报告 `profile`；否则作为 operator fallback |
 | `provider_discovery` | 已知时保存 `suggested_provider` | 已知时保存 Provider 返回的精确模型 ID；否则保留现有值 | 是，`capacity_source = operator` | 运维配置容量，不声称 profile |
 | `none` | 现有行为 | 现有行为 | 仅现有手动输入 | 现有 fallback/override 行为 |
 

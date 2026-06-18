@@ -527,12 +527,16 @@ This helper also extends `_infer_model_factory` to LLM/VLM. Embedding records
 continue to use the existing embedding behavior, but the host map must be
 shared so LLM/VLM and embedding inference cannot drift.
 
-Accepting a suggestion has these persistence rules:
+Accepting a suggestion has these persistence rules. Catalog suggestions save
+both the canonical provider/model needed for W1 exact lookup and the visible
+capacity fields the operator accepted. Runtime still reports `profile` only
+when the saved provider/model exactly match the catalog; saved capacity fields
+alone are operator-confirmed fallback values, not proof of a profile match.
 
 | Match kind | Save `model_factory` | Save `model_name` | Save capacity fields | Runtime expectation |
 | --- | --- | --- | --- | --- |
-| `catalog_exact` | `suggested_provider` | Existing value if already canonical; otherwise `canonical_model_name` | Optional, as operator-confirmed visible values | W1 exact profile match should produce `capacity_source = profile` |
-| `catalog_fuzzy` | `suggested_provider` | `canonical_model_name` unless the operator explicitly keeps the raw name | Yes, `capacity_source = operator` | Profile match only if canonical name is saved |
+| `catalog_exact` | `suggested_provider` | Existing value if already canonical; otherwise `canonical_model_name` | Yes, as operator-confirmed visible values | W1 exact profile match should produce runtime `capacity_source = profile`; otherwise saved fields act as operator fallback |
+| `catalog_fuzzy` | `suggested_provider` | `canonical_model_name` unless the operator explicitly keeps the raw name | Yes, as operator-confirmed visible values | Runtime `profile` only if canonical name is saved and exact catalog lookup succeeds; otherwise operator fallback |
 | `provider_discovery` | `suggested_provider` when known | Provider-returned exact model ID when known; otherwise existing value | Yes, `capacity_source = operator` | Operator-configured capacity, no profile claim |
 | `none` | Existing behavior | Existing behavior | Existing manual input only | Existing fallback/override behavior |
 
