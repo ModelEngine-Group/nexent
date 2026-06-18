@@ -2791,9 +2791,9 @@
   "a2a.server.protocolVersion": "协议版本",
   "a2a.server.restEndpoints": "HTTP+JSON (REST)",
   "a2a.server.usageTitle": "如何使用这些端点",
-  "a2a.server.localDevHint": "本地开发：在上述路径前加上 localhost:5013/api",
-  "a2a.server.productionHint": "生产环境：将 localhost:5013 替换为您的服务器域名或公网 IP 及端口 5013",
-  "a2a.server.urlHint": "需要拼接基础 URL 才能访问。本地开发请使用 localhost:5013/api",
+  "a2a.server.localDevHint": "本地开发：在上述路径前加上 localhost:5013/api(docker启动) localhost:30013/api(k8s启动)",
+  "a2a.server.productionHint": "生产环境：将 localhost 替换为您的服务器域名或公网 IP",
+  "a2a.server.urlHint": "需要拼接基础 URL 才能访问。本地开发请使用 localhost:5013(或30013)/api",
 
   "a2a.service.discoverFailed": "发现 Agent 失败",
   "a2a.service.listFailed": "获取列表失败",
