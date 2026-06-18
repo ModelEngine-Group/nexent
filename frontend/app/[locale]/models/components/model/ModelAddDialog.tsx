@@ -497,6 +497,28 @@ export const ModelAddDialog = ({
       if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
         return false;
       }
+      // Per-row required capacity gate for LLM/VLM batch import: every
+      // enabled row's effective context_window and max_output (row override
+      // → catalog value → top-level batch default) must resolve to a
+      // positive value. Without this gate a user can toggle on a row whose
+      // catalog hasn't supplied context_window while leaving the batch
+      // default empty, and the Add button would still light up.
+      if (supportsCapacityFields) {
+        const batchDefaults = capacityFormToSnakePayload(form);
+        for (const model of modelList) {
+          if (!selectedModelIds.has(model.id)) continue;
+          if (!rowSupportsCapacityFields(model)) continue;
+          const effectiveContextWindow =
+            model.context_window_tokens ?? batchDefaults.context_window_tokens;
+          const effectiveMaxOutput =
+            model.max_output_tokens ??
+            model.max_tokens ??
+            batchDefaults.max_output_tokens;
+          if (!effectiveContextWindow || !effectiveMaxOutput) {
+            return false;
+          }
+        }
+      }
       // If provider is ModelEngine, require the ModelEngine URL as well.
       if (form.provider === "modelengine") {
         return (
@@ -885,18 +907,34 @@ export const ModelAddDialog = ({
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
     setModelMaxTokens(model.max_tokens?.toString() || "");
-    setModelCapacity(
-      rowSupportsCapacityFields(model)
-        ? capacityFormFromModel({
-            contextWindowTokens: model.context_window_tokens,
-            maxInputTokens: model.max_input_tokens,
-            maxOutputTokens: model.max_output_tokens,
-            maxTokens: model.max_tokens,
-            defaultOutputReserveTokens: model.default_output_reserve_tokens,
-            tokenizerFamily: model.tokenizer_family,
-          })
-        : emptyCapacityForm
-    );
+    if (rowSupportsCapacityFields(model)) {
+      // Merge order: row override (incl. capacityFormFromModel's max_tokens
+      // promotion) wins, falling back to the top-level batch defaults the
+      // user typed into the capacity panel. The gear modal must reflect
+      // exactly what the row will end up using if the user clicks save
+      // without further edits — otherwise users see empty required fields
+      // and either bypass save or get confused about which value applies.
+      const rowMapped = capacityFormFromModel({
+        contextWindowTokens: model.context_window_tokens,
+        maxInputTokens: model.max_input_tokens,
+        maxOutputTokens: model.max_output_tokens,
+        maxTokens: model.max_tokens,
+        defaultOutputReserveTokens: model.default_output_reserve_tokens,
+        tokenizerFamily: model.tokenizer_family,
+      });
+      setModelCapacity({
+        contextWindowTokens:
+          rowMapped.contextWindowTokens || form.contextWindowTokens,
+        maxInputTokens: rowMapped.maxInputTokens || form.maxInputTokens,
+        maxOutputTokens: rowMapped.maxOutputTokens || form.maxOutputTokens,
+        defaultOutputReserveTokens:
+          rowMapped.defaultOutputReserveTokens ||
+          form.defaultOutputReserveTokens,
+        tokenizerFamily: rowMapped.tokenizerFamily || form.tokenizerFamily,
+      });
+    } else {
+      setModelCapacity(emptyCapacityForm);
+    }
     setSettingsModalVisible(true);
   };
 
