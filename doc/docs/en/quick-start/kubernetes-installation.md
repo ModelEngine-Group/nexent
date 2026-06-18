@@ -291,6 +291,122 @@ Provider callback URLs:
 
 For local NodePort, a GitHub callback example is `http://localhost:30000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain and register the exact same URL in the OAuth provider console.
 
+### CAS Login Configuration
+
+CAS SSO does not require the `supabase` component. Set `nexent-common.config.cas.callbackBaseUrl` to the browser-accessible Nexent Web URL without a trailing `/`. `nexent-common.config.cas.serverUrl` is the CAS Server root URL and should also not include a trailing `/`.
+
+Kubernetes writes CAS settings into backend environment variables through `nexent-common` `config.cas.*` values:
+
+```bash
+helm upgrade --install nexent nexent \
+  --namespace nexent --create-namespace \
+  --set nexent-common.config.cas.enabled=true \
+  --set nexent-common.config.cas.serverUrl=https://cas.example.com/cas \
+  --set nexent-common.config.cas.callbackBaseUrl=https://nexent.example.com \
+  --set nexent-common.config.cas.loginMode=force \
+  --set nexent-common.config.cas.logoutUrl=/logout
+```
+
+Configurable CAS values:
+
+| Value | Environment variable | Description |
+|-------|----------------------|-------------|
+| `nexent-common.config.cas.enabled` | `CAS_ENABLED` | Enables CAS |
+| `nexent-common.config.cas.serverUrl` | `CAS_SERVER_URL` | CAS Server root URL |
+| `nexent-common.config.cas.validatePath` | `CAS_VALIDATE_PATH` | serviceValidate path, default `/p3/serviceValidate` |
+| `nexent-common.config.cas.callbackBaseUrl` | `CAS_CALLBACK_BASE_URL` | Web entry URL; CAS callback paths are appended automatically |
+| `nexent-common.config.cas.loginMode` | `CAS_LOGIN_MODE` | `disabled`, `button`, or `force` |
+| `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | User identifier attribute. Empty means use `<cas:user>` |
+| `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | Email attribute |
+| `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | Role attribute |
+| `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | Tenant attribute |
+| `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | JSON mapping from CAS roles to Nexent roles |
+| `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | Maximum local CAS session lifetime |
+| `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent local session lifetime |
+| `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | Trigger silent renewal within this many seconds before expiry |
+| `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | Silent renewal timeout |
+| `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | Domain used when CAS does not return an email |
+| `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS logout URL. Empty means Nexent logout will not call the CAS Server logout endpoint |
+| `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | Whether to verify CAS Server TLS certificates |
+| `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | Custom CA bundle path |
+
+Common CAS URLs:
+
+| Purpose | URL |
+|---------|-----|
+| Nexent login entry | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS silent renewal callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS single logout callback | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+For Apereo CAS JSON Service Registry, create a service registration file such as `Nexent-10001.json` in the service registry directory configured by your CAS deployment. The `id` must be globally unique. This is a local NodePort example:
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:30000/api/user/cas/logout_callback"
+}
+```
+
+In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
+
+#### CAS Integration with ModelEngine
+
+When integrating with ModelEngine through the CAS protocol, use a values file to configure Nexent. This avoids complex command-line escaping for `CAS_ROLE_MAP_JSON`.
+
+Create `cas-modelengine-values.yaml`:
+
+```yaml
+nexent-common:
+  config:
+    cas:
+      enabled: true
+      serverUrl: "https://<ModelEngine IP>:5443/SSOSvr"
+      validatePath: "/p3/serviceValidate"
+      callbackBaseUrl: "http://<Nexent IP>:30000"
+      loginMode: "force"
+      userAttribute: "userName"
+      emailAttribute: "email"
+      roleAttribute: "userType"
+      tenantAttribute: "tenant_id"
+      roleMapJson: '{"1":"ADMIN","3":"DEV"}'
+      sessionMaxAgeSeconds: 3600
+      localSessionMaxAgeSeconds: 3600
+      renewBeforeSeconds: 300
+      renewTimeoutSeconds: 10
+      syntheticEmailDomain: "cas.local"
+      logoutUrl: "/logout?service=http://<Nexent IP>:30000"
+      sslVerify: false
+      caBundle: ""
+```
+
+You also need to add a CAS client service registration file in the OMS container. Use the following steps as a reference:
+
+```bash
+# Create the registration file, paste the JSON content into it, and save it.
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:30000/api/user/cas/logout_callback"
+}
+
+# Run the following command to copy the registration file into the container.
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+```
+
 ## 🔍 Troubleshooting
 
 ### Check Pod Status

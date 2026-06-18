@@ -157,7 +157,14 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
-  const { modelConfig, data: configData, invalidateConfig, config, updateConfig, saveConfig } = useConfig();
+  const {
+    modelConfig,
+    data: configData,
+    invalidateConfig,
+    config,
+    updateConfig,
+    saveConfig,
+  } = useConfig();
   const { token } = theme.useToken();
 
   // Get available embedding models for knowledge base creation
@@ -177,7 +184,10 @@ function DataConfig({ isActive }: DataConfigProps) {
       setDataMateUrl("");
     }
 
-    if (configData?.app && typeof configData.app.modelEngineEnabled === "boolean") {
+    if (
+      configData?.app &&
+      typeof configData.app.modelEngineEnabled === "boolean"
+    ) {
       setModelEngineEnabled(configData.app.modelEngineEnabled);
     }
 
@@ -214,8 +224,11 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
-  const [newKbIngroupPermission, setNewKbIngroupPermission] = useState<string>("READ_ONLY");
+  const [newKbIngroupPermission, setNewKbIngroupPermission] =
+    useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
+  const [newKbPreserveSourceFile, setNewKbPreserveSourceFile] =
+    useState<boolean>(true);
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
@@ -269,7 +282,8 @@ function DataConfig({ isActive }: DataConfigProps) {
       const modelType = isMultimodal ? "multi_embedding" : "embedding";
       return availableEmbeddingModels.find(
         (model) =>
-          model.displayName === normalizedDisplayName && model.type === modelType
+          model.displayName === normalizedDisplayName &&
+          model.type === modelType
       )?.id;
     },
     [availableEmbeddingModels]
@@ -280,8 +294,13 @@ function DataConfig({ isActive }: DataConfigProps) {
     const singleEmbeddingModelName = modelConfig?.embedding?.modelName?.trim();
     const multiEmbeddingModelName =
       modelConfig?.multiEmbedding?.modelName?.trim();
-    setShowEmbeddingWarning(!singleEmbeddingModelName && !multiEmbeddingModelName);
-  }, [modelConfig?.embedding?.modelName, modelConfig?.multiEmbedding?.modelName]);
+    setShowEmbeddingWarning(
+      !singleEmbeddingModelName && !multiEmbeddingModelName
+    );
+  }, [
+    modelConfig?.embedding?.modelName,
+    modelConfig?.multiEmbedding?.modelName,
+  ]);
 
   // Add event listener for selecting new knowledge base
   useEffect(() => {
@@ -698,9 +717,11 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbName(defaultName);
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
+    setNewKbPreserveSourceFile(true);
     // Set default embedding model:
     // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
-    const configEmbeddingModel = modelConfig?.embedding?.modelName?.trim() || "";
+    const configEmbeddingModel =
+      modelConfig?.embedding?.modelName?.trim() || "";
     const configMultiEmbeddingModel =
       modelConfig?.multiEmbedding?.modelName?.trim() || "";
     const preferredModel = [
@@ -715,7 +736,10 @@ function DataConfig({ isActive }: DataConfigProps) {
     );
     const defaultModel =
       (preferredModel &&
-        toEmbeddingModelOptionValue(preferredModel.modelName, preferredModel.type)) ||
+        toEmbeddingModelOptionValue(
+          preferredModel.modelName,
+          preferredModel.type
+        )) ||
       (availableEmbeddingModels[0]
         ? toEmbeddingModelOptionValue(
             availableEmbeddingModels[0].displayName,
@@ -795,7 +819,8 @@ function DataConfig({ isActive }: DataConfigProps) {
           newKbIngroupPermission,
           newKbGroupIds,
           parsedSelectedModel.displayName,
-          isMultimodal
+          isMultimodal,
+          newKbPreserveSourceFile
         );
 
         if (!newKB) {
@@ -1015,7 +1040,10 @@ function DataConfig({ isActive }: DataConfigProps) {
               onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
                 // Update knowledge base in list and active knowledge base
                 updateKnowledgeBase(updatedKnowledgeBase);
-                if (kbState.activeKnowledgeBase && kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id) {
+                if (
+                  kbState.activeKnowledgeBase &&
+                  kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id
+                ) {
                   setActiveKnowledgeBase(updatedKnowledgeBase);
                 }
               }}
@@ -1062,6 +1090,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onIngroupPermissionChange={setNewKbIngroupPermission}
                 selectedGroupIds={newKbGroupIds}
                 onSelectedGroupIdsChange={setNewKbGroupIds}
+                preserveSourceFile={newKbPreserveSourceFile}
+                onPreserveSourceFileChange={setNewKbPreserveSourceFile}
                 // Embedding model for create mode
                 availableEmbeddingModels={availableEmbeddingModels}
                 selectedEmbeddingModel={newKbEmbeddingModel}
@@ -1102,25 +1132,30 @@ function DataConfig({ isActive }: DataConfigProps) {
                 isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
                 onChunkCountChange={() => {
                   // Trigger knowledge base list update to refresh chunk count
-                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
+                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(
+                    true
+                  );
                 }}
-                  permission={kbState.activeKnowledgeBase?.permission}
+                permission={kbState.activeKnowledgeBase?.permission}
                 summaryFrequency={kbState.activeKnowledgeBase?.summaryFrequency}
                 onSummaryFrequencyChange={(frequency) => {
                   if (kbState.activeKnowledgeBase) {
-                    knowledgeBaseService.updateSummaryFrequency(
-                      kbState.activeKnowledgeBase.id,
-                      frequency
-                    ).then(() => {
-                      const updatedKB: KnowledgeBase = {
-                        ...kbState.activeKnowledgeBase!,
-                        summaryFrequency: frequency
-                      };
-                      updateKnowledgeBase(updatedKB);
-                      setActiveKnowledgeBase(updatedKB);
-                    }).catch((error) => {
-                      log.error("Failed to update summary frequency:", error);
-                    });
+                    knowledgeBaseService
+                      .updateSummaryFrequency(
+                        kbState.activeKnowledgeBase.id,
+                        frequency
+                      )
+                      .then(() => {
+                        const updatedKB: KnowledgeBase = {
+                          ...kbState.activeKnowledgeBase!,
+                          summaryFrequency: frequency,
+                        };
+                        updateKnowledgeBase(updatedKB);
+                        setActiveKnowledgeBase(updatedKB);
+                      })
+                      .catch((error) => {
+                        log.error("Failed to update summary frequency:", error);
+                      });
                   }
                 }}
                 // Upload related props

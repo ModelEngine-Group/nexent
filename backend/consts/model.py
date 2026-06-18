@@ -1,8 +1,8 @@
 from enum import Enum
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Literal
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
@@ -230,6 +230,24 @@ class HistoryItem(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
 
 
+class AgentToolParamsRequest(BaseModel):
+    """Request-scoped tool parameter overrides for a single agent."""
+
+    tools: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Mapping from tool identifier to request-scoped override params",
+    )
+
+
+class ToolParamsRequest(BaseModel):
+    """Request-scoped tool parameter overrides for main and managed agents."""
+
+    agents: Dict[str, AgentToolParamsRequest] = Field(
+        default_factory=dict,
+        description="Mapping from agent identifier to tool parameter overrides",
+    )
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -240,6 +258,7 @@ class AgentRequest(BaseModel):
     model_id: Optional[int] = None
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
+    tool_params: Optional[ToolParamsRequest] = None
 
 
 class MessageUnit(BaseModel):
@@ -414,12 +433,47 @@ class OptimizePromptSectionRequest(BaseModel):
     section_title: str
     current_content: str
     feedback: str
+    mode: Literal["general", "insert", "select"] = "general"
+    start_pos: Optional[int] = Field(None, description="Start position for insert/select mode")
+    end_pos: Optional[int] = Field(None, description="End position for insert/select mode")
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
+class BadCaseItem(BaseModel):
+    question: str
+    answer: str
+    label: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class OptimizePromptBadCaseRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    current_content: str
+    bad_cases: List[BadCaseItem]
+    section_type: str
+    section_title: str
+    tool_ids: Optional[List[int]] = Field(None)
+    sub_agent_ids: Optional[List[int]] = Field(None)
+    knowledge_base_display_names: Optional[List[str]] = Field(None)
+
+
+class OptimizeFromDebugSelected(BaseModel):
+    user_question: str
+    assistant_answer: str
+
+
+class OptimizePromptFromDebugRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    feedback: str
+    selected: OptimizeFromDebugSelected
+    history: Optional[List[HistoryItem]] = None
 
 
 class GenerateTitleRequest(BaseModel):
@@ -454,7 +508,17 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    verification_config: Optional[Dict[str, Any]] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
     version_no: int = 0
+
+    @field_validator("verification_config", mode="before")
+    @classmethod
+    def normalize_verification_config(cls, value):
+        if value is None:
+            return None
+        return AgentVerificationConfig.model_validate(value).model_dump()
 
 
 class AgentIDRequest(BaseModel):
@@ -520,6 +584,7 @@ class MessageIdRequest(BaseModel):
 
 class ExportAndImportAgentInfo(BaseModel):
     agent_id: int
+    tenant_id: Optional[str] = None
     name: str
     display_name: Optional[str] = None
     description: str
@@ -527,6 +592,7 @@ class ExportAndImportAgentInfo(BaseModel):
     author: Optional[str] = None
     max_steps: int
     provide_run_summary: bool
+    verification_config: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
     few_shots_prompt: Optional[str] = None
@@ -554,6 +620,11 @@ class ExportAndImportDataFormat(BaseModel):
     agent_id: int
     agent_info: Dict[str, ExportAndImportAgentInfo]
     mcp_info: List[MCPInfo]
+
+
+class AgentRepositorySnapshot(ExportAndImportDataFormat):
+    """Frozen marketplace snapshot: export format plus optional skill ZIP payloads."""
+    skills: Optional[List["SkillZipEntry"]] = None
 
 
 class SkillZipEntry(BaseModel):

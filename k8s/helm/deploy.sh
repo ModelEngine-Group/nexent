@@ -611,7 +611,7 @@ apply() {
                 sleep 5
                 for svc in $backend_services; do
                     echo "  Waiting for nexent-$svc..."
-                    if kubectl wait --for=condition=ready pod -l app=nexent-$svc -n $NAMESPACE --timeout=300s 2>/dev/null; then
+                    if kubectl rollout status "deployment/nexent-$svc" -n "$NAMESPACE" --timeout=300s >/dev/null 2>&1; then
                         echo "  nexent-$svc is ready."
                     else
                         echo "  Error: nexent-$svc did not become ready within timeout."

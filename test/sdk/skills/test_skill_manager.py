@@ -1921,7 +1921,8 @@ description: List param test
 
             assert result == "ok"
             args = sp.run.call_args[0][0]
-            assert args == ["python", ANY, "-i", "a", "-i", "b", "-i", "c"]
+            assert args[0] == sys.executable
+            assert args[1:] == [ANY, "-i", "a", "-i", "b", "-i", "c"]
 
     def test_run_python_script_boolean_false_excluded(self, mocker):
         """Test boolean flags in string params are passed as-is (True)."""
