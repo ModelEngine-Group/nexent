@@ -50,8 +50,8 @@ Persona: an operator adding or editing an LLM/VLM model.
    from `provider_hint` or `base_url`, then tries capacity suggestion in this
    order:
    - Approved W1 catalog exact/fuzzy match.
-   - Provider discovery metadata, when the provider adapter and credentials can
-     return model list or raw metadata with capacity hints.
+   - Version 2 only: provider discovery metadata, when the provider adapter and
+     credentials can return model list or raw metadata with capacity hints.
    - No suggestion.
 4. If a suggestion is found, the capacity fields populate in `suggested` state
    and an alert explains the source. Nothing is saved yet.
@@ -70,10 +70,19 @@ Persona: an operator adding or editing an LLM/VLM model.
 Values that used to be invisible:
 
 - Operators now see whether a capacity suggestion came from approved catalog
-  data or lower-confidence provider discovery.
+  data, and Version 2 may add lower-confidence provider discovery.
 - Operators can correct a wrong suggestion before saving.
 - A miss remains non-blocking but is observable through endpoint metrics and
   debug logs; the UI keeps the existing empty capacity form.
+
+Capacity suggestion is controlled by `CAPACITY_SUGGESTION_ENABLED` and by a
+frontend Add/Edit switch that is shown in every single-model capacity surface:
+the normal Add/Edit dialogs and the per-model configuration path inside batch
+provider flows. The switch controls whether W11 shows user-facing capacity
+suggestions from deterministic inference and the future provider-capacity
+interface. The recommended default is **on** because suggestions are
+non-mutating, visibly attributed, and still require explicit operator
+acceptance before persistence.
 
 ## Visibility for Existing Bare-Capacity Models
 
@@ -141,6 +150,10 @@ any row whose capacity is incomplete. The badge:
   pre-expanded and (if W11 suggestion can match) the suggestion
   prefilled.
 
+The badge and repair affordance are visible to administrators or users with
+model-management permission. They are not exposed as a repair link to users who
+cannot manage models.
+
 The badge condition is `context_window_tokens IS NULL OR
 max_output_tokens IS NULL`, matching the W1 resolver's
 `ProviderCapabilityUnknown` gate. Both fields, not just one, because
@@ -158,24 +171,26 @@ If the author selects a bare-capacity model, the agent-edit form
 shows a non-blocking inline notice above the save button: "The
 selected model has no capacity configured. The agent will run, but
 output-token enforcement and budget consistency checks are off
-until capacity is set in Model Management." This notice **does not**
-include a link to the Model Management page if the current agent
-author lacks model-management permission; in that case it instead
-shows: "Ask a model administrator to configure capacity for
-`<model_name>`."
+until capacity is set in Model Management." Ordinary agent authors
+who lack model-management permission see no repair link; they only
+see the non-blocking warning and: "Ask a model administrator to
+configure capacity for `<model_name>`." Administrators or users with
+model-management permission may see a link to the Model Management
+repair entry.
 
 #### 3. Dashboard Widget for Operators
 
 In the system dashboard (the existing operator landing page used by
-platform admins), add a small "Model capacity coverage" widget
-showing:
+platform admins), add a small "Model capacity coverage" widget for
+platform administrators or model-management administrators showing:
 
 - Number of bare-capacity LLM/VLM rows / total rows.
 - A "View all" link that opens Model Management filtered to bare
   rows.
 
-The widget hides itself when the count is zero. No alerting; the
-widget is observability, not paging.
+The widget hides itself when the count is zero and is not shown to
+ordinary agent authors. No alerting; the widget is observability, not
+paging.
 
 ### Backend Endpoint Contract
 
@@ -216,18 +231,24 @@ If the W11 feature flag is off, `suggestion_available` is always
 
 ### Frontend Implementation
 
-The visibility work shares the same flag as the rest of W11
-(`CAPACITY_SUGGESTION_ENABLED`). When off:
+Bare-capacity visibility is separate from capacity suggestion. It is a
+default-on remediation prompt for old rows, not an automatic repair path and
+not part of `CAPACITY_SUGGESTION_ENABLED`.
 
-- The list-page badge still renders (the badge does not depend on
-  suggestion; it depends only on the bare condition).
+When `CAPACITY_SUGGESTION_ENABLED` is off:
+
+- The list-page badge still renders because the badge depends only on the bare
+  condition.
 - The agent-edit dropdown warning still renders.
 - The dashboard widget still renders.
 - The "Click to fill" affordance opens the existing `ModelEditDialog`
-  without prefill; the operator types values from scratch.
+  without suggestion prefill; the operator types values from scratch.
 
-When on, the same controls additionally prefill suggested values
-from W11's catalog match.
+When `CAPACITY_SUGGESTION_ENABLED` is on, the same controls may additionally
+prefill suggested values from W11's catalog match or later provider-capacity
+interfaces. Suggestion UI is also controlled by a visible Add/Edit switch,
+default on, across both normal single-model dialogs and per-model configuration
+inside batch provider flows.
 
 Files touched (new sub-list, not replacing the existing
 Repository Touchpoints section):
@@ -297,127 +318,55 @@ suggestion-on-add UX because:
 - It directly addresses the existing-bare-rows problem regardless of
   whether the suggestion flag is on.
 
-If Phase 1 ships in week N, Phase 1.5 should ship in week N+1
-behind a separate small flag (`CAPACITY_COVERAGE_VISIBILITY_ENABLED`,
-default off) so it can be enabled without waiting for the suggestion
-UX, then merged into the broader W11 flag at GA.
+If Phase 1 ships in week N, Phase 1.5 should ship in week N+1 as a default-on
+visibility feature. It can still be disabled by operators if needed, but it is
+not gated by the capacity-suggestion switch because it does not propose or save
+capacity values.
 
-### Last-Resort Auto-Inference from Legacy `max_tokens`
+### Legacy `max_tokens` Guidance, Not Auto-Repair
 
 When the W1 catalog backfill misses (CM-031: typically
-`model_factory = 'OpenAI-API-Compatible'`) **and** the W11
-provider-discovery recommendation table also returns no match, the
-row stays bare and the dispatch path silently runs without CM-030
-enforcement. The visibility surfaces above tell operators *which*
-rows need attention, but until the operator finds the time to open
-the edit dialog the model is unprotected. W11 closes the remaining
-gap with a narrowly bounded auto-inference from the legacy
-`max_tokens` column.
+`model_factory = 'OpenAI-API-Compatible'`) and no capacity suggestion is
+available, the row stays bare and the dispatch path may run without CM-030
+enforcement. W11 does **not** auto-repair these rows and never writes inferred
+capacity values to `model_record_t`.
 
-Gating (all must hold; any miss leaves the row bare and falls back
-to the visibility surfaces):
-
-- `model_type IN ('llm', 'vlm')`. Embeddings re-use `max_tokens`
-  as the vector dimension; STT/TTS/rerank do not participate in W2,
-  per the "Scope: LLM and VLM Only" invariant above.
-- `context_window_tokens IS NULL AND max_output_tokens IS NULL`.
-  Any operator edit, any catalog backfill hit, or any W11
-  recommendation acceptance disables inference for that row.
-- `max_tokens IS NOT NULL AND max_tokens > 0`.
-- W1 catalog match returned `none` for the row's
-  `(model_factory, model_name)`.
-- W11 provider-discovery returned `match_kind = none`, or the
-  provider adapter is unreachable or did not return capacity hints.
-
-Inferred values:
-
-| Field | Value | Rationale |
-| --- | --- | --- |
-| `context_window_tokens` | `max_tokens` | Pre-W1, `max_tokens` was most often entered as the context window value (W1 ADR Decision 1 calls out this ambiguity). Defaulting to that assumption recovers the common case. |
-| `max_output_tokens` | `min(max_tokens, _TOKEN_THRESHOLD_LEGACY_FALLBACK)` where the constant is `32768` | Caps the inferred output at the same threshold used by `create_agent_info._resolve_safe_input_budget` and the frontend `tokenUsageIndicator` default. Avoids the failure mode documented below where the legacy `max_tokens` was actually a context window. |
-| `default_output_reserve_tokens` | `min(max_output_tokens, 4096)` | Matches the SDK `_DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096` so W2 has a reasonable per-request reserve without exceeding the inferred cap. |
-| `tokenizer_family` | `NULL` | CM-016 uncertainty reserve (10% of `context_window_tokens`) covers the resulting unknowns. |
-| `capacity_source` | `legacy_inferred` | New tag, distinct from `profile` / `operator` / `provider_candidate`. |
-
-**Production evidence motivating the cap (2026-06-17 incident).**
-`glm-5.1` on `dashscope` shipped to the active development cluster
-with `max_tokens = 204800` persisted by an operator who entered the
-provider's **context window** value into the pre-W1 "最大Token数"
-input. The 2026-06-17 W2 catalog backfill then set
-`max_output_tokens = 131072` from the catalog while leaving the
-legacy column untouched. At runtime the SDK
-`OpenAIModel.__call__` auto-filled `max_tokens = 131072` from the
-new column, the W2 snapshot's `requested_output_tokens` resolved
-from the per-tenant default reserve to `8192`, and the dispatch
-boundary raised `CallerMaxTokensOverrideForbidden` (CM-030),
-breaking the "数学思考" agent end-to-end. The post-mortem fixes
-were the service-layer `_coerce_legacy_max_tokens_alias`
-(new-write defense), `v2.2.0_0618_reconcile_max_tokens_alias.sql`
-(one-shot data reconcile), and the W2 dispatch flow guard
-(`safe_input_budget_snapshot != None` → skip the SDK's pre-W2
-auto-fill). The 32K cap on inferred `max_output_tokens` here is the
-forward-looking complement: even if a future legacy row's
-`max_tokens` is again a context window value, the inferred output
-cap stays well below provider hard limits and the dispatch boundary
-contract holds.
-
-UI surfacing:
-
-- The model-edit capacity-source tag (`SOURCE_COLORS` in
-  `ModelCapacityFields.tsx`) gains a `legacy_inferred` entry
-  rendered in **orange**, distinct from the green `profile`,
-  blue `operator`, and gold `provider_candidate` tags.
-- Tag tooltip: "These values were inferred from the legacy
-  `max_tokens` column and have not been verified against the
-  provider. Please confirm and save." (i18n key
-  `model.dialog.capacity.source.legacy_inferred.tooltip`.)
-- The bare-row badge from the visibility surfaces above treats
-  `legacy_inferred` rows as **not bare** (W2 has a snapshot, CM-030
-  is enforced), but the model-list page still renders a smaller
-  outline "verify" indicator so operators can find them.
-- The agent-edit selector subtitle reads "Capacity inferred from
-  legacy values — confirm in Model Management" instead of the
-  bare-row warning.
+Instead, bare-capacity UI surfaces show the legacy `max_tokens` value when it is
+present and positive. The prompt explains that old `max_tokens` values were
+often entered as the model's context window before W1 separated capacity fields,
+and instructs the operator to review that value and manually fill the
+`context_window_tokens` field if it matches the provider documentation. The
+operator may also fill `max_output_tokens`, `default_output_reserve_tokens`, and
+other capacity fields manually or by accepting an explicit W11 suggestion.
 
 Persistence semantics:
 
-- Inference runs once per row at the next agent run that loads the
-  model record. The helper writes the inferred values back into
-  `model_record_t` so subsequent loads see real columns and the
-  helper is an immediate no-op; this preserves the
-  `capacity_source = legacy_inferred` provenance for the UI to
-  surface.
-- Inference is **not** run from API request paths or schemas; only
-  from the model loader. This keeps it off the hot path and makes
-  the audit trail (`updated_by = system_w17_inferred`) easy to
-  reason about.
-- Operator edits, catalog backfill SQL, and W11 recommendation
-  acceptance always win over inferred values (the gating clause
-  `context_window_tokens IS NULL AND max_output_tokens IS NULL`
-  short-circuits on any non-NULL).
+- W11 never mutates a bare row without an operator save action.
+- The legacy `max_tokens` value is displayed as evidence only; it is not copied
+  into `context_window_tokens` automatically.
+- Accepted suggestions and manual edits continue to save through the existing
+  model-management endpoints with `capacity_source = 'operator'`.
+- Rows that remain incomplete continue to be shown by the default-on
+  bare-capacity visibility surfaces.
 
-Out of scope for this fallback:
+UI copy:
 
-- Embedding `max_tokens` migration. Embedding dimension lives in
-  `max_tokens` until a separate workstream introduces a dedicated
-  column (W1 spec, line 17).
-- STT/TTS/rerank capacity inference. These types do not have W2
-  semantics; their bare-row state is not a missed enforcement.
-- Inferring `max_input_tokens`. The W2 formula tolerates a NULL
-  `max_input_tokens` by falling back to
-  `context_window_tokens - requested_output_tokens`, so leaving it
-  NULL keeps inference minimal.
+- Bare-capacity tooltip/details include: "Legacy max_tokens is
+  `<max_tokens>`. If this value is the provider context window, enter it as
+  Context Window and save."
+- If `max_tokens` is missing or non-positive, the UI omits the value and asks
+  the operator to consult provider documentation.
+- Agent-edit selector warnings stay non-blocking and do not attempt to infer a
+  capacity value.
 
 ### Out of Scope for This Section
 
-- Auto-fixing bare rows beyond the narrowly bounded
-  `legacy_inferred` fallback documented above. The fix path
-  for any row that does not qualify for inference is still the
-  operator opening the edit dialog and saving. Auto-write paths
-  for catalog-matched rows are governed by the catalog backfill
-  SQL migration
-  (`docker/sql/v2.2.0_0617_backfill_w2_capacity_from_w1_catalog.sql`),
-  not by this UI work.
+- Auto-fixing bare rows. The fix path is the operator opening the edit dialog,
+  reviewing any legacy `max_tokens` evidence or W11 suggestion, and saving.
+  Auto-write paths for catalog-matched rows remain governed by the catalog
+  backfill SQL migration
+  (`docker/sql/v2.2.0_0617_backfill_w2_capacity_from_w1_catalog.sql`), not by
+  this UI work.
 - Blocking agent save when a bare-capacity model is selected.
   Degraded behavior (warning + non-blocking) is the chosen UX so
   agent authoring is never gated on cross-team coordination.
@@ -526,11 +475,13 @@ Catalog matches return high or medium confidence:
 - `catalog_fuzzy`: `medium`, green UI treatment with a note that the saved
   canonical model name/provider will be used if accepted.
 
-### 2. Provider Discovery During Connectivity Validation
+### 2. Provider Discovery During Connectivity Validation (Version 2)
 
-If the catalog does not match and `base_url` host or `provider_hint` maps to a
-supported provider adapter (`silicon`, `dashscope`, `tokenpony`,
-`modelengine`), W11 may call the existing provider discovery flow during
+Provider discovery is out of the first W11 implementation version. Version 1
+ships catalog exact/fuzzy suggestions only. In Version 2, if the catalog does
+not match and `base_url` host or `provider_hint` maps to a supported provider
+adapter (`silicon`, `dashscope`, `tokenpony`, `modelengine`), W11 may call a
+provider-capacity interface or existing provider discovery flow during
 connectivity validation.
 
 Provider discovery is deliberately lower trust than the approved catalog:
@@ -634,12 +585,14 @@ the global env flag decides behavior.
 ## Migration, Deliverables, and Phases
 
 - Phase 1: catalog exact/fuzzy match only. Ship behind
-  `CAPACITY_SUGGESTION_ENABLED=false` by default.
-- Phase 2: integrate suggestion output into connectivity validation response.
-  No provider discovery yet.
-- Phase 3: add provider discovery for supported adapters when credentials are
+  `CAPACITY_SUGGESTION_ENABLED=true` by default, with the frontend Add/Edit
+  suggestion switch defaulting on.
+- Phase 2: integrate catalog suggestion output into connectivity validation
+  response. No provider discovery in Version 1.
+- Version 2: add provider discovery for supported adapters when credentials are
   available from connectivity validation or an explicit `/suggest-capacity`
-  request.
+  request, after the provider-capacity interface, timeout, rate-limit, and
+  credential-handling contracts are accepted.
 - Phase 4: extend `_infer_model_factory` to all LLM/VLM paths via the shared
   host-to-provider map; keep embedding behavior compatible.
 - Phase 5: remove the feature flag once dogfood and SLO evidence passes.
@@ -699,12 +652,17 @@ the global env flag decides behavior.
 14. On save, accepted suggestion metadata is included in the existing save
     payload so backend can persist provider/model canonicalization and capacity
     fields according to the save rules above.
-15. When no suggestion exists for `context_window_tokens`, render the context
+15. The capacity suggestion switch is rendered in every Add/Edit capacity
+    surface, including normal single-model dialogs and per-model configuration
+    opened from batch provider flows. Turning it off suppresses suggestion
+    calls and suggestion chips for that dialog, but does not suppress
+    bare-capacity warnings.
+16. When no suggestion exists for `context_window_tokens`, render the context
     window control as a preset-capable selector instead of a plain numeric
     input. The selector must allow the operator to either choose a common preset
     or type a custom positive integer. Selecting or typing a value marks the
     field `operator`.
-16. When no suggestion exists for `default_output_reserve_tokens`, render the
+17. When no suggestion exists for `default_output_reserve_tokens`, render the
     output reserve control as a smaller preset-capable selector with the same
     custom positive-integer behavior.
 
@@ -739,36 +697,36 @@ from them save as `capacity_source = 'operator'`.
 
 ### Frontend Add/Edit Paths
 
-17. `ModelAddDialog`: primary flow. Run suggestion after successful
+18. `ModelAddDialog`: primary flow. Run suggestion after successful
     connectivity validation and also allow the standalone endpoint after
     `model_name` blur or `base_url` change when validation has already passed.
-18. `ModelEditDialog`: if an existing custom OpenAI-compatible LLM/VLM has null
+19. `ModelEditDialog`: if an existing custom OpenAI-compatible LLM/VLM has null
     capacity fields or `model_factory = OpenAI-API-Compatible`, show
     "Suggestion available" after validation or explicit check.
-19. `ProviderConfigEditDialog` per-model gear path: reuse the same edit logic
+20. `ProviderConfigEditDialog` per-model gear path: reuse the same edit logic
     when invoked for one model. Provider-level batch config remains out of scope
     and keeps capacity fields hidden per CM-032.
-20. `ModelDeleteDialog` provider browser flow: when enabling a provider model
+21. `ModelDeleteDialog` provider browser flow: when enabling a provider model
     whose record is missing capacity values, surface the suggestion as an "Add
     capacity" prompt. Existing provider-sourced `model_factory` values are not
     overwritten unless the operator accepts a suggestion.
 
 ### Error and Fallback Handling
 
-21. HTTP 5xx / network error from `/suggest-capacity`: log to console and fall
+22. HTTP 5xx / network error from `/suggest-capacity`: log to console and fall
     back to existing empty-form behavior. Never block add/edit.
-22. `match_kind = none`: no suggestion alert is shown. Capacity fields remain
+23. `match_kind = none`: no suggestion alert is shown. Capacity fields remain
     editable, and the context window / output reserve fields expose the preset
     selectors described above. Emit metric.
-23. Provider discovery timeout/auth failure: show no user-facing error unless
+24. Provider discovery timeout/auth failure: show no user-facing error unless
     connectivity validation itself failed. Suggestion miss is diagnostic only.
-24. Fuzzy catalog canonicalization warning: if the operator declines saving the
+25. Fuzzy catalog canonicalization warning: if the operator declines saving the
     canonical model name, show a warning that runtime will not claim profile
     capacity unless W1 exact lookup succeeds.
 
 ### Localization
 
-25. Add locale strings to en/zh:
+26. Add locale strings to en/zh:
     - `model.dialog.capacity.suggestion.title`
     - `model.dialog.capacity.suggestion.matchExact`
     - `model.dialog.capacity.suggestion.matchFuzzy`
@@ -777,9 +735,11 @@ from them save as `capacity_source = 'operator'`.
     - `model.dialog.capacity.suggestion.canonicalName`
     - `model.dialog.capacity.suggestion.candidateWarning`
     - `model.dialog.capacity.suggestion.profileMissWarning`
+    - `model.dialog.capacity.suggestion.toggle`
     - `model.dialog.capacity.preset.custom`
     - `model.dialog.capacity.preset.contextWindow`
     - `model.dialog.capacity.preset.outputReserve`
+    - `model.dialog.capacity.legacyMaxTokensHint`
 
 ## Repository Touchpoints
 
@@ -824,10 +784,10 @@ no DB migration.
 
 | Component | Action | Trigger |
 | --- | --- | --- |
-| `nexent-runtime` / `nexent-northbound` / `nexent-config` / `nexent-mcp` | Image rebuild + `compose up --force-recreate` (flow A in `nexent 代码改动生效流程.md`) | Backend route, service, connectivity response, and inference changes |
+| `nexent-runtime` / `nexent-northbound` / `nexent-config` / `nexent-mcp` | Image rebuild + `compose up --force-recreate` (flow A in `nexent 代码改动生效流程.md`) | Backend route, service, connectivity response, and suggestion changes |
 | `nexent-web` | Image rebuild + `compose up --force-recreate` (flow D) | Frontend dialog, service, and i18n changes |
 | `nexent-postgresql` | No change | No schema migration |
-| `consts.const` | Add `CAPACITY_SUGGESTION_ENABLED`, default `false` | Global feature flag |
+| `consts.const` | Add `CAPACITY_SUGGESTION_ENABLED`, default `true` | Global feature flag |
 | Tenant config | Optional key `capacity_suggestion_enabled`; unset means inherit env flag | Staged tenant rollout |
 | Monitoring | Add endpoint and acceptance metrics listed above | Phase 2 observation |
 
@@ -837,8 +797,8 @@ Rollout sequence:
 2. Enable per-tenant for one internal tenant.
 3. Measure one week of catalog exact/fuzzy accuracy and accepted-save profile
    hits.
-4. Enable provider discovery only after rate-limit and credential-handling
-   evidence is reviewed.
+4. Defer provider discovery to Version 2; enable it only after rate-limit and
+   credential-handling evidence is reviewed.
 5. Enable for paid tenants.
 6. Measure one week.
 7. Enable for all tenants and remove the flag only after definition of done
@@ -862,8 +822,8 @@ Rollback:
   Silicon entries.
 - `_pick_provider` covers the host map and verifies unknown hosts return null.
 - `_fuzzy_catalog_match` rejects ambiguous final-segment matches.
-- Provider discovery tests verify chat/completions token usage is never treated
-  as hard capacity metadata.
+- Version 2 provider discovery tests verify chat/completions token usage is
+  never treated as hard capacity metadata.
 
 ### Integration Tests
 
@@ -879,8 +839,8 @@ Rollback:
 - `POST /api/v1/models/suggest-capacity` with
   `{"model_name":"unknown-local-model","base_url":"http://localhost:8000/v1"}`
   returns `match_kind = none` and no suggestions.
-- Provider discovery mocked test: `qwen-some-experimental-model` against a
-  DashScope provider response with capacity metadata returns
+- Version 2 provider discovery mocked test: `qwen-some-experimental-model`
+  against a DashScope provider response with capacity metadata returns
   `provider_discovery`, low confidence, and no `capability_profile_version`.
 
 ### Frontend E2E
@@ -993,17 +953,19 @@ SLOs during rollout:
   `match_kind != none` during connectivity validation.
 - At least 95% of accepted catalog suggestions produce the expected runtime
   `capability_profile_version` on first dispatch.
-- Provider discovery suggestion p95 latency stays under the approved model-add
-  latency budget and timeout never blocks connectivity validation.
+- Version 2 provider discovery suggestion p95 latency stays under the approved
+  model-add latency budget and timeout never blocks connectivity validation.
 - Suggestion endpoint 5xx rate stays below 1% for enabled tenants.
 
 Definition of done:
 
-- Phase 1 and Phase 2 ship behind a flag, default off.
+- Phase 1 and Phase 2 ship behind `CAPACITY_SUGGESTION_ENABLED`, default on,
+  and every Add/Edit capacity surface includes the user-visible suggestion
+  switch.
 - Internal dogfood verifies exact and fuzzy suggestions for every approved
   catalog entry.
-- Provider discovery ships only after credential logging, rate-limit, and
-  timeout tests pass.
+- Provider discovery is out of Version 1 and ships only in Version 2 after
+  credential logging, rate-limit, and timeout tests pass.
 - `_infer_model_factory` covers LLM/VLM add paths and preserves embedding
   behavior.
 - All frontend sibling paths listed above are covered or explicitly out of
