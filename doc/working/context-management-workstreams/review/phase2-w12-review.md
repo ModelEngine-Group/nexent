@@ -1,4 +1,4 @@
-# Phase 2: W12 Review
+# Phase 2: W6 Review
 
 ## Assessment
 
@@ -11,7 +11,7 @@ delegated-context authorization are not transactionally or operationally complet
 - **CM-010 (Medium):** Artifact availability and recovery objectives are absent.
 - **CM-012 (Critical):** The accepted fail-closed behavior makes raw artifact or inline
   fallback impossible after governance failure.
-- **CM-019 (High):** The accepted W12-specific path uses governed non-readable staging,
+- **CM-019 (High):** The accepted W6-specific path uses governed non-readable staging,
   a pending-artifact/event/finalize-outbox transaction, idempotent finalize, ready-only
   reads, retry/repair, and orphan cleanup.
 - **CM-025 (Medium):** Delegated work lacks capability and mutation boundaries.

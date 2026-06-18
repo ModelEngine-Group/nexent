@@ -1,4 +1,4 @@
-# Phase 2: W10 Review
+# Phase 2: P4 Review
 
 ## Assessment
 
@@ -18,6 +18,6 @@ closes bypass enforcement; the specification still needs a finite conflict model
 
 - Keep decisions enforced at governed storage mutation and provider-dispatch boundaries.
 - Define supported conflict classes, deterministic outcomes, and explicit unresolved errors.
-- Treat semantic quality as W15 evidence, not a policy-engine guarantee.
+- Treat semantic quality as W10 evidence, not a policy-engine guarantee.
 
 **Readiness:** Conditionally implementation-ready.

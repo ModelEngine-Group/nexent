@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Accepted |
 | Owners | Agent runtime squad (W2 lead), AI Agent squad (SDK boundary), Model integration squad (W1 lead, fingerprint compatibility) |
-| Affects | [W2](../W2_Output_and_Safety_Capacity_Reserve.md), [W3](../W3_Guaranteed_Context_Fit.md), [W13](../W13_Reliable_Governed_Compaction.md), [W16](../W16_Prompt_Cache_Aware_Assembly.md) |
+| Affects | [W2](../W2_Output_and_Safety_Capacity_Reserve.md), [W10](../W10_Guaranteed_Context_Fit.md), [W6](../W6_Reliable_Governed_Compaction.md), [W3](../W3_Prompt_Cache_Aware_Assembly.md) |
 | Related findings | CM-013, CM-027, CM-028, CM-029, CM-030 |
 | Date | 2026-06-16 |
 | Accepted on | 2026-06-16 |
@@ -14,7 +14,7 @@
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Decision 1: W2 fingerprint field set and algorithm | Confirmed | W3 can use the W2 snapshot fingerprint algorithm and field set for validation. |
+| Decision 1: W2 fingerprint field set and algorithm | Confirmed | W10 can use the W2 snapshot fingerprint algorithm and field set for validation. |
 | Decision 2: override precedence chain | Confirmed | The precedence chain and frontend-facing agent override behavior are accepted. |
 | Decision 3: reject-on-mismatch at SDK dispatch | Confirmed | AI Agent squad / SDK boundary owner accepts reject-on-mismatch and SDK-wrapper enforcement. |
 | Type skeleton PR | Completed | Interface/type skeleton work is included in the W2 skeleton commit; calculator body, migration, and dispatch enforcement remain separate W2 implementation work. |
@@ -24,14 +24,14 @@
 The W2 spec body now reflects CM-027–CM-030 (per the 2026-06-16 phase 6
 review and today's spec edits). This ADR was opened to pin three
 implementation-detail couplings, each with two reasonable choices that
-downstream W3, W13, and the SDK boundary will hard-depend on:
+downstream W10, W6, and the SDK boundary will hard-depend on:
 
 1. **`SafeInputBudgetSnapshot` field set and fingerprint algorithm.** The
    W1 ADR Decision 3 explicitly defers this to a sibling ADR:
    > *"The W2 fingerprint uses the same algorithm with its own field set
    > (defined in a sibling W2 ADR if needed) and includes the W1
    > fingerprint as one input."*
-   W3 verifies W1 and W2 fingerprints at the trusted dispatch boundary;
+   W10 verifies W1 and W2 fingerprints at the trusted dispatch boundary;
    without an exact algorithm here, that verification cannot be written.
 2. **Override precedence and DB column shapes for CM-027/CM-028.** The W2
    spec lists the per-tenant `soft_limit_ratio` override, the per-agent
@@ -44,7 +44,7 @@ downstream W3, W13, and the SDK boundary will hard-depend on:
    wrapper." Both pairs are binary choices with different security and
    layer-rule implications.
 
-Resolving the three together avoids spec drift across W2, W3, W13, the
+Resolving the three together avoids spec drift across W2, W10, W6, the
 SDK, and `tenant_config_t` storage. As of the signoff status above,
 Decisions 1-3 are confirmed, and the type skeleton has been completed.
 This ADR is accepted as of 2026-06-16.
@@ -114,7 +114,7 @@ def compute_w2_fingerprint(
 | `provider`, `model_name` | Identity of the dispatch target; redundant with W1 fingerprint but kept for greppable logs |
 | `requested_output_tokens` + `output_reserve_source` | Three override paths produce the same number from different provenance; sources must affect fingerprint per CM-028 |
 | Three reserve fields (`uncertainty_reserve_tokens`, `_basis`, `approved_profile_reserve_tokens`) | Different reserves under CM-016/CM-027 must produce different fingerprints |
-| `soft_limit_ratio` + `_source` | Per-tenant override produces a different operating envelope; W3 must reject snapshots whose ratio source no longer matches the active tenant config |
+| `soft_limit_ratio` + `_source` | Per-tenant override produces a different operating envelope; W10 must reject snapshots whose ratio source no longer matches the active tenant config |
 | Derived `soft_input_budget_tokens`, `hard_input_budget_tokens` | Included so a calculator bug that changes derivation cannot silently match |
 | Sorted `field_sources` | Two configurations with the same numbers but different provenance are not interchangeable for audit |
 
@@ -290,7 +290,7 @@ that catches the residual class of "caller passes a stray kwarg through."
 
 ## Consequences
 
-- **W3 can write fingerprint verification today.** The exact W2 field set
+- **W10 can write fingerprint verification today.** The exact W2 field set
   and algorithm are pinned; `capacity_fingerprint_mismatch` becomes
   implementable.
 - **One migration, two new override paths.** The per-agent column ships
@@ -303,7 +303,7 @@ that catches the residual class of "caller passes a stray kwarg through."
 - **SDK stays pure.** The assertion operates on parameters only; no
   env/config reads added to the SDK.
 - **W2 can start implementation once this ADR is accepted.** Its
-  remaining dependency is W1 (already accepted) plus W3's trusted-dispatch
+  remaining dependency is W1 (already accepted) plus W10's trusted-dispatch
   integration, which consumes this ADR's fingerprint contract.
 - **Type skeleton can start before acceptance.** The skeleton may add
   frozen model types, calculator signatures, and dispatch wrapper
@@ -326,7 +326,7 @@ decisions that can be made during the type-skeleton PR.
 
 This ADR is accepted when:
 
-- [x] **Decision 1 fingerprint field set signed off by W3 lead** — W3
+- [x] **Decision 1 fingerprint field set signed off by W10 lead** — W10
       verification code can be written against it.
 - [x] **Decision 2 precedence chain signed off by W2 lead and frontend
       reviewer** — the agent-edit UI behavior is unambiguous.

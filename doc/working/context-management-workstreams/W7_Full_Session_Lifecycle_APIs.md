@@ -1,14 +1,14 @@
-# W9: Full Session Lifecycle APIs
+# W7: Full Session Lifecycle APIs
 
 ## Objective
 
-Expose durable, authorized, auditable session operations for compact, checkpoint,
+Expose durable, authorized, auditable session operations for compact, flush_snapshot,
 restore, reset, and context inspection over immutable execution history.
 
 ## API Surface
 
-W9 owns authorized lifecycle orchestration and public/backend API behavior. It does not
-rewrite W5 history, implement W8 internals, or define compaction algorithms; it
+W7 owns authorized lifecycle orchestration and public/backend API behavior. It does not
+rewrite W5 history, implement P2 internals, or define compaction algorithms; it
 coordinates those services and records their outcomes.
 
 Provide backend APIs and matching SDK methods:
@@ -17,7 +17,7 @@ Provide backend APIs and matching SDK methods:
 | --- | --- |
 | `compact` | Create a governed compacted representation, optionally using focused instructions |
 | `flush_snapshot` | Flush in-memory state as a `compression.snapshot` event to W5 |
-| `restore` | Append lifecycle events that make a checkpoint the new active derived-state baseline without deleting later history |
+| `restore` | Append lifecycle events that make a compression.snapshot the new active derived-state baseline without deleting later history |
 | `reset_context` | Reset selected derived state without deleting source history |
 | `inspect_context` | Return authorized items, representations, budgets, and decision reasons |
 | `resolve_ambiguous_effect` | Record an explicit `retry`, `skip`, or `confirm_completed` decision for one blocked tool call |
@@ -28,7 +28,7 @@ when supplied an idempotency key and emits pre/post lifecycle events.
 
 ## Behavioral Rules
 
-- Initial lifecycle APIs operate only on W4 single-owner sessions. W9 exposes no
+- Initial lifecycle APIs operate only on W4 single-owner sessions. W7 exposes no
   conversation-sharing, membership-management, or ownership-transfer operation.
 - Shared agents, tenant-shared memories, and administrator/operator capabilities do not
   change session ownership. Any separately authorized operator action is explicitly
@@ -38,15 +38,24 @@ when supplied an idempotency key and emits pre/post lifecycle events.
   operations return `operation_conflicts_with_active_run` while a run is active.
 - Waiting for or cancelling a run does not make a conflicting operation safe until the
   run reaches a committed terminal/recovery state and clears W5 `active_run_id`.
+- If a parent session has pending subagent sessions (subagent sessions linked by
+  `parent_session_id` that have not reached a committed terminal state), mutating
+  lifecycle operations return `operation_conflicts_with_active_subagent`. This is
+  distinct from the active-run check: a parent run may complete its current execution
+  step while an async subagent is still running, creating a window where
+  `active_run_id` is cleared but subagent results have not yet been written back.
 - Read-only `inspect_context` may run concurrently. Runtime-internal compaction executed
-  as part of the active run is not a W9 manual lifecycle mutation.
+  as part of the active run is not a W7 manual lifecycle mutation.
 - Restore and reset cannot silently destroy dirty state; a `compression.snapshot` event is appended to W5 first.
 - Restore and reset change derived active state through new lifecycle events; they do
   not delete or rewrite later source events.
-- A `restore.applied` event records the restored covered `event_seq` and may reference a `compression.snapshot` event. Projectors can rebuild the source prefix from W5 when the checkpoint is
-  unavailable, then apply events after the restore event; events between the restored
-  boundary and restore event remain auditable but inactive.
-- Manual compaction instructions are untrusted user input governed by W10/W14.
+- A `restore.applied` event records the restored covered `event_seq` and may reference
+  a `compression.snapshot` event. Projectors can rebuild the source prefix from W5
+  when the compression.snapshot is unavailable, then apply events after the restore
+  event; events between the restored boundary and restore event remain auditable but
+  inactive.
+- Manual compaction instructions are untrusted user input governed by W13 and, when
+  enabled, P5.
 - Inspect responses redact sensitive payloads and reveal no hidden chain-of-thought.
 - Inspect, restore, and resume responses expose session `replay_status`. A
   `partial_after_erasure` session must never be reported as completely replayable.
@@ -71,9 +80,9 @@ resolves W4 identity and W5 `agent_session_id`; clients never authorize themselv
 supplying internal IDs.
 
 Responses contain operation ID, lifecycle status, committed W5 event IDs/sequences,
-checkpoint/version references, and typed warnings. Required errors include
+compression.snapshot/version references, and typed warnings. Required errors include
 `access_denied`, `session_not_found`, `version_conflict`, `dirty_state_flush_failed`,
-`checkpoint_invalid`, `operation_in_progress`, `hook_failed`, and `operation_timeout`.
+`snapshot_invalid`, `operation_in_progress`, `hook_failed`, and `operation_timeout`.
 An active-run conflict returns `operation_conflicts_with_active_run`.
 Unsupported sharing or ownership-transfer requests return
 `shared_conversation_unsupported` or `ownership_transfer_unsupported`; ordinary
@@ -93,16 +102,18 @@ and are rejected, not queued or applied, while an active run exists.
 ## Required Deliverables and Phases
 
 - Deliver API/SDK schemas, lifecycle service/state machine, operation store,
-  authorization matrix, hooks, W5/W8 integration, UI/operator controls, and runbooks.
-- Phase through inspect/checkpoint, restore/reset, Working Memory edits, compact, then
-  frontend controls after contract and failure-path stabilization.
+  authorization matrix, hooks, W5/P2 integration, UI/operator controls, and runbooks.
+- Phase through inspect/flush_snapshot, resolve_ambiguous_effect, restore/reset,
+  Working Memory edits, compact, then frontend controls after contract and
+  failure-path stabilization.
 
 ## Implementation Plan
 
 1. Define request/response/error schemas and authorization matrix.
-2. Add lifecycle service orchestrating W5 events, compression snapshots, and W8 validation.
+2. Add lifecycle service orchestrating W5 events, compression snapshots, and P2 validation.
 3. Enforce W5 single-active-run checks for every mutating lifecycle operation.
-4. Implement flush_snapshot and inspect first, then restore/reset, then compact.
+4. Implement flush_snapshot and inspect first, then resolve_ambiguous_effect, then
+   restore/reset, then compact.
 5. Add `resolve_ambiguous_effect` with authorization, idempotency, and durable W5 events.
 6. Add Working Memory edit operations with optimistic version checks.
 7. Add pre/post hooks and typed lifecycle events.
@@ -116,16 +127,20 @@ and are rejected, not queued or applied, while an active run exists.
 - `backend/services/conversation_management_service.py`
 - `backend/agents/agent_run_manager.py`
 - New SDK session client methods
+- Subagent session query (for debugging and conflict checking)
 - Monitoring/operator UI
 
 ## Tests and Definition of Done
 
-- Restore reproduces the checkpoint's effective active-context view.
+- Restore reproduces the compression.snapshot's effective active-context view.
 - Erasure tests expose `partial_after_erasure`, never reuse invalidated derived state,
   and reject restore/resume when safe reconstruction is impossible.
 - Reset preserves immutable events and handles dirty-state writeback.
 - Active-run conflict tests prove restore, reset, manual compact, and Working Memory
   mutation are rejected until the active run reaches a committed terminal/recovery state.
+- Subagent conflict tests prove mutating lifecycle operations are rejected with
+  `operation_conflicts_with_active_subagent` when the parent session has pending
+  subagent sessions, even after the parent run's `active_run_id` is cleared.
 - Crash-after-tool-start tests prove resume is blocked, no automatic tool invocation
   occurs, and each explicit resolution choice is durable, authorized, and idempotent.
 - Authorization, redaction, idempotency, concurrency, and hook-failure tests pass.
@@ -133,5 +148,5 @@ and are rejected, not queued or applied, while an active run exists.
   resources grant no session access, and audited operator actions leave ownership
   unchanged.
 - Inspection explains inclusion, exclusion, reduction, budget, and provenance decisions.
-- W9 is done when all lifecycle operations are durable, authorized, replayable,
+- W7 is done when all lifecycle operations are durable, authorized, replayable,
   observable, and usable through backend API plus SDK.

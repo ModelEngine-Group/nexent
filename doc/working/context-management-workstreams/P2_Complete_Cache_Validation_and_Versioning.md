@@ -1,4 +1,4 @@
-# W8: Complete Cache Validation and Versioning
+# P2: Complete Cache Validation and Versioning
 
 ## Objective
 
@@ -8,24 +8,27 @@ lifecycle change.
 
 ## Validity Contract
 
-W8 owns canonical fingerprints, validation, and invalidation delivery. It does not
-create projections or decide policy content; W6, W10, and W14 provide
-the versioned inputs that W8 validates.
+P2 owns canonical fingerprints, validation, and invalidation delivery. It does not
+create projections or decide policy content; P1, P3, and P5 provide
+the versioned inputs that P2 validates.
 
-Replace boundary-only fingerprints in `sdk/nexent/core/agents/agent_context.py` with a
-complete canonical fingerprint. A derived view or cached projection is valid only when all inputs match:
+Replace boundary-only fingerprints in `sdk/nexent/core/agents/agent_context.py` with
+metadata-based validation. A derived view or cached projection is valid only when all
+metadata inputs match:
 
-- Hash of the complete covered event range using canonical serialization.
 - W5 session identity and covered start/end event sequence.
+- `partial_after_erasure` flag (one-time mark for physical erasure propagation).
 - Context policy and memory policy versions.
 - Summary prompt and output schema versions.
 - Agent/configuration version and model ID.
 - Tokenizer family/version and capacity-calculation version.
 - Projection/representation schema versions.
 - Relevant redaction, authority, and lifecycle-state versions.
+- Event count since last compression snapshot (for P1 materialized projections).
 
-Use an explicit hash algorithm and canonical JSON rules. Store components separately
-as well as in one final digest so invalidation reasons remain observable.
+Content hashing (traversing event payloads to compute a digest) is removed from P2.
+Storage-layer integrity is handled by database checksums, not by P2. Store validation
+components separately so invalidation reasons remain observable. **Finding:** CM-015.
 
 ## Invalidation Rules
 
@@ -37,7 +40,7 @@ immutable, so edits are represented by events and invalidation metadata.
 
 Physical erasure or irreversible redaction additionally sets the owning session replay
 status to `partial_after_erasure`. Derived objects located through explicit source IDs
-or covered source ranges are invalidated as whole objects; W8 does not attempt
+or covered source ranges are invalidated as whole objects; P2 does not attempt
 field-level removal from summaries or other generated content.
 
 ## Validator Contract
@@ -54,15 +57,18 @@ fingerprint components plus stable reasons. Required invalid reasons include
 `source_erased`.
 Validation errors never degrade to cache hits.
 
-## Canonicalization and Invalidation Delivery
+## Validation and Invalidation Delivery
 
-- Define one canonical JSON/byte serialization, hash algorithm, and registry version.
-- Store component digests separately so operators can explain invalidation.
+- Define one version registry and validation component schema.
+- Store validation components separately so operators can explain invalidation.
 - Direct read paths must call the centralized validator; bypasses are test failures.
 - Deletion/redaction/policy changes publish targeted invalidation work with durable
   retries; lazy validation remains the correctness backstop.
-- An authorized W14 deletion tombstone makes matching read candidates immediately
+- An authorized P5 deletion tombstone makes matching read candidates immediately
   invalid even while destination-specific physical deletion remains in progress.
+- Physical erasure propagates through the one-time `partial_after_erasure` flag on
+  `agent_session`; all historical compression snapshots are invalidated without
+  per-snapshot hash computation. **Finding:** CM-015.
 
 ## Required Deliverables and Phases
 
@@ -73,20 +79,26 @@ Validation errors never degrade to cache hits.
 
 ## Implementation Plan
 
-1. Define canonical serialization and version registry in an ADR.
-2. Implement streaming complete-prefix hashing over W5 events.
-3. Extend derived-state records with digest inputs and invalidation reason.
-4. Centralize validation in `CheckpointValidator`; callers cannot bypass it.
+1. Define version registry and validation component schema in an ADR.
+2. Implement O(1) metadata-based validation:
+   - compression.snapshot: `partial_after_erasure` flag + version field comparison
+     (policy_version, model_version, projection_version).
+   - P1 materialized projections: snapshot validity + event count since snapshot +
+     version fields.
+   - Physical erasure: one-time `partial_after_erasure` flag that invalidates all
+     historical snapshots without per-snapshot hash computation.
+3. Extend derived-state records with validation inputs and invalidation reason.
+4. Centralize validation in `DerivedStateValidator`; callers cannot bypass it.
 5. Add targeted invalidation events/jobs for deletion, redaction, and policy changes.
 6. Emit hit, miss, invalid, rebuild, and reason-code metrics.
-7. Provide an operator tool to explain why a checkpoint was accepted or rejected.
+7. Provide an operator tool to explain why derived state was accepted or rejected.
 
 ## Repository Touchpoints
 
 - `sdk/nexent/core/agents/agent_context.py`
 - `sdk/nexent/core/agents/summary_cache.py`
 - W5 event-log repository
-- Policy/version registries from W10 and W14
+- Policy/version registries from P3 and P5
 - Monitoring and lifecycle services
 
 ## Tests and Definition of Done
@@ -98,5 +110,24 @@ Validation errors never degrade to cache hits.
 - Erasure tests prove range- and explicit-ID lineage locate affected derived objects
   and prevent their reuse after payload deletion.
 - Canonicalization tests are stable across processes and supported runtime versions.
-- W8 is done when no derived view or cached projection can be used without centralized
+- P2 is done when no derived view or cached projection can be used without centralized
   complete validation and every invalidation is observable by stable reason code.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Minimal fix justified now; full version registry deferred.**
+
+### Current state
+- Boundary-only fingerprint: MD5 of last 200 chars of boundary step
+- Incremental compression cache: PreviousSummaryCache + CurrentSummaryCache
+- Stable-phase bypass: skips LLM when effective tokens under threshold
+
+### Real gap
+- Mid-sequence edits, model switches, or prompt changes go undetected
+- No model ID, prompt version, or schema version in fingerprints
+
+### Why full P2 is deferred
+The 9 metadata dimensions P2 specifies (policy version, prompt version, schema version, agent version, model ID, tokenizer version, projection version, lifecycle state, redaction version) **don't exist yet** — they require W5/P3/P5 to deliver versioned inputs first.
+
+### Minimal fix (do now)
+Hash the full covered prefix + include model ID in fingerprint (~50 lines in `agent_context.py`).

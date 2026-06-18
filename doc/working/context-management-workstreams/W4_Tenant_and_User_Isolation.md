@@ -15,7 +15,7 @@ compression snapshots, and artifacts would multiply the impact unless identity i
 ## Identity Contract
 
 W4 owns identity resolution, authorization, and identity-qualified keying. It does not
-define event schemas, compression snapshot contents, or lifecycle behavior; W5 and W9 consume
+define event schemas, compression snapshot contents, or lifecycle behavior; W5 and W7 consume
 the authorized identity contract.
 
 Introduce immutable branchless `ContextIdentity`:
@@ -103,11 +103,13 @@ to the operation and resource being executed.
 1. Add `ContextIdentity` to backend and SDK boundary models.
 2. Replace string key construction in `AgentRunManager`.
 3. Require identity in context-manager creation, cleanup, and run registration.
-4. Add identity columns and composite indexes to W5 persistence schemas.
+4. Verify W5 persistence schemas include identity columns and composite indexes;
+   coordinate with W5 implementation to ensure alignment.
 5. Add an authorization service used by compression snapshot, artifact, and lifecycle operations.
-6. Remove or deprecate internal mutation APIs that accept only `conversation_id`;
-   public conversation APIs may retain it but must resolve and authorize the full
-   identity from request context.
+6. Mark internal mutation APIs that accept only `conversation_id` as deprecated
+   with a notice that they will be removed in the next version. Public conversation
+   APIs may retain `conversation_id` as a parameter but must resolve and authorize
+   the full identity from request context.
 7. Add structured security audit events for denied access.
 8. Require model dispatch and governed persistence boundaries to reject missing, stale,
    mismatched, or caller-supplied authorization decisions.
@@ -120,7 +122,7 @@ to the operation and resource being executed.
 - `backend/apps/conversation_management_app.py`
 - `backend/services/conversation_management_service.py`
 - `backend/database/conversation_db.py`
-- New event-log, artifact, and lifecycle modules from W5-W9
+- New event-log, artifact, and lifecycle modules from W5-W7
 
 ## Tests
 
@@ -147,3 +149,20 @@ identity and remove legacy keys. Existing conversations receive an internal W5 s
 during migration. W4 is done when every context-state mutation requires authorized
 `ContextIdentity`, unsupported sharing/transfer fails explicitly, and collision/security
 suites pass.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Plan is correct. Significant gaps confirmed.**
+
+### What exists
+- Memory system: properly isolated via `build_memory_identifiers()` (tenant+user scoped)
+- Agent runs: user-scoped (`"{user_id}:{conversation_id}"`)
+- Agent/Model/Knowledge/MCP tables: all have `tenant_id` columns
+- Auth extraction: JWT correctly extracts user_id and resolves tenant_id
+
+### What is missing
+- **5 conversation tables have no `tenant_id`**: `conversation_record_t`, `conversation_message_t`, `conversation_message_unit_t`, `conversation_source_search_t`, `conversation_source_image_t`
+- **ContextManager keyed only by `conversation_id`**: `_conversation_context_managers` dict uses `str(conversation_id)` — cross-tenant collision possible
+- **No tenant filtering on conversation queries**: `conversation_db.py` never filters by `tenant_id`
+- **`rename_conversation`/`delete_conversation` do not verify ownership**: any authenticated user can modify any conversation
+- **No tenant isolation middleware**: only `ExceptionHandlerMiddleware` exists

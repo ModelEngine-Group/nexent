@@ -1,4 +1,4 @@
-# W17: Capacity Suggestion on Model Add
+# W11: Capacity Suggestion on Model Add
 
 ## Objective
 
@@ -9,7 +9,7 @@ Make W1's capability profile catalog reachable from the default frontend
 through the manual form (URL + API key + model name) and currently bypass the
 catalog entirely (see CM-031 / W1 ADR Known Limitations), defeating W1's purpose.
 
-W17 also uses the existing connectivity-check moment to surface capacity
+W11 also uses the existing connectivity-check moment to surface capacity
 suggestions. Operators already must click connectivity validation before a model
 can be added; that validation should return capacity suggestions when they can
 be derived safely, while still treating unknown capacity as a non-blocking
@@ -24,7 +24,7 @@ only when `(provider, model_name)` exactly matches a catalog key. The frontend
 Pydantic default `'OpenAI-API-Compatible'` and matches no catalog key. The
 backend helper `_infer_model_factory` only fires for embedding-type records.
 
-W17 owns the user-facing "suggest defaults at add time" experience and the
+W11 owns the user-facing "suggest defaults at add time" experience and the
 connectivity-check integration that triggers it. It does **not** change the W1
 resolver, the catalog data model, or the W1 fingerprint contract. The approved
 catalog remains the trusted source for high-confidence profile defaults.
@@ -46,7 +46,7 @@ Persona: an operator adding or editing an LLM/VLM model.
    `api_key`, and `model_name`.
 2. The operator clicks the existing connectivity validation control. The add
    button remains gated by connectivity success exactly as it is today.
-3. During the same backend validation request, W17 infers a provider candidate
+3. During the same backend validation request, W11 infers a provider candidate
    from `provider_hint` or `base_url`, then tries capacity suggestion in this
    order:
    - Approved W1 catalog exact/fuzzy match.
@@ -77,10 +77,10 @@ Values that used to be invisible:
 
 ## Visibility for Existing Bare-Capacity Models
 
-W17 also takes on the complementary mission of surfacing **existing**
+W11 also takes on the complementary mission of surfacing **existing**
 model rows whose capacity columns are still NULL — the legacy rows
 created before W1 step 7 made `context_window_tokens` and
-`max_output_tokens` required in the Add/Edit forms. Without W17,
+`max_output_tokens` required in the Add/Edit forms. Without W11,
 these rows silently disable W2 output-token enforcement and the W1→W2
 dispatch consistency check, and the only signal today is a backend
 WARNING that the model administrator and agent author never see.
@@ -88,7 +88,7 @@ WARNING that the model administrator and agent author never see.
 ### Problem Statement
 
 The remediation path for a legacy bare-capacity row is identical to
-the W17 add-time flow: open the model, fill in capacity, save. What is
+the W11 add-time flow: open the model, fill in capacity, save. What is
 missing is a way for the people who can take that action — model
 administrators and agent authors — to **discover** which rows need it
 without grepping backend logs. Today:
@@ -108,7 +108,7 @@ rows total, of which 6 carried `model_factory = 'OpenAI-API-Compatible'`
 matched only one row (`glm-5.1` on `dashscope`), leaving the LLM the
 operator was actively chatting with (`glm-5`) bare and silently
 running without CM-030 enforcement. This is not an edge case: in the
-absence of W17, the default-factory path is the dominant path, and
+absence of W11, the default-factory path is the dominant path, and
 the bare-row population grows monotonically with normal usage.
 
 ### Scope: LLM and VLM Only
@@ -138,7 +138,7 @@ any row whose capacity is incomplete. The badge:
   this model. Click to fill capacity values now." (i18n keys below.)
 - Clicking the badge opens the same `ModelEditDialog` that the
   existing pencil/gear control opens, with the capacity panel
-  pre-expanded and (if W17 suggestion can match) the suggestion
+  pre-expanded and (if W11 suggestion can match) the suggestion
   prefilled.
 
 The badge condition is `context_window_tokens IS NULL OR
@@ -208,15 +208,15 @@ targets (typically < 100 per tenant), a simple list is sufficient
 and operator filters are local-only.
 
 `suggestion_available` is precomputed by a non-blocking call to the
-W17 catalog matcher for each bare row. Provider-discovery suggestion
+W11 catalog matcher for each bare row. Provider-discovery suggestion
 is **not** attempted from this endpoint (it would require credentials
 and network calls scaled by row count); only catalog matching runs.
-If the W17 feature flag is off, `suggestion_available` is always
+If the W11 feature flag is off, `suggestion_available` is always
 `false` and the field is informational only.
 
 ### Frontend Implementation
 
-The visibility work shares the same flag as the rest of W17
+The visibility work shares the same flag as the rest of W11
 (`CAPACITY_SUGGESTION_ENABLED`). When off:
 
 - The list-page badge still renders (the badge does not depend on
@@ -227,7 +227,7 @@ The visibility work shares the same flag as the rest of W17
   without prefill; the operator types values from scratch.
 
 When on, the same controls additionally prefill suggested values
-from W17's catalog match.
+from W11's catalog match.
 
 Files touched (new sub-list, not replacing the existing
 Repository Touchpoints section):
@@ -245,7 +245,7 @@ Repository Touchpoints section):
 - `backend/services/model_management_service.py`
   (`get_capacity_coverage(tenant_id)` query)
 
-### Localization Strings (Additional to the W17 Set Above)
+### Localization Strings (Additional to the W11 Set Above)
 
 - `model.list.capacityWarning.badgeTooltip`
 - `model.list.capacityWarning.tooltipAction`
@@ -286,7 +286,7 @@ Frontend E2E:
 - Dashboard widget with `bare_count = 0` is not rendered; with
   `bare_count > 0` it shows the count and the "View all" link works.
 
-### Phase Placement Within W17
+### Phase Placement Within W11
 
 This visibility work is **Phase 1.5** (between Phase 1 catalog match
 and Phase 2 connectivity integration). It ships independently of the
@@ -300,17 +300,17 @@ suggestion-on-add UX because:
 If Phase 1 ships in week N, Phase 1.5 should ship in week N+1
 behind a separate small flag (`CAPACITY_COVERAGE_VISIBILITY_ENABLED`,
 default off) so it can be enabled without waiting for the suggestion
-UX, then merged into the broader W17 flag at GA.
+UX, then merged into the broader W11 flag at GA.
 
 ### Last-Resort Auto-Inference from Legacy `max_tokens`
 
 When the W1 catalog backfill misses (CM-031: typically
-`model_factory = 'OpenAI-API-Compatible'`) **and** the W17
+`model_factory = 'OpenAI-API-Compatible'`) **and** the W11
 provider-discovery recommendation table also returns no match, the
 row stays bare and the dispatch path silently runs without CM-030
 enforcement. The visibility surfaces above tell operators *which*
 rows need attention, but until the operator finds the time to open
-the edit dialog the model is unprotected. W17 closes the remaining
+the edit dialog the model is unprotected. W11 closes the remaining
 gap with a narrowly bounded auto-inference from the legacy
 `max_tokens` column.
 
@@ -321,12 +321,12 @@ to the visibility surfaces):
   as the vector dimension; STT/TTS/rerank do not participate in W2,
   per the "Scope: LLM and VLM Only" invariant above.
 - `context_window_tokens IS NULL AND max_output_tokens IS NULL`.
-  Any operator edit, any catalog backfill hit, or any W17
+  Any operator edit, any catalog backfill hit, or any W11
   recommendation acceptance disables inference for that row.
 - `max_tokens IS NOT NULL AND max_tokens > 0`.
 - W1 catalog match returned `none` for the row's
   `(model_factory, model_name)`.
-- W17 provider-discovery returned `match_kind = none`, or the
+- W11 provider-discovery returned `match_kind = none`, or the
   provider adapter is unreachable or did not return capacity hints.
 
 Inferred values:
@@ -391,7 +391,7 @@ Persistence semantics:
   from the model loader. This keeps it off the hot path and makes
   the audit trail (`updated_by = system_w17_inferred`) easy to
   reason about.
-- Operator edits, catalog backfill SQL, and W17 recommendation
+- Operator edits, catalog backfill SQL, and W11 recommendation
   acceptance always win over inferred values (the gating clause
   `context_window_tokens IS NULL AND max_output_tokens IS NULL`
   short-circuits on any non-NULL).
@@ -468,7 +468,7 @@ without persisting them.
 | `capability_profile_version` | out | string/null | Present only for catalog matches |
 | `capacity_source_on_accept` | out | enum/null | Always `operator` for accepted writes; null when `match_kind = none` |
 
-The suggestion object includes only the model-record capacity fields that W17
+The suggestion object includes only the model-record capacity fields that W11
 can safely prefill:
 
 - `context_window_tokens`
@@ -491,7 +491,7 @@ canonical model name make W1's exact catalog lookup succeed.
 
 ## Design
 
-W17 uses three capacity sources in strict trust order.
+W11 uses three capacity sources in strict trust order.
 
 ### 1. Approved Catalog Match
 
@@ -530,7 +530,7 @@ Catalog matches return high or medium confidence:
 
 If the catalog does not match and `base_url` host or `provider_hint` maps to a
 supported provider adapter (`silicon`, `dashscope`, `tokenpony`,
-`modelengine`), W17 may call the existing provider discovery flow during
+`modelengine`), W11 may call the existing provider discovery flow during
 connectivity validation.
 
 Provider discovery is deliberately lower trust than the approved catalog:
@@ -624,7 +624,7 @@ Security and privacy:
 
 ## Database Migration Contract
 
-None. W17 does not introduce schema. It reads the approved catalog and may make
+None. W11 does not introduce schema. It reads the approved catalog and may make
 optional upstream HTTP calls during provider discovery.
 
 If per-tenant rollout is required, use existing `tenant_config_t` config storage
@@ -654,7 +654,7 @@ the global env flag decides behavior.
    - `_pick_provider`
    - `_fuzzy_catalog_match`
    - `_suggest_from_provider_discovery`
-   - shared host-to-provider map used by both W17 and `_infer_model_factory`
+   - shared host-to-provider map used by both W11 and `_infer_model_factory`
 2. Add `POST /api/v1/models/suggest-capacity` route in
    `backend/apps/model_managment_app.py`.
 3. Add `ModelCapacitySuggestionRequest`,
@@ -819,7 +819,7 @@ Call-site evidence to verify during implementation:
 
 ## Operational Dependencies
 
-W17 requires a coordinated deploy across backend and web containers. There is
+W11 requires a coordinated deploy across backend and web containers. There is
 no DB migration.
 
 | Component | Action | Trigger |
@@ -1018,7 +1018,7 @@ contract. The "how does the catalog get populated correctly from real user
 behavior" question is a separate layer of the same problem. Moving the fix into
 a fresh workstream keeps W1's invariants stable: catalog keys remain exact,
 approved profiles remain reviewed data, and `provider_candidate` is never
-authoritative without operator acceptance. W17 improves the operator path into
+authoritative without operator acceptance. W11 improves the operator path into
 that contract without replacing the contract.
 
 See `W1_ADR_Capability_Catalog_Storage_and_Fingerprint.md` "Known Limitations"

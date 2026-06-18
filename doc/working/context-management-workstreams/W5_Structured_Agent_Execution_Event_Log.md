@@ -9,7 +9,7 @@ compatibility projection.
 ## Scope and Non-Goals
 
 W5 stores what happened: runs, model actions, tool calls/results, artifacts, errors,
-answers, context-item lifecycle, Working Memory updates, and memory decisions. W6
+answers, context-item lifecycle, Working Memory updates, and memory decisions. P1
 decides what each consumer sees. W5 also persists `compression.snapshot` events for recovery acceleration. Hidden/private
 chain-of-thought is explicitly not required and is not persisted by default. Branching
 and forking execution history are not supported by this design.
@@ -71,7 +71,7 @@ Required constraints:
 The split between index and data keeps replay scans and relationship queries small.
 Both rows must be inserted atomically, so an indexed event can never exist without its
 typed payload. Large or binary payloads are stored in `agent_artifact` and referenced
-from `detail`. Before this transaction, the trusted W14 governance boundary must return
+from `detail`. Before this transaction, the trusted P5 governance boundary must return
 a complete `GovernedPayload`. Classification or redaction failure cannot fall back to
 raw event persistence; only a sanitized reason-coded failure event without the rejected
 payload may be appended.
@@ -87,7 +87,7 @@ sessions. Existing conversations receive sessions lazily on their first W5-backe
 or through a migration job.
 
 The initial release never changes an `agent_session` owner and does not attach multiple
-users to one session. Sharing and ownership-transfer requests are rejected by W4/W9;
+users to one session. Sharing and ownership-transfer requests are rejected by W4/W7;
 shared agents or tenant-shared memories do not grant access to W5 history.
 
 Current conversation tables remain a compatibility projection during migration:
@@ -134,7 +134,7 @@ The initial release permits exactly one active run per durable `agent_session`.
 `agent_session` stores or references the current `active_run_id`; run start and terminal
 state changes update it transactionally with the corresponding W5 lifecycle event.
 
-A second run and conflicting W9 lifecycle mutations are rejected while `active_run_id`
+A second run and conflicting W7 lifecycle mutations are rejected while `active_run_id`
 is present. A cancelled, interrupted, or crashed run must first reach a committed
 terminal/recovery state before the active-run marker is cleared. This deliberately
 avoids concurrent same-session mutation and does not require fencing tokens.
@@ -146,7 +146,7 @@ transaction commits. The normal application role may insert and read event rows 
 may not update or delete them. Corrections, retries, cancellations, and logical
 redactions are represented by new typed events. `agent_session.next_event_seq` and
 session lifecycle fields are mutable coordination state and are not part of the
-append-only event history. W14-governed legal deletion or physical redaction is the
+append-only event history. P5-governed legal deletion or physical redaction is the
 only privileged exception; it must emit an auditable tombstone/proof record and
 invalidate affected derived state. The owning `agent_session` is marked
 `partial_after_erasure`; the system must no longer claim complete deterministic replay
@@ -182,7 +182,7 @@ Payload schema:
 | `policy_version` | string | Context/memory policy version used for compression |
 | `model_version` | string | Model ID and version used for compression |
 | `schema_version` | string | Follows CM-005 event-schema compatibility contract |
-| `projection_version` | string | W6 projection version active at snapshot time |
+| `projection_version` | string | P1 projection version active at snapshot time |
 | `creation_reason` | enum | `periodic`, `lifecycle_boundary`, `manual_compact`, `dirty_state_flush` |
 
 A `compression.snapshot` event is appended like any other W5 event. It is immutable
@@ -191,7 +191,7 @@ covers an extended range; old snapshots remain in the event log as audit history
 are superseded for recovery purposes by the latest snapshot.
 
 If the snapshot payload exceeds the inline event size limit, large fields (e.g.,
-Working Memory) are stored as W12 artifacts and referenced by pointer.
+Working Memory) are stored as P4 artifacts and referenced by pointer.
 
 ### Recovery from Compression Snapshot
 
@@ -212,7 +212,7 @@ recovery replays the entire event log from the beginning. This is always correct
 slower for long sessions.
 
 Recovery never treats an in-flight tool call as completed or automatically reinvokes
-it. Unresolved `ambiguous_effect` state blocks continuation until W9 records an
+it. Unresolved `ambiguous_effect` state blocks continuation until W7 records an
 explicit resolution.
 
 A `compression.snapshot` affected by physical erasure is invalidated as a whole.
@@ -236,7 +236,7 @@ schema upgrade.
 For each event type, the W5 registry declares one enabled writer version and supports
 reading that current version plus its immediately previous version. The W5 canonical
 event reader owns the simple previous-to-current upcaster and returns the current
-internal representation to W6, replay, projection, and audit consumers. Stored events
+internal representation to P1, replay, projection, and audit consumers. Stored events
 remain immutable; consumers do not implement their own event upcasters.
 
 An event outside the declared `current + previous` read window fails explicitly with
@@ -330,20 +330,47 @@ production implementation.
 
 ## Implementation Plan
 
-1. Approve event taxonomy, schemas, ordering, idempotency, and the initial
-   `current + previous` event-evolution ADR before the first production schema upgrade.
+1. Approve architecture decision records (ADRs) before the first production schema upgrade:
+   - **1a. Event taxonomy and schema ADR:** Define event types (user.input,
+     run.started, run.completed, tool.call.started, tool.call.completed,
+     final.answer, error, cancellation, Working Memory update, memory decision,
+     compression.snapshot, lifecycle boundary, etc.), payload schema for each event
+     type, and schema versioning strategy.
+   - **1b. Ordering and idempotency ADR:** Define event_seq as the sole ordering
+     mechanism, idempotency_key usage and uniqueness constraints, run_id and step_id
+     scoping rules, and concurrent writer conflict resolution.
+   - **1c. Event schema evolution ADR:** Define current + previous version support
+     policy, upcaster implementation requirements, and deployment/rollback procedures.
 2. Add database entities, indexes, payload-size limits, and append repository.
-3. Add session resolution and an event writer to agent execution, tool, error,
-   cancellation, and answer paths.
-4. Add context/memory lifecycle event APIs for W6-W14.
-5. Implement redaction-before-persistence and artifact-reference behavior with W14.
+3. Add session resolution and an event writer to each code path:
+   - **3a. Agent main loop:** Emit `run.started` (with model/agent/config snapshots)
+     and `run.completed`/`run.failed` events in `CoreAgent._run_stream`.
+   - **3b. Tool execution:** Emit `tool.call.started` and `tool.call.completed`
+     events around each tool invocation in the agent step loop.
+   - **3c. Error and cancellation:** Emit `error` events on exceptions and
+     `cancellation` events when `stop_event` is triggered.
+   - **3d. Answer generation:** Emit `final.answer` events when the agent produces
+     its final output.
+4. Add context/memory lifecycle event APIs for P1-P5.
+5. Implement redaction-before-persistence and artifact-reference behavior with P5.
 6. Build compatibility projection into current conversation tables.
-7. Migrate direct/asynchronous conversation saves to event-first projection.
+7. Migrate direct/asynchronous conversation saves to event-first projection in phases:
+   - **7a. Shadow mode:** Dual-write to both W5 events and existing conversation
+     tables; compare outputs and log mismatches without changing behavior.
+   - **7b. Read switch:** Read conversation history from W5 event projections;
+     keep dual-write for safety.
+   - **7c. Write switch:** W5 events become authoritative; conversation table
+     writes happen asynchronously through the compatibility projector.
+   - **7d. Remove direct writes:** Remove legacy direct-write paths to
+     conversation tables; all mutations go through W5 event append first.
 8. Implement replay tooling that reconstructs a run after process restart.
 
 ## Repository Touchpoints
 
-- `backend/database/db_models.py` and new event-log database module
+- `backend/database/db_models.py` and new event-log database module (event
+  repository for index/data append and replay, session repository for
+  agent_session CRUD and sequence allocation, projection outbox for
+  compatibility projection work items)
 - `backend/agents/create_agent_info.py`
 - `backend/apps/agent_app.py`
 - `backend/services/conversation_management_service.py`
@@ -381,6 +408,30 @@ production implementation.
 - Compatibility projection matches existing UI behavior.
 - Migration tests cover conversation-backed, debug/non-conversation, and concurrent-run paths.
 - Redaction fixtures prove secrets and hidden reasoning are absent.
+- Performance baseline tests measure event-append latency, session-sequence lock
+  contention, and projection lag under realistic workloads to establish benchmarks
+  before production deployment.
 - W5 is done when all production run paths emit typed events, replay is deterministic
   enough to rebuild state, ambiguous tool calls cannot auto-resume, and no UI
   transcript is treated as the execution source of truth.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Current logging is UI-oriented, not an event log. Two bugs found.**
+
+### Current architecture
+```
+conversation_record_t → conversation_message_t → conversation_message_unit_t
+```
+Units are flat text with `unit_type varchar(100)` (no DB enum), ordered by `unit_index`. No run_id, step_id, event timestamps, or structured tool call/result records.
+
+### Bugs found
+1. **Backend merge omission** (`conversation_management_service.py:222`): `save_conversation_assistant()` merges consecutive `model_output_code` and `model_output_thinking` but NOT `model_output_deep_thinking`. Each deep-thinking token becomes a separate DB row.
+2. **Frontend history loader omission** (`chatMessageExtractor.ts`): `extractAssistantMsgFromResponse` has no case for `MODEL_OUTPUT_DEEP_THINKING`. Deep thinking content is silently dropped on history reload (live streaming works correctly).
+
+### What is NOT persisted
+- No agent run table (no record of "this agent ran at this time")
+- No step table (steps implicit via `step_count` units)
+- No tool call/result structured records
+- No event timestamps (`create_time` is batch insert time)
+- No append-only guarantee (units can be soft-deleted)

@@ -29,7 +29,7 @@ that produced CM-031.
   this; both paths must be either in scope with a frontend sub-plan or
   explicitly deferred.
 - **CM-029 (High):** Every model call (primary, compaction, summary) needs
-  its own W1→W2 snapshot pair. W13's compaction model is a separate
+  its own W1→W2 snapshot pair. W9's compaction model is a separate
   `model_record_t` with its own capacity; reusing the main run's snapshot
   would misjudge the compaction budget. This is the same defect class as
   CM-031 — assuming one model's parameters apply to all calls.
@@ -46,17 +46,17 @@ that produced CM-031.
 - For CM-028, decide in the W2 spec which of the two override paths is in
   W2 scope versus deferred to a follow-up; record the decision in W2
   alongside the per-agent column migration plan if in scope.
-- For CM-029, cross-link W13 spec: when W13 is re-reviewed, verify W13
+- For CM-029, cross-link W9 spec: when W9 is re-reviewed, verify W9
   invokes the W1→W2 chain with the compaction model's identity and does
   not inherit the main run's snapshot. Add the same per-model-snapshot
-  rule to W13's `Repository Touchpoints` enumeration of compaction call
+  rule to W9's `Repository Touchpoints` enumeration of compaction call
   sites.
 - For CM-030, add the explicit server-side assertion in the SDK or backend
   dispatch wrapper and include a negative test that a caller-supplied
   `max_tokens` kwarg is rejected or coerced.
 
 **Readiness:** Not ready for implementation as written. Once CM-027 through
-CM-030 are reflected in the W2 spec (and CM-029's cross-link to W13 is
+CM-030 are reflected in the W2 spec (and CM-029's cross-link to W9 is
 recorded), W2 returns to Ready to start implementation. Production dispatch
-activation continues to depend on the W1 snapshot, W3 trusted-dispatch
+activation continues to depend on the W1 snapshot, W4 trusted-dispatch
 integration, and release evidence already cited in the Phase 2 W2 review.

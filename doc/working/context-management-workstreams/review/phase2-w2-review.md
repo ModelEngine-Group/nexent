@@ -21,4 +21,4 @@ provider capability contract and on preventing local recalculation.
 - Test override authorization and configuration drift, not only arithmetic.
 
 **Readiness:** Ready to start implementation. Production dispatch activation remains
-gated by W1 capacity snapshots, W3 trusted-dispatch integration, and release evidence.
+gated by W1 capacity snapshots, W4 trusted-dispatch integration, and release evidence.

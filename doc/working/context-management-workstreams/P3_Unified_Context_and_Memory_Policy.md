@@ -1,4 +1,9 @@
-# W10: Unified Context and Memory Policy
+# P3: Unified Context and Memory Policy
+
+**Status:** Promoted for core scope. The Release 1 policy engine has been split into
+`W13_Unified_Context_and_Memory_Policy.md`. This P3 document now represents future
+policy extensions beyond W13, especially capabilities that require full P5 governance
+or advanced temporal-memory lifecycle.
 
 ## Objective
 
@@ -8,9 +13,9 @@ request.
 
 ## Policy Domains
 
-W10 owns policy resolution, authority/conflict decisions, selection decisions, and
+P3 owns policy resolution, authority/conflict decisions, selection decisions, and
 memory-operation permission. It does not serialize final prompts, reduce content, or
-persist events/memory; W3, W11-W12, W5, and memory services execute approved decisions.
+persist events/memory; W10, W8-P4, W5, and memory services execute approved decisions.
 
 Define `ContextPolicy` with a nested `MemoryPolicy`. The policy covers:
 
@@ -46,7 +51,7 @@ conflicts that cannot be resolved by these rules return `authority_conflict_unre
 and do not silently select either side. Multi-source memory conflicts are handled by
 global retrieval resolution for deduplication, lifecycle filtering, and contradiction
 detection; unresolvable conflicts are excluded from injection. All unresolved conflicts
-emit a stable reason code visible through W9 inspection and W15 measurement. An
+emit a stable reason code visible through W7 inspection and W9 measurement. An
 exhaustive conflict-resolution ontology is explicitly out of scope. **Finding:** CM-017.
 
 ## Selection Contract
@@ -70,6 +75,13 @@ and fingerprint. Decisions contain selected/excluded IDs, conflicts, required
 confirmation, target scope/destination, budgets, and stable reasons. Required failures
 include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible`,
 `authority_conflict_unresolved`, and `memory_operation_denied`.
+
+## Subagent Policy Independence
+
+Subagent sessions resolve their own P3 policy based on their agent configuration.
+The parent agent's policy does not apply to the subagent's internal context selection
+or memory operations. When a subagent returns its final answer to the parent, the
+parent's P3 policy governs how that result is integrated into the parent's context.
 
 ## Merge and Bypass Rules
 
@@ -99,8 +111,9 @@ include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible
 4. Route `store_memory` and `search_memory` tools plus automatic memory flows through
    the Memory Policy Engine.
 5. Add global cross-scope retrieval resolution.
-6. Emit policy decisions and expose authorized inspection through W9.
-7. Remove or deprecate runtime paths that bypass policy.
+6. Emit policy decisions and expose authorized inspection through W7.
+7. Mark runtime paths that bypass policy as deprecated with a notice that they will
+   be removed in the next version.
 8. Enforce server-resolved policy decisions at model dispatch and governed persistence
    boundaries.
 
@@ -123,5 +136,31 @@ include `policy_invalid`, `override_not_permitted`, `mandatory_budget_impossible
 - Negative integration tests prove caller-supplied, stale, or mismatched decisions
   cannot authorize dispatch or persistence.
 - Invalid policy fixtures fail before run start with actionable errors.
-- W10 is done when one versioned policy explains and enforces every context selection
+- Performance baseline tests measure policy resolution and context selection latency
+  to ensure P3 does not become a bottleneck on the model request hot path.
+- P3 is done when one versioned policy explains and enforces every context selection
   and memory lifecycle decision.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: ContextManager centralizes ~40%; memory decisions scattered. Pre-step justified.**
+
+### What ContextManager already centralizes
+- Conversation compression engine (1050 lines)
+- Component registration (7 ContextComponent types)
+- Strategy-based selection (4 strategies)
+- System prompt message assembly
+
+### What is scattered outside ContextManager
+- Memory search before run: `create_agent_info.py:495` (bypasses ContextManager)
+- Memory level filtering: duplicated in 3 files (`create_agent_info.py`, `store_memory_tool.py`, `search_memory_tool.py`)
+- End-of-run auto memory write: `agent_service.py:900-945` (completely outside ContextManager)
+- Conflict resolution: prompt text only (LLM follows instructions, no code enforcement)
+- Observation truncation: `core_agent.py:438-447` (uses config but logic in CoreAgent)
+- Time injection: `core_agent.py:485-486` (hardcoded)
+
+### Pre-step (do now)
+Extract the 3 copies of memory-level-filtering logic into a single shared function.
+
+### Why full P3 is deferred
+Full policy engine requires W5 event log and P1 projections as input to provide versioned policy entities.

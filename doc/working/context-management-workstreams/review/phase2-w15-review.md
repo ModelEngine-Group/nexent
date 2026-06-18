@@ -1,8 +1,8 @@
-# Phase 2: W15 Review
+# Phase 2: W10 Review
 
 ## Assessment
 
-W15 is essential but not implementation-ready as a release gate until numeric targets,
+W10 is essential but not implementation-ready as a release gate until numeric targets,
 workloads, evidence ownership, and trace governance are approved.
 
 ## Findings and Risks
@@ -20,9 +20,9 @@ workloads, evidence ownership, and trace governance are approved.
 ## Recommendations
 
 - Create a release capability matrix with claim-specific gates.
-- Reuse W15 evidence in the accepted lightweight claim-scoped release checklist.
+- Reuse W10 evidence in the accepted lightweight claim-scoped release checklist.
 - Approve numeric targets, populations, exclusions, and minimum samples.
-- Govern evidence through W14 and reject unsupported modality claims.
+- Govern evidence through W3 and reject unsupported modality claims.
 
 **Readiness:** Ready to implement the evidence framework and checklist; release-gate
 activation still requires approved numeric targets, populations, and claim scope.

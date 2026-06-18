@@ -1,8 +1,8 @@
 # 容量值全景：从 UI 到 dispatch 的每一个数字到底在算什么
 
-> 受众：模型管理员、Agent 作者、参与 W1/W2/W3 评审的工程师
+> 受众：模型管理员、Agent 作者、参与 W1/W2/W10 评审的工程师
 > 目标：用一篇文档说清楚 Nexent 上下文管理里所有"容量类"数字的物理意义、出处、计算关系
-> 关联：W1（容量解析）、W2（输出/安全预算）、W3（dispatch 保障）
+> 关联：W1（容量解析）、W2（输出/安全预算）、W10（dispatch 保障）
 
 ---
 
@@ -53,7 +53,7 @@
 | 默认输出预留 | `default_output_reserve_tokens` | 当 agent 没配 "输出预留" 时，本模型本轮预留多少 | 模型管理员（可空，留空走 SDK 默认 4096） |
 | 最大输入 tokens | `max_input_tokens` | 部分 provider 显式给的 input-only 硬上限（多数模型未公开，留空即可）；如果填了，会再做 `min(max_input, context_window − requested_output)` | 模型管理员（一般留空） |
 
-> **UI 入口可见性**：`maxInputTokens`、`maxOutputTokens` 在 Add / Edit 两种模式都可见；`defaultOutputReserveTokens` **当前只在 Edit 模式渲染**（`ModelCapacityFields.tsx:277` 的 `isAddMode` 分支）。所以新加模型这一列默认 NULL，runtime 走 SDK 4096 默认；要按模型精调，必须先 Add，再 Edit 进去补这一列。这是当前的 UX 折中，W17 会进一步在 catalog 命中时自动 prefill 这个值。
+> **UI 入口可见性**：`maxInputTokens`、`maxOutputTokens` 在 Add / Edit 两种模式都可见；`defaultOutputReserveTokens` **当前只在 Edit 模式渲染**（`ModelCapacityFields.tsx:277` 的 `isAddMode` 分支）。所以新加模型这一列默认 NULL，runtime 走 SDK 4096 默认；要按模型精调，必须先 Add，再 Edit 进去补这一列。这是当前的 UX 折中，W11 会进一步在 catalog 命中时自动 prefill 这个值。
 
 ### 2.2 Agent 编辑 UI（Agent 作者配置）→ `agent_t` 列
 
@@ -78,7 +78,7 @@
 | 字段 | 公式 | 含义 |
 |------|------|------|
 | `provider_input_limit_tokens` | `min(max_input_tokens, context_window − requested_output_tokens)` | 这一次调用允许的输入上限。所有压缩 / 预算都以这个为根 |
-| `fingerprint` | SHA-256 over canonical JSON | 整套 W1 状态的指纹，下游 W2/W3 用来检测"被偷偷改了" |
+| `fingerprint` | SHA-256 over canonical JSON | 整套 W1 状态的指纹，下游 W2/W10 用来检测"被偷偷改了" |
 
 ### 2.6 W2 SafeInputBudgetCalculator 算出 → `SafeInputBudgetSnapshot`
 
@@ -86,7 +86,7 @@
 |------|------|------|
 | `uncertainty_reserve_tokens` | 当某些 capability "unknown" 时，按 `provider_input_limit × 10%`（CM-016） | 给"不确定的事情"留的应急空间，避免溢出 |
 | `hard_input_budget_tokens` | `provider_input_limit − uncertainty_reserve` | **绝对红线**。超过这里 → provider 报 token overflow |
-| `soft_input_budget_tokens` | `floor(hard × soft_limit_ratio)` | **黄色警戒**。到这里 W3 / 上下文管理器开始**主动压缩** |
+| `soft_input_budget_tokens` | `floor(hard × soft_limit_ratio)` | **黄色警戒**。到这里 W10 / 上下文管理器开始**主动压缩** |
 | `requested_output_tokens` | 来自 override 链（见 §3） | 本轮预留给输出的 token 数 |
 | `fingerprint` | SHA-256 包含 `w1_fingerprint` | 整套 W2 状态的指纹；dispatch 时和 W1 配对验证 |
 
@@ -189,7 +189,7 @@ dispatch 时 CM-030 不生效（没有 W2 snapshot 强制 max_tokens）
 后端日志输出一条 operator-friendly WARNING（每进程每模型一次）
 ```
 
-修法：模型管理 UI 给这个模型补 capacity；W17 会用 badge 让这种 row 可见。
+修法：模型管理 UI 给这个模型补 capacity；W11 会用 badge 让这种 row 可见。
 
 ---
 
@@ -205,7 +205,7 @@ dispatch 时 CM-030 不生效（没有 W2 snapshot 强制 max_tokens）
 | 前端 indicator 显示 `XX/32k*`，星号 | 后端没发 `token_threshold`（snapshot 路径不通） | 同上：补 capacity；或确认 W2 链路 |
 | `soft_input_budget` 看起来比想象的低 | `soft_limit_ratio` 被租户调低（< 0.8） | 看 `tenant_config_t.soft_limit_ratio`；想激进就拉到 0.9 |
 | 模型回复总是被截断（输出半句话 / JSON 半截） | `requested_output_tokens` 太小（fallback 到 4096、或 model default 配小了、或 agent 显式设了小值） | 优先：agent 编辑设大"输出预留"；其次：管理员去模型 edit 给 `default_output_reserve_tokens` 填合理值；单次需要长输出可以 API body 临时覆盖 |
-| 新加模型的 agent 输出经常 4K 截断 | Add 模式不渲染 `defaultOutputReserveTokens` → DB 这一列 NULL → fallback 到 4096 | 去模型 edit 模式补 `default_output_reserve_tokens`；或等 W17 catalog 自动 prefill |
+| 新加模型的 agent 输出经常 4K 截断 | Add 模式不渲染 `defaultOutputReserveTokens` → DB 这一列 NULL → fallback 到 4096 | 去模型 edit 模式补 `default_output_reserve_tokens`；或等 W11 catalog 自动 prefill |
 | 上下文还有很多空间但已开始压缩 | `hard - soft` 间距 = 20%（默认）正在工作 | 这是设计；不想压可调高 ratio |
 
 ---
@@ -216,7 +216,7 @@ dispatch 时 CM-030 不生效（没有 W2 snapshot 强制 max_tokens）
 |------|------|------|
 | W1 | Workstream 1 | 模型容量解析，输出 `ModelCapacitySnapshot` |
 | W2 | Workstream 2 | 输出 + 安全输入预算，输出 `SafeInputBudgetSnapshot` |
-| W3 | Workstream 3 | dispatch 时强制按 W2 snapshot 调用 LLM |
+| W10 | Workstream 10 | dispatch 时强制按 W2 snapshot 调用 LLM |
 | CM-013 | Context-Management Finding 013 | 可信 dispatch 边界：缺失 / 过期 / 篡改 → fail closed |
 | CM-016 | Context-Management Finding 016 | capability 不全时按 10% 预留 uncertainty buffer |
 | CM-027 | Context-Management Finding 027 | `soft_limit_ratio` 默认 0.8，租户可覆盖 |
@@ -247,7 +247,7 @@ default_output_reserve_tokens
                                                           (hard / soft / requested_output / fingerprint)
                                                                       │
                                                                       ▼
-                                                            W3 dispatch
+                                                            W10 dispatch
                                                           (CM-030 强制 max_tokens = requested_output)
                                                           (CM-013 验证 fingerprint 链)
 ```

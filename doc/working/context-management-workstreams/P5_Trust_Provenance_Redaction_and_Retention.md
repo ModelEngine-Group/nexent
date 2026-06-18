@@ -1,4 +1,4 @@
-# W14: Trust, Provenance, Redaction, and Retention
+# P5: Trust, Provenance, Redaction, and Retention
 
 ## Objective
 
@@ -8,9 +8,9 @@ propagation across all context stores and derived state.
 
 ## Metadata Contract
 
-W14 owns governance metadata, classification, redaction, confirmation, retention,
+P5 owns governance metadata, classification, redaction, confirmation, retention,
 deletion propagation, and validated writeback. It does not decide context relevance or
-token fit; W10 and W3 consume W14-governed inputs.
+token fit; P3 and W10 consume P5-governed inputs.
 
 Every context item, event, artifact, compression snapshot, and memory carries source, owner,
 permissions, trust level, timestamps, expiry/retention class, lifecycle status, and
@@ -68,12 +68,12 @@ descendants as unavailable immediately, even while physical deletion is in progr
 The operation reports `in_progress`, not `completed`, until all required destinations
 are verified.
 
-W14 coordinates a fixed initial destination registry: W5 event payloads, conversation
-projections, compression snapshots, W8 caches/derived state, W12 artifacts/object storage,
+P5 coordinates a fixed initial destination registry: W5 event payloads, conversation
+projections, compression snapshots, P2 caches/derived state, P4 artifacts/object storage,
 long-term memory, and explicitly declared persistent log/search/backup destinations.
 For each destination, a simple durable status record progresses from `pending` to
 `completed`, or to `failed` and back through idempotent retry. The owning storage
-adapter performs and verifies its deletion; W14 aggregates status and proof.
+adapter performs and verifies its deletion; P5 aggregates status and proof.
 
 Backup destinations that cannot delete immediately must be inaccessible to normal
 restore/read paths and report their expiry/purge deadline. A deletion operation becomes
@@ -106,8 +106,8 @@ redaction proof metadata, and policy version. Required failures include
 
 Events, memories, summaries, artifacts, compression snapshots, projections, caches, and other
 governed durable state are written only through trusted server-side persistence
-interfaces. Each write requires a current W4 authorization decision, applicable W10
-policy decision, and W14 `GovernedPayload` with classification, redaction, provenance,
+interfaces. Each write requires a current W4 authorization decision, applicable P3
+policy decision, and P5 `GovernedPayload` with classification, redaction, provenance,
 lineage, retention, and policy metadata required for that destination.
 
 SDK/client claims that content is authorized, classified, redacted, or governed are
@@ -115,6 +115,15 @@ untrusted. Missing, stale, mismatched, or incomplete governance inputs fail clos
 before persistence. This boundary is an interface and permission contract within the
 existing storage paths; release one does not require a separate policy-enforcement
 microservice, service mesh, or signed capability-token platform.
+
+## Deletion and Writeback State Machines
+
+## Subagent Governance
+
+Subagent sessions apply P5 governance internally using their own agent
+configuration. The subagent's final answer is already a governed output. When it
+enters the parent context, the parent's P3 policy selection governs integration;
+P5 does not re-redact already-redacted content.
 
 ## Deletion and Writeback State Machines
 
@@ -138,19 +147,19 @@ microservice, service mesh, or signed capability-token platform.
 
 1. Approve classification, trust, retention, and temporal-memory schemas.
 2. Implement shared authorization/provenance and redaction services.
-3. Apply redaction before W5 events, W12 artifacts, compression snapshots, memory, logs, and traces.
-4. Add confirmation/no-write flows to W10 Memory Policy Engine.
+3. Apply redaction before W5 events, P4 artifacts, compression snapshots, memory, logs, and traces.
+4. Add confirmation/no-write flows to P3 Memory Policy Engine.
 5. Add lifecycle filtering, supersession, and conflict metadata to memory retrieval.
 6. Implement the fixed-destination deletion coordinator, per-destination status,
    idempotent retry, read blocking, and proof report.
 7. Add queryable source-lineage lookup and `partial_after_erasure` session state.
 8. Implement validated writeback journal and retention/expiry jobs.
-9. Restrict governed storage writes to trusted persistence interfaces and remove or
-   deny raw/direct write paths.
+9. Mark raw/direct write paths as deprecated with a notice that they will be
+   removed in the next version.
 
 ## Repository Touchpoints
 
-- W5-W12 storage and policy modules
+- W5-P4 storage and policy modules
 - `sdk/nexent/memory/`
 - `sdk/nexent/core/tools/store_memory_tool.py`
 - `sdk/nexent/core/tools/search_memory_tool.py`
@@ -171,6 +180,27 @@ microservice, service mesh, or signed capability-token platform.
 - Writeback tests reject stale-version, unauthorized, destructive, and invalid operations.
 - Negative integration tests prove SDK/client and ordinary internal callers cannot
   persist raw or self-declared-governed payloads.
-- W14 is done when governance metadata and policy apply end to end, secret tests pass,
+- Performance baseline tests measure redaction latency per event write and deletion
+  propagation latency (lower priority, after functional implementation is stable).
+- P5 is done when governance metadata and policy apply end to end, secret tests pass,
   direct raw persistence is denied, and deletion/retention/writeback behavior is
   demonstrably complete.
+
+## Codebase Gap Analysis (2026-06-17)
+
+**Verdict: Minimal secret redaction justified; full governance stack deferred.**
+
+### Current state
+- Only redaction: logging-level in `core_agent.py:257-263` (api_key/token/password/secret → `***REDACTED***`)
+- No PII detection or filtering
+- No content sanitization before persistence
+- No retention policies
+- No deletion propagation
+- No trust levels or source labeling
+- **No customer requests** for sensitive content removal
+
+### Why full P5 is deferred
+Full P5 (trust tiers, temporal lifecycle, deletion propagation, writeback journal, erasure lineage) is multi-month infrastructure for problems that haven't materialized. Requires W5 durable events as prerequisite.
+
+### Minimal fix (do now)
+Pattern-based secret redaction in tool outputs before persistence (~100 lines): regex detection for API keys, Bearer tokens, AWS keys, etc. Applied before `ActionStep` content enters memory or compression.
