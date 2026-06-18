@@ -14,6 +14,7 @@ export type AgentConfigUpdate = Partial<Pick<
   | "model"
   | "model_id"
   | "max_step"
+  | "requested_output_tokens"
   | "provide_run_summary"
   | "description"
   | "duty_prompt"
@@ -42,6 +43,7 @@ export interface Agent {
   model: string;
   model_id?: number;
   max_step: number;
+  requested_output_tokens?: number | null;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   tools: Tool[];

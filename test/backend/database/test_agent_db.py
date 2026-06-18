@@ -132,6 +132,7 @@ class MockAgent:
         self.group_ids = None
         self.is_new = True
         self.enable_context_manager = False
+        self.requested_output_tokens = None
         self.greeting_message = None
         self.example_questions = None
         self.current_version_no = None
@@ -433,6 +434,36 @@ def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_sessio
     # group_ids should be set as a comma-separated string
     assert getattr(mock_agent, "group_ids") == "1,2"
     agent_db_module.convert_list_to_string.assert_called_once_with([1, 2])
+    assert mock_agent.updated_by == "user1"
+
+def test_update_agent_allows_explicit_requested_output_tokens_null(monkeypatch, mock_session):
+    """Explicit requested_output_tokens=None should clear the W2 agent override."""
+    session, query = mock_session
+    mock_agent = MockAgent()
+    mock_agent.requested_output_tokens = 2048
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_agent
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+
+    class AgentInfoUpdate:
+        def __init__(self):
+            self.requested_output_tokens = None
+            self.model_fields_set = {"requested_output_tokens"}
+
+    agent_info = AgentInfoUpdate()
+
+    update_agent(1, agent_info, "user1")
+
+    assert mock_agent.requested_output_tokens is None
     assert mock_agent.updated_by == "user1"
 
 def test_update_agent_not_found(monkeypatch, mock_session):

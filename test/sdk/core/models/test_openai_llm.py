@@ -104,6 +104,20 @@ def _setup_stubs():
     smol_mod.Tool = object
     sys.modules["smolagents"] = smol_mod
     sys.modules["smolagents.models"] = smol_models
+    smol_memory = types.ModuleType("smolagents.memory")
+    smol_memory.ActionStep = type("ActionStep", (), {})
+    smol_memory.AgentMemory = type("AgentMemory", (), {})
+    smol_memory.MemoryStep = type("MemoryStep", (), {})
+    sys.modules["smolagents.memory"] = smol_memory
+    smol_monitoring = types.ModuleType("smolagents.monitoring")
+    smol_monitoring.TokenUsage = type("TokenUsage", (), {
+        "__init__": lambda self, input_tokens=0, output_tokens=0: (
+            setattr(self, "input_tokens", input_tokens),
+            setattr(self, "output_tokens", output_tokens),
+            None,
+        )[-1]
+    })
+    sys.modules["smolagents.monitoring"] = smol_monitoring
 
     # Stub OpenAIServerModel base class
     sa_mod = types.ModuleType("smolagents.models") if "smolagents.models" not in sys.modules else sys.modules["smolagents.models"]
@@ -229,6 +243,18 @@ class SimpleChatMessage:
 mock_models_module.ChatMessage = SimpleChatMessage
 mock_models_module.MessageRole = MagicMock()
 mock_smolagents.models = mock_models_module
+mock_memory_module = MagicMock()
+mock_memory_module.ActionStep = type("ActionStep", (), {})
+mock_memory_module.AgentMemory = type("AgentMemory", (), {})
+mock_memory_module.MemoryStep = type("MemoryStep", (), {})
+mock_monitoring_module = MagicMock()
+mock_monitoring_module.TokenUsage = type("TokenUsage", (), {
+    "__init__": lambda self, input_tokens=0, output_tokens=0: (
+        setattr(self, "input_tokens", input_tokens),
+        setattr(self, "output_tokens", output_tokens),
+        None,
+    )[-1]
+})
 
 # Mock monitoring modules
 monitoring_manager_mock = MagicMock()
@@ -297,6 +323,8 @@ nexent_core_utils_mock.observer.ProcessType = MockProcessType
 module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.models": mock_models_module,
+    "smolagents.memory": mock_memory_module,
+    "smolagents.monitoring": mock_monitoring_module,
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(),
@@ -1325,6 +1353,259 @@ def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
             messages=[{"role": "user", "content": "hello"}], _token_tracker=mock_tracker)
 
     mock_tracker.record_token.assert_called()
+
+
+def _safe_input_budget_snapshot(requested_output_tokens=128):
+    payload = {
+        "w1_fingerprint": "w1fingerprint",
+        "provider": "openai",
+        "model_name": "gpt-test",
+        "requested_output_tokens": requested_output_tokens,
+        "output_reserve_source": "model_default",
+        "provider_input_limit_tokens": 1000,
+        "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none",
+        "approved_profile_reserve_tokens": None,
+        "soft_limit_ratio": 0.8,
+        "soft_limit_ratio_source": "code_default",
+        "soft_input_budget_tokens": 800,
+        "hard_input_budget_tokens": 1000,
+        "field_sources": {},
+        "warnings": [],
+        "resolver_version": "1.0.0",
+    }
+    payload["fingerprint"] = openai_llm_module.compute_w2_fingerprint(
+        w2_resolver_version=payload["resolver_version"],
+        w1_fingerprint=payload["w1_fingerprint"],
+        provider=payload["provider"],
+        model_name=payload["model_name"],
+        requested_output_tokens=payload["requested_output_tokens"],
+        output_reserve_source=payload["output_reserve_source"],
+        uncertainty_reserve_tokens=payload["uncertainty_reserve_tokens"],
+        uncertainty_reserve_basis=payload["uncertainty_reserve_basis"],
+        approved_profile_reserve_tokens=payload["approved_profile_reserve_tokens"],
+        soft_limit_ratio=payload["soft_limit_ratio"],
+        soft_limit_ratio_source=payload["soft_limit_ratio_source"],
+        soft_input_budget_tokens=payload["soft_input_budget_tokens"],
+        hard_input_budget_tokens=payload["hard_input_budget_tokens"],
+        field_sources=payload["field_sources"],
+        warnings=payload["warnings"],
+    )
+    return payload
+
+
+def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
+    openai_model_instance,
+):
+    """Regression: when a W2 snapshot is active on self, __call__ must not
+    auto-fill max_tokens from self.max_output_tokens. The dispatch boundary
+    treats any caller-supplied max_tokens that disagrees with the snapshot as
+    CallerMaxTokensOverrideForbidden, so the pre-W2 auto-fill must be gated
+    on the snapshot being absent.
+    """
+    snapshot = _safe_input_budget_snapshot(requested_output_tokens=8192)
+    openai_model_instance.max_output_tokens = 131072
+    openai_model_instance.safe_input_budget_snapshot = snapshot
+
+    messages = [{"role": "user", "content": [{"text": "Hi"}]}]
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "ok"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.total_tokens = 2
+    mock_chunk.usage.completion_tokens = 1
+    mock_stream = [mock_chunk]
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = mock_stream
+    mock_result_message.role = MagicMock()
+
+    with patch.object(
+        openai_model_instance, "_prepare_completion_kwargs", return_value={}
+    ), patch.object(
+        mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message
+    ):
+        openai_model_instance.client.chat.completions.create.return_value = mock_stream
+        openai_model_instance.__call__(messages)
+
+    create_kwargs = openai_model_instance.client.chat.completions.create.call_args.kwargs
+    assert create_kwargs["max_tokens"] == 8192
+
+
+def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        stream=True,
+        messages=[],
+        max_tokens=64,
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=64,
+    )
+
+
+def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        stream=True,
+        messages=[],
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
+    with pytest.raises(openai_llm_module.CallerMaxTokensOverrideForbidden):
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+            stream=True,
+            messages=[],
+            max_tokens=128,
+        )
+
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_rejects_tampered_w2_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    snapshot["hard_input_budget_tokens"] = 999
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetFingerprintMismatch):
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            stream=True,
+            messages=[],
+        )
+
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def _matching_capacity_snapshot(budget_snapshot):
+    return {
+        "provider": budget_snapshot["provider"],
+        "model_name": budget_snapshot["model_name"],
+        "capacity_fingerprint": budget_snapshot["w1_fingerprint"],
+    }
+
+
+def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=snapshot,
+        capacity_snapshot=_matching_capacity_snapshot(snapshot),
+        stream=True,
+        messages=[],
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_dispatch_rejects_stale_w1_fingerprint(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    capacity = _matching_capacity_snapshot(snapshot)
+    capacity["capacity_fingerprint"] = "different-w1-fingerprint"
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            capacity_snapshot=capacity,
+            stream=True,
+            messages=[],
+        )
+
+    assert exc_info.value.field == "w1_fingerprint"
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_rejects_cross_provider_w2_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    capacity = _matching_capacity_snapshot(snapshot)
+    capacity["provider"] = "dashscope"
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            capacity_snapshot=capacity,
+            stream=True,
+            messages=[],
+        )
+
+    assert exc_info.value.field == "provider"
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_rejects_cross_model_w2_snapshot(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+    capacity = _matching_capacity_snapshot(snapshot)
+    capacity["model_name"] = "gpt-other"
+
+    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+        openai_model_instance._dispatch_chat_completion(
+            safe_input_budget_snapshot=snapshot,
+            capacity_snapshot=capacity,
+            stream=True,
+            messages=[],
+        )
+
+    assert exc_info.value.field == "model_name"
+    openai_model_instance.client.chat.completions.create.assert_not_called()
+
+
+def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(256)
+
+    openai_model_instance._dispatch_chat_completion(
+        safe_input_budget_snapshot=snapshot,
+        capacity_snapshot=None,
+        stream=True,
+        messages=[],
+    )
+
+    openai_model_instance.client.chat.completions.create.assert_called_once_with(
+        stream=True,
+        messages=[],
+        max_tokens=256,
+    )
+
+
+def test_safe_input_budget_trace_attributes_are_prefixed():
+    attrs = ImportedOpenAIModel._safe_input_budget_trace_attributes(
+        _safe_input_budget_snapshot(256)
+    )
+
+    assert len(attrs["w2.budget_fingerprint"]) == 32
+    assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
+    assert attrs["w2.requested_output_tokens"] == 256
+    assert attrs["w2.soft_input_budget_tokens"] == 800
+    assert attrs["w2.hard_input_budget_tokens"] == 1000
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):

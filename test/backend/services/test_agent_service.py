@@ -3720,6 +3720,7 @@ def mock_agent_request():
         query="test query",
         history=[],
         minio_files=[],
+        requested_output_tokens=4096,
         is_debug=False,
     )
 
@@ -3759,7 +3760,20 @@ async def test_prepare_agent_run(
     assert memory_context == mock_memory_context
     mock_build_memory_context.assert_called_once_with(
         "test_user", "test_tenant", 1, skip_query=False)
-    mock_create_run_info.assert_called_once()
+    mock_create_run_info.assert_called_once_with(
+        agent_id=1,
+        minio_files=[],
+        query="test query",
+        history=[],
+        tenant_id="test_tenant",
+        user_id="test_user",
+        language="zh",
+        allow_memory_search=True,
+        is_debug=False,
+        override_version_no=None,
+        override_model_id=None,
+        requested_output_tokens=4096,
+    )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
 

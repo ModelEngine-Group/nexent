@@ -16,6 +16,18 @@ from .capacity_resolver import (
     compute_fingerprint,
     resolve_capacity,
 )
+from .capacity_budget import (
+    BudgetResolverError,
+    CallerMaxTokensOverrideForbidden,
+    CapacityReservePolicy,
+    RequestBudgetOverrides,
+    SafeInputBudgetCalculator,
+    SafeInputBudgetCapacityMismatch,
+    SafeInputBudgetFingerprintMismatch,
+    SafeInputBudgetSnapshot,
+    W2_RESOLVER_VERSION,
+    compute_w2_fingerprint,
+)
 from . import tokenizer_registry
 
 __all__ = [
@@ -39,5 +51,15 @@ __all__ = [
     "RESOLVER_VERSION",
     "compute_fingerprint",
     "resolve_capacity",
+    "BudgetResolverError",
+    "CallerMaxTokensOverrideForbidden",
+    "CapacityReservePolicy",
+    "RequestBudgetOverrides",
+    "SafeInputBudgetCalculator",
+    "SafeInputBudgetCapacityMismatch",
+    "SafeInputBudgetFingerprintMismatch",
+    "SafeInputBudgetSnapshot",
+    "W2_RESOLVER_VERSION",
+    "compute_w2_fingerprint",
     "tokenizer_registry",
 ]

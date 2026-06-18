@@ -185,7 +185,16 @@ _OVERRIDABLE_FIELDS = (
     "tokenizer_family",
 )
 
-_DEFAULT_REQUESTED_OUTPUT_TOKENS = 1024
+# Last-resort fallback when neither the agent nor the model record sets a
+# requested_output_tokens / default_output_reserve_tokens. 1024 was too small
+# in practice: tool-using agents often write multi-hundred-token JSON tool
+# calls plus a few hundred tokens of thought per step, and 1024 produced
+# mid-JSON truncation that surfaced to users as "tool failed" instead of a
+# capacity-config issue. 4096 covers the median single-turn output reliably
+# without overshooting tiny-output models — those still get caught by the
+# RequestedOutputExceedsCap check (capacity_resolver line 276-283 and
+# the agent-edit form rule).
+_DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096
 
 
 def resolve_capacity(
@@ -261,6 +270,18 @@ def resolve_capacity(
         raise InvalidCapacityConfiguration(
             f"max_output_tokens ({max_output_tokens}) exceeds context_window_tokens "
             f"({context_window_tokens})"
+        )
+
+    if (
+        max_input_tokens is not None
+        and context_window_tokens is not None
+        and max_input_tokens > context_window_tokens
+    ):
+        raise InvalidCapacityConfiguration(
+            f"max_input_tokens ({max_input_tokens}) exceeds context_window_tokens "
+            f"({context_window_tokens}); operators who fill an input cap above the "
+            f"window will be silently clipped by the derived provider_input_limit, "
+            f"so the override never takes effect"
         )
 
     if requested_output_tokens is None:

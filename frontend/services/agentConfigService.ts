@@ -248,6 +248,7 @@ export const getCreatingSubAgentId = async () => {
         modelName: data.model_name,
         model_id: data.model_id,
         maxSteps: data.max_steps,
+        requestedOutputTokens: data.requested_output_tokens ?? null,
         businessDescription: data.business_description,
         dutyPrompt: data.duty_prompt,
         constraintPrompt: data.constraint_prompt,
@@ -407,6 +408,7 @@ export interface UpdateAgentInfoPayload {
   model_name?: string;
   model_id?: number;
   max_steps?: number;
+  requested_output_tokens?: number | null;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   enabled?: boolean;
@@ -764,6 +766,7 @@ export const searchAgentInfo = async (
       model: data.model_name,
       model_id: data.model_id,
       max_step: data.max_steps,
+      requested_output_tokens: data.requested_output_tokens ?? null,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,

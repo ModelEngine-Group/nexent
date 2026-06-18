@@ -281,6 +281,39 @@ class ModelMonitoringRecord(SimpleTableBase):
     capacity_fingerprint = Column(
         String(64), doc="Fingerprint of the resolved model capacity snapshot"
     )
+    budget_fingerprint = Column(
+        String(64), doc="Fingerprint of the resolved W2 safe input budget snapshot"
+    )
+    budget_w1_fingerprint = Column(
+        String(64), doc="W1 capacity fingerprint consumed by the W2 budget snapshot"
+    )
+    budget_requested_output_tokens = Column(
+        Integer, doc="W2 trusted requested output tokens used at dispatch"
+    )
+    budget_output_reserve_source = Column(
+        String(32), doc="Source of the W2 requested output token reserve"
+    )
+    budget_provider_input_limit_tokens = Column(
+        Integer, doc="Provider input limit after applying the W2 output reserve"
+    )
+    budget_uncertainty_reserve_tokens = Column(
+        Integer, doc="Additional W2 uncertainty reserve deducted from input budget"
+    )
+    budget_uncertainty_reserve_basis = Column(
+        String(64), doc="Basis used for the W2 uncertainty reserve"
+    )
+    budget_soft_limit_ratio = Column(
+        Float, doc="W2 soft input budget ratio"
+    )
+    budget_soft_input_budget_tokens = Column(
+        Integer, doc="W2 soft input budget where proactive compression begins"
+    )
+    budget_hard_input_budget_tokens = Column(
+        Integer, doc="W2 hard input budget consumed by W3 final fit"
+    )
+    budget_warnings = Column(
+        JSONB, doc="Structured W2 budget warnings active for this request"
+    )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(
@@ -377,6 +410,13 @@ class AgentInfo(TableBase):
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
     enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
+    requested_output_tokens = Column(
+        Integer,
+        doc=(
+            "Per-agent override for W2 requested_output_tokens. NULL means "
+            "inherit the resolved model-level default."
+        ),
+    )
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
 

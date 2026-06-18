@@ -99,6 +99,7 @@ export const validateCapacityForm = (
   }
 
   const contextWindowTokens = toOptionalPositiveInt(value.contextWindowTokens);
+  const maxInputTokens = toOptionalPositiveInt(value.maxInputTokens);
   const maxOutputTokens = toOptionalPositiveInt(value.maxOutputTokens);
   const defaultOutputReserveTokens = toOptionalPositiveInt(
     value.defaultOutputReserveTokens
@@ -110,6 +111,14 @@ export const validateCapacityForm = (
     maxOutputTokens > contextWindowTokens
   ) {
     return "model.dialog.capacity.error.outputExceedsWindow";
+  }
+
+  if (
+    contextWindowTokens !== undefined &&
+    maxInputTokens !== undefined &&
+    maxInputTokens > contextWindowTokens
+  ) {
+    return "model.dialog.capacity.error.inputExceedsWindow";
   }
 
   if (
@@ -262,61 +271,37 @@ export const ModelCapacityFields = ({
           "model.dialog.capacity.maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens.tooltip"
         )}
-        {/* In add mode the tokenizer sits next to maxOutputTokens so the panel
-            is two tidy rows. In edit mode defaultOutputReserveTokens takes
-            this slot and the tokenizer renders full-width below. */}
-        {isAddMode ? (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
-                <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
-              </Tooltip>
-              {requiredSet.has("tokenizerFamily") && (
-                <span className="text-red-500 ml-1">*</span>
-              )}
-            </label>
-            <AutoComplete
-              allowClear
-              value={value.tokenizerFamily}
-              onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
-              options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
-                label: item,
-                value: item,
-              }))}
-              style={{ width: "100%" }}
-            />
-          </div>
-        ) : (
-          renderNumberInput(
-            "defaultOutputReserveTokens",
-            "model.dialog.capacity.defaultOutputReserveTokens",
-            "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
-          )
+        {/* defaultOutputReserveTokens is rendered in both add and edit modes
+            so newly added rows do not silently fall back to the SDK default at
+            runtime. Tokenizer renders full-width below in both modes for the
+            same consistency reason. */}
+        {renderNumberInput(
+          "defaultOutputReserveTokens",
+          "model.dialog.capacity.defaultOutputReserveTokens",
+          "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
         )}
       </div>
 
-      {!isAddMode && (
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
-              <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
-            </Tooltip>
-            {requiredSet.has("tokenizerFamily") && (
-              <span className="text-red-500 ml-1">*</span>
-            )}
-          </label>
-          <AutoComplete
-            allowClear
-            value={value.tokenizerFamily}
-            onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
-            options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
-              label: item,
-              value: item,
-            }))}
-            style={{ width: "100%" }}
-          />
-        </div>
-      )}
+      <div>
+        <label className="block mb-1 text-sm font-medium text-gray-700">
+          <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
+            <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
+          </Tooltip>
+          {requiredSet.has("tokenizerFamily") && (
+            <span className="text-red-500 ml-1">*</span>
+          )}
+        </label>
+        <AutoComplete
+          allowClear
+          value={value.tokenizerFamily}
+          onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
+          options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
+            label: item,
+            value: item,
+          }))}
+          style={{ width: "100%" }}
+        />
+      </div>
 
       {validationError && (
         <Alert type="error" showIcon message={t(validationError)} />

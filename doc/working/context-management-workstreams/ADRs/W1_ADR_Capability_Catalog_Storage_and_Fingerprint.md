@@ -491,9 +491,10 @@ containing the substring, but it is **only called inside the
 records skip the inference entirely.
 
 **Net result.** Manual-add LLM models hit `ProviderCapabilityUnknown` at
-resolve time and fall back to `_TOKEN_THRESHOLD_LEGACY_FALLBACK` (8192) for
-`ContextManagerConfig.token_threshold`. The monitoring record for such a
-request leaves all capacity columns null.
+resolve time and fall back to `_TOKEN_THRESHOLD_LEGACY_FALLBACK` (32768; was
+8192 at W1 acceptance, retuned during W2 end-to-end validation — see W2
+commit log) for `ContextManagerConfig.token_threshold`. The monitoring
+record for such a request leaves all capacity columns null.
 
 **Workarounds shipped with W1.**
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from contextvars import copy_context
 from threading import Thread
@@ -6,12 +7,52 @@ from typing import Any, Dict, Union
 
 from smolagents import ToolCollection
 
-from ...monitor import set_monitoring_capacity_snapshot
+from ...monitor import (
+    set_monitoring_capacity_snapshot,
+    set_monitoring_safe_input_budget_snapshot,
+)
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
+    snapshot = getattr(agent_run_info, "safe_input_budget_snapshot", None)
+    if not isinstance(snapshot, dict):
+        return
+    warnings = snapshot.get("warnings") or []
+    if "uncertainty_reserve_active" not in warnings:
+        return
+
+    payload = {
+        "code": "uncertainty_reserve_active",
+        "message": (
+            "W2 applied the unified 10% uncertainty reserve because selected "
+            "model capability behavior is not fully verified."
+        ),
+        "budget_fingerprint": snapshot.get("fingerprint"),
+        "w1_fingerprint": snapshot.get("w1_fingerprint"),
+        "uncertainty_reserve_tokens": snapshot.get("uncertainty_reserve_tokens"),
+        "hard_input_budget_tokens": snapshot.get("hard_input_budget_tokens"),
+    }
+    logger.warning(
+        "W2 uncertainty reserve active: budget_fingerprint=%s w1_fingerprint=%s "
+        "uncertainty_reserve_tokens=%s hard_input_budget_tokens=%s",
+        payload["budget_fingerprint"],
+        payload["w1_fingerprint"],
+        payload["uncertainty_reserve_tokens"],
+        payload["hard_input_budget_tokens"],
+    )
+    try:
+        agent_run_info.observer.add_message(
+            "",
+            ProcessType.OTHER,
+            json.dumps(payload, ensure_ascii=False),
+        )
+    except Exception:
+        logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
 
 
 def _detect_transport(url: str) -> str:
@@ -80,6 +121,10 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         set_monitoring_capacity_snapshot(
             getattr(agent_run_info, "capacity_snapshot", None)
         )
+        set_monitoring_safe_input_budget_snapshot(
+            getattr(agent_run_info, "safe_input_budget_snapshot", None)
+        )
+        _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
         if mcp_host is None or len(mcp_host) == 0:
             nexent = NexentAgent(

@@ -18,6 +18,13 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
+from .capacity_budget import (
+    CallerMaxTokensOverrideForbidden,
+    SafeInputBudgetCapacityMismatch,
+    SafeInputBudgetFingerprintMismatch,
+    SafeInputBudgetSnapshot,
+    compute_w2_fingerprint,
+)
 from ..utils.observer import MessageObserver, ProcessType
 
 logger = logging.getLogger("openai_llm")
@@ -30,6 +37,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
+                 safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
+                 capacity_snapshot: Optional[Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -65,6 +74,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
         self.extra_body = extra_body or None
+        self.safe_input_budget_snapshot = safe_input_budget_snapshot
+        self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
             logger.debug(
                 "OpenAIModel received legacy max_tokens=%s; treating as max_output_tokens. "
@@ -106,10 +117,15 @@ ssl_verify=True, model_factory: Optional[str] = None,
             _monitoring_display_name.set(self.display_name)
 
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
-                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
+                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
+                 _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+                 **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
+            trusted_budget_snapshot = (
+                safe_input_budget_snapshot or self.safe_input_budget_snapshot
+            )
             invocation_parameters = {
                 "temperature": self.temperature,
                 "top_p": self.top_p,
@@ -125,6 +141,9 @@ ssl_verify=True, model_factory: Optional[str] = None,
                 else "input.value"
             )
             trace_attributes[input_attr_key] = messages or []
+            trace_attributes.update(
+                self._safe_input_budget_trace_attributes(trusted_budget_snapshot)
+            )
 
             with self._monitoring.trace_llm_request(
                 f"{self.display_name or self.model_id}.generate",
@@ -139,6 +158,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
                     response_format=response_format,
                     tools_to_call_from=tools_to_call_from,
                     _token_tracker=token_tracker,
+                    safe_input_budget_snapshot=safe_input_budget_snapshot,
                     **kwargs,
                 )
 
@@ -192,14 +212,30 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if self.extra_body:
             completion_kwargs["extra_body"] = self.extra_body
 
+        trusted_budget_snapshot = (
+            safe_input_budget_snapshot or self.safe_input_budget_snapshot
+        )
+
         # Bound completion length unless the caller passed their own override
         # via kwargs (which already landed in completion_kwargs above).
         # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
-        if self.max_output_tokens is not None and "max_tokens" not in completion_kwargs:
+        # When a W2 snapshot is active, its requested_output_tokens is the sole
+        # authority per CM-030 — skip the pre-W2 auto-fill so the dispatch
+        # boundary does not see max_output_tokens masquerading as a caller
+        # override and reject it via CallerMaxTokensOverrideForbidden.
+        if (
+            self.max_output_tokens is not None
+            and "max_tokens" not in completion_kwargs
+            and trusted_budget_snapshot is None
+        ):
             completion_kwargs["max_tokens"] = self.max_output_tokens
 
-        current_request = self.client.chat.completions.create(
-            stream=True, **completion_kwargs)
+        current_request = self._dispatch_chat_completion(
+            safe_input_budget_snapshot=trusted_budget_snapshot,
+            capacity_snapshot=self.capacity_snapshot,
+            stream=True,
+            **completion_kwargs,
+        )
 
         # Validate response type: ensure we got a proper iterator, not error strings or dicts
         # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
@@ -341,6 +377,142 @@ ssl_verify=True, model_factory: Optional[str] = None,
             if "context_length_exceeded" in str(e):
                 raise ValueError(f"Token limit exceeded: {str(e)}")
             raise e
+
+    def _dispatch_chat_completion(
+        self,
+        *,
+        safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
+        capacity_snapshot: Optional[Dict[str, Any]] = None,
+        **completion_kwargs: Any,
+    ) -> Any:
+        """Dispatch the OpenAI chat completion request.
+
+        When W2 supplied a trusted safe-input-budget snapshot, this method is
+        the provider dispatch boundary: caller `max_tokens` overrides must
+        match the snapshot, and absent values are filled from the snapshot.
+
+        When the active W1 capacity snapshot is also threaded through, the
+        boundary additionally verifies W1->W2 fingerprint and provider/model
+        identity to catch a stale or cross-model W2 snapshot before the
+        provider call.
+        """
+        snapshot = self._coerce_safe_input_budget_snapshot(safe_input_budget_snapshot)
+        if snapshot is not None:
+            self._verify_w1_w2_consistency(
+                budget_snapshot=snapshot,
+                capacity_snapshot=capacity_snapshot,
+            )
+            trusted_max_tokens = snapshot.requested_output_tokens
+            caller_max_tokens = completion_kwargs.get("max_tokens")
+            if caller_max_tokens is not None and caller_max_tokens != trusted_max_tokens:
+                raise CallerMaxTokensOverrideForbidden(
+                    snapshot_value=trusted_max_tokens,
+                    caller_value=caller_max_tokens,
+                )
+            completion_kwargs["max_tokens"] = trusted_max_tokens
+        return self.client.chat.completions.create(**completion_kwargs)
+
+    @staticmethod
+    def _verify_w1_w2_consistency(
+        *,
+        budget_snapshot: SafeInputBudgetSnapshot,
+        capacity_snapshot: Optional[Dict[str, Any]],
+    ) -> None:
+        """Reject a W2 snapshot whose W1 identity disagrees with the active W1.
+
+        Defense-in-depth per CM-013: a W2 snapshot computed from a different
+        model's W1 capacity (model swap mid-flight, stale cache, cross-tenant
+        leak) must not be allowed through dispatch even if its own fingerprint
+        self-checks.
+
+        When the active W1 capacity_snapshot is not threaded through, the
+        check is skipped. This preserves the migration window for legacy
+        rows without capacity columns, where W2 already does not produce a
+        snapshot.
+        """
+        if not capacity_snapshot:
+            return
+        w1_fingerprint = capacity_snapshot.get("capacity_fingerprint")
+        provider = capacity_snapshot.get("provider")
+        model_name = capacity_snapshot.get("model_name")
+        if not w1_fingerprint and not provider and not model_name:
+            return
+        if w1_fingerprint and w1_fingerprint != budget_snapshot.w1_fingerprint:
+            raise SafeInputBudgetCapacityMismatch(
+                field="w1_fingerprint",
+                expected=w1_fingerprint,
+                actual=budget_snapshot.w1_fingerprint,
+            )
+        if provider and provider != budget_snapshot.provider:
+            raise SafeInputBudgetCapacityMismatch(
+                field="provider",
+                expected=provider,
+                actual=budget_snapshot.provider,
+            )
+        if model_name and model_name != budget_snapshot.model_name:
+            raise SafeInputBudgetCapacityMismatch(
+                field="model_name",
+                expected=model_name,
+                actual=budget_snapshot.model_name,
+            )
+
+    @staticmethod
+    def _coerce_safe_input_budget_snapshot(
+        snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+    ) -> Optional[SafeInputBudgetSnapshot]:
+        if snapshot is None:
+            return None
+        if isinstance(snapshot, SafeInputBudgetSnapshot):
+            resolved = snapshot
+        elif isinstance(snapshot, dict):
+            resolved = SafeInputBudgetSnapshot.model_validate(snapshot)
+        else:
+            raise TypeError(
+                "safe_input_budget_snapshot must be a SafeInputBudgetSnapshot or dict"
+            )
+        expected = compute_w2_fingerprint(
+            w2_resolver_version=resolved.resolver_version,
+            w1_fingerprint=resolved.w1_fingerprint,
+            provider=resolved.provider,
+            model_name=resolved.model_name,
+            requested_output_tokens=resolved.requested_output_tokens,
+            output_reserve_source=resolved.output_reserve_source,
+            uncertainty_reserve_tokens=resolved.uncertainty_reserve_tokens,
+            uncertainty_reserve_basis=resolved.uncertainty_reserve_basis,
+            approved_profile_reserve_tokens=resolved.approved_profile_reserve_tokens,
+            soft_limit_ratio=resolved.soft_limit_ratio,
+            soft_limit_ratio_source=resolved.soft_limit_ratio_source,
+            soft_input_budget_tokens=resolved.soft_input_budget_tokens,
+            hard_input_budget_tokens=resolved.hard_input_budget_tokens,
+            field_sources=resolved.field_sources,
+            warnings=resolved.warnings,
+        )
+        if resolved.fingerprint != expected:
+            raise SafeInputBudgetFingerprintMismatch(
+                expected=expected,
+                actual=resolved.fingerprint,
+            )
+        return resolved
+
+    @classmethod
+    def _safe_input_budget_trace_attributes(
+        cls,
+        snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        snapshot = cls._coerce_safe_input_budget_snapshot(snapshot)
+        if snapshot is None:
+            return {}
+        return {
+            "w2.budget_fingerprint": snapshot.fingerprint,
+            "w2.w1_fingerprint": snapshot.w1_fingerprint,
+            "w2.requested_output_tokens": snapshot.requested_output_tokens,
+            "w2.output_reserve_source": snapshot.output_reserve_source,
+            "w2.provider_input_limit_tokens": snapshot.provider_input_limit_tokens,
+            "w2.soft_input_budget_tokens": snapshot.soft_input_budget_tokens,
+            "w2.hard_input_budget_tokens": snapshot.hard_input_budget_tokens,
+            "w2.uncertainty_reserve_tokens": snapshot.uncertainty_reserve_tokens,
+            "w2.uncertainty_reserve_basis": snapshot.uncertainty_reserve_basis,
+        }
 
     async def check_connectivity(self) -> bool:
         """
