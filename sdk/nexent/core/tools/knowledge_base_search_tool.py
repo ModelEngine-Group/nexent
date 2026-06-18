@@ -21,21 +21,6 @@ from ..utils.tools_common_message import (
 logger = logging.getLogger("knowledge_base_search_tool")
 
 
-def _unwrap_field_info(value):
-    """Resolve a value that may be wrapped in a Pydantic FieldInfo.
-
-    Parameters declared with `Field(...)` and `exclude=True` are not expanded by
-    smolagents' Tool wrapper, so they arrive at `__init__` as raw FieldInfo
-    instances instead of their declared defaults. This helper extracts the
-    concrete value so callers can safely treat the result as plain data.
-    """
-    if isinstance(value, FieldInfo):
-        if value.default_factory is not None:
-            return value.default_factory()
-        return value.default
-    return value
-
-
 class KnowledgeBaseSearchTool(Tool):
     """Knowledge base search tool"""
 
@@ -144,10 +129,7 @@ class KnowledgeBaseSearchTool(Tool):
         self.rerank_model = rerank_model
         self.data_process_service = os.getenv("DATA_PROCESS_SERVICE")
         self.display_name_to_index_map = display_name_to_index_map
-        # `document_paths` is declared with `exclude=True` so smolagents passes the
-        # raw FieldInfo default when no value is supplied. Unwrap it here so the
-        # internal filter is always a concrete list (or None), never a FieldInfo.
-        self._internal_document_paths = _unwrap_field_info(document_paths)
+        self._internal_document_paths = document_paths
 
         self.record_ops = 1
         self.running_prompt_zh = "知识库检索中..."
@@ -162,7 +144,7 @@ class KnowledgeBaseSearchTool(Tool):
         Args:
             document_paths: List of allowed document path_or_urls. If None, no filtering is applied.
         """
-        self._internal_document_paths = _unwrap_field_info(document_paths)
+        self._internal_document_paths = document_paths
 
     def _convert_to_index_names(self, names: List[str]) -> List[str]:
         """Convert display names (knowledge_name) to index names if necessary.
@@ -206,7 +188,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             Filtered list containing only results with allowed document paths
         """
-        allowed_paths = _unwrap_field_info(self._internal_document_paths)
+        allowed_paths = self._internal_document_paths
         if not allowed_paths:
             return results
 

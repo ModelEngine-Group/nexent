@@ -171,7 +171,7 @@ export default function AgentGenerateDetail({}) {
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
       provideRunSummary: editedAgent.provide_run_summary || false,
-      verificationEnabled: editedAgent.verification_config?.enabled ?? false,
+      verificationEnabled: editedAgent.verification_config?.enabled ?? true,
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:editedAgent.business_logic_model_name,
       businessLogicModelId: editedAgent.business_logic_model_id,
@@ -809,7 +809,7 @@ export default function AgentGenerateDetail({}) {
                       </Can>
 
                       <Row gutter={16}>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="agentAuthor"
                             label={t("agent.author")}
@@ -828,7 +828,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="mainAgentModel"
                             label={t("businessLogic.config.model")}
@@ -875,7 +875,7 @@ export default function AgentGenerateDetail({}) {
                       </Row>
 
                       <Row gutter={16}>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="mainAgentMaxStep"
                             label={t("businessLogic.config.maxSteps")}
@@ -903,7 +903,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="provideRunSummary"
                             label={t("agent.provideRunSummary")}
