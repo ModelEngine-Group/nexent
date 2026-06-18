@@ -171,7 +171,7 @@ export default function AgentGenerateDetail({}) {
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
       provideRunSummary: editedAgent.provide_run_summary || false,
-      verificationEnabled: editedAgent.verification_config?.enabled ?? true,
+      verificationEnabled: editedAgent.verification_config?.enabled ?? false,
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:editedAgent.business_logic_model_name,
       businessLogicModelId: editedAgent.business_logic_model_id,
