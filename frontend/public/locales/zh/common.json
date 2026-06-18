@@ -813,6 +813,8 @@
   "model.dialog.capacity.source.provider_candidate": "供应商候选",
   "model.dialog.capacity.source.legacy": "旧字段",
   "model.dialog.capacity.source.unknown": "未知",
+  "model.dialog.capacity.batchDefault.title": "批量默认容量",
+  "model.dialog.capacity.batchDefault.hint": "此处填写的数值将作为本次批量导入所有 LLM/VLM 模型的默认容量。如需为某个模型单独设置，请点击对应行的⚙图标覆盖。",
   "model.dialog.modelList.tooltip.settings": "模型设置",
   "model.dialog.hint.multimodalEnabled": "多模态向量模型可处理图像和文本",
   "model.dialog.hint.multimodalDisabled": "文本向量模型仅处理文本",

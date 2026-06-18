@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
+import { Alert, Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
   LoaderCircle,
@@ -36,8 +36,11 @@ import {
 } from "./ModelMaxTokensInput";
 import {
   buildCapacityPayload,
+  capacityFieldKeys,
+  capacityFormFromModel,
   emptyCapacityForm,
   ModelCapacityFields,
+  ModelCapacityFormState,
   validateCapacityForm,
 } from "./ModelCapacityFields";
 
@@ -306,6 +309,11 @@ export const ModelAddDialog = ({
   const [selectedModelForSettings, setSelectedModelForSettings] =
     useState<any>(null);
   const [modelMaxTokens, setModelMaxTokens] = useState("");
+  // Per-row capacity overrides edited via the gear icon in batch mode. Mirrors
+  // the top-level form's capacity fields so the same ModelCapacityFields panel
+  // can be rendered against this row-scoped state.
+  const [modelCapacity, setModelCapacity] =
+    useState<ModelCapacityFormState>(emptyCapacityForm);
 
   // Use the silicon model list hook
   const siliconHook = useSiliconModelList({
@@ -693,6 +701,29 @@ export const ModelAddDialog = ({
     };
   };
 
+  // Translate the top-level ModelCapacityFormState (camelCase, string) into the
+  // snake_case fields the batch-add backend expects. Used as the per-row
+  // fallback in batch mode when the row itself has no capacity overrides.
+  const capacityFormToSnakePayload = (capacity: ModelCapacityFormState) => {
+    const toInt = (raw: string) => {
+      const trimmed = raw.trim();
+      if (!/^[1-9]\d*$/.test(trimmed)) return undefined;
+      return Number.parseInt(trimmed, 10);
+    };
+    const tokenizer = capacity.tokenizerFamily.trim();
+    const hasAny = capacityFieldKeys.some(
+      (k) => capacity[k].trim() !== ""
+    );
+    return {
+      context_window_tokens: toInt(capacity.contextWindowTokens),
+      max_input_tokens: toInt(capacity.maxInputTokens),
+      max_output_tokens: toInt(capacity.maxOutputTokens),
+      default_output_reserve_tokens: toInt(capacity.defaultOutputReserveTokens),
+      tokenizer_family: tokenizer || undefined,
+      capacity_source: hasAny ? "operator" : undefined,
+    };
+  };
+
   const buildBatchModelData = (model: any, modelType: ModelType) => {
     const isEmbeddingType =
       modelType === MODEL_TYPES.EMBEDDING ||
@@ -708,9 +739,42 @@ export const ModelAddDialog = ({
       return modelWithoutMaxTokens;
     }
 
+    // Rerank and other legacy-only types: keep the pre-W2 path that relies on
+    // form.maxTokens as the batch default.
+    if (!rowSupportsCapacityFields(model)) {
+      return {
+        ...model,
+        max_tokens: model.max_tokens ?? parseMaxTokens(form.maxTokens),
+      };
+    }
+
+    // LLM/VLM: row-scoped capacity overrides win; otherwise fall back to the
+    // top-level capacity panel acting as the batch default. snake_case here
+    // because that's what the backend create-batch endpoint expects.
+    const fallback = capacityFormToSnakePayload(form);
+
+    const resolved = {
+      context_window_tokens:
+        model.context_window_tokens ?? fallback.context_window_tokens,
+      max_input_tokens: model.max_input_tokens ?? fallback.max_input_tokens,
+      max_output_tokens:
+        model.max_output_tokens ?? fallback.max_output_tokens,
+      default_output_reserve_tokens:
+        model.default_output_reserve_tokens ??
+        fallback.default_output_reserve_tokens,
+      tokenizer_family: model.tokenizer_family ?? fallback.tokenizer_family,
+      capacity_source: model.capacity_source ?? fallback.capacity_source,
+    };
+
     return {
       ...model,
-      max_tokens: model.max_tokens ?? parseMaxTokens(form.maxTokens),
+      ...resolved,
+      // Mirror max_output_tokens into legacy max_tokens. Backend has a coercion
+      // helper but mirroring here keeps the wire payload self-consistent.
+      max_tokens:
+        resolved.max_output_tokens ??
+        model.max_tokens ??
+        parseMaxTokens(form.maxTokens),
     };
   };
 
@@ -804,20 +868,87 @@ export const ModelAddDialog = ({
     }
   };
 
+  // Resolve whether a fetched batch row uses the capacity panel. The row's own
+  // model_type wins (a row may be rerank even when form.type is LLM during
+  // mixed-type fetches), falling back to the form-level decision.
+  const rowSupportsCapacityFields = (model: any): boolean => {
+    const rowType = model?.model_type;
+    if (rowType === MODEL_TYPES.EMBEDDING || rowType === MODEL_TYPES.MULTI_EMBEDDING)
+      return false;
+    if (rowType === MODEL_TYPES.STT || rowType === MODEL_TYPES.TTS) return false;
+    if (rowType === MODEL_TYPES.RERANK) return false;
+    if (rowType) return true;
+    return supportsCapacityFields;
+  };
+
   // Handle settings button click
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
     setModelMaxTokens(model.max_tokens?.toString() || "");
+    setModelCapacity(
+      rowSupportsCapacityFields(model)
+        ? capacityFormFromModel({
+            contextWindowTokens: model.context_window_tokens,
+            maxInputTokens: model.max_input_tokens,
+            maxOutputTokens: model.max_output_tokens,
+            maxTokens: model.max_tokens,
+            defaultOutputReserveTokens: model.default_output_reserve_tokens,
+            tokenizerFamily: model.tokenizer_family,
+          })
+        : emptyCapacityForm
+    );
     setSettingsModalVisible(true);
   };
 
   // Handle settings save
   const handleSettingsSave = () => {
-    const nextMaxTokens = parseMaxTokens(modelMaxTokens);
-    if (!nextMaxTokens) return;
+    if (!selectedModelForSettings) {
+      setSettingsModalVisible(false);
+      return;
+    }
 
-    if (selectedModelForSettings) {
-      // Update the model in the list with new max_tokens
+    const useCapacity = rowSupportsCapacityFields(selectedModelForSettings);
+
+    if (useCapacity) {
+      // Persist capacity fields onto the row in their snake_case API shape so
+      // buildBatchModelData can forward them without further translation.
+      const payload = capacityFormToSnakePayload(modelCapacity);
+      const hasAny = capacityFieldKeys.some(
+        (k) => modelCapacity[k].trim() !== ""
+      );
+      setModelList((prev) =>
+        prev.map((model) =>
+          model.id === selectedModelForSettings.id
+            ? {
+                ...model,
+                context_window_tokens:
+                  payload.context_window_tokens ??
+                  (hasAny ? null : model.context_window_tokens),
+                max_input_tokens:
+                  payload.max_input_tokens ??
+                  (hasAny ? null : model.max_input_tokens),
+                max_output_tokens:
+                  payload.max_output_tokens ??
+                  (hasAny ? null : model.max_output_tokens),
+                default_output_reserve_tokens:
+                  payload.default_output_reserve_tokens ??
+                  (hasAny ? null : model.default_output_reserve_tokens),
+                tokenizer_family:
+                  payload.tokenizer_family ??
+                  (hasAny ? null : model.tokenizer_family),
+                capacity_source: hasAny
+                  ? payload.capacity_source
+                  : model.capacity_source,
+                // Mirror max_output_tokens into legacy max_tokens so the
+                // backend coercion path stays consistent for rows that bypass it.
+                max_tokens: payload.max_output_tokens ?? model.max_tokens,
+              }
+            : model
+        )
+      );
+    } else {
+      const nextMaxTokens = parseMaxTokens(modelMaxTokens);
+      if (!nextMaxTokens) return;
       setModelList((prev) =>
         prev.map((model) =>
           model.id === selectedModelForSettings.id
@@ -826,6 +957,7 @@ export const ModelAddDialog = ({
         )
       );
     }
+
     setSettingsModalVisible(false);
     setSelectedModelForSettings(null);
   };
@@ -1060,8 +1192,11 @@ export const ModelAddDialog = ({
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
   const isSTTModel = form.type === MODEL_TYPES.STT;
   const isTTSModel = form.type === MODEL_TYPES.TTS;
+  // Capacity fields apply to LLM/VLM types in both single-add and batch-add
+  // paths. In batch mode the top-level capacity panel becomes a per-batch
+  // default (mirrors how form.maxTokens worked pre-W2), with each row's gear
+  // dialog free to override individual values.
   const supportsCapacityFields =
-    !form.isBatchImport &&
     !isEmbeddingModel &&
     !isSTTModel &&
     !isTTSModel &&
@@ -1525,13 +1660,23 @@ export const ModelAddDialog = ({
         )}
 
         {supportsCapacityFields && (
-          <ModelCapacityFields
-            value={form}
-            onChange={(field, value) => handleFormChange(field, value)}
-            validationError={capacityValidationError}
-            formMode="add"
-            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
-          />
+          <div className="space-y-2">
+            {form.isBatchImport && (
+              <Alert
+                type="info"
+                showIcon
+                message={t("model.dialog.capacity.batchDefault.title")}
+                description={t("model.dialog.capacity.batchDefault.hint")}
+              />
+            )}
+            <ModelCapacityFields
+              value={form}
+              onChange={(field, value) => handleFormChange(field, value)}
+              validationError={capacityValidationError}
+              formMode="add"
+              requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+            />
+          </div>
         )}
 
         {/* Max Tokens (legacy; only for non-LLM types still using the standalone field) */}
@@ -2085,30 +2230,58 @@ export const ModelAddDialog = ({
       </div>
 
       {/* Settings Modal */}
-      <Modal
-        title={t("model.dialog.settings.title")}
-        open={settingsModalVisible}
-        onCancel={() => setSettingsModalVisible(false)}
-        onOk={handleSettingsSave}
-        okButtonProps={{ disabled: !isValidMaxTokens(modelMaxTokens) }}
-        cancelText={t("common.cancel")}
-        okText={t("common.confirm")}
-        destroyOnHidden
-      >
-        <div className="space-y-3">
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.settings.label.maxTokens")}{" "}
-              <span className="text-red-500">*</span>
-            </label>
-            <ModelMaxTokensInput
-              value={modelMaxTokens}
-              onChange={setModelMaxTokens}
-              placeholder={t("model.dialog.placeholder.maxTokens")}
-            />
-          </div>
-        </div>
-      </Modal>
+      {(() => {
+        const useCapacity = selectedModelForSettings
+          ? rowSupportsCapacityFields(selectedModelForSettings)
+          : false;
+        const settingsCapacityError = useCapacity
+          ? validateCapacityForm(modelCapacity, [
+              "contextWindowTokens",
+              "maxOutputTokens",
+            ])
+          : null;
+        const okDisabled = useCapacity
+          ? settingsCapacityError !== null
+          : !isValidMaxTokens(modelMaxTokens);
+        return (
+          <Modal
+            title={t("model.dialog.settings.title")}
+            open={settingsModalVisible}
+            onCancel={() => setSettingsModalVisible(false)}
+            onOk={handleSettingsSave}
+            okButtonProps={{ disabled: okDisabled }}
+            cancelText={t("common.cancel")}
+            okText={t("common.confirm")}
+            destroyOnHidden
+          >
+            <div className="space-y-3">
+              {useCapacity ? (
+                <ModelCapacityFields
+                  value={modelCapacity}
+                  onChange={(field, value) =>
+                    setModelCapacity((prev) => ({ ...prev, [field]: value }))
+                  }
+                  validationError={settingsCapacityError}
+                  formMode="add"
+                  requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+                />
+              ) : (
+                <div>
+                  <label className="block mb-1 text-sm font-medium text-gray-700">
+                    {t("model.dialog.settings.label.maxTokens")}{" "}
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <ModelMaxTokensInput
+                    value={modelMaxTokens}
+                    onChange={setModelMaxTokens}
+                    placeholder={t("model.dialog.placeholder.maxTokens")}
+                  />
+                </div>
+              )}
+            </div>
+          </Modal>
+        );
+      })()}
     </Modal>
   );
 };
