@@ -235,7 +235,7 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
             message_list.append(message)
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2 + 1,
-                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=request.minio_files)
+                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=None)
     save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
 
 
