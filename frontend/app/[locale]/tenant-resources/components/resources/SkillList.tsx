@@ -13,10 +13,10 @@ import {
   Form,
   Switch,
   InputNumber,
+  Tooltip
 } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Download } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 
 import {
   fetchSkillsList,
@@ -547,7 +547,6 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [form] = Form.useForm();
-
   const [paramsModalOpen, setParamsModalOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillListItem | null>(null);
   const [savingParams, setSavingParams] = useState(false);
@@ -730,8 +729,8 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
     : "closed";
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex justify-end mb-2">
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex justify-end mb-2 flex-shrink-0">
         <Button
           type="primary"
           icon={<Download className="h-4 w-4" />}
@@ -748,7 +747,8 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
         size="small"
         pagination={{ pageSize: 10 }}
         locale={{ emptyText: t("tenantResources.skills.empty") }}
-        scroll={{ x: true }}
+        scroll={{ y: "calc(100vh - 500px)" }}
+        className="flex-1 [&_.ant-table]:h-full"
       />
 
       <Modal

@@ -75,6 +75,37 @@ def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         session.add(user_tenant)
 
 
+def upsert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", user_email: str = None) -> Dict[str, Any]:
+    """
+    Create or update the active user-tenant relationship for an external identity login.
+    """
+    with get_db_session() as session:
+        result = session.query(UserTenant).filter(
+            UserTenant.user_id == user_id,
+            UserTenant.delete_flag == "N"
+        ).first()
+
+        if result:
+            result.tenant_id = tenant_id
+            result.user_role = user_role
+            if user_email is not None:
+                result.user_email = user_email
+            result.updated_by = user_id
+        else:
+            result = UserTenant(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                user_role=user_role,
+                user_email=user_email,
+                created_by=user_id,
+                updated_by=user_id
+            )
+            session.add(result)
+
+        session.flush()
+        return as_dict(result)
+
+
 def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
                            sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """

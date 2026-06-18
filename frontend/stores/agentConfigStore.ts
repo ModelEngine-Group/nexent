@@ -10,7 +10,13 @@
 
 import { create } from "zustand";
 
-import { Agent, Tool, AgentConfigUpdate, Skill } from "@/types/agentConfig";
+import {
+  Agent,
+  Tool,
+  AgentConfigUpdate,
+  Skill,
+  DEFAULT_AGENT_VERIFICATION_CONFIG,
+} from "@/types/agentConfig";
 import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
 /**
@@ -38,9 +44,12 @@ export type EditableAgent = Pick<
   | "business_logic_model_id"
   | "prompt_template_id"
   | "prompt_template_name"
+  | "verification_config"
   | "sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
+  | "greeting_message"
+  | "example_questions"
 > & {
   skills: Skill[];
   external_sub_agent_id_list?: number[];
@@ -168,9 +177,12 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     business_logic_model_id: llmConfig?.id || 0,
     prompt_template_id: 0,
     prompt_template_name: "system_default",
+    verification_config: { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
     sub_agent_id_list: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
+    greeting_message: "",
+    example_questions: [],
   };
 }
 
@@ -197,11 +209,14 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_id: agent.business_logic_model_id || 0,
         prompt_template_id: agent.prompt_template_id ?? 0,
         prompt_template_name: agent.prompt_template_name || "system_default",
+        verification_config: agent.verification_config || { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
         sub_agent_id_list: agent.sub_agent_id_list || [],
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
         ingroup_permission: agent.ingroup_permission || "READ_ONLY",
         prompts_hidden: agent.prompts_hidden,
+        greeting_message: agent.greeting_message || "",
+        example_questions: agent.example_questions || [],
       }
     : { ...emptyEditableAgent };
 
@@ -312,12 +327,16 @@ const isDirty = (
       editedAgent.business_logic_model_id !== 0 ||
       (editedAgent.prompt_template_id ?? 0) !== 0 ||
       (editedAgent.prompt_template_name || "system_default") !== "system_default" ||
+      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
+        JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
       normalizeArray(editedAgent.group_ids || []).length > 0 ||
       normalizeArray(editedAgent.sub_agent_id_list || []).length > 0 ||
       normalizeArray(editedAgent.external_sub_agent_id_list || []).length > 0 ||
       editedAgent.tools.length > 0 ||
       editedAgent.skills.length > 0 ||
-      editedAgent.ingroup_permission !== "READ_ONLY"
+      editedAgent.ingroup_permission !== "READ_ONLY" ||
+      editedAgent.greeting_message !== "" ||
+      (editedAgent.example_questions || []).length > 0
     );
   }
 
@@ -338,6 +357,8 @@ const isDirty = (
     baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
     (baselineAgent.prompt_template_id ?? 0) !== (editedAgent.prompt_template_id ?? 0) ||
     (baselineAgent.prompt_template_name || "system_default") !== (editedAgent.prompt_template_name || "system_default") ||
+    JSON.stringify(baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
+      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) ||
     JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
       JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
     JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==
@@ -346,7 +367,9 @@ const isDirty = (
       JSON.stringify(normalizeArray(editedAgent.external_sub_agent_id_list ?? [])) ||
     isToolsDirty(baselineAgent.tools, editedAgent.tools) ||
     isSkillsDirty(baselineAgent.skills, editedAgent.skills) ||
-    baselineAgent.ingroup_permission !== editedAgent.ingroup_permission
+    baselineAgent.ingroup_permission !== editedAgent.ingroup_permission ||
+    baselineAgent.greeting_message !== editedAgent.greeting_message ||
+    JSON.stringify(baselineAgent.example_questions ?? []) !== JSON.stringify(editedAgent.example_questions ?? [])
   );
 };
 
@@ -384,6 +407,12 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
         if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
         if (cached.constraintPrompt) cacheUpdates.constraint_prompt = cached.constraintPrompt;
         if (cached.fewShotsPrompt) cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
+        if (cached.greetingMessage) cacheUpdates.greeting_message = cached.greetingMessage;
+        if (cached.exampleQuestions) {
+          cacheUpdates.example_questions = typeof cached.exampleQuestions === "string"
+            ? (() => { try { return JSON.parse(cached.exampleQuestions); } catch { return []; } })()
+            : cached.exampleQuestions;
+        }
         
         // Only restore agent metadata if not already set in baseline
         if (cached.agentName && !editedAgent.name) cacheUpdates.name = cached.agentName;
@@ -508,4 +537,3 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     return get().baselineAgent;
   },
 }));
-

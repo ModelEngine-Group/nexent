@@ -10,7 +10,7 @@ import {
   fetchSkillFileContent,
   SkillFilesAccessDeniedError,
 } from "@/services/agentConfigService";
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import {
   buildTreeData,
   collectDirKeys,

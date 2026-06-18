@@ -1016,3 +1016,71 @@ def get_message_id_by_index(conversation_id: int, message_index: int) -> Optiona
         result = session.execute(stmt).scalar()
 
         return result
+
+
+def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str] = None) -> Optional[int]:
+    """
+    Get the most recent assistant message ID for a conversation.
+
+    Args:
+        conversation_id: Conversation ID (integer)
+        user_id: Optional user ID for ownership check
+
+    Returns:
+        Optional[int]: The latest assistant message ID, or None if not found
+    """
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+
+        stmt = select(ConversationMessage.message_id).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.message_role == 'assistant'
+        ).order_by(desc(ConversationMessage.message_index)).limit(1)
+
+        if user_id:
+            stmt = stmt.join(
+                ConversationRecord,
+                ConversationMessage.conversation_id == ConversationRecord.conversation_id
+            ).where(ConversationRecord.created_by == user_id)
+
+        result = session.execute(stmt).scalar()
+        return result
+
+
+def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[str, Any]]) -> bool:
+    """
+    Merge skill file uploads into an existing message's minio_files field.
+
+    Args:
+        message_id: Message ID to update
+        skill_file_uploads: List of skill file upload metadata dicts to append
+
+    Returns:
+        bool: True if the message was updated, False if the message was not found
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = select(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.delete_flag == 'N'
+        )
+        record = session.scalars(stmt).first()
+        if not record:
+            return False
+
+        existing = record.minio_files
+        if existing:
+            try:
+                if isinstance(existing, str):
+                    existing = json.loads(existing)
+            except (json.JSONDecodeError, TypeError):
+                existing = []
+        else:
+            existing = []
+
+        existing.extend(skill_file_uploads)
+        record.minio_files = json.dumps(existing, ensure_ascii=False)
+
+        return True

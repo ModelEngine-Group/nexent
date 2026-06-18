@@ -1624,20 +1624,23 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_documents") as mock_delete_docs:
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
 
-        # Setup the return value for delete_documents
         es_result = {
             "status": "success",
             "message": "Documents deleted successfully",
-            "deleted_count": 5
+            "scope": "full",
+            "deleted_es_count": 5,
+            "source_available": False,
         }
-        mock_delete_docs.return_value = es_result
+        mock_delete_by_scope.return_value = es_result
 
-        # Setup the mock for delete_document_records
         redis_result = {
             "index_name": index_name,
             "path_or_url": path_or_url,
@@ -1647,9 +1650,10 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
         }
         redis_service_mock.delete_document_records.return_value = redis_result
 
-        # Execute request
         response = client.delete(
-            f"/indices/{index_name}/documents", params={"path_or_url": path_or_url})
+            f"/indices/{index_name}/documents",
+            params={"path_or_url": path_or_url, "scope": "full"},
+        )
 
         # Verify expected 200 status code
         assert response.status_code == 200
@@ -1668,11 +1672,44 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock):
         assert "redis_cleanup" in actual_response
         assert actual_response["redis_cleanup"] == redis_result
 
-        # Verify delete_documents was called with the correct parameters
-        # Use ANY for the vdb_core parameter because the actual object may differ
-        mock_delete_docs.assert_called_once_with(index_name, path_or_url, ANY)
+        mock_delete_by_scope.assert_called_once_with(
+            index_name, path_or_url, "full", ANY
+        )
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
+
+
+@pytest.mark.asyncio
+async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_service_mock):
+    """source_only scope must not trigger Redis document cleanup."""
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
+
+        index_name = "test_index"
+        path_or_url = "knowledge_base/test.pdf"
+        mock_delete_by_scope.return_value = {
+            "status": "success",
+            "scope": "source_only",
+            "deleted_es_count": 0,
+            "deleted_minio": True,
+            "source_available": False,
+        }
+
+        response = client.delete(
+            f"/indices/{index_name}/documents",
+            params={"path_or_url": path_or_url, "scope": "source_only"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["scope"] == "source_only"
+        mock_delete_by_scope.assert_called_once_with(
+            index_name, path_or_url, "source_only", ANY
+        )
+        redis_service_mock.delete_document_records.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1684,27 +1721,30 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_documents") as mock_delete_docs:
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
 
-        # Setup the return value for delete_documents
         es_result = {
             "status": "success",
             "message": "Documents deleted successfully",
-            "deleted_count": 5
+            "scope": "full",
+            "deleted_es_count": 5,
         }
-        mock_delete_docs.return_value = es_result
+        mock_delete_by_scope.return_value = es_result
 
-        # Setup redis error
         redis_error_message = "Redis connection failed"
         redis_service_mock.delete_document_records.side_effect = Exception(
             redis_error_message)
 
-        # Execute request
         response = client.delete(
-            f"/indices/{index_name}/documents", params={"path_or_url": path_or_url})
+            f"/indices/{index_name}/documents",
+            params={"path_or_url": path_or_url, "scope": "full"},
+        )
 
         # Verify expected 200 status code (the operation should still succeed even with Redis errors)
         assert response.status_code == 200
@@ -1722,9 +1762,9 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock):
         assert "redis_cleanup_error" in actual_response
         assert actual_response["redis_cleanup_error"] == redis_error_message
 
-        # Verify delete_documents was called
-        # Use ANY for the vdb_core parameter because the actual object may differ
-        mock_delete_docs.assert_called_once_with(index_name, path_or_url, ANY)
+        mock_delete_by_scope.assert_called_once_with(
+            index_name, path_or_url, "full", ANY
+        )
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
 
@@ -1737,29 +1777,28 @@ async def test_delete_documents_es_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_documents") as mock_delete_docs:
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
 
-        # Setup the mock to raise an exception
-        mock_delete_docs.side_effect = Exception(
+        mock_delete_by_scope.side_effect = Exception(
             "Elasticsearch deletion failed")
 
-        # Execute request
         response = client.delete(
-            f"/indices/{index_name}/documents", params={"path_or_url": path_or_url})
+            f"/indices/{index_name}/documents",
+            params={"path_or_url": path_or_url, "scope": "full"},
+        )
 
-        # Verify expected 500 status code
         assert response.status_code == 500
-
-        # Verify error response
         expected_error_detail = "Error delete indexing documents: Elasticsearch deletion failed"
         assert response.json() == {"detail": expected_error_detail}
-
-        # Verify delete_documents was called
-        # Use ANY for the vdb_core parameter because the actual object may differ
-        mock_delete_docs.assert_called_once_with(index_name, path_or_url, ANY)
+        mock_delete_by_scope.assert_called_once_with(
+            index_name, path_or_url, "full", ANY
+        )
 
 
 @pytest.mark.asyncio
@@ -1771,20 +1810,22 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_documents") as mock_delete_docs:
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
 
-        # Setup the return value for delete_documents
         es_result = {
             "status": "success",
             "message": "Documents deleted successfully",
-            "deleted_count": 5
+            "scope": "full",
+            "deleted_es_count": 5,
         }
-        mock_delete_docs.return_value = es_result
+        mock_delete_by_scope.return_value = es_result
 
-        # Setup the mock for delete_document_records with warnings
         redis_result = {
             "index_name": index_name,
             "path_or_url": path_or_url,
@@ -1795,9 +1836,10 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
         }
         redis_service_mock.delete_document_records.return_value = redis_result
 
-        # Execute request
         response = client.delete(
-            f"/indices/{index_name}/documents", params={"path_or_url": path_or_url})
+            f"/indices/{index_name}/documents",
+            params={"path_or_url": path_or_url, "scope": "full"},
+        )
 
         # Verify expected 200 status code
         assert response.status_code == 200
@@ -1816,9 +1858,9 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
         assert actual_response["redis_warnings"] == [
             "Some cache keys could not be deleted"]
 
-        # Verify delete_documents was called
-        # Use ANY for the vdb_core parameter because the actual object may differ
-        mock_delete_docs.assert_called_once_with(index_name, path_or_url, ANY)
+        mock_delete_by_scope.assert_called_once_with(
+            index_name, path_or_url, "full", ANY
+        )
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
 
@@ -1831,29 +1873,27 @@ async def test_delete_documents_validation_exception(vdb_core_mock):
     """
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_documents") as mock_delete_docs:
+            patch(
+                "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                new_callable=AsyncMock,
+            ) as mock_delete_by_scope:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
 
-        # Setup the mock to raise a validation exception
-        mock_delete_docs.side_effect = ValueError(
+        mock_delete_by_scope.side_effect = ValueError(
             "Invalid document path format")
 
-        # Execute request
         response = client.delete(
-            f"/indices/{index_name}/documents", params={"path_or_url": path_or_url})
+            f"/indices/{index_name}/documents",
+            params={"path_or_url": path_or_url, "scope": "source_only"},
+        )
 
-        # Verify expected 500 status code
-        assert response.status_code == 500
-
-        # Verify error response
-        expected_error_detail = "Error delete indexing documents: Invalid document path format"
-        assert response.json() == {"detail": expected_error_detail}
-
-        # Verify delete_documents was called
-        # Use ANY for the vdb_core parameter because the actual object may differ
-        mock_delete_docs.assert_called_once_with(index_name, path_or_url, ANY)
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Invalid document path format"}
+        mock_delete_by_scope.assert_called_once_with(
+            index_name, path_or_url, "source_only", ANY
+        )
 
 
 @pytest.mark.asyncio

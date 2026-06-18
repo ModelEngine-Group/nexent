@@ -114,6 +114,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [openApiJson, setOpenApiJson] = useState("");
   const [openApiServiceName, setOpenApiServiceName] = useState("");
   const [openApiServerUrl, setOpenApiServerUrl] = useState("");
+  const [openApiHeadersTemplate, setOpenApiHeadersTemplate] = useState("");
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
@@ -445,6 +446,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           service_name: openApiServiceName.trim(),
           server_url: openApiServerUrl.trim(),
           openapi_json: parsedJson,
+          headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
         }),
       });
 
@@ -453,6 +455,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         setOpenApiJson("");
         setOpenApiServiceName("");
         setOpenApiServerUrl("");
+        setOpenApiHeadersTemplate("");
         await loadOpenapiServices();
       } else {
         const errorData = await response.json();
@@ -757,7 +760,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex justify-between items-center mb-4 flex-shrink-0">
         <div />
         <Button type="primary" icon={<Plus size={16} />} onClick={() => setAddModalVisible(true)}>
@@ -765,47 +768,45 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         </Button>
       </div>
 
-      <div className="space-y-6 flex-1 overflow-auto">
-        <div className="min-w-0">
-          <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.serverList.title")}</Title>
-          <Table
-            columns={serverColumns}
-            dataSource={serverList}
-            rowKey={(record) => `${record.service_name}-${record.mcp_url}`}
-            loading={loading}
-            size="small"
-            pagination={{ pageSize: 7 }}
-            locale={{ emptyText: t("mcpConfig.serverList.empty") }}
-          />
-        </div>
+      <div className="flex-1 overflow-hidden">
+        <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.serverList.title")}</Title>
+        <Table
+          columns={serverColumns}
+          dataSource={serverList}
+          rowKey={(record) => `${record.service_name}-${record.mcp_url}`}
+          loading={loading}
+          size="small"
+          pagination={{ pageSize: 7 }}
+          locale={{ emptyText: t("mcpConfig.serverList.empty") }}
+          scroll={{ y: "calc(100vh - 560px)" }}
+          className="flex-1 [&_.ant-table]:h-full"
+        />
 
-        <div className="min-w-0">
-          <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.containerList.title")}</Title>
-          <Table
-            columns={containerColumns}
-            dataSource={containerList}
-            rowKey="container_id"
-            loading={loading}
-            size="small"
-            pagination={{ pageSize: 3 }}
-            locale={{ emptyText: t("mcpConfig.containerList.empty") }}
-            scroll={{ x: true }}
-          />
-        </div>
+        <Title level={5} style={{ marginTop: 24, marginBottom: 12 }}>{t("mcpConfig.containerList.title")}</Title>
+        <Table
+          columns={containerColumns}
+          dataSource={containerList}
+          rowKey="container_id"
+          loading={loading}
+          size="small"
+          pagination={{ pageSize: 3 }}
+          locale={{ emptyText: t("mcpConfig.containerList.empty") }}
+          scroll={{ y: 200 }}
+          className="[&_.ant-table]:h-full"
+        />
 
-        <div className="min-w-0">
-          <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.openapiService.list.title")}</Title>
-          <Table
-            columns={openapiServicesColumns}
-            dataSource={openapiServices}
-            rowKey="id"
-            loading={loadingOpenapiServices}
-            size="small"
-            pagination={{ pageSize: 5 }}
-            locale={{ emptyText: t("mcpConfig.openapiService.list.empty") }}
-            scroll={{ x: true }}
-          />
-        </div>
+        <Title level={5} style={{ marginTop: 24, marginBottom: 12 }}>{t("mcpConfig.openapiService.list.title")}</Title>
+        <Table
+          columns={openapiServicesColumns}
+          dataSource={openapiServices}
+          rowKey="id"
+          loading={loadingOpenapiServices}
+          size="small"
+          pagination={{ pageSize: 5 }}
+          locale={{ emptyText: t("mcpConfig.openapiService.list.empty") }}
+          scroll={{ y: 250 }}
+          className="[&_.ant-table]:h-full"
+        />
       </div>
 
       {/* Add Modal */}
@@ -1035,13 +1036,22 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         style={{ flex: 3 }}
                       />
                     </div>
-                    <Input.TextArea
-                      placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
-                      value={openApiJson}
-                      onChange={(e) => setOpenApiJson(e.target.value)}
-                      rows={6}
-                      disabled={actionsLocked || importingOpenApi}
-                    />
+                    <div className="space-y-2">
+                      <Input.TextArea
+                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                        value={openApiHeadersTemplate}
+                        onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
+                        rows={2}
+                        disabled={actionsLocked || importingOpenApi}
+                      />
+                      <Input.TextArea
+                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                        value={openApiJson}
+                        onChange={(e) => setOpenApiJson(e.target.value)}
+                        rows={6}
+                        disabled={actionsLocked || importingOpenApi}
+                      />
+                    </div>
                     <div className="flex justify-end">
                       <Button
                         type="primary"

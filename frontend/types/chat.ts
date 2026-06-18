@@ -36,11 +36,12 @@ export interface StepContent {
         typeof chatConfig.messageTypes.VIRTUAL |
         typeof chatConfig.messageTypes.MEMORY_SEARCH |
         typeof chatConfig.messageTypes.PREPROCESS |
+        typeof chatConfig.messageTypes.VERIFICATION |
         typeof chatConfig.messageTypes.MAX_STEPS_REACHED
   content: string
   expanded: boolean
   timestamp: number
-  subType?: "thinking" | "code" | "deep_thinking" | "progress" | "file_processed" | "truncation" | "complete" | "error"
+  subType?: "thinking" | "code" | "deep_thinking" | "progress" | "file_processed" | "truncation" | "complete" | "error" | "verification"
   isLoading?: boolean
   _preserve?: boolean
   _messageContainer?: {
@@ -74,7 +75,7 @@ metrics: TokenMetrics | null
 
 export interface ChatAgentSelectorProps {
   selectedAgentId: string | null;
-  onAgentSelect: (agentId: string | null) => void;
+  onAgentSelect: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
 }
@@ -139,6 +140,7 @@ type LocalFilePreviewSource = {
 export type FilePreviewProps = {
   open: boolean;
   onClose: () => void;
+  previewContext?: 'knowledgeBase';
 } & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type
@@ -204,9 +206,11 @@ export interface ChatStreamMainProps {
   currentConversationId?: number;
   shouldScrollToBottom?: boolean;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
   onCitationHover?: () => void;
   onScroll?: () => void;
+  agentGreeting?: string | null;
+  agentExampleQuestions?: string[];
 }
 
 // Card item type for task window

@@ -230,6 +230,7 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "summary_frequency" varchar(10) COLLATE "pg_catalog"."default",
   "last_summary_time" timestamp(0),
   "last_doc_update_time" timestamp(0),
+  "preserve_source_file" boolean NOT NULL DEFAULT true,
   CONSTRAINT "knowledge_record_t_pk" PRIMARY KEY ("knowledge_id")
 );
 ALTER TABLE "knowledge_record_t" OWNER TO "root";
@@ -251,6 +252,7 @@ COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'User who created the rec
 COMMENT ON COLUMN "knowledge_record_t"."summary_frequency" IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
 COMMENT ON COLUMN "knowledge_record_t"."last_summary_time" IS 'Timestamp of last summary generation';
 COMMENT ON COLUMN "knowledge_record_t"."last_doc_update_time" IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
+COMMENT ON COLUMN "knowledge_record_t"."preserve_source_file" IS 'Whether to preserve uploaded source documents after vectorization';
 COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and status information';
@@ -337,9 +339,12 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     is_new BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
     enable_context_manager BOOLEAN DEFAULT FALSE,
+    verification_config JSONB,
     version_no INTEGER DEFAULT 0 NOT NULL,
     current_version_no INTEGER NULL,
     ingroup_permission VARCHAR(30),
+    greeting_message TEXT,
+    example_questions JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -397,6 +402,9 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = dr
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to enable context management (compression) for this agent';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.verification_config IS 'Layered ReAct self-verification configuration';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.greeting_message IS 'Agent greeting message displayed on chat initial screen';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.example_questions IS 'List of example questions for starting a conversation with this agent';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -715,6 +723,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
     version_no INTEGER DEFAULT 0 NOT NULL,
+    selected_agent_version_no INTEGER,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -747,6 +756,7 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_id IS 'Selected agen
 COMMENT ON COLUMN nexent.ag_agent_relation_t.parent_agent_id IS 'Parent agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.tenant_id IS 'Tenant ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_version_no IS 'Pinned version of selected_agent_id. NULL = use child current published version at runtime (legacy/draft).';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.created_by IS 'Creator ID, audit field';
@@ -1260,7 +1270,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_skill_info_t (
     config_schemas JSON,
     config_values JSON,
     source VARCHAR(30) DEFAULT 'official',
-    tenant_id VARCHAR(100),
     created_by VARCHAR(100),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -1900,3 +1909,31 @@ FOR EACH ROW
 EXECUTE FUNCTION update_mcp_community_record_update_time();
 
 COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t IS 'Trigger to maintain update_time';
+
+CREATE TABLE IF NOT EXISTS nexent.user_cas_session_t (
+    cas_session_id SERIAL PRIMARY KEY,
+    session_id VARCHAR(100) NOT NULL UNIQUE,
+    user_id VARCHAR(100) NOT NULL,
+    cas_user_id VARCHAR(200) NOT NULL,
+    cas_session_index VARCHAR(500),
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_session_id
+    ON nexent.user_cas_session_t (session_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_user_id
+    ON nexent.user_cas_session_t (user_id);
+CREATE INDEX IF NOT EXISTS ix_user_cas_session_cas_user_id
+    ON nexent.user_cas_session_t (cas_user_id);
+
+COMMENT ON TABLE nexent.user_cas_session_t IS 'Server-side session records for CAS SSO login and logout synchronization';
+COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for revocation checks';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
+COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';

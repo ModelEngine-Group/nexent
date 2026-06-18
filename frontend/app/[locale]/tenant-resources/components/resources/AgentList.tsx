@@ -411,20 +411,19 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="space-y-6 flex-1 overflow-auto">
-        <div className="min-w-0">
-          <Table
-            columns={columns}
-            dataSource={agents as AgentListRow[]}
-            rowKey="id"
-            loading={isLoading}
-            size="small"
-            pagination={{ pageSize: 10 }}
-            locale={{ emptyText: t("space.noAgents") }}
-            scroll={{ x: true }}
-          />
-        </div>
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-hidden">
+        <Table
+          columns={columns}
+          dataSource={agents as AgentListRow[]}
+          rowKey="id"
+          loading={isLoading}
+          size="small"
+          pagination={{ pageSize: 10 }}
+          locale={{ emptyText: t("space.noAgents") }}
+          scroll={{ y: "calc(100vh - 480px)" }}
+          className="[&_.ant-table]:h-full"
+        />
       </div>
 
       {/* View Modal */}
