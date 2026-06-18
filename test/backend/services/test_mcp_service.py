@@ -432,10 +432,6 @@ class TestSanitizeFunctionName:
 class TestRegisterOpenapiService:
     """Test register_openapi_service function"""
 
-    @staticmethod
-    def _headers_template():
-        return {}
-
     def test_register_service_success(self):
         """Test successful OpenAPI service registration"""
         service_name = "test_service"
@@ -446,12 +442,7 @@ class TestRegisterOpenapiService:
         }
         server_url = "https://api.example.com"
 
-        result = mcp_service.register_openapi_service(
-            service_name,
-            openapi_json,
-            server_url,
-            self._headers_template()
-        )
+        result = mcp_service.register_openapi_service(service_name, openapi_json, server_url)
 
         assert result is True
         assert service_name in mcp_service._openapi_mcp_services
@@ -459,12 +450,12 @@ class TestRegisterOpenapiService:
 
     def test_register_service_empty_name(self):
         """Test registration with empty service name"""
-        result = mcp_service.register_openapi_service("", {}, "https://api.example.com", self._headers_template())
+        result = mcp_service.register_openapi_service("", {}, "https://api.example.com")
         assert result is False
 
     def test_register_service_none_name(self):
         """Test registration with None service name"""
-        result = mcp_service.register_openapi_service(None, {}, "https://api.example.com", self._headers_template())
+        result = mcp_service.register_openapi_service(None, {}, "https://api.example.com")
         assert result is False
 
     def test_register_duplicate_service(self):
@@ -473,21 +464,11 @@ class TestRegisterOpenapiService:
         openapi_json = {"openapi": "3.0.0", "info": {}, "paths": {}}
 
         # First registration
-        result1 = mcp_service.register_openapi_service(
-            service_name,
-            openapi_json,
-            "https://api.example.com",
-            self._headers_template()
-        )
+        result1 = mcp_service.register_openapi_service(service_name, openapi_json, "https://api.example.com")
         assert result1 is True
 
         # Second registration should fail
-        result2 = mcp_service.register_openapi_service(
-            service_name,
-            openapi_json,
-            "https://api.example.com",
-            self._headers_template()
-        )
+        result2 = mcp_service.register_openapi_service(service_name, openapi_json, "https://api.example.com")
         assert result2 is False
 
     def test_register_service_without_server_url(self):
@@ -495,7 +476,7 @@ class TestRegisterOpenapiService:
         service_name = "no_url_service"
         openapi_json = {"openapi": "3.0.0", "info": {}, "paths": {}}
 
-        result = mcp_service.register_openapi_service(service_name, openapi_json, "", self._headers_template())
+        result = mcp_service.register_openapi_service(service_name, openapi_json, "")
 
         assert result is True
 
@@ -506,45 +487,11 @@ class TestRegisterOpenapiService:
 
         original_json = openapi_json.copy()
 
-        mcp_service.register_openapi_service(
-            service_name,
-            openapi_json,
-            "https://api.example.com",
-            self._headers_template()
-        )
+        mcp_service.register_openapi_service(service_name, openapi_json, "https://api.example.com")
 
         # Verify original was not modified
         assert openapi_json == original_json
         assert "servers" not in openapi_json
-
-    @patch.object(mcp_service, 'FastMCP')
-    @patch.object(mcp_service.httpx, 'AsyncClient')
-    def test_register_service_passes_headers_template_to_async_client(
-        self, mock_async_client, mock_fastmcp
-    ):
-        """Test registration passes headers_template to HTTP client."""
-        mock_client = MagicMock()
-        mock_async_client.return_value = mock_client
-        mock_fastmcp.from_openapi.return_value = MagicMock()
-        headers_template = {
-            "Authorization": "Bearer {{token}}",
-            "X-Tenant-ID": "{{tenant_id}}"
-        }
-
-        result = mcp_service.register_openapi_service(
-            "headers_service",
-            {"openapi": "3.0.0", "info": {}, "paths": {}},
-            "https://api.example.com",
-            headers_template
-        )
-
-        assert result is True
-        mock_async_client.assert_called_once_with(
-            base_url="https://api.example.com",
-            timeout=120.0,
-            headers=headers_template
-        )
-        mock_fastmcp.from_openapi.assert_called_once()
 
     @patch.object(mcp_service, 'FastMCP')
     def test_register_service_from_openapi_failure(self, mock_fastmcp):
@@ -554,8 +501,7 @@ class TestRegisterOpenapiService:
         result = mcp_service.register_openapi_service(
             "fail_service",
             {"openapi": "3.0.0", "info": {}, "paths": {}},
-            "https://api.example.com",
-            self._headers_template()
+            "https://api.example.com"
         )
 
         assert result is False
@@ -569,8 +515,7 @@ class TestRegisterOpenapiService:
         result = mcp_service.register_openapi_service(
             "none_service",
             {"openapi": "3.0.0", "info": {}, "paths": {}},
-            "https://api.example.com",
-            self._headers_template()
+            "https://api.example.com"
         )
 
         assert result is False
@@ -707,38 +652,6 @@ class TestRefreshOpenapiServicesByTenant:
         assert "old_service" not in mcp_service._openapi_mcp_services
         assert "new_service" in mcp_service._openapi_mcp_services
 
-    @patch.object(mcp_service, 'register_openapi_service')
-    def test_refresh_passes_headers_template_to_register(self, mock_register):
-        """Test refresh passes headers_template to register_openapi_service."""
-        services_data = [
-            {
-                "mcp_service_name": "api_service_1",
-                "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
-                "server_url": "https://api1.example.com",
-                "headers_template": {
-                    "Authorization": "Bearer {{token}}",
-                    "X-Tenant-ID": "{{tenant_id}}"
-                }
-            }
-        ]
-        mcp_service.query_available_openapi_services.return_value = services_data
-        mock_register.return_value = True
-
-        result = mcp_service.refresh_openapi_services_by_tenant("tenant1")
-
-        assert result["registered"] == 1
-        assert result["skipped"] == 0
-        assert result["total"] == 1
-        mock_register.assert_called_once_with(
-            "api_service_1",
-            {"openapi": "3.0.0", "info": {}, "paths": {}},
-            "https://api1.example.com",
-            {
-                "Authorization": "Bearer {{token}}",
-                "X-Tenant-ID": "{{tenant_id}}"
-            }
-        )
-
     def test_refresh_remounts_local_service(self):
         """Test that refresh re-mounts local MCP service"""
         mcp_service.query_available_openapi_services.return_value = []
@@ -759,21 +672,13 @@ class TestRefreshOpenapiServicesByTenant:
 class TestRefreshSingleOpenapiService:
     """Test refresh_single_openapi_service function"""
 
-    @staticmethod
-    def _headers_template():
-        return {
-            "Authorization": "Bearer {{token}}",
-            "X-Tenant-ID": "{{tenant_id}}"
-        }
-
     def test_refresh_existing_service(self):
         """Test refreshing an existing service"""
         services_data = [
             {
                 "mcp_service_name": "target_service",
                 "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
-                "server_url": "https://api.example.com",
-                "headers_template": self._headers_template()
+                "server_url": "https://api.example.com"
             }
         ]
         mcp_service.query_available_openapi_services.return_value = services_data
@@ -832,8 +737,7 @@ class TestRefreshSingleOpenapiService:
             {
                 "mcp_service_name": "old_service",
                 "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
-                "server_url": "https://api.example.com",
-                "headers_template": self._headers_template()
+                "server_url": "https://api.example.com"
             }
         ]
         mcp_service.query_available_openapi_services.return_value = services_data
@@ -841,30 +745,6 @@ class TestRefreshSingleOpenapiService:
         result = mcp_service.refresh_single_openapi_service("old_service", "tenant1")
 
         assert result["status"] == "refreshed"
-
-    @patch.object(mcp_service, 'register_openapi_service')
-    def test_refresh_existing_service_passes_headers_template(self, mock_register):
-        """Test refreshing a service passes headers_template to register_openapi_service."""
-        services_data = [
-            {
-                "mcp_service_name": "target_service",
-                "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
-                "server_url": "https://api.example.com",
-                "headers_template": self._headers_template()
-            }
-        ]
-        mcp_service.query_available_openapi_services.return_value = services_data
-        mock_register.return_value = True
-
-        result = mcp_service.refresh_single_openapi_service("target_service", "tenant1")
-
-        assert result["status"] == "refreshed"
-        mock_register.assert_called_once_with(
-            "target_service",
-            {"openapi": "3.0.0", "info": {}, "paths": {}},
-            "https://api.example.com",
-            self._headers_template()
-        )
 
     def test_refresh_deleted_service_removes_from_mounted_servers(self):
         """Test that deleting a service removes it from mounted_servers"""
@@ -954,13 +834,14 @@ class TestGetMcpManagementApp:
     def test_app_has_routes(self):
         """Test that app has expected routes"""
         app = mcp_service.get_mcp_management_app()
-        paths = app.openapi()["paths"]
 
-        assert "/tools/outer_api/refresh" in paths
-        assert "/tools/openapi_service/refresh" in paths
-        assert "/tools/openapi_service" in paths
-        assert "/tools/openapi_service/{service_name}/refresh" in paths
-        assert "/tools/outer_api" in paths
+        routes = [route.path for route in app.routes]
+
+        assert "/tools/outer_api/refresh" in routes
+        assert "/tools/openapi_service/refresh" in routes
+        assert "/tools/openapi_service" in routes
+        assert "/tools/openapi_service/{service_name}/refresh" in routes
+        assert "/tools/outer_api" in routes
 
 
 # ---------------------------------------------------------------------------
@@ -1125,11 +1006,7 @@ class TestRefreshSingleOpenapiServiceEndpoint:
             {
                 "mcp_service_name": "target_service",
                 "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
-                "server_url": "https://api.example.com",
-                "headers_template": {
-                    "Authorization": "Bearer {{token}}",
-                    "X-Tenant-ID": "{{tenant_id}}"
-                }
+                "server_url": "https://api.example.com"
             }
         ]
 

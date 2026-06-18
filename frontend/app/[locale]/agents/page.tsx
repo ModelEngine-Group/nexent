@@ -12,8 +12,6 @@ import AgentInfoComp from "./components/AgentInfoComp";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import AgentVersionManage from "./AgentVersionManage";
 import AgentSelectorHeader from "./components/AgentSelectorHeader";
-import { searchAgentInfo } from "@/services/agentConfigService";
-import log from "@/lib/logger";
 
 const { Header, Content } = Layout;
 
@@ -23,8 +21,6 @@ export default function AgentSetupOrchestrator() {
   const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
   const reset = useAgentConfigStore((state) => state.reset);
   const setDefaultLlmConfig = useAgentConfigStore((state) => state.setDefaultLlmConfig);
-  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
-  const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
   const { config } = useConfig();
 
   // Sync default LLM config from load_config
@@ -50,26 +46,6 @@ export default function AgentSetupOrchestrator() {
       }, 100);
     }
   }, [searchParams, enterCreateMode]);
-
-  // Handle auto-select agent from URL params (agent_id)
-  useEffect(() => {
-    const agentId = searchParams.get('agent_id');
-    if (agentId && (!currentAgentId || String(currentAgentId) !== agentId)) {
-      const loadAgent = async () => {
-        try {
-          const result = await searchAgentInfo(parseInt(agentId));
-          if (result.success && result.data) {
-            setCurrentAgent(result.data);
-          } else {
-            log.warn("Failed to load agent from URL agent_id:", result.message);
-          }
-        } catch (error) {
-          log.error("Failed to load agent from URL agent_id:", error);
-        }
-      };
-      loadAgent();
-    }
-  }, [searchParams, currentAgentId, setCurrentAgent]);
 
   // Reset agent selection state when leaving the page
   useEffect(() => {

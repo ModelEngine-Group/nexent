@@ -27,7 +27,6 @@ class ProcessType(Enum):
     TOOL = "tool"  # tool name
     MEMORY_SEARCH = "memory_search"  # memory search status
     MAX_STEPS_REACHED = "max_steps_reached"  # agent reached maximum steps limit
-    VERIFICATION = "verification"  # layered ReAct self-verification status
 
 
 # message transformer base class
@@ -160,8 +159,7 @@ class MessageObserver:
             ProcessType.CARD: default_transformer,
             ProcessType.TOOL: default_transformer,
             ProcessType.MEMORY_SEARCH: default_transformer,
-            ProcessType.MAX_STEPS_REACHED: default_transformer,
-            ProcessType.VERIFICATION: default_transformer
+            ProcessType.MAX_STEPS_REACHED: default_transformer
         }
 
     def add_model_new_token(self, new_token):

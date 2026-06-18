@@ -51,8 +51,7 @@ async def _require_asset_owner_context(request: Request) -> NorthboundContext:
 @router.get("/indices")
 async def get_list_indices(
     request: Request,
-    pattern: Annotated[str, Query(
-        description="Pattern to match index names")] = "*",
+    pattern: Annotated[str, Query(description="Pattern to match index names")] = "*",
 ):
     """List knowledge bases visible to the asset-owner tenant.
 
@@ -93,7 +92,7 @@ async def create_new_index(
         Optional[Dict[str, Any]],
         Body(
             description=(
-                "Request body with optional fields (ingroup_permission, group_ids, embedding_model_name, preserve_source_file)"
+                "Request body with optional fields (ingroup_permission, group_ids, embedding_model_name)"
             ),
         ),
     ] = None,
@@ -111,12 +110,10 @@ async def create_new_index(
         ingroup_permission = None
         group_ids = None
         embedding_model_name = None
-        preserve_source_file = None
         if body:
             ingroup_permission = body.get("ingroup_permission")
             group_ids = body.get("group_ids")
             embedding_model_name = body.get("embedding_model_name")
-            preserve_source_file = body.get("preserve_source_file")
 
         return ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
@@ -127,7 +124,6 @@ async def create_new_index(
             ingroup_permission=ingroup_permission,
             group_ids=group_ids,
             embedding_model_name=embedding_model_name,
-            preserve_source_file=preserve_source_file,
         )
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while creating index")
@@ -226,65 +222,52 @@ async def delete_documents(
     request: Request,
     index_name: Annotated[str, Path(..., description="Name of the index")],
     path_or_url: Annotated[str, Query(..., description="Path or URL of documents to delete")],
-    scope: Annotated[
-        str,
-        Query(
-            description=(
-                "source_only: delete MinIO source only; "
-                "full: delete ES, MinIO, and Redis records"
-            ),
-        ),
-    ] = "full",
 ):
-    """Delete a document by scope. Restricted to asset administrators."""
-    try:
-        await _require_asset_owner_context(request)
-        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
-        logger.debug(
-            "Deleting documents for index %s scope=%s", index_name, scope
-        )
-        result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
-        )
+    """Delete documents by path or URL and clean up related Redis records.
 
-        if scope == "full":
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for index %s: %s",
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+    Restricted to asset administrators (same auth as get_list_indices).
+    """
+    try:
+        ctx = await _require_asset_owner_context(request)
+        vdb_core = get_vector_db_core(db_type=VectorDatabaseType.ELASTICSEARCH)
+        logger.debug("Deleting documents for index %s", index_name)
+        result = ElasticSearchService.delete_documents(
+            index_name, path_or_url, vdb_core)
+
+        try:
+            redis_service = get_redis_service()
+            redis_cleanup_result = redis_service.delete_document_records(
+                index_name, path_or_url)
+
+            result["redis_cleanup"] = redis_cleanup_result
+
+            original_message = result.get(
+                "message", "Documents deleted successfully")
+            result["message"] = (
+                f"{original_message}. "
+                f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
+                f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
+                f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
+            )
+
+            if redis_cleanup_result.get("errors"):
+                result["redis_warnings"] = redis_cleanup_result["errors"]
+
+        except Exception as redis_error:
+            logger.warning(
+                "Redis cleanup failed for index %s: %s",
+                index_name,
+                redis_error,
+            )
+            result["redis_cleanup_error"] = str(redis_error)
+            original_message = result.get(
+                "message", "Documents deleted successfully")
+            result["message"] = (
+                f"{original_message}, but Redis cleanup encountered an error: "
+                f"{str(redis_error)}"
+            )
 
         return result
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
-        )
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting documents")
         raise HTTPException(

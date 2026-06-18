@@ -16,7 +16,6 @@ def _reset_prompt_template_service_modules():
     yield
     sys.modules.pop("services.prompt_template_service", None)
     sys.modules.pop("database.prompt_template_db", None)
-    sys.modules.pop("consts.model", None)
 
 
 @pytest.fixture
@@ -24,30 +23,20 @@ def prompt_template_models(monkeypatch):
     if BACKEND_PATH not in sys.path:
         sys.path.insert(0, BACKEND_PATH)
 
-    consts_model_module = types.ModuleType("consts.model")
+    nexent_module = types.ModuleType("nexent")
+    nexent_core_module = types.ModuleType("nexent.core")
+    nexent_agents_module = types.ModuleType("nexent.core.agents")
+    agent_model_module = types.ModuleType("nexent.core.agents.agent_model")
+    agent_model_module.ToolConfig = type("ToolConfig", (), {})
 
-    class PromptTemplateContentRequest:
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
+    monkeypatch.setitem(sys.modules, "nexent", nexent_module)
+    monkeypatch.setitem(sys.modules, "nexent.core", nexent_core_module)
+    monkeypatch.setitem(sys.modules, "nexent.core.agents", nexent_agents_module)
+    monkeypatch.setitem(sys.modules, "nexent.core.agents.agent_model", agent_model_module)
 
-        def model_dump(self):
-            return dict(self.__dict__)
-
-    class PromptTemplateRequest:
-        def __init__(self, template_name, description, template_type, template_content_zh, template_content_en=None):
-            self.template_name = template_name
-            self.description = description
-            self.template_type = template_type
-            self.template_content_zh = template_content_zh
-            self.template_content_en = template_content_en
-
-    consts_model_module.PromptTemplateRequest = PromptTemplateRequest
-    consts_model_module.PromptTemplateContentRequest = PromptTemplateContentRequest
-    monkeypatch.setitem(sys.modules, "consts.model", consts_model_module)
-
+    consts_model = importlib.import_module("consts.model")
     consts_exceptions = importlib.import_module("consts.exceptions")
-    return consts_model_module, consts_exceptions
+    return consts_model, consts_exceptions
 
 
 @pytest.fixture

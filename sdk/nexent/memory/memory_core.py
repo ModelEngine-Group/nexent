@@ -102,9 +102,7 @@ async def get_memory_instance(memory_config: Dict[str, Any]) -> AsyncMemory:
     # Validate *before* computing hash so we fail fast with human-readable error
     _validate_config(memory_config)
 
-    config_hash = _hash_config(memory_config)
-    loop = asyncio.get_event_loop()
-    cache_key = f"{config_hash}:{id(loop)}"
+    cache_key = _hash_config(memory_config)
 
     async with _get_cache_lock():
         if cache_key in _MEMORY_CACHE:

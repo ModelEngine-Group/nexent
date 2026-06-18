@@ -4722,37 +4722,6 @@ class TestImportOpenapiService:
 
     @patch('backend.services.tool_configuration_service.upsert_openapi_service')
     @patch('backend.services.tool_configuration_service.logger')
-    def test_import_openapi_service_with_headers_template(self, mock_logger, mock_upsert):
-        """Test import_openapi_service passes headers_template to upsert."""
-        mock_upsert.return_value = {"service_name": "test_service"}
-        headers_template = {
-            "Authorization": "Bearer {{token}}",
-            "X-Tenant-ID": "{{tenant_id}}"
-        }
-
-        openapi_json = {
-            "info": {"description": "Test API"},
-            "paths": {}
-        }
-
-        from backend.services.tool_configuration_service import import_openapi_service
-        result = import_openapi_service(
-            service_name="test_service",
-            openapi_json=openapi_json,
-            server_url="http://api.example.com",
-            tenant_id="tenant1",
-            user_id="user1",
-            headers_template=headers_template
-        )
-
-        assert result["service_name"] == "test_service"
-        call_kwargs = mock_upsert.call_args.kwargs
-        assert call_kwargs["headers_template"] == headers_template
-        assert call_kwargs["description"] == "Test API"
-        mock_logger.info.assert_called_once()
-
-    @patch('backend.services.tool_configuration_service.upsert_openapi_service')
-    @patch('backend.services.tool_configuration_service.logger')
     def test_import_openapi_service_overrides_servers_url(self, mock_logger, mock_upsert):
         """Test import_openapi_service overrides servers URL in openapi_json."""
         mock_upsert.return_value = {"service_name": "test_service"}

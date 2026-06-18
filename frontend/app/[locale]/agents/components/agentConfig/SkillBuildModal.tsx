@@ -56,7 +56,7 @@ import {
   SkillFilesAccessDeniedError,
   type SkillFileNode,
 } from "@/services/agentConfigService";
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import log from "@/lib/logger";
 
 const { TextArea } = Input;

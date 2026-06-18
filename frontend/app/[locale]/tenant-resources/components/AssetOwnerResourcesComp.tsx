@@ -54,7 +54,7 @@ export default function AssetOwnerResourcesComp() {
 
           <Tabs
             defaultActiveKey="users"
-            className="h-full flex flex-col overflow-hidden [&_.ant-tabs-contentHolder]:flex-1 [&_.ant-tabs-contentHolder]:overflow-hidden asset-owner-tabs"
+            className="h-full flex flex-col"
             items={[
               {
                 key: "users",
@@ -108,17 +108,3 @@ export default function AssetOwnerResourcesComp() {
     </div>
   );
 }
-
-<style jsx global>{`
-  .asset-owner-tabs .ant-tabs-content {
-    width: 100%;
-    height: 100%;
-  }
-  .asset-owner-tabs .ant-tabs-tabpane {
-    height: 100%;
-    overflow: hidden;
-  }
-  .asset-owner-tabs .ant-tabs-nav {
-    flex-shrink: 0;
-  }
-`}</style>

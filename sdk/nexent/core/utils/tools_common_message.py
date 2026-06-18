@@ -17,7 +17,6 @@ class ToolSign(Enum):
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
     DATABASE_OPERATION = "z"  # Database operation tool identifier
-    MEMORY_OPERATION = "n"      # Memory operation tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -34,7 +33,6 @@ TOOL_SIGN_MAPPING = {
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
     "database_operation": ToolSign.DATABASE_OPERATION.value,
-    "memory_operation": ToolSign.MEMORY_OPERATION.value,
 }
 
 # Reverse mapping for lookup

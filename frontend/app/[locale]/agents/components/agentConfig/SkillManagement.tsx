@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
-import { Tabs, message, Tooltip, Badge } from "antd";
+import { Tabs, message, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Info, Trash2, Settings } from "lucide-react";
@@ -207,27 +207,21 @@ export default function SkillManagement({
   };
 
   const tabItems = skillGroups.map((group) => {
-    const selectedCount = group.skills.filter(s => originalSelectedSkillIdsSet.has(s.skill_id)).length;
-
     return {
       key: group.key,
       label: (
         <Tooltip title={group.label} placement="right">
-          <span className="inline-flex items-center gap-1">
-            <span
-              style={{
-                maxWidth: "100px",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                textAlign: "left",
-              }}
-            >
-              {group.label}
-            </span>
-            {selectedCount > 0 && (
-              <Badge count={selectedCount} size="small" color="blue" />
-            )}
+          <span
+            style={{
+              display: "block",
+              maxWidth: "100px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              textAlign: "left",
+            }}
+          >
+            {group.label}
           </span>
         </Tooltip>
       ),

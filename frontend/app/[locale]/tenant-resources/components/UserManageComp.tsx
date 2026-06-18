@@ -18,8 +18,6 @@ import {
   Pagination,
   Alert,
   Space,
-  Divider,
-  Tooltip
 } from "antd";
 import {
   Users,
@@ -64,6 +62,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   getPasswordChecks,
   getStrengthLevel,
@@ -1180,182 +1179,167 @@ export default function UserManageComp() {
   };
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className="w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="flex w-full px-6 pt-12">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
-            <Building2 className="h-6 w-6 text-white" />
+      <div className="w-full px-10 pt-10">
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
+              <Building2 className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
+                {t("tenantResources.title") || "Tenant Resource Management"}
+              </h1>
+              <p className="text-slate-600 dark:text-slate-300 mt-1">
+                {t("tenantResources.subtitle") ||
+                  "Manage tenants, users, groups and resources"}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
-              {t("tenantResources.title") || "Tenant Resource Management"}
-            </h1>
-            <p className="text-slate-600 dark:text-slate-300 mt-1">
-              {t("tenantResources.subtitle") ||
-                "Manage tenants, users, groups and resources"}
-            </p>
-          </div>
-        </div>
+        </motion.div>
       </div>
-      <div className="flex-1 min-h-0 h-full">
-        <div className="flex h-full">
-          <Can permission="tenant.list:read">
-            <Col className="flex flex-col h-full" style={{ width: 300 }}>
-              <div className="h-full pr-6">
-                <div className="sticky top-6">
-                  <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                    <TenantList
-                      selected={tenantId}
-                      onSelect={(id) => setTenantId(id)}
-                      tenants={tenantData?.data || []}
-                      total={tenantData?.total}
-                      page={tenantData?.page}
-                      pageSize={tenantData?.page_size}
-                      totalPages={tenantData?.total_pages}
-                      onPageChange={handlePageChange}
-                      onTenantsRefetch={async () => {
-                        setCurrentPage(1);
-                        return refetchTenants();
-                      }}
-                      loading={tenantsLoading}
-                      t={t}
-                      onUserListRefresh={() =>
-                        setUserListRefreshKey((prev) => prev + 1)
-                      }
-                      onInvitationListRefresh={() =>
-                        setInvitationListRefreshKey((prev) => prev + 1)
-                      }
-                      locale={locale}
-                    />
-                  </div>
-                </div>
-              </div>
-            </Col>
-          </Can>
-          <Col className="flex-1 flex flex-col p-6 overflow-hidden">
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
-              {/* Tenant name header */}
-              <div className="flex">
-                {isEditingTenantName ? (
-                  <Input
-                    ref={tenantNameInputRef}
-                    value={editingTenantName}
-                    onChange={(e) => setEditingTenantName(e.target.value)}
-                    onBlur={saveTenantName}
-                    onKeyDown={handleTenantNameKeyDown}
-                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
-                    placeholder={t("tenantResources.tenants.name")}
+      <Row className="flex-1 min-h-0 h-full" align="stretch">
+        <Can permission="tenant.list:read">
+          <Col className="flex flex-col h-full" style={{ width: 300 }}>
+            <div className="h-full pr-6">
+              <div className="sticky top-6">
+                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                  <TenantList
+                    selected={tenantId}
+                    onSelect={(id) => setTenantId(id)}
+                    tenants={tenantData?.data || []}
+                    total={tenantData?.total}
+                    page={tenantData?.page}
+                    pageSize={tenantData?.page_size}
+                    totalPages={tenantData?.total_pages}
+                    onPageChange={handlePageChange}
+                    onTenantsRefetch={async () => {
+                      setCurrentPage(1);
+                      return refetchTenants();
+                    }}
+                    loading={tenantsLoading}
+                    t={t}
+                    onUserListRefresh={() =>
+                      setUserListRefreshKey((prev) => prev + 1)
+                    }
+                    onInvitationListRefresh={() =>
+                      setInvitationListRefreshKey((prev) => prev + 1)
+                    }
+                    locale={locale}
                   />
-                ) : (
-                  <div
-                    className="flex items-center gap-2 group cursor-pointer"
-                    onClick={startEditingTenantName}
-                  >
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {currentTenantName}
-                    </h2>
-                    <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                )}
-                
-              </div>
-              
-              <div className="flex-1 min-h-0 h-full">
-                <Divider size="small"/>
-                <div className="flex h-full w-full">
-                  {tenantId ? (
-                    <Tabs
-                      defaultActiveKey="users"
-                      className="h-full flex flex-col tenant-resource-tabs w-full overflow-hidden"
-                      items={[
-                        {
-                          key: "users",
-                          label: t("tenantResources.tabs.users") || "Users",
-                          children: (
-                            <UserList
-                              tenantId={tenantId}
-                              refreshKey={userListRefreshKey}
-                            />
-                          ),
-                        },
-                        {
-                          key: "groups",
-                          label: t("tenantResources.tabs.groups") || "Groups",
-                          children: <GroupList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "models",
-                          label: t("tenantResources.tabs.models") || "Models",
-                          children: <ModelList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "knowledge",
-                          label:
-                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                          children: <KnowledgeList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "agents",
-                          label: t("tenantResources.tabs.agents") || "Agents",
-                          children: <AgentList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "mcp",
-                          label: t("tenantResources.tabs.mcp") || "MCP",
-                          children: <McpList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "skills",
-                          label: "Skills",
-                          children: <SkillList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "invitations",
-                          label: t("tenantResources.invitation.tab") || "Invitations",
-                          children: (
-                            <InvitationList
-                              tenantId={tenantId}
-                              refreshKey={invitationListRefreshKey}
-                            />
-                          ),
-                        },
-                      ]}
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                        <Users className="h-8 w-8 text-gray-400" />
-                      </div>
-                      <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                        {t("tenantResources.selectTenantFirst") ||
-                          "Please select a tenant"}
-                      </h3>
-                      <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                        {t("tenantResources.selectTenantDescription") ||
-                          "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
-                      </p>
-                    </div>
-                  )}
                 </div>
-
               </div>
             </div>
           </Col>
-        </div>
-      </div>
+        </Can>
+        <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
+            {/* Tenant name header */}
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              {isEditingTenantName ? (
+                <Input
+                  ref={tenantNameInputRef}
+                  value={editingTenantName}
+                  onChange={(e) => setEditingTenantName(e.target.value)}
+                  onBlur={saveTenantName}
+                  onKeyDown={handleTenantNameKeyDown}
+                  className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  placeholder={t("tenantResources.tenants.name")}
+                />
+              ) : (
+                <div
+                  className="flex items-center gap-2 group cursor-pointer"
+                  onClick={startEditingTenantName}
+                >
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {currentTenantName}
+                  </h2>
+                  <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              )}
+            </div>
+
+            {tenantId ? (
+              <Tabs
+                defaultActiveKey="users"
+                className="h-full flex flex-col"
+                items={[
+                  {
+                    key: "users",
+                    label: t("tenantResources.tabs.users") || "Users",
+                    children: (
+                      <UserList
+                        tenantId={tenantId}
+                        refreshKey={userListRefreshKey}
+                      />
+                    ),
+                  },
+                  {
+                    key: "groups",
+                    label: t("tenantResources.tabs.groups") || "Groups",
+                    children: <GroupList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "models",
+                    label: t("tenantResources.tabs.models") || "Models",
+                    children: <ModelList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "knowledge",
+                    label:
+                      t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                    children: <KnowledgeList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "agents",
+                    label: t("tenantResources.tabs.agents") || "Agents",
+                    children: <AgentList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "mcp",
+                    label: t("tenantResources.tabs.mcp") || "MCP",
+                    children: <McpList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "skills",
+                    label: "Skills",
+                    children: <SkillList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "invitations",
+                    label: t("tenantResources.invitation.tab") || "Invitations",
+                    children: (
+                      <InvitationList
+                        tenantId={tenantId}
+                        refreshKey={invitationListRefreshKey}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                  {t("tenantResources.selectTenantFirst") ||
+                    "Please select a tenant"}
+                </h3>
+                <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+                  {t("tenantResources.selectTenantDescription") ||
+                    "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
+                </p>
+              </div>
+            )}
+          </div>
+        </Col>
+      </Row>
     </div>
   );
 }
-
-<style jsx global>{`
-  .tenant-resource-tabs .ant-tabs-content {
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
-  }
-  .tenant-resource-tabs .ant-tabs-tabpane {
-    max-width: 100%;
-    overflow: hidden;
-  }
-`}</style>

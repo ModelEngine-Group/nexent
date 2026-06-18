@@ -19,13 +19,12 @@ from consts.exceptions import (
     ValidationError,
 )
 from consts.error_code import ErrorCode
-from services.cas_service import build_logout_url, CasAuthenticationError
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
     update_password
 from services.user_service import delete_user_and_cleanup
-from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
+from utils.auth_utils import get_current_user_id
 
 
 load_dotenv()
@@ -151,18 +150,7 @@ async def logout(request: Request):
     authorization = request.headers.get("Authorization")
     try:
         # Make logout idempotent: if no token or token expired, still return success
-        session_id = None
-        cas_logout_url = ""
         if authorization:
-            session_id = extract_session_id_from_authorization(authorization)
-            if session_id:
-                from database.cas_session_db import revoke_cas_session_by_session_id
-
-                revoke_cas_session_by_session_id(session_id, actor="user")
-                try:
-                    cas_logout_url = build_logout_url()
-                except CasAuthenticationError as cas_err:
-                    logging.warning(f"CAS logout URL is unavailable: {str(cas_err)}")
             client = get_authorized_client(authorization)
             try:
                 client.auth.sign_out()
@@ -171,12 +159,7 @@ async def logout(request: Request):
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
         return JSONResponse(status_code=HTTPStatus.OK,
-                            content={
-                                "message": "Logout successful",
-                                "data": {
-                                    "cas_logout_url": cas_logout_url
-                                }
-                            })
+                            content={"message": "Logout successful"})
 
     except Exception as e:
         logging.error(f"User logout failed: {str(e)}")
@@ -230,10 +213,6 @@ async def get_user_information(request: Request):
         user_info = await get_user_info(user_id)
         if not user_info:
             raise UnauthorizedError("User information not found")
-
-        user_info["user"]["auth_provider"] = (
-            "cas" if extract_session_id_from_authorization(authorization) else "local"
-        )
 
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Success",

@@ -1,6 +1,6 @@
 system_prompt: |-
   ### Basic Information
-  You are {{APP_NAME}}, {{APP_DESCRIPTION}}
+  You are {{APP_NAME}}, {{APP_DESCRIPTION}}, it is {{time|default('current time')}} now
 
   {%- if memory_list and memory_list|length > 0 %}
   ### Contextual Memory
@@ -66,11 +66,6 @@ system_prompt: |-
      - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code
      - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.
      - **IMPORTANT**: After code execution, the system will return content with "Observation:" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**
-
-  3. Self-verification:
-     - After critical events (tool calls, retrieval results, code execution, agent handoffs, and final-answer preparation), the system may run explicit verification.
-     - If verification reports errors, insufficient evidence, incomplete parameters, or unreliable results, you must repair the issue, gather more evidence, call tools again, or clearly state what cannot be completed.
-     - The final answer is shown to the user only after verification passes. If the system returns Verification feedback, treat it as a real observation and continue revising.
 
   After thinking, when you believe you can answer the user's question, you can generate a final answer directly to the user without generating code and stop the loop.
 
@@ -227,13 +222,3 @@ final_answer:
     Original task: {{task}}
 
     Please provide a clear and concise summary of the work completed so far.
-
-
-verification:
-  pre_messages: |-
-    You are a strict verifier for a ReAct agent. Judge reliability only from the task, candidate answer, tool outputs, and observations. Do not output hidden chain-of-thought.
-    You must output JSON only.
-
-  post_messages: |-
-    Verify whether the candidate answer covers the user's intent, is grounded in observations, handles tool errors, uses trustworthy citations, and is formatted for users.
-    Output fields: passed, score, status, failed_criteria, checks, revision_instruction, user_visible_note.

@@ -151,15 +151,10 @@ export function useAgentGeneration({
               }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
+              // Only save to cache if user hasn't filled in agent display name themselves
               if (!editedAgent.display_name) {
                 saveGeneratedField(generationAgentId, 'agentDisplayName', data.content);
               }
-              break;
-            case GENERATE_PROMPT_STREAM_TYPES.GREETING_MESSAGE:
-              saveGeneratedField(generationAgentId, 'greetingMessage', data.content);
-              break;
-            case GENERATE_PROMPT_STREAM_TYPES.EXAMPLE_QUESTIONS:
-              saveGeneratedField(generationAgentId, 'exampleQuestions', data.content);
               break;
           }
         },
@@ -216,12 +211,6 @@ export function useAgentGeneration({
             duty_prompt: cached?.dutyPrompt || editedAgent.duty_prompt || "",
             constraint_prompt: cached?.constraintPrompt || editedAgent.constraint_prompt || "",
             few_shots_prompt: cached?.fewShotsPrompt || editedAgent.few_shots_prompt || "",
-            greeting_message: cached?.greetingMessage || editedAgent.greeting_message || "",
-            example_questions: cached?.exampleQuestions
-              ? (typeof cached.exampleQuestions === "string"
-                ? (() => { try { return JSON.parse(cached.exampleQuestions); } catch { return []; } })()
-                : cached.exampleQuestions)
-              : editedAgent.example_questions || [],
           };
           // Update agent config in store
           updateAgentConfig(configUpdates);

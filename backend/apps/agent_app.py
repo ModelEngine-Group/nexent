@@ -195,6 +195,8 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
                     "Content-Disposition": f"attachment; filename=\"{result.get('filename', 'agent_export.zip')}\""
                 }
             )
+        if isinstance(result, str):
+            result = json.loads(result)
         return ConversationResponse(code=0, message="success", data=result)
     except Exception as e:
         logger.error(f"Agent export error: {str(e)}")
@@ -619,5 +621,3 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-
-

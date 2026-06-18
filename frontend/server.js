@@ -87,10 +87,14 @@ function setAuthCookies(res, session) {
 
   if (session.expires_at) {
     cookies.push(
-      cookie.serialize(COOKIE_NAMES.EXPIRES_AT, String(session.expires_at), {
-        ...buildCookieOptions(false), // readable by frontend JS
-        maxAge: expiresInSeconds, // Same as access token
-      })
+      cookie.serialize(
+        COOKIE_NAMES.EXPIRES_AT,
+        String(session.expires_at),
+        {
+          ...buildCookieOptions(false), // readable by frontend JS
+          maxAge: expiresInSeconds, // Same as access token
+        }
+      )
     );
   }
 
@@ -102,19 +106,10 @@ function setAuthCookies(res, session) {
 function clearAuthCookies(res) {
   const expired = { maxAge: 0, path: "/" };
   res.setHeader("Set-Cookie", [
-    cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", {
-      ...expired,
-      httpOnly: true,
-    }),
-    cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
-      ...expired,
-      httpOnly: true,
-    }),
+    cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", { ...expired, httpOnly: true }),
+    cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", { ...expired, httpOnly: true }),
     cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
-    cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", {
-      ...expired,
-      httpOnly: true,
-    }),
+    cookie.serialize(COOKIE_NAMES.OAUTH_PENDING, "", { ...expired, httpOnly: true }),
   ]);
 }
 
@@ -159,12 +154,6 @@ const AUTH_INTERCEPT_ENDPOINTS = new Set([
   "/api/user/oauth/link",
   "/api/user/oauth/pending",
   "/api/user/oauth/complete",
-  "/api/user/cas/config",
-  "/api/user/cas/login",
-  "/api/user/cas/callback",
-  "/api/user/cas/renew",
-  "/api/user/cas/renew_callback",
-  "/api/user/cas/logout_callback",
 ]);
 
 function collectRequestBody(req) {
@@ -182,11 +171,8 @@ function collectRequestBody(req) {
  * If no refresh_token cookie exists, return 401 immediately.
  */
 function prepareAuthRequestBody(pathname, body, cookies, res) {
-  if (
-    pathname === "/api/user/refresh_token" ) {
-    const refreshToken =
-    cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ;
+  if (pathname === "/api/user/refresh_token") {
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
     if (!refreshToken) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ detail: "No refresh token cookie found" }));
@@ -208,204 +194,144 @@ function forwardAuthRequest(req, res, targetUrl) {
   const transport = parsedTarget.protocol === "https:" ? https : http;
   const cookies = parseCookies(req);
 
-  if (
-    req.parsedPathname === "/api/user/refresh_token" &&
-    !cookies[COOKIE_NAMES.REFRESH_TOKEN]
-  ) {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  collectRequestBody(req)
-    .then((rawBody) => {
-      const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
+  collectRequestBody(req).then((rawBody) => {
+    const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies, res);
 
     // If body is null, prepareAuthRequestBody already sent the error response
     if (body === null) {
       return;
     }
 
-      const forwardHeaders = { ...req.headers, host: parsedTarget.host };
+    const forwardHeaders = { ...req.headers, host: parsedTarget.host };
 
-      // Inject access_token from cookie as Authorization header for the backend
-      if (
-        cookies[COOKIE_NAMES.ACCESS_TOKEN] &&
-        !forwardHeaders["authorization"]
-      ) {
-        forwardHeaders["authorization"] =
-          `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`;
-      }
+    // Inject access_token from cookie as Authorization header for the backend
+    if (cookies[COOKIE_NAMES.ACCESS_TOKEN] && !forwardHeaders["authorization"]) {
+      forwardHeaders["authorization"] = `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`;
+    }
 
-      if (
-        cookies[COOKIE_NAMES.OAUTH_PENDING] &&
-        (req.parsedPathname === "/api/user/oauth/pending" ||
-          req.parsedPathname === "/api/user/oauth/complete")
-      ) {
-        forwardHeaders["x-oauth-pending-token"] =
-          cookies[COOKIE_NAMES.OAUTH_PENDING];
-      }
+    if (
+      cookies[COOKIE_NAMES.OAUTH_PENDING] &&
+      (req.parsedPathname === "/api/user/oauth/pending" ||
+        req.parsedPathname === "/api/user/oauth/complete")
+    ) {
+      forwardHeaders["x-oauth-pending-token"] = cookies[COOKIE_NAMES.OAUTH_PENDING];
+    }
 
-      // Update content-length if body was modified
-      if (body.length !== rawBody.length) {
-        forwardHeaders["content-length"] = String(body.length);
-      }
+    // Update content-length if body was modified
+    if (body.length !== rawBody.length) {
+      forwardHeaders["content-length"] = String(body.length);
+    }
 
-      const options = {
-        hostname: parsedTarget.hostname,
-        port: parsedTarget.port,
-        path: req.url,
-        method: req.method,
-        headers: forwardHeaders,
-      };
+    const options = {
+      hostname: parsedTarget.hostname,
+      port: parsedTarget.port,
+      path: req.url,
+      method: req.method,
+      headers: forwardHeaders,
+    };
 
-      const proxyReq = transport.request(options, (proxyRes) => {
-        const responseChunks = [];
-        proxyRes.on("data", (chunk) => responseChunks.push(chunk));
-        proxyRes.on("end", () => {
-          const responseBody = Buffer.concat(responseChunks);
-          let finalBody = responseBody;
+    const proxyReq = transport.request(options, (proxyRes) => {
+      const responseChunks = [];
+      proxyRes.on("data", (chunk) => responseChunks.push(chunk));
+      proxyRes.on("end", () => {
+        const responseBody = Buffer.concat(responseChunks);
+        let finalBody = responseBody;
 
-          try {
-            const contentType = proxyRes.headers["content-type"] || "";
-            if (
-              contentType.includes("application/json") &&
-              responseBody.length > 0
+        try {
+          const contentType = proxyRes.headers["content-type"] || "";
+          if (contentType.includes("application/json") && responseBody.length > 0) {
+            const data = JSON.parse(responseBody.toString());
+
+            const isLogout = req.parsedPathname === "/api/user/logout";
+            const isRevoke = req.parsedPathname === "/api/user/revoke";
+
+            if (isLogout || isRevoke) {
+              clearAuthCookies(res);
+            } else if (
+              req.parsedPathname === "/api/user/oauth/callback" &&
+              data.data &&
+              data.data.requires_account_completion &&
+              data.data.pending_token
             ) {
-              const data = JSON.parse(responseBody.toString());
+              setPendingOAuthCookie(res, data.data.pending_token);
+              const locale = getPreferredLocale(cookies);
+              res.writeHead(302, { Location: `/${locale}/oauth/complete` });
+              res.end();
+              return;
+            } else if (data.data && data.data.session) {
+              const session = data.data.session;
+              setAuthCookies(res, session);
 
-              const isLogout = req.parsedPathname === "/api/user/logout";
-              const isRevoke = req.parsedPathname === "/api/user/revoke";
-
-              if (isLogout || isRevoke) {
-                clearAuthCookies(res);
-              } else if (
-                req.parsedPathname === "/api/user/oauth/callback" &&
-                data.data &&
-                data.data.requires_account_completion &&
-                data.data.pending_token
-              ) {
-                setPendingOAuthCookie(res, data.data.pending_token);
-                const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: `/${locale}/oauth/complete` });
-                res.end();
-                return;
-              } else if (data.data && data.data.session) {
-                const session = data.data.session;
-                setAuthCookies(res, session);
-
-                const isOAuthCallback =
-                  req.parsedPathname === "/api/user/oauth/callback";
-                const isCasCallback =
-                  req.parsedPathname === "/api/user/cas/callback";
-                const isCasRenewCallback =
-                  req.parsedPathname === "/api/user/cas/renew_callback";
-                if (isOAuthCallback) {
-                  res.writeHead(302, { Location: "/" });
-                  res.end();
-                  return;
-                }
-                if (isCasCallback) {
-                  res.writeHead(302, {
-                    Location: data.data.redirect_url || "/",
-                  });
-                  res.end();
-                  return;
-                }
-                if (isCasRenewCallback) {
-                  const html = Buffer.from(`<!doctype html><html><body><script>
-window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window.location.origin);
-</script></body></html>`);
-                  const responseHeaders = {
-                    "content-type": "text/html; charset=utf-8",
-                    "content-length": String(html.length),
-                  };
-                  const existingSetCookie = res.getHeader("Set-Cookie") || [];
-                  const cookiesToSend = Array.isArray(existingSetCookie)
-                    ? existingSetCookie
-                    : [existingSetCookie];
-                  if (cookiesToSend.filter(Boolean).length > 0) {
-                    responseHeaders["set-cookie"] =
-                      cookiesToSend.filter(Boolean);
-                  }
-                  res.writeHead(200, responseHeaders);
-                  res.end(html);
-                  return;
-                }
-
-                if (req.parsedPathname === "/api/user/oauth/complete") {
-                  clearPendingOAuthCookie(res);
-                }
-
-                const sanitized = { ...data };
-                sanitized.data = { ...data.data };
-                sanitized.data.session = {
-                  expires_at: session.expires_at,
-                  expires_in_seconds: session.expires_in_seconds,
-                };
-                finalBody = Buffer.from(JSON.stringify(sanitized));
-              } else if (
-                req.parsedPathname === "/api/user/oauth/callback" &&
-                data.data &&
-                data.data.oauth_error
-              ) {
-                const errorParams = new URLSearchParams({
-                  oauth_error: data.data.oauth_error,
-                  oauth_error_description:
-                    data.data.oauth_error_description || "",
-                });
-                res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+              const isOAuthCallback = req.parsedPathname === "/api/user/oauth/callback";
+              if (isOAuthCallback) {
+                res.writeHead(302, { Location: "/" });
                 res.end();
                 return;
               }
+
+              if (req.parsedPathname === "/api/user/oauth/complete") {
+                clearPendingOAuthCookie(res);
+              }
+
+              const sanitized = { ...data };
+              sanitized.data = { ...data.data };
+              sanitized.data.session = {
+                expires_at: session.expires_at,
+                expires_in_seconds: session.expires_in_seconds,
+              };
+              finalBody = Buffer.from(JSON.stringify(sanitized));
+            } else if (req.parsedPathname === "/api/user/oauth/callback" && data.data && data.data.oauth_error) {
+              const errorParams = new URLSearchParams({
+                oauth_error: data.data.oauth_error,
+                oauth_error_description: data.data.oauth_error_description || "",
+              });
+              res.writeHead(302, { Location: `/?${errorParams.toString()}` });
+              res.end();
+              return;
             }
-          } catch {
-            // If JSON parsing fails, pass through unchanged
           }
-
-          // Copy response headers, but override content-length and set cookies
-          const responseHeaders = { ...proxyRes.headers };
-          responseHeaders["content-length"] = String(finalBody.length);
-          // Merge Set-Cookie: proxyRes cookies + our auth cookies
-          const existingSetCookie = res.getHeader("Set-Cookie") || [];
-          const upstreamSetCookie = proxyRes.headers["set-cookie"] || [];
-          const mergedCookies = [
-            ...(Array.isArray(existingSetCookie)
-              ? existingSetCookie
-              : [existingSetCookie]),
-            ...(Array.isArray(upstreamSetCookie)
-              ? upstreamSetCookie
-              : [upstreamSetCookie]),
-          ].filter(Boolean);
-
-          delete responseHeaders["set-cookie"];
-          if (mergedCookies.length > 0) {
-            responseHeaders["set-cookie"] = mergedCookies;
-          }
-
-          res.writeHead(proxyRes.statusCode, responseHeaders);
-          res.end(finalBody);
-        });
-      });
-
-      proxyReq.on("error", (err) => {
-        console.error("[Auth Proxy] Forward error:", err.message);
-        if (!res.headersSent) {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ detail: "Backend unavailable" }));
+        } catch {
+          // If JSON parsing fails, pass through unchanged
         }
-      });
 
-      proxyReq.write(body);
-      proxyReq.end();
-    })
-    .catch((err) => {
-      console.error("[Auth Proxy] Body read error:", err.message);
+        // Copy response headers, but override content-length and set cookies
+        const responseHeaders = { ...proxyRes.headers };
+        responseHeaders["content-length"] = String(finalBody.length);
+        // Merge Set-Cookie: proxyRes cookies + our auth cookies
+        const existingSetCookie = res.getHeader("Set-Cookie") || [];
+        const upstreamSetCookie = proxyRes.headers["set-cookie"] || [];
+        const mergedCookies = [
+          ...(Array.isArray(existingSetCookie) ? existingSetCookie : [existingSetCookie]),
+          ...(Array.isArray(upstreamSetCookie) ? upstreamSetCookie : [upstreamSetCookie]),
+        ].filter(Boolean);
+
+        delete responseHeaders["set-cookie"];
+        if (mergedCookies.length > 0) {
+          responseHeaders["set-cookie"] = mergedCookies;
+        }
+
+        res.writeHead(proxyRes.statusCode, responseHeaders);
+        res.end(finalBody);
+      });
+    });
+
+    proxyReq.on("error", (err) => {
+      console.error("[Auth Proxy] Forward error:", err.message);
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ detail: "Internal proxy error" }));
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ detail: "Backend unavailable" }));
       }
     });
+
+    proxyReq.write(body);
+    proxyReq.end();
+  }).catch((err) => {
+    console.error("[Auth Proxy] Body read error:", err.message);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "Internal proxy error" }));
+    }
+  });
 }
 
 // ============================================================================
@@ -413,14 +339,8 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
 // ============================================================================
 proxy.on("proxyReq", (proxyReq, req) => {
   const cookies = parseCookies(req);
-  if (
-    cookies[COOKIE_NAMES.ACCESS_TOKEN] &&
-    !proxyReq.getHeader("authorization")
-  ) {
-    proxyReq.setHeader(
-      "Authorization",
-      `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`
-    );
+  if (cookies[COOKIE_NAMES.ACCESS_TOKEN] && !proxyReq.getHeader("authorization")) {
+    proxyReq.setHeader("Authorization", `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`);
   }
 });
 
@@ -455,18 +375,12 @@ app.prepare().then(() => {
           pathname.startsWith("/api/file/storage") ||
           pathname.startsWith("/api/file/preprocess");
         if (isRuntime) {
-          proxy.web(req, res, {
-            target: RUNTIME_HTTP_BACKEND,
-            changeOrigin: true,
-          });
+          proxy.web(req, res, { target: RUNTIME_HTTP_BACKEND, changeOrigin: true });
         } else if (
           pathname === "/api/skills/create" ||
           pathname.startsWith("/api/skills/stop/")
         ) {
-          proxy.web(req, res, {
-            target: RUNTIME_HTTP_BACKEND,
-            changeOrigin: true,
-          });
+          proxy.web(req, res, { target: RUNTIME_HTTP_BACKEND, changeOrigin: true });
         } else {
           proxy.web(req, res, { target: HTTP_BACKEND, changeOrigin: true });
         }

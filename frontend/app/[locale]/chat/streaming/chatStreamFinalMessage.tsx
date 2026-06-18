@@ -10,7 +10,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 
 /**
  * Convert custom code tags to standard markdown code fences
@@ -30,7 +30,8 @@ const convertToMarkdownCodeFences = (content: string): string => {
   });
   return content;
 };
-import { Button, Tooltip } from "antd";
+import { Button } from "antd";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { ChatMessageType, MaxStepsInfo } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
@@ -353,16 +354,6 @@ function ChatStreamFinalMessageInner({
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}
               />
 
-              {/* Skill-generated file attachments - render below the main content */}
-              {message.attachments && message.attachments.length > 0 && (
-                <div className="mt-3">
-                  <ChatAttachment
-                    attachments={message.attachments as AttachmentItem[]}
-                    onImageClick={onImageClick}
-                  />
-                </div>
-              )}
-
               {/* Button group - only show when hideButtons is false and message is complete */}
               {!hideButtons && message.isComplete && (
                 <div className="flex items-center justify-between mt-3">
@@ -402,7 +393,7 @@ function ChatStreamFinalMessageInner({
 
                   {/* Tool button */}
                   <div className="flex items-center space-x-2 mt-1 justify-end">
-                    <div>
+                    <TooltipProvider>
                       {/* Copy button */}
                       <Tooltip
                         title={
@@ -486,7 +477,7 @@ function ChatStreamFinalMessageInner({
                           {ttsButtonContent.icon}
                         </Button>
                       </Tooltip>
-                    </div>
+                    </TooltipProvider>
                   </div>
                 </div>
               )}

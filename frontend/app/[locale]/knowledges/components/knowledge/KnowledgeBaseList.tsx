@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
 
-import { Button, Input, Select, Tooltip } from "antd";
+import { Button, Input, Select } from "antd";
 import {
   SyncOutlined,
   PlusOutlined,
@@ -19,6 +19,7 @@ import {
   SquarePen,
   CircleOff,
 } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -638,13 +639,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                   </span>
                                 ))}
                             </Can>
-                            {kb.preserve_source_file === false && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                              >
-                                {t("knowledgeBase.tag.noPreserveSourceFile")}
-                              </span>
-                            )}
                           </>
                         )}
                       </div>

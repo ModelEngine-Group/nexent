@@ -11,33 +11,11 @@ from typing import Dict, List, Optional, Any
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 
 from .container_client_base import ContainerClient, ContainerConfig
 from .docker_config import DockerContainerConfig
-
-Client = None
-StreamableHttpTransport = None
-SSETransport = None
-
-
-def _ensure_fastmcp_imports() -> tuple[type, type, type]:
-    global Client, StreamableHttpTransport, SSETransport
-
-    if Client is None:
-        from fastmcp import Client as FastMCPClient
-
-        Client = FastMCPClient
-
-    if StreamableHttpTransport is None or SSETransport is None:
-        from fastmcp.client.transports import (
-            StreamableHttpTransport as FastMCPStreamableHttpTransport,
-            SSETransport as FastMCPSSETransport,
-        )
-
-        StreamableHttpTransport = FastMCPStreamableHttpTransport
-        SSETransport = FastMCPSSETransport
-
-    return Client, StreamableHttpTransport, SSETransport
 
 logger = logging.getLogger("nexent.container.docker")
 
@@ -57,7 +35,7 @@ class ContainerConnectionError(Exception):
 class DockerContainerClient(ContainerClient):
     """Docker container client implementation"""
 
-    DEFAULT_NETWORK_NAME = "nexent_network"
+    DEFAULT_NETWORK_NAME = "nexent_nexent"
 
     def __init__(self, config: DockerContainerConfig):
         """
@@ -403,8 +381,6 @@ class DockerContainerClient(ContainerClient):
         Raises:
             ContainerConnectionError: If service is not ready after max retries
         """
-        client_cls, streamable_http_transport_cls, sse_transport_cls = _ensure_fastmcp_imports()
-
         for i in range(max_retries):
             try:
                 # Select transport based on URL ending and set headers
@@ -412,23 +388,23 @@ class DockerContainerClient(ContainerClient):
                 headers = {"Authorization": authorization_token} if authorization_token else {}
 
                 if url_stripped.endswith("/sse"):
-                    transport = sse_transport_cls(
+                    transport = SSETransport(
                         url=url_stripped,
                         headers=headers
                     )
                 elif url_stripped.endswith("/mcp"):
-                    transport = streamable_http_transport_cls(
+                    transport = StreamableHttpTransport(
                         url=url_stripped,
                         headers=headers
                     )
                 else:
                     # Default to StreamableHttpTransport for unrecognized formats
-                    transport = streamable_http_transport_cls(
+                    transport = StreamableHttpTransport(
                         url=url_stripped,
                         headers=headers
                     )
 
-                client = client_cls(transport=transport)
+                client = Client(transport=transport)
                 async with client:
                     if client.is_connected():
                         logger.info(f"Service ready at {url}")

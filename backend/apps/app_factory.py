@@ -101,16 +101,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         if isinstance(exc, AppException):
             return await app_exception_handler(request, exc)
 
-        # Handle NexentCapabilityError with a friendly message
-        from adapters.exception import NexentCapabilityError as _NCE
-
-        if isinstance(exc, _NCE):
-            logger.warning(f"NexentCapabilityError: {exc}")
-            return JSONResponse(
-                status_code=400,
-                content={"message": str(exc)},
-            )
-
         logger.error(f"Generic Exception: {exc}")
         return JSONResponse(
             status_code=500,

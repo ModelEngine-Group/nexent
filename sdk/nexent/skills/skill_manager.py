@@ -7,7 +7,6 @@ import os
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import zipfile
 from typing import Any, Dict, List, Optional, Union
@@ -787,13 +786,9 @@ class SkillManager:
         """
         cmd_parts = shlex.split(params) if params else []
 
-        # Use sys.executable to ensure the script runs in the same Python environment
-        # as the current process, so all installed packages (e.g., python-docx) are available
-        python_executable = sys.executable
-
         try:
             result = subprocess.run(
-                [python_executable, script_path] + cmd_parts,
+                ["python", script_path] + cmd_parts,
                 capture_output=True,
                 text=True,
                 timeout=300,

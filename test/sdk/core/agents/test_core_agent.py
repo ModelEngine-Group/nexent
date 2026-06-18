@@ -279,121 +279,6 @@ And some more text."""
     assert result == expected
 
 
-# ----------------------------------------------------------------------------
-# Tests for layered final-answer verification policy
-# ----------------------------------------------------------------------------
-
-def _make_verification_controller(**config_overrides):
-    config = core_agent_module.AgentVerificationConfig(
-        enabled=True,
-        step_verification_enabled=True,
-        final_verification_enabled=True,
-        llm_verification_enabled=True,
-        **config_overrides,
-    )
-    observer = MagicMock()
-    observer.add_message = MagicMock()
-    model = MagicMock()
-    logger = MagicMock()
-    logger.log = MagicMock()
-    return core_agent_module.VerificationController(
-        config=config,
-        observer=observer,
-        agent_name="test-agent",
-        model=model,
-        logger=logger,
-    ), model
-
-
-def test_final_verification_skips_llm_for_greeting():
-    """Simple greetings should not require external evidence or tool output."""
-    controller, model = _make_verification_controller()
-
-    result = controller.verify_final_answer(
-        task="你好",
-        candidate="你好！有什么我可以帮你的吗？",
-        memory_summary="Step 1:\nCode:\nObservation:\nOutput:",
-        round_number=1,
-    )
-
-    assert result.passed is True
-    assert result.phase == "final_pass"
-    model.assert_not_called()
-
-
-def test_final_verification_pass_message_explains_reason():
-    """Passed verification events should tell users what was checked."""
-    controller, _ = _make_verification_controller()
-
-    controller.verify_final_answer(
-        task="你好",
-        candidate="你好！有什么我可以帮你的吗？",
-        memory_summary="Step 1:\nCode:\nObservation:\nOutput:",
-        round_number=1,
-    )
-
-    messages = [
-        json.loads(call.args[2])["message"]
-        for call in controller.observer.add_message.call_args_list
-    ]
-
-    assert any("基础自检通过" in message and "答案非空" in message for message in messages)
-    assert any("最终自检通过" in message and "轻量对话无需外部证据" in message for message in messages)
-
-
-def test_verification_feedback_does_not_count_as_tool_error():
-    """Self-verification feedback should not poison the next final-answer check."""
-    controller, _ = _make_verification_controller()
-    memory_summary = """
-Step 1:
-Observation:
-Verification feedback:
-- Event: final_answer
-- Severity: blocking
-- Failed criteria: evidence_grounding, tool_error_handling
-- Repair instruction: Provide more evidence.
-"""
-
-    result = controller.verify_before_final_answer(
-        candidate="你好！有什么我可以帮你的吗？",
-        observation=memory_summary,
-        step_number=2,
-    )
-
-    assert result.passed is True
-    assert "previous_errors_acknowledged" not in result.failed_criteria
-
-
-def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
-    """Verifier output is normalized when failed criteria are not required by policy."""
-    controller, _ = _make_verification_controller()
-    verifier_payload = json.dumps({
-        "passed": False,
-        "score": 0.5,
-        "status": "revise",
-        "failed_criteria": ["evidence_grounding", "tool_error_handling"],
-        "checks": [
-            {"name": "evidence_grounding", "passed": False},
-            {"name": "tool_error_handling", "passed": False},
-        ],
-        "revision_instruction": "Find evidence.",
-        "user_visible_note": "Missing evidence.",
-    })
-
-    result = controller._parse_llm_verifier_result(
-        verifier_payload,
-        {
-            "task_profile": "lightweight_conversation",
-            "evidence_required": False,
-            "tool_error_check_required": False,
-        },
-    )
-
-    assert result.passed is True
-    assert result.failed_criteria == []
-    assert result.score >= controller.config.pass_score
-
-
 def test_parse_code_blobs_run_format_with_newline():
     """Test parse_code_blobs with <code>\\ncontent\\n</code> pattern."""
     text = """Here is some code:
@@ -2487,13 +2372,13 @@ class TestHandleMaxStepsReached:
         # Should return error message
         assert "Error in generating final LLM output" in result
 
-        # Verify logger was called with error
+        # Verify logger was called with warning
         agent.logger.log.assert_called()
-        error_calls = [
+        warning_calls = [
             call for call in agent.logger.log.call_args_list
-            if call[1].get("level") and "ERROR" in str(call[1].get("level"))
+            if call[1].get("level") and "WARNING" in str(call[1].get("level"))
         ]
-        assert len(error_calls) >= 1
+        assert len(warning_calls) >= 1
 
     def test_handle_max_steps_reached_creates_memory_step_with_error(self):
         """Test that a memory step with AgentMaxStepsError is created."""
@@ -2724,3 +2609,4 @@ class TestLogModelCallParameters:
         # Verify warning was logged via the except block
         # The exception handler logs via self.logger.log()
         agent.logger.log.assert_called()
+

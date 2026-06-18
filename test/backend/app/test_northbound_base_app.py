@@ -274,17 +274,17 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
     def test_router_inclusion(self):
         """The main northbound router should be included."""
-        paths = app.openapi()["paths"]
-        self.assertIn("/dummy", paths)
+        routes = [route.path for route in app.routes]
+        self.assertIn("/dummy", routes)
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""
-        paths = app.openapi()["paths"]
-        self.assertIn("/nb/a2a/{endpoint_id}/.well-known/agent-card.json", paths)
-        self.assertIn("/nb/a2a/{endpoint_id}/v1", paths)
-        self.assertIn("/nb/a2a/{endpoint_id}/message:send", paths)
-        self.assertIn("/nb/a2a/{endpoint_id}/message:stream", paths)
-        self.assertIn("/nb/a2a/{endpoint_id}/tasks/{task_id}", paths)
+        routes = [route.path for route in app.routes]
+        self.assertIn("/nb/a2a/{endpoint_id}/.well-known/agent-card.json", routes)
+        self.assertIn("/nb/a2a/{endpoint_id}/v1", routes)
+        self.assertIn("/nb/a2a/{endpoint_id}/message:send", routes)
+        self.assertIn("/nb/a2a/{endpoint_id}/message:stream", routes)
+        self.assertIn("/nb/a2a/{endpoint_id}/tasks/{task_id}", routes)
 
     # -------------------------------------------------------------------
     # Exception handlers - delegated to app_factory which calls register_exception_handlers
