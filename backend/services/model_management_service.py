@@ -260,21 +260,27 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                     # the batch refresh path only touched legacy max_tokens, so
                     # editing a row's capacity via batch-add (e.g. tweaking the
                     # top-level batch defaults and re-confirming) silently
-                    # dropped the W1/W2 capacity updates.
-                    for field in (
-                        "context_window_tokens",
-                        "max_input_tokens",
-                        "max_output_tokens",
-                        "default_output_reserve_tokens",
-                        "tokenizer_family",
-                        "capacity_source",
-                        "capability_profile_version",
-                    ):
-                        new_value = model.get(field)
-                        if new_value is None:
-                            continue
-                        if existing_model.get(field) != new_value:
-                            update_data[field] = new_value
+                    # dropped the W1/W2 capacity updates. We mirror the
+                    # operator-vs-candidate rule from prepare_model_dict here:
+                    # only persist W1/W2 capacity when the payload is marked
+                    # capacity_source="operator", so provider-discovered hints
+                    # don't auto-overwrite an existing row on a refresh.
+                    if model.get("capacity_source") == "operator":
+                        for field in (
+                            "context_window_tokens",
+                            "max_input_tokens",
+                            "max_output_tokens",
+                            "default_output_reserve_tokens",
+                            "tokenizer_family",
+                            "capability_profile_version",
+                        ):
+                            new_value = model.get(field)
+                            if new_value is None:
+                                continue
+                            if existing_model.get(field) != new_value:
+                                update_data[field] = new_value
+                        if existing_model.get("capacity_source") != "operator":
+                            update_data["capacity_source"] = "operator"
                     if update_data:
                         update_model_record(existing_model["model_id"], update_data, user_id)
                     continue

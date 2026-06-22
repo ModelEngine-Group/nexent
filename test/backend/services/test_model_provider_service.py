@@ -439,7 +439,17 @@ async def test_prepare_model_dict_llm():
 
 @pytest.mark.asyncio
 async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
-    """Provider capacity candidates remain UI hints until an operator saves them."""
+    """Provider capacity candidates remain UI hints until an operator saves them.
+
+    Per the W1/W2 plan, _extract_capacity_hints tags provider-discovered
+    capacity values with capacity_source="provider_candidate" so the
+    catalog UI can show them as suggestions. They must not auto-persist
+    on batch_create; only operator acceptance (capacity_source="operator")
+    can write to the row. The original assertion only checked the dumped
+    result, which is trivially controlled by the mock; the strengthened
+    assertion below pins ModelRequest's constructor kwargs so the
+    contract is enforced regardless of what model_dump returns.
+    """
     with mock.patch(
         "backend.services.model_provider_service.split_repo_name",
         return_value=("openai", "gpt-4"),
@@ -479,10 +489,89 @@ async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates(
             "test-key",
         )
 
+        # Result-level: the dumped dict (controlled by the mock) doesn't
+        # carry capacity hints downstream.
         assert "context_window_tokens" not in result
         assert "max_output_tokens" not in result
         assert "tokenizer_family" not in result
         assert "capacity_source" not in result
+
+        # Contract-level: prepare_model_dict must NOT thread provider
+        # candidates into ModelRequest. Without this assertion the bug
+        # we just fixed -- threading every W2 field through unconditionally
+        # -- would slip past the result-level check because the mock
+        # absorbs any kwargs silently.
+        _, kwargs = mock_model_request.call_args
+        assert "context_window_tokens" not in kwargs
+        assert "max_output_tokens" not in kwargs
+        assert "max_input_tokens" not in kwargs
+        assert "default_output_reserve_tokens" not in kwargs
+        assert "tokenizer_family" not in kwargs
+        assert "capacity_source" not in kwargs
+        assert "capability_profile_version" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_persists_operator_capacity():
+    """Operator-saved capacity reaches ModelRequest and lands on the row.
+
+    Regression test for the glm-5.1/glm-5.2 production incident: the
+    frontend batch-add path resolves user-typed top-level batch defaults
+    (or per-row gear values) and submits them with
+    capacity_source="operator". Before the fix, prepare_model_dict
+    silently dropped every W1/W2 field on the floor and only the legacy
+    max_tokens mirror persisted -- leaving DB rows with
+    context_window_tokens=NULL and max_output_tokens=NULL.
+    """
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("dashscope", "glm-5.2"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="dashscope/glm-5.2",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request:
+
+        mock_model_req_instance = mock.MagicMock()
+        mock_model_req_instance.model_dump.return_value = {
+            "model_factory": "dashscope",
+            "model_name": "glm-5.2",
+            "model_type": "llm",
+            "max_tokens": 31920,
+            "display_name": "dashscope/glm-5.2",
+        }
+        mock_model_request.return_value = mock_model_req_instance
+
+        model = {
+            "id": "dashscope/glm-5.2",
+            "model_type": "llm",
+            "max_tokens": 31920,
+            "context_window_tokens": 200000,
+            "max_input_tokens": None,
+            "max_output_tokens": 31920,
+            "default_output_reserve_tokens": 4096,
+            "tokenizer_family": "qwen",
+            "capacity_source": "operator",
+        }
+
+        await prepare_model_dict(
+            "dashscope",
+            model,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "dash-key",
+        )
+
+        _, kwargs = mock_model_request.call_args
+        assert kwargs["context_window_tokens"] == 200000
+        assert kwargs["max_output_tokens"] == 31920
+        assert kwargs["default_output_reserve_tokens"] == 4096
+        assert kwargs["tokenizer_family"] == "qwen"
+        # capacity_source is forced to "operator" by the prepare_model_dict
+        # contract: only operator-marked values reach the row, and the
+        # marker itself is normalized to the canonical value rather than
+        # echoing whatever the caller sent.
+        assert kwargs["capacity_source"] == "operator"
 
 
 @pytest.mark.asyncio

@@ -1756,3 +1756,120 @@ async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_tr
         assert mock_create.call_count == 1
         create_args = mock_create.call_args[0][0]
         assert create_args["ssl_verify"] is True
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_update_branch_persists_operator_capacity():
+    """Re-confirming a batch with operator-marked capacity updates W1/W2 columns.
+
+    Regression test for the gap that left glm-5.x style rows with NULL
+    W2 columns: the batch_create update branch previously only checked
+    legacy max_tokens for changes, so a user who tweaked the top-level
+    batch defaults and re-confirmed could not push the new
+    context_window_tokens / max_output_tokens onto an existing row.
+    """
+    svc = import_svc()
+
+    existing_row = {
+        "model_id": 42,
+        "model_repo": "dashscope",
+        "model_name": "glm-5.2",
+        "max_tokens": 31920,
+        "context_window_tokens": None,
+        "max_output_tokens": None,
+        "capacity_source": None,
+    }
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [
+            {
+                "id": "dashscope/glm-5.2",
+                "max_tokens": 31920,
+                "context_window_tokens": 200000,
+                "max_output_tokens": 31920,
+                "default_output_reserve_tokens": 4096,
+                "tokenizer_family": "qwen",
+                "capacity_source": "operator",
+            }
+        ],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.2")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.2"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        mock_update.assert_called_once()
+        called_model_id, called_update_data, *_ = mock_update.call_args[0]
+        assert called_model_id == 42
+        assert called_update_data["context_window_tokens"] == 200000
+        assert called_update_data["max_output_tokens"] == 31920
+        assert called_update_data["default_output_reserve_tokens"] == 4096
+        assert called_update_data["tokenizer_family"] == "qwen"
+        assert called_update_data["capacity_source"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_update_branch_skips_provider_candidate_capacity():
+    """Provider-discovered hints must not auto-overwrite an existing row.
+
+    Even when the catalog response contains rich inference_metadata, those
+    values stay tagged capacity_source="provider_candidate" until the
+    operator accepts them. Refreshing the provider list must not
+    silently rewrite a row's operator-set capacity (or its NULLs) with
+    catalog hints.
+    """
+    svc = import_svc()
+
+    existing_row = {
+        "model_id": 7,
+        "model_repo": "dashscope",
+        "model_name": "glm-5.1",
+        "max_tokens": 8192,
+        "context_window_tokens": None,
+        "max_output_tokens": None,
+        "capacity_source": None,
+    }
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [
+            {
+                "id": "dashscope/glm-5.1",
+                "max_tokens": 8192,
+                "context_window_tokens": 128000,
+                "max_output_tokens": 8192,
+                "tokenizer_family": "qwen",
+                "capacity_source": "provider_candidate",
+            }
+        ],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.1")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.1"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # max_tokens didn't change between existing (8192) and incoming
+        # (8192), so no update is needed at all. If the implementation
+        # were treating provider_candidate as authoritative, update would
+        # fire with the W2 fields.
+        if mock_update.called:
+            _, called_update_data, *_ = mock_update.call_args[0]
+            assert "context_window_tokens" not in called_update_data
+            assert "max_output_tokens" not in called_update_data
+            assert "tokenizer_family" not in called_update_data
+            assert called_update_data.get("capacity_source") != "provider_candidate"
