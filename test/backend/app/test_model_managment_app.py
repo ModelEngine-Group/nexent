@@ -82,6 +82,68 @@ def sample_model_data():
     }
 
 
+@pytest.mark.asyncio
+async def test_suggest_capacity_success(client, auth_header, user_credentials, mocker):
+    """Test standalone capacity suggestion endpoint."""
+    from backend.consts.model import CapacitySuggestionFields, ModelCapacitySuggestionResponse
+
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_suggest = mocker.patch(
+        'backend.apps.model_managment_app._suggest_capacity_for_request',
+        return_value=ModelCapacitySuggestionResponse(
+            suggestions=CapacitySuggestionFields(
+                context_window_tokens=128000,
+                max_output_tokens=16384,
+                default_output_reserve_tokens=4096,
+                tokenizer_family="o200k_base",
+            ),
+            match_kind="catalog_exact",
+            match_confidence="high",
+            match_explanation="Matched approved catalog profile openai/gpt-4o@1",
+            suggested_provider="openai",
+            canonical_model_name="gpt-4o",
+            capability_profile_version="openai/gpt-4o@1",
+            capacity_source_on_accept="operator",
+        )
+    )
+
+    response = client.post(
+        "/model/suggest-capacity",
+        json={
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "llm",
+        },
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["match_kind"] == "catalog_exact"
+    assert data["suggestions"]["context_window_tokens"] == 128000
+    assert data["suggested_provider"] == "openai"
+    mock_suggest.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_suggest_capacity_bad_request(client, auth_header, user_credentials, mocker):
+    """Test standalone capacity suggestion endpoint maps invalid input to 400."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app._suggest_capacity_for_request',
+        side_effect=ValueError("model_name is required"),
+    )
+
+    response = client.post(
+        "/model/suggest-capacity",
+        json={"model_name": "gpt-4o"},
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "model_name is required" in response.json()["detail"]
+
+
 # Tests for /model/create endpoint
 @pytest.mark.asyncio
 async def test_create_model_success(client, auth_header, user_credentials, sample_model_data, mocker):
@@ -443,6 +505,13 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
     )
+    mock_suggest = mocker.patch(
+        'backend.apps.model_managment_app._capacity_suggestion_for_model_request',
+        return_value={
+            "suggestions": {"context_window_tokens": 128000},
+            "match_kind": "catalog_exact",
+        },
+    )
     
     response = client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
@@ -451,9 +520,11 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     data = response.json()
     assert data["message"] == "Successfully verified model connectivity"
     assert data["data"]["connectivity"] is True
+    assert data["data"]["capacity_suggestion"]["match_kind"] == "catalog_exact"
     # Success case should not have error field in response
     assert "error" not in data["data"]
     mock_verify.assert_called_once()
+    mock_suggest.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -467,6 +538,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
             "error": "Failed to connect to model 'gpt-4' at https://api.openai.com. Please verify the URL, API key, and network connection."
         }
     )
+    mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
@@ -477,9 +549,11 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     assert data["data"]["connectivity"] is False
     # Failure case should have error field with descriptive message
     assert "error" in data["data"]
+    assert data["data"]["capacity_suggestion"] is None
     assert "Failed to connect to model" in data["data"]["error"]
     assert "Please verify the URL, API key, and network connection" in data["data"]["error"]
     mock_verify.assert_called_once()
+    mock_suggest.assert_not_called()
 
 
 @pytest.mark.asyncio
