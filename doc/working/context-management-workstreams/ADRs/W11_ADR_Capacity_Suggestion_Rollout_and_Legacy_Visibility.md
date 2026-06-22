@@ -55,6 +55,11 @@ Every single-model capacity surface must include a user-visible Add/Edit switch:
 
 The global flag and the frontend switch both default to **on**.
 
+Version 1 may limit suggestion UI implementation to the normal single-model Add
+and Edit dialogs. Per-model configuration opened from batch/provider flows
+remains a tracked follow-up after Version 1, while provider-level bulk
+configuration continues to hide capacity controls per CM-032.
+
 ### Rationale
 
 Suggestions are safe to enable by default because they do not write data until
@@ -68,6 +73,8 @@ preserves local control for tenants or operators who prefer manual entry.
 - Turning off the Add/Edit switch suppresses suggestion calls and suggestion
   chips in that dialog.
 - Turning off suggestions must not hide bare-capacity warnings.
+- Version 1 tests must explicitly mark batch/provider suggestion surfaces as
+  follow-up or out of scope so the deferred surfaces are not silently missed.
 
 ## Decision 2: Legacy Bare-Capacity Visibility Is Default-On and Separate
 
@@ -94,6 +101,11 @@ disabled, so the visibility path must not be tied to the suggestion feature.
 - The backend `/capacity-coverage` endpoint remains read-only.
 - Embedding, speech-to-text, text-to-speech, and rerank rows stay out of scope
   for this warning because they do not participate in the W1/W2 dispatch path.
+- Visibility may have its own developer-level rollback flag,
+  `CAPACITY_VISIBILITY_ENABLED`, default on, with optional tenant config key
+  `capacity_visibility_enabled`. This flag must not be tied to
+  `CAPACITY_SUGGESTION_ENABLED`, and Version 1 does not expose it as a normal
+  frontend user switch.
 
 ## Decision 3: No Automatic Legacy Data Repair
 
