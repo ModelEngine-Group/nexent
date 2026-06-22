@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Modal, Select, Input, Button, App } from "antd";
+import { Alert, Modal, Select, Input, Button, App } from "antd";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
@@ -23,6 +23,7 @@ import {
   capacityFormFromModel,
   emptyCapacityForm,
   ModelCapacityFields,
+  ModelCapacityFormState,
   validateCapacityForm,
 } from "./ModelCapacityFields";
 
@@ -723,21 +724,29 @@ export const ProviderConfigEditDialog = ({
   const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
   const isRerankModel = modelType === MODEL_TYPES.RERANK
   const isVoiceModel = modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS
-  const supportsCapacityFields =
-    !hideCapacityFields && !isEmbeddingModel && !isRerankModel && !isVoiceModel
+  const isLlmOrVlm = !isEmbeddingModel && !isRerankModel && !isVoiceModel
+  // Per-model capacity panel: shown when the dialog is editing a single
+  // model's W2 capacity (gear icon next to a row).
+  const supportsCapacityFields = !hideCapacityFields && isLlmOrVlm
+  // Provider-level "bulk apply" capacity panel: shown when the dialog is
+  // editing shared provider settings (the "修改配置" button). Renders the
+  // same ModelCapacityFields panel with Tokenizer hidden -- bulk-applying
+  // a single tokenizer family across N models is almost always wrong, but
+  // context_window / max_output / etc. are reasonable defaults to broadcast.
+  const supportsBulkCapacity = hideCapacityFields && isLlmOrVlm
   // Only rerank and voice models legitimately need the deprecated max_tokens
-  // input. LLM/VLM use the capacity panel; when the dialog is in provider-
-  // level mode (hideCapacityFields=true) it edits shared settings only --
-  // capacity is per-model and lives on each gear-icon dialog. Per the W1/W2
-  // plan, never surface legacy max_tokens for LLM/VLM regardless of the
-  // hideCapacityFields flag.
+  // input. Per the W1/W2 plan, never surface legacy max_tokens for LLM/VLM
+  // regardless of the hideCapacityFields flag.
   const needsLegacyMaxTokens = isRerankModel || isVoiceModel
-  const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(capacityForm, [
-        "contextWindowTokens",
-        "maxOutputTokens",
-      ])
-    : null
+  // In bulk mode the panel is optional ("fill to override; leave empty to
+  // keep each row's current value"), so no required-field markers and the
+  // user can leave both empty to skip the capacity bulk-apply entirely.
+  const capacityRequiredFields: Array<keyof ModelCapacityFormState> =
+    supportsCapacityFields ? ["contextWindowTokens", "maxOutputTokens"] : []
+  const capacityValidationError =
+    supportsCapacityFields || supportsBulkCapacity
+      ? validateCapacityForm(capacityForm, capacityRequiredFields)
+      : null
 
   const handleCapacityChange = (field: keyof typeof capacityForm, value: string) => {
     setCapacityForm((prev) => ({ ...prev, [field]: value }))
@@ -745,17 +754,20 @@ export const ProviderConfigEditDialog = ({
 
   const valid = () => {
     if (supportsCapacityFields) {
-      // For LLM/VLM the legacy max_tokens input is hidden — the capacity
-      // panel's max_output_tokens is the source of truth and is already
-      // required by validateCapacityForm. Don't gate Save on the now-hidden
-      // legacy input.
+      // Per-model capacity edit: required fields enforced by
+      // validateCapacityForm.
+      return !capacityValidationError
+    }
+    if (supportsBulkCapacity) {
+      // Provider-level bulk apply: capacity fields are optional ("fill to
+      // override; leave empty to keep current per-model value"). Only fail
+      // when a typed value is not a positive integer.
       return !capacityValidationError
     }
     if (needsLegacyMaxTokens) {
       return isValidMaxTokens(maxTokens)
     }
-    // No capacity panel and no legacy field rendered (provider-level config
-    // edit for LLM/VLM, embedding shared config): the dialog only owns
+    // Embedding shared config: the dialog only owns
     // apiKey/timeoutSeconds/concurrencyLimit, so always valid.
     return true
   }
@@ -781,7 +793,13 @@ export const ProviderConfigEditDialog = ({
         maxTokens: legacyMaxTokens,
         ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
         ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
-        ...(supportsCapacityFields ? buildCapacityPayload(capacityForm) : {}),
+        // Both per-model and bulk-apply modes write capacity via
+        // buildCapacityPayload. In bulk mode this returns {} when all
+        // capacity fields are empty (hasCapacityValues check), so an
+        // apiKey-only edit doesn't accidentally null out per-model values.
+        ...(supportsCapacityFields || supportsBulkCapacity
+          ? buildCapacityPayload(capacityForm)
+          : {}),
       })
       onClose()
     } finally {
@@ -820,6 +838,23 @@ export const ProviderConfigEditDialog = ({
               !capacityForm.maxOutputTokens
             }
           />
+        )}
+        {supportsBulkCapacity && (
+          <div className="space-y-2">
+            <Alert
+              type="info"
+              showIcon
+              message={t("model.dialog.capacity.bulkApply.title")}
+              description={t("model.dialog.capacity.bulkApply.hint")}
+            />
+            <ModelCapacityFields
+              value={capacityForm}
+              onChange={handleCapacityChange}
+              validationError={capacityValidationError}
+              formMode="add"
+              hideTokenizer
+            />
+          </div>
         )}
         {/* Legacy max_tokens input — only rendered for model types that
             legitimately still own this field (rerank, STT/TTS). LLM/VLM use

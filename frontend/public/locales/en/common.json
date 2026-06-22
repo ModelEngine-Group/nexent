@@ -845,6 +845,8 @@
   "model.dialog.capacity.batchDefault.title": "Batch default capacity",
   "model.dialog.capacity.batchDefault.hint": "Values entered here apply as the default capacity for every LLM/VLM model in this batch import. Click the gear icon on a row to override a specific model.",
   "model.dialog.batch.requireRowCapacity": "Some enabled rows are missing context window or max output tokens. Open the gear icon to fill them in before confirming.",
+  "model.dialog.capacity.bulkApply.title": "Bulk apply capacity (optional)",
+  "model.dialog.capacity.bulkApply.hint": "Values entered here are bulk-applied to every model of this type under the current provider as part of this Modify Config. Empty fields are skipped and keep each model's existing value. Tokenizer is intentionally omitted because it should not be uniform across models -- set it from the per-row gear icon instead.",
   "model.dialog.modelList.tooltip.settings": "Model Settings",
   "model.dialog.hint.multimodalEnabled": "Multimodal vector model can process both images and text",
   "model.dialog.hint.multimodalDisabled": "Text vector model only processes text",

@@ -654,17 +654,34 @@ export const ModelDeleteDialog = ({
     });
   }, [providerModels, pendingSelectedProviderIds, deletingModelType]);
 
-  // Handle provider config save
+  // Handle provider config save. In addition to the shared API key /
+  // timeoutSeconds / concurrencyLimit, the "modify config" dialog now also
+  // exposes a top-level capacity panel (Tokenizer hidden) as a per-provider
+  // bulk-apply default, mirroring the batch-add UX. Any filled capacity
+  // field is forwarded to every model under (provider, model_type) so the
+  // user can fix glm-5.x style rows with NULL W2 columns from one place
+  // instead of opening N gear modals.
   const handleProviderConfigSave = async ({
     apiKey,
     maxTokens,
     timeoutSeconds,
     concurrencyLimit,
+    contextWindowTokens,
+    maxInputTokens,
+    maxOutputTokens,
+    defaultOutputReserveTokens,
+    capacitySource,
   }: {
     apiKey?: string;
     maxTokens: number;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }) => {
     setMaxTokens(maxTokens);
     if (
@@ -699,6 +716,15 @@ export const ModelDeleteDialog = ({
             maxTokens: maxTokens || m.maxTokens,
             ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
             ...(concurrencyLimit !== undefined ? { concurrencyLimit } : {}),
+            // Only forward capacity fields the user actually filled in the
+            // bulk panel; omitted fields keep each model's existing value.
+            ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
+            ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+            ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined ? { capacitySource } : {}),
           }));
 
         await modelService.updateBatchModel(
@@ -709,13 +735,32 @@ export const ModelDeleteDialog = ({
         // Show success message since no exception was thrown
         message.success(t("model.dialog.success.updateSuccess"));
 
-        // Synchronize providerModels state with the updated maxTokens
+        // Synchronize providerModels state with the bulk values that landed,
+        // so the row gear modals show the new defaults next time they open.
         setProviderModels((prev) =>
           prev.map((model) => ({
             ...model,
             max_tokens: maxTokens || model.max_tokens,
             timeout_seconds: timeoutSeconds || model.timeout_seconds,
-            concurrency_limit: concurrencyLimit !== undefined ? concurrencyLimit : model.concurrency_limit,
+            concurrency_limit:
+              concurrencyLimit !== undefined
+                ? concurrencyLimit
+                : model.concurrency_limit,
+            ...(contextWindowTokens !== undefined
+              ? { context_window_tokens: contextWindowTokens }
+              : {}),
+            ...(maxInputTokens !== undefined
+              ? { max_input_tokens: maxInputTokens }
+              : {}),
+            ...(maxOutputTokens !== undefined
+              ? { max_output_tokens: maxOutputTokens }
+              : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { default_output_reserve_tokens: defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined
+              ? { capacity_source: capacitySource }
+              : {}),
           }))
         );
       } catch (e) {

@@ -118,7 +118,22 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         expected_chunk_size=expected_chunk_size,
         maximum_chunk_size=maximum_chunk_size,
         chunk_batch=chunk_batch,
-        timeout_seconds=timeout_seconds_value
+        timeout_seconds=timeout_seconds_value,
+        # W1/W2 capacity fields. Frontend batch-add resolves these in
+        # buildBatchModelData (row override -> top-level batch default) and
+        # sends them per row; without threading them through here the
+        # ModelRequest defaults kick in (all None) and every freshly
+        # batch-created row lands with context_window_tokens=NULL,
+        # max_output_tokens=NULL, capacity_source=NULL even though the user
+        # filled the panel. Only max_tokens=mirror would land, matching the
+        # glm-5.1/glm-5.2 production incident.
+        context_window_tokens=model.get("context_window_tokens"),
+        max_input_tokens=model.get("max_input_tokens"),
+        max_output_tokens=model.get("max_output_tokens"),
+        default_output_reserve_tokens=model.get("default_output_reserve_tokens"),
+        tokenizer_family=model.get("tokenizer_family"),
+        capacity_source=model.get("capacity_source"),
+        capability_profile_version=model.get("capability_profile_version"),
     )
 
     model_dict = model_obj.model_dump()
