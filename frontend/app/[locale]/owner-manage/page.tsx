@@ -3,7 +3,7 @@
 import React from "react";
 import { Flex } from "antd";
 
-import AssetOwnerResourcesComp from "../tenant-resources/components/AssetOwnerResourcesComp";
+import AssetOwnerResourcesComp from "../resource-manage/components/AssetOwnerResourcesComp";
 
 export default function AssetOwnerResourcesPage() {
   return (
