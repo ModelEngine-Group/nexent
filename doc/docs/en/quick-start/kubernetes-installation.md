@@ -356,6 +356,57 @@ For Apereo CAS JSON Service Registry, create a service registration file such as
 
 In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
 
+#### CAS Integration with ModelEngine
+
+When integrating with ModelEngine through the CAS protocol, use a values file to configure Nexent. This avoids complex command-line escaping for `CAS_ROLE_MAP_JSON`.
+
+Create `cas-modelengine-values.yaml`:
+
+```yaml
+nexent-common:
+  config:
+    cas:
+      enabled: true
+      serverUrl: "https://<ModelEngine IP>:5443/SSOSvr"
+      validatePath: "/p3/serviceValidate"
+      callbackBaseUrl: "http://<Nexent IP>:30000"
+      loginMode: "force"
+      userAttribute: "userName"
+      emailAttribute: "email"
+      roleAttribute: "userType"
+      tenantAttribute: "tenant_id"
+      roleMapJson: '{"1":"ADMIN","3":"DEV"}'
+      sessionMaxAgeSeconds: 3600
+      localSessionMaxAgeSeconds: 3600
+      renewBeforeSeconds: 300
+      renewTimeoutSeconds: 10
+      syntheticEmailDomain: "cas.local"
+      logoutUrl: "/logout?service=http://<Nexent IP>:30000"
+      sslVerify: false
+      caBundle: ""
+```
+
+You also need to add a CAS client service registration file in the OMS container. Use the following steps as a reference:
+
+```bash
+# Create the registration file, paste the JSON content into it, and save it.
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:30000/api/user/cas/logout_callback"
+}
+
+# Run the following command to copy the registration file into the container.
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+```
+
 ## 🔍 Troubleshooting
 
 ### Check Pod Status

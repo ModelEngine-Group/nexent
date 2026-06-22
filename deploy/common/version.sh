@@ -21,12 +21,6 @@ deployment_read_version() {
     return 0
   fi
 
-  version_file="$root/deploy/VERSION"
-  if [ -f "$version_file" ]; then
-    sed -n '1{s/[[:space:]]*$//;p;}' "$version_file"
-    return 0
-  fi
-
   local const_file="$root/backend/consts/const.py"
   if [ -f "$const_file" ]; then
     local line

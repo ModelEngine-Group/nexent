@@ -1918,11 +1918,14 @@ class TestDataProcessService(unittest.TestCase):
         """
         # Arrange: mock DataProcessCore.file_process to return mixed chunks
         mock_instance = MagicMock()
-        mock_instance.file_process.return_value = [
-            {"content": "First chunk"},
-            {"no_content": True},
-            {"content": "Second chunk"},
-        ]
+        mock_instance.file_process.return_value = (
+            [
+                {"content": "First chunk"},
+                {"no_content": True},
+                {"content": "Second chunk"},
+            ],
+            []  # images_info
+        )
         mock_data_process_core.return_value = mock_instance
 
         filename = "test.txt"

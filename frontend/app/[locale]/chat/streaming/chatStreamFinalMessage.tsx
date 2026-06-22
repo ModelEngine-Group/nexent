@@ -10,7 +10,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 
 /**
  * Convert custom code tags to standard markdown code fences
@@ -30,8 +30,7 @@ const convertToMarkdownCodeFences = (content: string): string => {
   });
   return content;
 };
-import { Button } from "antd";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
+import { Button, Tooltip } from "antd";
 import { ChatMessageType, MaxStepsInfo } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
@@ -403,7 +402,7 @@ function ChatStreamFinalMessageInner({
 
                   {/* Tool button */}
                   <div className="flex items-center space-x-2 mt-1 justify-end">
-                    <TooltipProvider>
+                    <div>
                       {/* Copy button */}
                       <Tooltip
                         title={
@@ -487,7 +486,7 @@ function ChatStreamFinalMessageInner({
                           {ttsButtonContent.icon}
                         </Button>
                       </Tooltip>
-                    </TooltipProvider>
+                    </div>
                   </div>
                 </div>
               )}

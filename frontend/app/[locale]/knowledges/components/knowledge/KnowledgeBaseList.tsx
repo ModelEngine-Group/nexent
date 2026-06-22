@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
 
-import { Button, Input, Select } from "antd";
+import { Button, Input, Select, Tooltip } from "antd";
 import {
   SyncOutlined,
   PlusOutlined,
@@ -19,7 +19,6 @@ import {
   SquarePen,
   CircleOff,
 } from "lucide-react";
-import { Tooltip } from "@/components/ui/tooltip";
 import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
