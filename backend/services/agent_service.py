@@ -7,7 +7,7 @@ import os
 import uuid
 import zipfile
 from collections import deque
-from typing import Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict, List
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -25,6 +25,7 @@ from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
+from nexent.core.utils.observer import ProcessType
 from consts.model import (
     AgentInfoRequest,
     AgentRequest,
@@ -33,6 +34,8 @@ from consts.model import (
     ExportAndImportAgentInfo,
     ExportAndImportDataFormat,
     MCPInfo,
+    MessageRequest,
+    MessageUnit,
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
@@ -83,7 +86,18 @@ from services.prompt_template_service import (
     get_prompt_template_summary,
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
-from services.conversation_management_service import save_conversation_assistant, save_conversation_user, save_skill_files_to_conversation
+from services.conversation_management_service import (
+    save_conversation_user,
+    save_message,
+    save_message_unit,
+    save_source_image,
+    save_source_search,
+    save_skill_files_to_conversation,
+    update_message_content,
+    update_message_status,
+    update_unit_content,
+    update_unit_status,
+)
 from services.memory_config_service import build_memory_context
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
@@ -782,68 +796,283 @@ async def _stream_agent_chunks(
     agent_run_info,
     memory_ctx,
 ):
-    """Yield SSE chunks from agent_run while persisting messages and cleanup."""
+    """Yield SSE chunks from agent_run while persisting messages incrementally."""
 
-    local_messages = []
+    # Types whose chunks should be merged into the previous unit boundary,
+    # matching the legacy batch merge logic.
+    _MERGEABLE_TYPES = {
+        ProcessType.MODEL_OUTPUT_CODE.value,
+        ProcessType.MODEL_OUTPUT_THINKING.value,
+        ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
+    }
+
     captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
+
+    # Persist the parent ConversationMessage row up front with status='streaming'
+    # so that units saved incrementally have a valid message_id to reference.
+    streaming_message_id: Optional[int] = None
+    if not agent_request.is_debug:
+        user_role_count = sum(
+            1 for item in getattr(agent_request, "history", [])
+            if item.role == MESSAGE_ROLE["USER"]
+        )
+        assistant_message_req = MessageRequest(
+            conversation_id=agent_request.conversation_id,
+            message_idx=user_role_count * 2 + 1,
+            role=MESSAGE_ROLE["ASSISTANT"],
+            message=[],
+            minio_files=None,
+        )
+        try:
+            streaming_message_id = save_message(
+                assistant_message_req,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                status="streaming",
+            )
+        except Exception as msg_exc:
+            logger.error(
+                "Failed to create streaming message row: %r", msg_exc, exc_info=True)
+
+    # Tracks the unit currently being accumulated in memory. Each entry is
+    # a dict with keys: type, content, unit_id, unit_index, mergeable.
+    current_unit: Optional[Dict[str, Any]] = None
+    # The next unit_index to assign to a brand-new (non-merge) unit.
+    next_unit_index: int = 0
+    # Set when the agent run loop finishes successfully.
+    stream_completed_normally: bool = False
+
     try:
         async for chunk in agent_run(agent_run_info):
-            local_messages.append(chunk)
+            chunk_type: Optional[str] = None
+            chunk_content: str = ""
             try:
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
-                if chunk_type == "final_answer":
-                    captured_final_answer = data.get("content")
-
-                should_parse_skill_file = chunk_type in {"execution_logs", "parse"} or data.get("role") == "tool-response"
-                if should_parse_skill_file:
-                    extracted_payload_count = 0
-                    content_value = data.get("content")
-                    if isinstance(content_value, list):
-                        content_items = content_value
-                    elif content_value:
-                        content_items = [{"type": "text", "text": str(content_value)}]
-                    else:
-                        content_items = []
-
-                    for item in content_items:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_value = item.get("text")
-                            if text_value:
-                                extracted_payloads = _extract_json_objects_from_text(text_value)
-                                for payload in extracted_payloads:
-                                    absolute_path = str(payload.get("absolute_path") or "").strip()
-                                    if not absolute_path:
-                                        continue
-                                    if absolute_path in captured_skill_files:
-                                        continue
-                                    if not os.path.exists(absolute_path):
-                                        continue
-                                    captured_skill_files[absolute_path] = payload
-                                    extracted_payload_count += 1
-                    if extracted_payload_count:
-                        logger.info(
-                            "[skill-file] captured payloads count=%s current_total=%s",
-                            extracted_payload_count,
-                            len(captured_skill_files),
-                        )
+                chunk_content = data.get("content", "") or ""
             except Exception:
-                pass
+                # Malformed chunk: emit as-is and skip persistence bookkeeping.
+                yield f"data: {chunk}\n\n"
+                continue
+
+            if chunk_type == "final_answer":
+                captured_final_answer = chunk_content
+
+            should_parse_skill_file = (
+                chunk_type in {"execution_logs", "parse"}
+                or data.get("role") == "tool-response"
+            )
+            if should_parse_skill_file:
+                extracted_payload_count = 0
+                content_value = data.get("content")
+                if isinstance(content_value, list):
+                    content_items = content_value
+                elif content_value:
+                    content_items = [{"type": "text", "text": str(content_value)}]
+                else:
+                    content_items = []
+
+                for item in content_items:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_value = item.get("text")
+                        if text_value:
+                            extracted_payloads = _extract_json_objects_from_text(text_value)
+                            for payload in extracted_payloads:
+                                absolute_path = str(payload.get("absolute_path") or "").strip()
+                                if not absolute_path:
+                                    continue
+                                if absolute_path in captured_skill_files:
+                                    continue
+                                if not os.path.exists(absolute_path):
+                                    continue
+                                captured_skill_files[absolute_path] = payload
+                                extracted_payload_count += 1
+                if extracted_payload_count:
+                    logger.info(
+                        "[skill-file] captured payloads count=%s current_total=%s",
+                        extracted_payload_count,
+                        len(captured_skill_files),
+                    )
+
+            # Incremental unit persistence: when a new chunk belongs to a different
+            # unit than the one currently being buffered, flush the previous unit
+            # and insert a fresh row for the new chunk.
+            if streaming_message_id is not None and chunk_type:
+                mergeable = chunk_type in _MERGEABLE_TYPES
+                is_continuation = (
+                    current_unit is not None
+                    and mergeable
+                    and current_unit.get("type") == chunk_type
+                )
+
+                if is_continuation:
+                    # Same mergeable unit: append to the in-memory buffer and
+                    # update the DB row to keep content in sync.
+                    current_unit["content"] += chunk_content
+                    submit(
+                        update_unit_content,
+                        current_unit["unit_id"],
+                        current_unit["content"],
+                        user_id,
+                    )
+                else:
+                    # Boundary detected: close the previous unit (if any) and
+                    # open a new one for this chunk.
+                    if current_unit is not None:
+                        submit(
+                            update_unit_status,
+                            current_unit["unit_id"],
+                            "completed",
+                            user_id,
+                        )
+
+                    # Special-case: final_answer also updates message_content
+                    if chunk_type == "final_answer":
+                        submit(
+                            update_message_content,
+                            streaming_message_id,
+                            chunk_content,
+                            user_id,
+                        )
+
+                    # Special-case: picture_web saves image source references
+                    if chunk_type == "picture_web":
+                        try:
+                            content_json = json.loads(chunk_content)
+                            if isinstance(content_json, dict) and "images_url" in content_json:
+                                seen_urls: set[str] = set()
+                                unique_urls: list[str] = []
+                                for image_url in content_json["images_url"]:
+                                    if image_url not in seen_urls:
+                                        seen_urls.add(image_url)
+                                        unique_urls.append(image_url)
+                                for image_url in unique_urls:
+                                    submit(
+                                        save_source_image,
+                                        {
+                                            "message_id": streaming_message_id,
+                                            "conversation_id": agent_request.conversation_id,
+                                            "image_url": image_url,
+                                        },
+                                    )
+                        except Exception as img_exc:
+                            logger.error(
+                                "Failed to persist picture_web unit: %r", img_exc, exc_info=True
+                            )
+
+                    # Special-case: search_content creates a placeholder unit
+                    # and inserts each search result as a source_search row
+                    # linked back to the unit_id we just created.
+                    if chunk_type == "search_content":
+                        placeholder_unit_id = submit(
+                            save_message_unit,
+                            message_id=streaming_message_id,
+                            conversation_id=agent_request.conversation_id,
+                            unit_index=next_unit_index,
+                            unit_type="search_content_placeholder",
+                            unit_content='{"placeholder": true}',
+                            user_id=user_id,
+                            unit_status="completed",
+                        ).result()
+                        try:
+                            search_results = json.loads(chunk_content)
+                            if not isinstance(search_results, list):
+                                search_results = [search_results]
+                            for result in search_results:
+                                search_data = {
+                                    "message_id": streaming_message_id,
+                                    "conversation_id": agent_request.conversation_id,
+                                    "unit_id": placeholder_unit_id,
+                                    "source_type": result.get("source_type", ""),
+                                    "source_title": result.get("title", ""),
+                                    "source_location": result.get("url", ""),
+                                    "source_content": result.get("text", ""),
+                                    "score_overall": float(result.get("score"))
+                                    if result.get("score") not in (None, "")
+                                    else None,
+                                    "score_accuracy": float(result.get("score_details", {}).get("accuracy"))
+                                    if result.get("score_details", {}).get("accuracy") not in (None, "")
+                                    else None,
+                                    "score_semantic": float(result.get("score_details", {}).get("semantic"))
+                                    if result.get("score_details", {}).get("semantic") not in (None, "")
+                                    else None,
+                                    "published_date": result.get("published_date")
+                                    if result.get("published_date") not in (None, "")
+                                    else None,
+                                    "cite_index": result.get("cite_index")
+                                    if result.get("cite_index") != ""
+                                    else None,
+                                    "search_type": result.get("search_type")
+                                    if result.get("search_type")
+                                    else None,
+                                    "tool_sign": result.get("tool_sign", ""),
+                                }
+                                submit(save_source_search, search_data, user_id)
+                        except Exception as src_exc:
+                            logger.error(
+                                "Failed to persist search_content unit: %r", src_exc, exc_info=True
+                            )
+                        current_unit = None
+                        next_unit_index += 1
+                        yield f"data: {chunk}\n\n"
+                        continue
+
+                    # Default path: insert a new unit row with unit_status='streaming'.
+                    if streaming_message_id is not None and chunk_type not in (
+                        "search_content_placeholder",
+                    ):
+                        new_unit_id = submit(
+                            save_message_unit,
+                            message_id=streaming_message_id,
+                            conversation_id=agent_request.conversation_id,
+                            unit_index=next_unit_index,
+                            unit_type=chunk_type,
+                            unit_content=chunk_content,
+                            user_id=user_id,
+                            unit_status="streaming",
+                        ).result()
+                        current_unit = {
+                            "type": chunk_type,
+                            "content": chunk_content,
+                            "unit_id": new_unit_id,
+                            "unit_index": next_unit_index,
+                            "mergeable": mergeable,
+                        }
+                        next_unit_index += 1
+
             yield f"data: {chunk}\n\n"
+        stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
         yield _safe_agent_stream_error_chunk()
     finally:
-        if not agent_request.is_debug:
-            save_messages(
-                agent_request,
-                target=MESSAGE_ROLE["ASSISTANT"],
-                messages=local_messages,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
+        # Finalize any in-flight unit and transition the parent message to its
+        # terminal status before releasing the agent run slot.
+        if streaming_message_id is not None:
+            if current_unit is not None:
+                try:
+                    submit(
+                        update_unit_status,
+                        current_unit["unit_id"],
+                        "completed",
+                        user_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to mark last unit as completed")
+
+            terminal_status = "completed" if stream_completed_normally else "failed"
+            try:
+                submit(
+                    update_message_status,
+                    streaming_message_id,
+                    terminal_status,
+                    user_id,
+                )
+            except Exception:
+                logger.exception("Failed to mark assistant message as %s", terminal_status)
+
         agent_run_manager.unregister_agent_run(
             agent_request.conversation_id, user_id)
 
@@ -2216,18 +2445,24 @@ async def prepare_agent_run(
     return agent_run_info, memory_context
 
 
-# Helper function for run_agent_stream, used to save messages for either user or assistant
+# Helper function for run_agent_stream, used to save the user-side message
+# before streaming begins. Assistant-side persistence is handled incrementally
+# inside _stream_agent_chunks (see save_message / save_message_unit).
 def save_messages(agent_request, target: str, user_id: str, tenant_id: str, messages=None):
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
         submit(save_conversation_user, agent_request, user_id, tenant_id)
-    elif target == MESSAGE_ROLE["ASSISTANT"]:
-        if messages is None:
-            raise ValueError(
-                "Messages cannot be None when saving for assistant.")
-        submit(save_conversation_assistant,
-               agent_request, messages, user_id, tenant_id)
+        return
+
+    if target == MESSAGE_ROLE["ASSISTANT"]:
+        raise ValueError(
+            "save_messages no longer persists the assistant message; "
+            "_stream_agent_chunks persists units incrementally via "
+            "save_message_unit."
+        )
+
+    raise ValueError(f"Unsupported target for save_messages: {target!r}")
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens

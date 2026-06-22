@@ -7,12 +7,12 @@ from typing import Any, Dict, List, Optional
 from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
-from consts.model import AgentRequest, ConversationResponse, MessageRequest, MessageUnit
+from consts.model import AgentRequest, MessageRequest, MessageUnit
 from consts.exceptions import ConversationNotFoundError
 from database.conversation_db import (
     create_conversation,
     create_conversation_message,
-    create_message_units,
+    create_message_unit,
     create_source_image,
     create_source_search,
     delete_conversation,
@@ -26,8 +26,12 @@ from database.conversation_db import (
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    update_conversation_message_content,
+    update_conversation_message_status,
     update_message_minio_files,
-    update_message_opinion
+    update_message_opinion,
+    update_message_unit_content,
+    update_message_unit_status,
 )
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
@@ -40,203 +44,178 @@ from utils.str_utils import remove_think_blocks
 logger = logging.getLogger("conversation_management_service")
 
 
-def save_message(request: MessageRequest, user_id: str, tenant_id: str):
+def save_message(request: MessageRequest, user_id: str, tenant_id: str,
+                  status: str = 'completed') -> int:
     """
-    Save a new message record
+    Insert only the ConversationMessage row for a new message.
 
     Args:
         request: MessageRequest object containing:
             - conversation_id: Required, conversation ID
             - message_idx: Message index (integer type)
             - role: Message role
-            - message: List of message units
+            - message: List of message units (the string/final_answer unit, if any,
+              is used to populate message_content; all units are then persisted
+              via separate ``save_message_unit`` calls)
             - minio_files: List of object_names for files stored in minio
-        authorization: Authorization header
+        user_id: Identifier of the user creating the message
+        tenant_id: Identifier of the tenant
+        status: Lifecycle status of the message
+            (pending / streaming / completed / failed / stopped)
 
     Returns:
-        ConversationResponse object:
-            - code: 0 indicates success
-            - data: true indicates successful save
-            - message: "success" success message
+        int: Newly created message_id
+
+    Raises:
+        Exception: If conversation_id is missing or the insert fails
     """
-    try:
-        if tenant_id is None or user_id is None:
-            logging.warning("Missing tenant_id or user_id to save message")
-        message_data = request.model_dump()
+    if tenant_id is None or user_id is None:
+        logging.warning("Missing tenant_id or user_id to save message")
 
-        # Validate conversation_id
-        conversation_id = message_data.get('conversation_id')
-        if not conversation_id:
-            raise Exception("conversation_id is required, please call /conversation/create to create a conversation first")
+    message_data = request.model_dump()
 
-        # Process different types of message units
-        message_units = message_data['message']
+    conversation_id = message_data.get('conversation_id')
+    if not conversation_id:
+        raise Exception(
+            "conversation_id is required, please call /conversation/create to create a conversation first")
 
-        # Filter specific message units
-        string_content = None
-        other_units = []
+    message_units = message_data.get('message') or []
+    string_content = None
+    for unit in message_units:
+        if unit.get('type') in ('string', 'final_answer'):
+            string_content = unit.get('content')
+            break
 
-        # First pass: Separate string/final_answer and other types
-        for unit in message_units:
-            unit_type = unit['type']
-            unit_content = unit['content']
+    if string_content is None and message_units:
+        string_content = ""
 
-            if unit_type in ['string', 'final_answer']:
-                string_content = unit_content
-            else:
-                other_units.append(unit)
-
-        # Initialize message record data
-        message_id = None
-        minio_files = message_data.get('minio_files')
-
-        # Process string/final_answer type, create message record
-        if string_content is not None:
-            message_data_copy = {'conversation_id': conversation_id, 'message_idx': message_data['message_idx'],
-                                 'role': message_data['role'], 'content': string_content, 'minio_files': minio_files}
-            message_id = create_conversation_message(
-                message_data_copy, user_id)
-
-        # If there are other types of units but no string type, create an empty content message for them
-        if other_units and message_id is None:
-            message_data_copy = {'conversation_id': conversation_id, 'message_idx': message_data['message_idx'],
-                                 # Empty content
-                                 'role': message_data['role'], 'content': "",
-                                 'minio_files': minio_files}
-            message_id = create_conversation_message(
-                message_data_copy, user_id)
-
-        # Process other types of units
-        filtered_message_units = []
-        search_content_units = []
-
-        for unit in other_units:
-            unit_type = unit['type']
-            unit_content = unit['content']
-
-            if unit_type == 'search_content':
-                # Create a placeholder for the search content and process it later
-                search_content_units.append(unit_content)
-                filtered_message_units.append({
-                    'type': 'search_content_placeholder',
-                    'content': '{"placeholder": true}'
-                })
-            elif unit_type == 'picture_web':
-                # Process image content, save as source_image, do not add to filtered_message_units
-                try:
-                    # Parse image URL list
-                    content_json = json.loads(unit_content)
-                    if isinstance(content_json, dict) and 'images_url' in content_json:
-                        # Deduplicate image URLs before saving
-                        seen_urls = set()
-                        unique_urls = []
-                        for image_url in content_json['images_url']:
-                            if image_url not in seen_urls:
-                                seen_urls.add(image_url)
-                                unique_urls.append(image_url)
-                        # Also deduplicate against any URLs already saved in this same message
-                        for image_url in unique_urls:
-                            image_data = {'message_id': message_id, 'conversation_id': conversation_id,
-                                          'image_url': image_url}
-                            create_source_image(image_data)
-                except Exception as e:
-                    logging.error(f"Failed to save image content: {str(e)}")
-            else:
-                # Keep other types of message units
-                filtered_message_units.append(unit)
-
-        # Create message unit records and get unit_ids
-        unit_ids = []
-        if filtered_message_units and message_id is not None:
-            unit_ids = create_message_units(
-                filtered_message_units, message_id, conversation_id)
-
-        # Process search content using corresponding unit_ids
-        search_placeholder_index = 0
-        for search_content in search_content_units:
-            try:
-                # Find the unit_id for this search content placeholder
-                placeholder_unit_id = None
-                current_index = 0
-                for i, unit in enumerate(filtered_message_units):
-                    if unit['type'] == 'search_content_placeholder':
-                        if current_index == search_placeholder_index:
-                            placeholder_unit_id = unit_ids[i]
-                            break
-                        current_index += 1
-
-                if placeholder_unit_id is None:
-                    logging.error(
-                        "Could not find unit_id for search content placeholder")
-                    continue
-
-                # Parse search content
-                search_results = json.loads(search_content)
-
-                # Ensure search_results is a list
-                if not isinstance(search_results, list):
-                    search_results = [search_results]
-
-                # Iterate through each search result and save separately
-                for result in search_results:
-                    search_data = {'message_id': message_id, 'conversation_id': conversation_id,
-                                   'unit_id': placeholder_unit_id,  # Use the placeholder's unit_id
-                                   'source_type': result.get('source_type', ''), 'source_title': result.get('title', ''),
-                                   'source_location': result.get('url', ''), 'source_content': result.get('text', ''),
-                                   'score_overall': float(result.get('score')) if result.get('score') and result.get(
-                                       'score') != '' else None,
-                                   'score_accuracy': float(result.get('score_details', {}).get('accuracy')) if result.get(
-                                       'score_details', {}).get('accuracy') and result.get('score_details', {}).get(
-                                       'accuracy') != '' else None,
-                                   'score_semantic': float(result.get('score_details', {}).get('semantic')) if result.get(
-                                       'score_details', {}).get('semantic') and result.get('score_details', {}).get(
-                                       'semantic') != '' else None,
-                                   'published_date': result.get('published_date') if result.get(
-                                       'published_date') and result.get('published_date') != '' else None,
-                                   'cite_index': result.get('cite_index', None) if result.get('cite_index') != '' else None,
-                                   'search_type': result.get('search_type') if result.get('search_type') and result.get(
-                                       'search_type') != '' else None, 'tool_sign': result.get('tool_sign', '')}
-                    create_source_search(search_data, user_id)
-
-                search_placeholder_index += 1
-
-            except Exception as e:
-                logging.error(f"Failed to save search content: {str(e)}")
-                search_placeholder_index += 1
-
-        return ConversationResponse(code=0, message="success", data=True)
-
-    except Exception as e:
-        logging.error(f"Failed to save message: {str(e)}")
-        raise Exception(str(e))
+    message_data_copy = {
+        'conversation_id': conversation_id,
+        'message_idx': message_data['message_idx'],
+        'role': message_data['role'],
+        'content': string_content or "",
+        'minio_files': message_data.get('minio_files'),
+    }
+    return create_conversation_message(message_data_copy, user_id, status=status)
 
 
-def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
+def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
+                      unit_type: str, unit_content: str,
+                      user_id: Optional[str] = None,
+                      unit_status: str = 'completed') -> int:
+    """
+    Insert exactly one ConversationMessageUnit row.
+
+    Args:
+        message_id: Parent message ID
+        conversation_id: Conversation ID
+        unit_index: Sequence number for frontend display sorting
+        unit_type: Type of the unit (e.g. "model_output_code", "final_answer")
+        unit_content: Complete content of the unit
+        user_id: Identifier of the user creating the unit
+        unit_status: Lifecycle status (streaming / completed)
+
+    Returns:
+        int: Newly created unit_id
+    """
+    return create_message_unit(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        unit_index=unit_index,
+        unit_type=unit_type,
+        unit_content=unit_content,
+        user_id=user_id,
+        unit_status=unit_status,
+    )
+
+
+def update_message_status(message_id: int, status: str, user_id: str) -> None:
+    """Update the lifecycle status of a conversation message."""
+    update_conversation_message_status(message_id, status, user_id=user_id)
+
+
+def update_unit_status(unit_id: int, status: str, user_id: str) -> None:
+    """Update the unit_status field of a message unit."""
+    update_message_unit_status(unit_id, status, user_id=user_id)
+
+
+def update_unit_content(unit_id: int, content: str, user_id: str) -> None:
+    """Update the unit_content field of a message unit."""
+    update_message_unit_content(unit_id, content, user_id=user_id)
+
+
+def update_message_content(message_id: int, content: str, user_id: str) -> None:
+    """Update the message_content field of a conversation message."""
+    update_conversation_message_content(message_id, content, user_id=user_id)
+
+
+def save_source_image(image_data: Dict[str, Any]) -> int:
+    """
+    Persist a single image source reference for a message.
+
+    Args:
+        image_data: Dictionary with message_id, conversation_id, image_url
+
+    Returns:
+        int: Newly created image_id, or -1 if duplicate
+    """
+    return create_source_image(image_data)
+
+
+def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
+    """
+    Persist a single search source reference for a message.
+
+    Args:
+        search_data: Dictionary of search result fields
+        user_id: Identifier of the user creating the search record
+
+    Returns:
+        int: Newly created search_id
+    """
+    return create_source_search(search_data, user_id=user_id)
+
+
+def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
+    """Persist the user-side message (one message row + one string unit)."""
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
-    conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2,
-                                      role=MESSAGE_ROLE["USER"], message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
-    save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
+    conversation_req = MessageRequest(
+        conversation_id=request.conversation_id,
+        message_idx=user_role_count * 2,
+        role=MESSAGE_ROLE["USER"],
+        message=[MessageUnit(type="string", content=request.query)],
+        minio_files=request.minio_files,
+    )
+    message_id = save_message(
+        conversation_req, user_id=user_id, tenant_id=tenant_id)
+    save_message_unit(
+        message_id=message_id,
+        conversation_id=request.conversation_id,
+        unit_index=0,
+        unit_type="string",
+        unit_content=request.query,
+        user_id=user_id,
+    )
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
-    user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
+    """
+    Batch-persist the assistant-side message and all of its units.
 
-    message_list = []
-    for item in messages:
-        message = json.loads(item)
-        if (len(message_list) and
-            message.get("type") in [ProcessType.MODEL_OUTPUT_CODE.value, ProcessType.MODEL_OUTPUT_THINKING.value] and
-                message.get("type") == message_list[-1].get("type")):
-            message_list[-1]["content"] += message["content"]
-        else:
-            message_list.append(message)
+    Kept for backwards compatibility and debug flows. The streaming agent run
+    persists units incrementally via ``save_message_unit`` instead of going
+    through this function. New callers should use ``save_message`` +
+    ``save_message_unit`` directly.
 
-    conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2 + 1,
-                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=None)
-    save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
+    Raises ``NotImplementedError`` because the incremental streaming flow
+    replaces this path; calling it would double-write the assistant message.
+    """
+    raise NotImplementedError(
+        "save_conversation_assistant has been replaced by the incremental "
+        "save_message / save_message_unit flow used by _stream_agent_chunks."
+    )
 
 
 def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
