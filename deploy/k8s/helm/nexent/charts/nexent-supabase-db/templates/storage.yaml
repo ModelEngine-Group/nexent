@@ -1,0 +1,86 @@
+{{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
+{{- $mode := default "local" .Values.persistence.mode }}
+{{- if eq $mode "local" }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-supabase-db-pv
+  labels:
+    type: local
+    app: nexent-supabase-db
+  annotations:
+    "helm.sh/hook-weight": "-2"
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  capacity:
+    storage: {{ .Values.storage.size }}
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  local:
+    path: {{ .Values.persistence.localPath | quote }}
+  {{- if .Values.persistence.localNodeName }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .Values.persistence.localNodeName | quote }}
+  {{- end }}
+{{- end }}
+{{- if ne $mode "existing" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-supabase-db
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-2"
+spec:
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-supabase-db-pv
+  {{- end }}
+  {{- if .Values.persistence.storageClassName }}
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-supabase-db-migrations
+data:
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-supabase-db-init
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-2"
+data:
+  99-jwt.sql: |
+{{ required "nexent-supabase-db.initScripts.jwt is required" .Values.initScripts.jwt | nindent 4 }}
+  99-pooler.sql: |
+{{ required "nexent-supabase-db.initScripts.pooler is required" .Values.initScripts.pooler | nindent 4 }}
+  99-logs.sql: |
+{{ required "nexent-supabase-db.initScripts.logs is required" .Values.initScripts.logs | nindent 4 }}
+  99-realtime.sql: |
+{{ required "nexent-supabase-db.initScripts.realtime is required" .Values.initScripts.realtime | nindent 4 }}
+  99-roles.sql: |
+{{ required "nexent-supabase-db.initScripts.roles is required" .Values.initScripts.roles | nindent 4 }}
+  97-_supabase.sql: |
+{{ required "nexent-supabase-db.initScripts.supabase is required" .Values.initScripts.supabase | nindent 4 }}
+  98-webhooks.sql: |
+{{ required "nexent-supabase-db.initScripts.webhooks is required" .Values.initScripts.webhooks | nindent 4 }}
+{{- end }}

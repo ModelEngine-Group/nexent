@@ -21,7 +21,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent/docker
 ```
 
-> **💡 Tip**: `deploy.sh` automatically copies `.env.example` to `docker/.env` when `docker/.env` does not exist. If you need to configure voice models (STT/TTS), update the related values in `docker/.env` before or after deployment.
+> **💡 Tip**: `deploy.sh` automatically copies `.env.example` to `.env` when `.env` does not exist. If you need to configure voice models (STT/TTS), update the related values in `.env` before or after deployment.
 
 ### 2. Deployment Options
 
@@ -152,7 +152,7 @@ Nexent uses Docker volumes for data persistence:
 
 Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `.env`).
 
-Uninstall is handled by `docker/uninstall.sh`. It prompts before deleting persistent data by default; you can also pass `--delete-volumes true|false`, `--remove-volumes`, `--keep-volumes`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
+Uninstall is handled by `deploy/docker/uninstall.sh`. It prompts before deleting persistent data by default; you can also pass `--delete-volumes true|false`, `--remove-volumes`, `--keep-volumes`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
 
 ## 🔌 Port Mapping
 
@@ -175,7 +175,7 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `docker/.env`, then starts the matching observability services from `docker/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
 
 ```bash
 cd nexent/docker
@@ -198,7 +198,7 @@ Supported providers:
 To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
 
 ```bash
-cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
+cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
 ```
 
 Common variables:
@@ -211,7 +211,7 @@ Common variables:
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
 
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `docker/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `docker/.env`:
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `.env`:
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -231,7 +231,7 @@ OAuth login requires the `supabase` component. When enabling third-party login, 
 bash deploy.sh --components infrastructure,application,supabase
 ```
 
-For Docker, configure OAuth in `docker/.env`:
+For Docker, configure OAuth in `.env`:
 
 ```bash
 # Web entry URL. The full callback path is generated as:
@@ -277,7 +277,7 @@ For local Docker, a GitHub callback example is `http://localhost:3000/api/user/o
 
 CAS SSO does not require the `supabase` component. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
 
-For Docker, configure CAS in `docker/.env`:
+For Docker, configure CAS in `.env`:
 
 ```bash
 CAS_ENABLED=true

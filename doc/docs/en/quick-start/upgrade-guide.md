@@ -14,8 +14,8 @@ Follow these steps to upgrade Nexent safely:
 
 Before updating, record the current deployment version and data directory information.
 
-- Current Deployment Version Location: APP_VERSION in backend/consts/const.py
-- Data Directory Location: ROOT_DIR in docker/.env
+- Current Deployment Version Location: root VERSION
+- Data Directory Location: ROOT_DIR in .env
 
 **Code downloaded via git**
 
@@ -41,8 +41,8 @@ bash upgrade.sh
 If deploy.options is missing, the script will prompt you to select deployment settings again, such as components, port policy, and image source. Choose the same options you used for the previous deployment.
 
 >💡 Tip
-> If `docker/.env` is missing, the deploy script automatically copies it from `.env.example`.
-> If you need to configure voice models (STT/TTS), add the relevant variables to `docker/.env`. We will provide a front-end configuration interface as soon as possible.
+> If `.env` is missing, the deploy script automatically copies it from `.env.example`.
+> If you need to configure voice models (STT/TTS), add the relevant variables to `.env`. We will provide a front-end configuration interface as soon as possible.
 
 
 ## 🌐 Step 3: Verify the deployment
@@ -89,7 +89,7 @@ If some SQL files fail to execute during the upgrade, you can perform the update
 ### ✅ Method A: Use a SQL editor (recommended)
 
 1. Open your SQL client and create a new PostgreSQL connection.
-2. Retrieve connection settings from `/nexent/docker/.env`:
+2. Retrieve connection settings from `/nexent/.env`:
    - Host
    - Port
    - Database
@@ -97,7 +97,7 @@ If some SQL files fail to execute during the upgrade, you can perform the update
    - Password
 3. Test the connection. When successful, you should see tables under the `nexent` schema.
 4. Open a new query window.
-5. Navigate to the /nexent/docker/sql directory and open the failed SQL file(s) to view the script.
+5. Navigate to the /nexent/deploy/sql/migrations directory and open the failed SQL file(s) to view the script.
 6. Execute the failed SQL file(s) and any subsequent version SQL files in order.
 
 > ⚠️ Important
@@ -127,8 +127,8 @@ If some SQL files fail to execute during the upgrade, you can perform the update
 
    ```bash
    # execute the following commands (please replace the placeholders with your actual values)
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.1_1030-update.sql
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.2_1105-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./deploy/sql/v1.1.1_1030-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./deploy/sql/v1.1.2_1105-update.sql
    ```
 
    Execute the corresponding scripts for your deployment versions in version order.

@@ -14,8 +14,8 @@
 
 更新之前，先记录下当前部署的版本和数据目录
 
-- 当前部署版本信息的位置：`backend/consts/const.py`中的 APP_VERSION
-- 数据目录信息的位置：`docker/.env`中的 ROOT_DIR
+- 当前部署版本信息的位置：根目录 `VERSION`
+- 数据目录信息的位置：`.env`中的 ROOT_DIR
 
 **git 方式下载的代码**
 
@@ -40,8 +40,8 @@ bash upgrade.sh
 缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
 
 > 💡 提示
-> - 若 `docker/.env` 不存在，部署脚本会从 `.env.example` 自动复制一份。
-> - 若需配置语音模型（STT/TTS），请在 `docker/.env` 中补充相关变量，我们将尽快提供前端配置入口。
+> - 若 `.env` 不存在，部署脚本会从 `.env.example` 自动复制一份。
+> - 若需配置语音模型（STT/TTS），请在 `.env` 中补充相关变量，我们将尽快提供前端配置入口。
 
 ## 🌐 步骤三：验证部署
 
@@ -87,7 +87,7 @@ docker system prune -af
 #### ✅ 方法一：使用 SQL 编辑器（推荐）
 
 1. 打开 SQL 编辑器，新建 PostgreSQL 连接。
-2. 在 `/nexent/docker/.env` 中找到以下信息：
+2. 在 `/nexent/.env` 中找到以下信息：
    - Host
    - Port
    - Database
@@ -95,7 +95,7 @@ docker system prune -af
    - Password
 3. 填写连接信息后测试连接，确认成功后可在 `nexent` schema 中查看所有表。
 4. 新建查询窗口。
-5. 打开 `/nexent/docker/sql` 目录，通过失败的sql文件查看 SQL 脚本。
+5. 打开 `/nexent/deploy/sql/migrations` 目录，通过失败的sql文件查看 SQL 脚本。
 6. 将失败的sql文件和后续版本的sql文件依次执行。
 
 > ⚠️ 注意事项
@@ -125,8 +125,8 @@ docker system prune -af
 
    ```bash
    # 我们需要执行以下命令（请注意替换占位符中的变量）
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.1_1030-update.sql
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.2_1105-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./deploy/sql/v1.1.1_1030-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./deploy/sql/v1.1.2_1105-update.sql
    ```
 
    请根据自己的部署版本，按版本顺序执行对应脚本。

@@ -46,10 +46,13 @@ Nexent 是一个基于 **Harness Engineering** 原则打造的零代码智能体
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/docker
-cp .env.example .env
-bash deploy.sh
+cd nexent
+bash deploy.sh docker
 ```
+
+根目录 `deploy.sh` 只负责转发到目标部署脚本；Docker 真实实现为 `bash deploy/docker/deploy.sh`。非交互部署可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
+
+Docker 与 Kubernetes 统一使用项目根目录 `.env` 作为运行配置文件；如果不存在，部署脚本会从 `.env.example` 创建，或首次自动迁移已有的 `docker/.env`。
 
 详细部署指南请参考 [Docker 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/installation.html)。
 
@@ -59,9 +62,11 @@ bash deploy.sh
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
-./deploy-helm.sh apply
+cd nexent
+bash deploy.sh k8s
 ```
+
+Kubernetes 真实实现为 `bash deploy/k8s/deploy.sh`。它会读取同一个根目录 `.env`，并显式渲染为 Helm ConfigMap 和 Secret 覆盖值。PVC 可通过 `--persistence-mode local|dynamic|existing`、`--storage-class`、`--local-path`、`--local-node-name`、`--existing-claim-prefix` 控制。
 
 详细部署指南请参考 [Kubernetes 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/kubernetes-installation.html)。
 

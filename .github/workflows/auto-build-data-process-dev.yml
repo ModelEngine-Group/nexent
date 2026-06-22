@@ -11,14 +11,18 @@ on:
     paths:
       - 'backend/**'
       - 'sdk/**'
-      - 'make/data_process/**'
+      - 'deploy/images/dockerfiles/data-process/**'
+      - 'deploy/common/**'
+      - 'deploy/sql/**'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
       - 'sdk/**'
-      - 'make/data_process/**'
+      - 'deploy/images/dockerfiles/data-process/**'
+      - 'deploy/common/**'
+      - 'deploy/sql/**'
       - '.github/workflows/**'
 
 jobs:
@@ -35,7 +39,7 @@ jobs:
           rm -rf .git .gitattributes
       - name: Build data process image (amd64) and load locally
         run: |
-          docker build --platform linux/amd64 -t nexent/nexent-data-process:dev-amd64 -f make/data_process/Dockerfile .
+          docker build --platform linux/amd64 -t nexent/nexent-data-process:dev-amd64 -f deploy/images/dockerfiles/data-process/Dockerfile .
 
   build-data-process-arm64:
     runs-on: ubuntu-24.04-arm
@@ -50,4 +54,4 @@ jobs:
           rm -rf .git .gitattributes
       - name: Build data process image (arm64) and load locally
         run: |
-          docker build --platform linux/arm64 -t nexent/nexent-data-process:dev-arm64 -f make/data_process/Dockerfile .
+          docker build --platform linux/arm64 -t nexent/nexent-data-process:dev-arm64 -f deploy/images/dockerfiles/data-process/Dockerfile .

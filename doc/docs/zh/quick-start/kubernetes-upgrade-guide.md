@@ -14,7 +14,7 @@
 
 更新之前，先记录下当前部署的版本和数据目录信息。
 
-- 当前部署版本信息的位置：`backend/consts/const.py` 中的 `APP_VERSION`
+- 当前部署版本信息的位置：根目录 `VERSION`
 - 本地卷目录信息的位置：各 Helm 子 chart 的 `storage.hostPath`，默认位于 `/var/lib/nexent-data/nexent-*`
 
 **git 方式下载的代码**
@@ -35,7 +35,7 @@ git pull
 进入更新后代码目录的 `k8s/helm` 目录，执行部署脚本：
 
 ```bash
-cd k8s/helm
+cd deploy/k8s
 ./deploy.sh
 ```
 
@@ -64,7 +64,7 @@ cd k8s/helm
 SQL 迁移脚本位于仓库的：
 
 ```
-docker/sql/
+deploy/sql/migrations/
 ```
 
 请查看 [升级指南](./upgrade-guide.md) 或版本发布说明，确认需要执行哪些 SQL 脚本。
@@ -87,7 +87,7 @@ docker/sql/
    - Port: `5433`（转发的端口）
    - Database: `nexent`
    - User: `root`
-   - Password: 可在 `k8s/helm/nexent/charts/nexent-common/values.yaml` 中查看
+   - Password: 可在 `deploy/deploy/k8s/helm/nexent/charts/nexent-common/values.yaml` 中查看
 
 4. 填写连接信息后测试连接，确认成功后可在 `nexent` schema 中查看所有表。
 5. 按版本顺序执行所需的 SQL 文件。
@@ -109,13 +109,13 @@ docker/sql/
 2. 直接从主机执行 SQL 文件：
 
    ```bash
-   kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent < ./sql/v1.1.1_1030-update.sql
+   kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent < ./deploy/sql/v1.1.1_1030-update.sql
    ```
 
    或者如果想交互式查看输出：
 
    ```bash
-   cat ./sql/v1.1.1_1030-update.sql | kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent
+   cat ./deploy/sql/v1.1.1_1030-update.sql | kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent
    ```
 
 **示例 - 依次执行多个 SQL 文件：**
@@ -125,8 +125,8 @@ docker/sql/
 POSTGRES_POD=$(kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}')
 
 # 按顺序执行 SQL 文件
-kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v1.8.0_xxxxx-update.sql
-kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0_0314_add_context_skill_t.sql
+kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./deploy/sql/v1.8.0_xxxxx-update.sql
+kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./deploy/sql/v2.0.0_0314_add_context_skill_t.sql
 ```
 
 > 💡 提示
@@ -141,7 +141,7 @@ kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0
 
    ```bash
    SUPABASE_POD=$(kubectl get pods -n nexent -l app=nexent-supabase-db -o jsonpath='{.items[0].metadata.name}')
-   kubectl cp docker/sql/xxx.sql nexent/$SUPABASE_POD:/tmp/update.sql
+   kubectl cp deploy/sql/migrations/xxx.sql nexent/$SUPABASE_POD:/tmp/update.sql
    kubectl exec -it nexent/$SUPABASE_POD -n nexent -- psql -U postgres -f /tmp/update.sql
    ```
 
@@ -175,6 +175,6 @@ kubectl rollout restart deployment/nexent-runtime -n nexent
 ### 重新初始化 Elasticsearch（如需要）
 
 ```bash
-cd k8s/helm
+cd deploy/k8s
 bash init-elasticsearch.sh
 ```

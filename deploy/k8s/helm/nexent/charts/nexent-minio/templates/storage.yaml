@@ -1,0 +1,53 @@
+{{- $mode := default "local" .Values.persistence.mode }}
+{{- if eq $mode "local" }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-minio-pv
+  labels:
+    type: local
+    app: nexent-minio
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  capacity:
+    storage: {{ .Values.storage.size }}
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  local:
+    path: {{ .Values.persistence.localPath | quote }}
+  {{- if .Values.persistence.localNodeName }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - {{ .Values.persistence.localNodeName | quote }}
+  {{- end }}
+---
+{{- end }}
+{{- if ne $mode "existing" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-minio
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-minio-pv
+  {{- end }}
+  {{- if .Values.persistence.storageClassName }}
+  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}

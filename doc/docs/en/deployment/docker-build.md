@@ -5,50 +5,50 @@
 docker buildx create --name nexent_builder --use
 
 # 🚀 build application for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f make/main/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 📊 build data_process for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f make/data_process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 🌐 build web frontend for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f make/web/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 📚 build documentation for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile . --push
 
 # 🔗 build MCP Server for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f make/mcp/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f make/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
 
 # 💻 build Ubuntu Terminal for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
 ```
 
 ### 💻 Local Development Build
 
 ```bash
 # 🚀 Build application image (current architecture only)
-docker build --progress=plain -t nexent/nexent -f make/main/Dockerfile .
+docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
 # 📊 Build data process image (current architecture only)
-docker build --progress=plain -t nexent/nexent-data-process -f make/data_process/Dockerfile .
+docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
 
 # 🌐 Build web frontend image (current architecture only)
-docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
+docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
 # 📚 Build documentation image (current architecture only)
-docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 
 # 🔗 Build MCP Server image (current architecture only)
-docker build --progress=plain -t nexent/nexent-mcp -f make/mcp/Dockerfile .
+docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
 
 # 💻 Build OpenSSH Server image (current architecture only)
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 ```
 
 ### 🧹 Clean up Docker resources
@@ -62,27 +62,27 @@ docker builder prune -f && docker system prune -f
 
 #### Main Application Image (nexent/nexent)
 - Contains backend API service
-- Built from `make/main/Dockerfile`
+- Built from `deploy/images/dockerfiles/main/Dockerfile`
 - Provides core agent services
 
 #### Data Processing Image (nexent/nexent-data-process)
 - Contains data processing service
-- Built from `make/data_process/Dockerfile`
+- Built from `deploy/images/dockerfiles/data-process/Dockerfile`
 - Handles document parsing and vectorization
 
 #### Web Frontend Image (nexent/nexent-web)
 - Contains Next.js frontend application
-- Built from `make/web/Dockerfile`
+- Built from `deploy/images/dockerfiles/web/Dockerfile`
 - Provides user interface
 
 #### Documentation Image (nexent/nexent-docs)
 - Contains Vitepress documentation site
-- Built from `make/docs/Dockerfile`
+- Built from `deploy/images/dockerfiles/docs/Dockerfile`
 - Provides project documentation and API reference
 
 #### MCP Server Image (nexent/nexent-mcp)
 - Contains MCP (Model Context Protocol) proxy service
-- Built from `make/mcp/Dockerfile`
+- Built from `deploy/images/dockerfiles/mcp/Dockerfile`
 - Provides MCP server functionality for AI model integration
 
 ##### Pre-installed Tools and Features
@@ -94,7 +94,7 @@ docker builder prune -f && docker system prune -f
 
 #### OpenSSH Server Image (nexent/nexent-ubuntu-terminal)
 - Ubuntu 24.04-based SSH server container
-- Built from `make/terminal/Dockerfile`
+- Built from `deploy/images/dockerfiles/terminal/Dockerfile`
 - Pre-installed with Conda, Python, Git and other development tools
 - Supports SSH key authentication with username `linuxserver.io`
 - Provides complete development environment
@@ -130,7 +130,7 @@ The documentation image can be built and run independently to serve nexent.tech/
 ### Build Documentation Image
 
 ```bash
-docker build -t nexent/nexent-docs -f make/docs/Dockerfile .
+docker build -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 ```
 
 ### Run Documentation Container
@@ -185,4 +185,4 @@ cd docker
 bash deploy.sh --image-source local-latest
 ```
 
-> `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `docker/deploy.sh`.
+> `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `deploy/docker/deploy.sh`.

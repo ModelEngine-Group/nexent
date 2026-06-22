@@ -9,77 +9,77 @@
 docker buildx create --name nexent_builder --use
 
 # 🚀 为多个架构构建应用程序
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f make/main/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 📊 为多个架构构建数据处理服务
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f make/data_process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 🌐 为多个架构构建前端
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f make/web/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 📚 为多个架构构建文档
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile . --push
 
 # 🔗 为多个架构构建 MCP Server
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f make/mcp/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f make/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
 
 # 💻 为多个架构构建 Ubuntu Terminal
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
 ```
 
 ## 💻 本地开发构建
 
 ```bash
 # 🚀 构建应用程序镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent -f make/main/Dockerfile .
+docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
 # 📊 构建数据处理镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-data-process -f make/data_process/Dockerfile .
+docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
 
 # 🌐 构建前端镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
+docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
 # 📚 构建文档镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 
 # 🔗 构建 MCP Server 镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-mcp -f make/mcp/Dockerfile .
+docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
 
 # 💻 构建 OpenSSH Server 镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 ```
 
 ## 🔧 镜像说明
 
 ### 主应用镜像 (nexent/nexent)
 - 包含后端 API 服务
-- 基于 `make/main/Dockerfile` 构建
+- 基于 `deploy/images/dockerfiles/main/Dockerfile` 构建
 - 提供核心的智能体服务
 
 ### 数据处理镜像 (nexent/nexent-data-process)
 - 包含数据处理服务
-- 基于 `make/data_process/Dockerfile` 构建
+- 基于 `deploy/images/dockerfiles/data-process/Dockerfile` 构建
 - 处理文档解析和向量化
 
 ### 前端镜像 (nexent/nexent-web)
 - 包含 Next.js 前端应用
-- 基于 `make/web/Dockerfile` 构建
+- 基于 `deploy/images/dockerfiles/web/Dockerfile` 构建
 - 提供用户界面
 
 ### 文档镜像 (nexent/nexent-docs)
 - 包含 Vitepress 文档站点
-- 基于 `make/docs/Dockerfile` 构建
+- 基于 `deploy/images/dockerfiles/docs/Dockerfile` 构建
 - 提供项目文档和 API 参考
 
 ### MCP Server 镜像 (nexent/nexent-mcp)
 - 包含 MCP (Model Context Protocol) 代理服务
-- 基于 `make/mcp/Dockerfile` 构建
+- 基于 `deploy/images/dockerfiles/mcp/Dockerfile` 构建
 - 为 AI 模型集成提供 MCP 服务器功能
 
 #### 预装工具和特性
@@ -91,7 +91,7 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/
 
 ### OpenSSH Server 镜像 (nexent/nexent-ubuntu-terminal)
 - 基于 Ubuntu 24.04 的 SSH 服务器容器
-- 基于 `make/terminal/Dockerfile` 构建
+- 基于 `deploy/images/dockerfiles/terminal/Dockerfile` 构建
 - 预装 Conda、Python、Git 等开发工具
 - 支持 SSH 密钥认证，用户名为 `linuxserver.io`
 - 提供完整的开发环境
@@ -127,7 +127,7 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/
 ### 构建文档镜像
 
 ```bash
-docker build -t nexent/nexent-docs -f make/docs/Dockerfile .
+docker build -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 ```
 
 ### 运行文档容器
@@ -167,4 +167,4 @@ cd docker
 bash deploy.sh --image-source local-latest
 ```
 
-> `local-latest` 会使用本地 `latest` Nexent 应用镜像并避免重新拉取这些镜像，无需修改 `docker/deploy.sh`。
+> `local-latest` 会使用本地 `latest` Nexent 应用镜像并避免重新拉取这些镜像，无需修改 `deploy/docker/deploy.sh`。

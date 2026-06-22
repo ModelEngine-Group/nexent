@@ -14,7 +14,7 @@ Follow these steps to upgrade Nexent on Kubernetes safely:
 
 Before updating, record the current deployment version and data directory information.
 
-- Current Deployment Version Location: `APP_VERSION` in `backend/consts/const.py`
+- Current Deployment Version Location: root `VERSION`
 - Local volume directories: each Helm sub-chart's `storage.hostPath`, defaulting to `/var/lib/nexent-data/nexent-*`
 
 **Code downloaded via git**
@@ -35,7 +35,7 @@ git pull
 Navigate to the k8s/helm directory of the updated code and run the deployment script:
 
 ```bash
-cd k8s/helm
+cd deploy/k8s
 ./deploy.sh
 ```
 
@@ -64,7 +64,7 @@ If some SQL files fail to execute during the upgrade, or if you need to run incr
 SQL migration scripts are located in the repository at:
 
 ```
-docker/sql/
+deploy/sql/migrations/
 ```
 
 Check the [upgrade-guide](./upgrade-guide.md) or release notes to identify which SQL scripts need to be executed for your upgrade path.
@@ -87,7 +87,7 @@ Check the [upgrade-guide](./upgrade-guide.md) or release notes to identify which
    - Port: `5433` (forwarded port)
    - Database: `nexent`
    - User: `root`
-   - Password: Check in `k8s/helm/nexent/charts/nexent-common/values.yaml`
+   - Password: Check in `deploy/deploy/k8s/helm/nexent/charts/nexent-common/values.yaml`
 
 4. Test the connection. When successful, you should see tables under the `nexent` schema.
 5. Execute the required SQL file(s) in version order.
@@ -109,13 +109,13 @@ Execute SQL scripts directly via stdin redirection:
 2. Execute the SQL file directly from your host machine:
 
    ```bash
-   kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent < ./sql/v1.1.1_1030-update.sql
+   kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent < ./deploy/sql/v1.1.1_1030-update.sql
    ```
 
    Or if you want to see the output interactively:
 
    ```bash
-   cat ./sql/v1.1.1_1030-update.sql | kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent
+   cat ./deploy/sql/v1.1.1_1030-update.sql | kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent
    ```
 
 **Example - Execute multiple SQL files:**
@@ -125,8 +125,8 @@ Execute SQL scripts directly via stdin redirection:
 POSTGRES_POD=$(kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}')
 
 # Execute SQL files in order
-kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v1.8.0_xxxxx-update.sql
-kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0_0314_add_context_skill_t.sql
+kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./deploy/sql/v1.8.0_xxxxx-update.sql
+kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./deploy/sql/v2.0.0_0314_add_context_skill_t.sql
 ```
 
 > 💡 Tips
@@ -141,7 +141,7 @@ kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0
 
    ```bash
    SUPABASE_POD=$(kubectl get pods -n nexent -l app=nexent-supabase-db -o jsonpath='{.items[0].metadata.name}')
-   kubectl cp docker/sql/xxx.sql nexent/$SUPABASE_POD:/tmp/update.sql
+   kubectl cp deploy/sql/migrations/xxx.sql nexent/$SUPABASE_POD:/tmp/update.sql
    kubectl exec -it nexent/$SUPABASE_POD -n nexent -- psql -U postgres -f /tmp/update.sql
    ```
 
@@ -175,6 +175,6 @@ kubectl rollout restart deployment/nexent-runtime -n nexent
 ### Re-initialize Elasticsearch (if needed)
 
 ```bash
-cd k8s/helm
+cd deploy/k8s
 bash init-elasticsearch.sh
 ```

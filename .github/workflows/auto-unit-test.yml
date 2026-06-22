@@ -16,6 +16,11 @@ on:
     paths:
       - 'backend/**'
       - 'sdk/**'
+      - 'deploy/common/**'
+      - 'deploy/tests/**'
+      - 'deploy/offline/**'
+      - 'deploy/docker/**'
+      - 'deploy/k8s/**'
       - 'test/**'
       - '.github/workflows/**'
   push:
@@ -23,6 +28,11 @@ on:
     paths:
       - 'backend/**'
       - 'sdk/**'
+      - 'deploy/common/**'
+      - 'deploy/tests/**'
+      - 'deploy/offline/**'
+      - 'deploy/docker/**'
+      - 'deploy/k8s/**'
       - 'test/**'
       - '.github/workflows/**'
 
@@ -32,6 +42,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Run deployment script tests
+        run: |
+          bash deploy/tests/test_common.sh
+          bash deploy/tests/test_sql_migrations.sh
+          bash deploy/tests/test_build_offline_package.sh
 
       - name: Set up Python
         uses: actions/setup-python@v4
