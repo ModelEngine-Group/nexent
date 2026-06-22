@@ -343,10 +343,10 @@ class TestRateLimiting:
         # First, add a request to create an old bucket
         old_bucket = str(int(ns._now_seconds() // 60) - 1)
         ns._RATE_STATE["tenant-cleanup"] = {old_bucket: 50}
-        
+
         # Make a new request - should trigger cleanup of old bucket
         await ns.check_and_consume_rate_limit("tenant-cleanup")
-        
+
         # Old bucket should be cleaned up, new bucket should have 1 request
         current_bucket = ns._minute_bucket()
         assert old_bucket not in ns._RATE_STATE["tenant-cleanup"]
@@ -946,7 +946,7 @@ class TestGetAgentInfoListErrorHandling:
     async def test_get_agent_info_by_name_success(self):
         """Test successful agent ID retrieval."""
         agent_service_mod.get_agent_id_by_name.return_value = 42
-        
+
         result = await ns.get_agent_info_by_name("test_agent", "tenant-1")
         assert result == 42
 
@@ -954,7 +954,7 @@ class TestGetAgentInfoListErrorHandling:
     async def test_get_agent_info_by_name_error(self):
         """Test that errors are wrapped properly."""
         agent_service_mod.get_agent_id_by_name.side_effect = Exception("Agent not found")
-        
+
         with pytest.raises(Exception) as exc_info:
             await ns.get_agent_info_by_name("nonexistent", "tenant-1")
         assert "Failed to get agent id" in str(exc_info.value)

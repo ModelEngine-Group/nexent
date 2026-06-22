@@ -56,6 +56,9 @@ class AnalyzeAudioTool(Tool):
     init_param_descriptions = {
         "observer": {"description": "Message observer"},
         "vlm_model": {"description": "The video understanding model to use"},
+        "selected_model_id": {
+            "description": "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used."
+        },
         "storage_client": {"description": "Storage client for downloading files"},
         "validate_url_access": {
             "description": "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)"
@@ -75,6 +78,9 @@ class AnalyzeAudioTool(Tool):
                 description="The video understanding model to use",
                 default=None,
                 exclude=True),
+            selected_model_id: int = Field(
+                description="Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+                default=None),
             storage_client: MinIOStorageClient = Field(
                 description="Storage client for downloading files from S3 URLs, HTTP URLs, and HTTPS URLs.",
                 default=None,
@@ -87,6 +93,7 @@ class AnalyzeAudioTool(Tool):
         super().__init__()
         self.observer = observer
         self.vlm_model = vlm_model
+        self.selected_model_id = selected_model_id
         self.storage_client = storage_client
         self._is_chinese = bool(observer and observer.lang == "zh")
 
