@@ -185,11 +185,13 @@ export const ModelEditDialog = ({
 
     try {
       // For LLM/VLM the legacy form.maxTokens field is no longer rendered;
-      // fall back to form.maxOutputTokens (capacity panel) for the
-      // connectivity-probe budget.
+      // use form.maxOutputTokens (capacity panel) for the connectivity-probe
+      // budget. Do NOT fall back to form.maxTokens for capacity types --
+      // the W1/W2 plan deprecates that field for LLM/VLM, and isFormValid
+      // already guarantees form.maxOutputTokens is filled before this
+      // probe runs.
       const llmProbeMaxTokens = supportsCapacityFields
-        ? Number.parseInt(form.maxOutputTokens || "0", 10) ||
-          parseMaxTokens(form.maxTokens)
+        ? Number.parseInt(form.maxOutputTokens || "0", 10)
         : parseMaxTokens(form.maxTokens);
       const config: any = {
         modelName: form.name,
@@ -244,12 +246,27 @@ export const ModelEditDialog = ({
 
   const handleSave = async () => {
     if (!model) return;
+    // Defensive gate: the Save button is already disabled via
+    // `!isFormValid()`, but disabled state can lag a tick behind state
+    // updates and the handler is also reachable from non-click paths.
+    // Re-check here so we never persist a row whose required W2 capacity
+    // fields are empty (this is how production glm-5.2 rows ended up with
+    // context_window_tokens=NULL and max_output_tokens=NULL).
+    if (!isFormValid()) return;
     setLoading(true);
     try {
       // Use update interface instead of delete + add
       const modelType = form.type as ModelType;
-      // Determine max tokens
-      let maxTokensValue = parseMaxTokens(form.maxTokens) || 0;
+      // Determine max tokens.
+      // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
+      // input is hidden and must not be read here per the W1/W2 plan
+      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
+      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
+      // a few lines below, keeping the deprecated NOT NULL column aligned
+      // with the W2 source of truth.
+      let maxTokensValue = supportsCapacityFields
+        ? 0
+        : parseMaxTokens(form.maxTokens) || 0;
       if (isEmbeddingModel || isRerankModel) maxTokensValue = 0;
 
       // Use original displayName for lookup, pass new displayName in body if changed
@@ -734,9 +751,18 @@ export const ProviderConfigEditDialog = ({
     if (!valid()) return
     try {
       setSaving(true)
+      // For LLM/VLM (supportsCapacityFields), the legacy maxTokens state is
+      // never user-editable (its input is hidden) and may still be carrying
+      // the backend's DEFAULT_LLM_MAX_TOKENS sentinel from the row prefill.
+      // Don't read it as a capacity value per the W1/W2 plan; the legacy
+      // column will be aligned by buildCapacityPayload's max_output_tokens
+      // mirror spread a few lines below.
+      const legacyMaxTokens = supportsCapacityFields
+        ? 0
+        : parseMaxTokens(maxTokens) || 0
       await onSave({
         ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
-        maxTokens: parseMaxTokens(maxTokens) || 0,
+        maxTokens: legacyMaxTokens,
         ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
         ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
         ...(supportsCapacityFields ? buildCapacityPayload(capacityForm) : {}),
