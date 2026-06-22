@@ -233,9 +233,24 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             for model in existing_model_list
         }
 
-        # Delete existing models not present
+        # Delete existing models not present.
+        # The membership key MUST match how existing_model_map (a few lines
+        # above) and the create-or-update branch (a few lines below) build
+        # their lookup key, otherwise the two halves disagree about what
+        # "the same model" means. Both of those use add_repo_to_name, which
+        # omits the slash when model_repo is empty. The naive
+        # `model_repo + "/" + model_name` here always prepends "/" for the
+        # empty-repo case (DashScope catalogs return bare names like
+        # "glm-4.7" and rows land with model_repo=""), so "/glm-4.7" never
+        # matched the catalog's "glm-4.7" entry -- every existing row was
+        # treated as "not in the incoming list" and silently soft-deleted on
+        # every batch_create. Use the same helper to keep both halves
+        # speaking the same language.
         for model in existing_model_list:
-            model_full_name = model["model_repo"] + "/" + model["model_name"]
+            model_full_name = add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            )
             if model_full_name not in model_list_ids:
                 delete_model_record(model["model_id"], user_id, tenant_id)
 

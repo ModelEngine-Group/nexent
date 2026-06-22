@@ -1712,10 +1712,27 @@ export const ModelDeleteDialog = ({
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {
-            const modelName = selectedSingleModel.model_name || selectedSingleModel.id;
+            // batch_update_models_for_tenant looks the row up by either a
+            // numeric model_id or a "model_factory/model_name" composite key
+            // (it splits on "/" and passes the prefix as model_factory).
+            // Sending just `model_name` here matched no row in production
+            // because DB rows have model_factory="dashscope" (etc.) and the
+            // missing prefix made get_model_by_name_factory return None --
+            // the gear modal's capacity edits became silent no-ops, which
+            // contributed to the glm-5.x / glm-4.7 soft-delete incident.
+            const baseName =
+              selectedSingleModel.model_name || selectedSingleModel.id;
+            const provider =
+              selectedSingleModel.model_factory || selectedSource;
+            const qualifiedId =
+              baseName && typeof baseName === "string" && baseName.includes("/")
+                ? baseName
+                : provider
+                  ? `${provider}/${baseName}`
+                  : baseName;
 
             const updatePayload: any = {
-              model_id: modelName,
+              model_id: qualifiedId,
               maxTokens: config.maxTokens,
               timeoutSeconds: config.timeoutSeconds,
               concurrencyLimit: config.concurrencyLimit,
