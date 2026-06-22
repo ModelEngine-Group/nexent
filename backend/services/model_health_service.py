@@ -38,13 +38,17 @@ def _normalize_embedding_url(base_url: str) -> str:
 def _infer_model_factory(model_type: str, base_url: str, current_factory: Optional[str] = None) -> Optional[str]:
     """Infer model_factory from base_url if not already set or is generic.
 
-    Currently handles:
-    - multi_embedding with dashscope URL -> "dashscope"
-    - embedding with dashscope URL -> "dashscope" (uses OpenAI-compatible endpoint)
+    Uses the shared W11 host map so embedding and LLM/VLM inference do not drift.
     """
-    base_url_lower = base_url.lower()
-    if "dashscope" in base_url_lower:
-        return DASHSCOPE_MODEL_FACTORY
+    try:
+        from services.model_capacity_suggestion_service import pick_provider_from_base_url
+
+        inferred_provider = pick_provider_from_base_url(base_url)
+    except Exception:
+        inferred_provider = DASHSCOPE_MODEL_FACTORY if "dashscope" in base_url.lower() else None
+
+    if inferred_provider:
+        return inferred_provider
 
     return current_factory
 
