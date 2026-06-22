@@ -9,6 +9,7 @@ import {
   ModelValidationResponse,
   ModelSource,
   CapacitySuggestion,
+  CapacityCoverage,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -87,6 +88,19 @@ const mapCapacitySuggestionFromApi = (
     capacitySourceOnAccept: suggestion.capacity_source_on_accept,
   };
 };
+
+const mapCapacityCoverageFromApi = (coverage: any): CapacityCoverage => ({
+  totalLlmVlm: coverage?.total_llm_vlm || 0,
+  bareCount: coverage?.bare_count || 0,
+  bareModels: (coverage?.bare_models || []).map((model: any) => ({
+    modelId: model.model_id,
+    modelName: model.model_name,
+    modelFactory: model.model_factory,
+    modelType: model.model_type,
+    maxTokens: model.max_tokens,
+    suggestionAvailable: Boolean(model.suggestion_available),
+  })),
+});
 
 // Error class
 export class ModelError extends Error {
@@ -755,6 +769,22 @@ export const modelService = {
       if (error instanceof ModelError) throw error;
       log.warn("Failed to suggest model capacity:", error);
       throw new ModelError("Failed to suggest model capacity", 500);
+    }
+  },
+
+  getCapacityCoverage: async (): Promise<CapacityCoverage> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.capacityCoverage, {
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+        return { totalLlmVlm: 0, bareCount: 0, bareModels: [] };
+      }
+      return mapCapacityCoverageFromApi(result.data);
+    } catch (error) {
+      log.warn("Failed to load model capacity coverage:", error);
+      return { totalLlmVlm: 0, bareCount: 0, bareModels: [] };
     }
   },
 

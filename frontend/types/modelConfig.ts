@@ -139,6 +139,21 @@ export interface CapacitySuggestion {
   capacitySourceOnAccept?: "operator" | null;
 }
 
+export interface CapacityCoverageBareModel {
+  modelId: number;
+  modelName: string;
+  modelFactory?: string | null;
+  modelType: "llm" | "vlm" | "vlm2" | "vlm3";
+  maxTokens?: number | null;
+  suggestionAvailable: boolean;
+}
+
+export interface CapacityCoverage {
+  totalLlmVlm: number;
+  bareCount: number;
+  bareModels: CapacityCoverageBareModel[];
+}
+
 // Model configuration interface
 export interface ModelConfig {
   llm: SingleModelConfig;
