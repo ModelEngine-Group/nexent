@@ -725,6 +725,13 @@ export const ProviderConfigEditDialog = ({
   const isVoiceModel = modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS
   const supportsCapacityFields =
     !hideCapacityFields && !isEmbeddingModel && !isRerankModel && !isVoiceModel
+  // Only rerank and voice models legitimately need the deprecated max_tokens
+  // input. LLM/VLM use the capacity panel; when the dialog is in provider-
+  // level mode (hideCapacityFields=true) it edits shared settings only --
+  // capacity is per-model and lives on each gear-icon dialog. Per the W1/W2
+  // plan, never surface legacy max_tokens for LLM/VLM regardless of the
+  // hideCapacityFields flag.
+  const needsLegacyMaxTokens = isRerankModel || isVoiceModel
   const capacityValidationError = supportsCapacityFields
     ? validateCapacityForm(capacityForm, [
         "contextWindowTokens",
@@ -744,22 +751,31 @@ export const ProviderConfigEditDialog = ({
       // legacy input.
       return !capacityValidationError
     }
-    return isEmbeddingModel || isValidMaxTokens(maxTokens)
+    if (needsLegacyMaxTokens) {
+      return isValidMaxTokens(maxTokens)
+    }
+    // No capacity panel and no legacy field rendered (provider-level config
+    // edit for LLM/VLM, embedding shared config): the dialog only owns
+    // apiKey/timeoutSeconds/concurrencyLimit, so always valid.
+    return true
   }
 
   const handleSave = async () => {
     if (!valid()) return
     try {
       setSaving(true)
-      // For LLM/VLM (supportsCapacityFields), the legacy maxTokens state is
-      // never user-editable (its input is hidden) and may still be carrying
-      // the backend's DEFAULT_LLM_MAX_TOKENS sentinel from the row prefill.
-      // Don't read it as a capacity value per the W1/W2 plan; the legacy
-      // column will be aligned by buildCapacityPayload's max_output_tokens
-      // mirror spread a few lines below.
-      const legacyMaxTokens = supportsCapacityFields
-        ? 0
-        : parseMaxTokens(maxTokens) || 0
+      // Only rerank/voice models legitimately surface the legacy maxTokens
+      // input. In every other case the maxTokens state still carries the
+      // backend's DEFAULT_LLM_MAX_TOKENS sentinel from the row prefill, so
+      // reading it would either be a no-op (LLM/VLM with capacity panel:
+      // buildCapacityPayload's max_output_tokens mirror overrides) or
+      // actively wrong (LLM/VLM provider-level config: would force the
+      // 4096 sentinel onto every existing row). Sending 0 here makes
+      // handleProviderConfigSave's `maxTokens || m.maxTokens` fall back to
+      // each row's current value, preserving it.
+      const legacyMaxTokens = needsLegacyMaxTokens
+        ? parseMaxTokens(maxTokens) || 0
+        : 0
       await onSave({
         ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
         maxTokens: legacyMaxTokens,
@@ -805,12 +821,14 @@ export const ProviderConfigEditDialog = ({
             }
           />
         )}
-        {/* Legacy max_tokens input — only shown when the capacity panel is
-            NOT rendered (i.e. STT/TTS/rerank). For LLM/VLM the capacity
-            panel's max_output_tokens replaces it; rendering both side by
-            side lets the two diverge in the DB. Matches the gate used by
-            ModelEditDialog per W1 step 7. */}
-        {!isEmbeddingModel && !supportsCapacityFields && (
+        {/* Legacy max_tokens input — only rendered for model types that
+            legitimately still own this field (rerank, STT/TTS). LLM/VLM use
+            the capacity panel; if hideCapacityFields=true is set (provider-
+            level config edit) the dialog deliberately drops both the
+            capacity panel and the legacy input -- per the W1/W2 plan
+            ("Never use legacy max_tokens") capacity is set per-model from
+            the gear icon, not via a provider-level shared value. */}
+        {needsLegacyMaxTokens && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
               {t('model.dialog.label.maxTokens')} <span className="text-red-500">*</span>

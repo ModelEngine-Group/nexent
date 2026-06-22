@@ -622,6 +622,38 @@ export const ModelDeleteDialog = ({
     });
   }, [providerModels, providerModelSearchTerm]);
 
+  // Per-row required capacity gate for the provider-management batch confirm.
+  // Unlike ModelAddDialog this dialog has no top-level "batch default capacity"
+  // panel, so each enabled row must itself carry positive context_window_tokens
+  // and max_output_tokens (set via the per-row gear modal). Without this gate
+  // the user could batch-confirm an LLM/VLM row whose catalog supplied no W2
+  // metadata, persisting context_window_tokens=NULL, max_output_tokens=NULL,
+  // and only the backend's DEFAULT_LLM_MAX_TOKENS=4096 legacy sentinel -- the
+  // exact glm-5.2 production incident we just root-caused.
+  //
+  // We deliberately don't fall back to model.max_tokens here: per the W1/W2
+  // plan the legacy column is unconditionally seeded by the provider
+  // adapters, so treating it as a stand-in would mask every missing W2 row.
+  const requiresW2Capacity = (modelType?: ModelType): boolean => {
+    if (!modelType) return false;
+    if (
+      modelType === MODEL_TYPES.EMBEDDING ||
+      modelType === MODEL_TYPES.MULTI_EMBEDDING
+    )
+      return false;
+    if (modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS)
+      return false;
+    if (modelType === MODEL_TYPES.RERANK) return false;
+    return true;
+  };
+  const hasUnconfiguredSelectedRow = useMemo(() => {
+    if (!requiresW2Capacity(deletingModelType as ModelType)) return false;
+    return providerModels.some((m: any) => {
+      if (!pendingSelectedProviderIds.has(m.id)) return false;
+      return !m.context_window_tokens || !m.max_output_tokens;
+    });
+  }, [providerModels, pendingSelectedProviderIds, deletingModelType]);
+
   // Handle provider config save
   const handleProviderConfigSave = async ({
     apiKey,
@@ -816,11 +848,20 @@ export const ModelDeleteDialog = ({
         selectedSource &&
           selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE &&
           deletingModelType && (
-            <Button
-              key="confirm"
-              type="primary"
-              loading={isConfirmLoading}
-              onClick={async () => {
+            <Tooltip
+              key="confirm-tooltip"
+              title={
+                hasUnconfiguredSelectedRow
+                  ? t("model.dialog.batch.requireRowCapacity")
+                  : ""
+              }
+            >
+              <Button
+                key="confirm"
+                type="primary"
+                loading={isConfirmLoading}
+                disabled={hasUnconfiguredSelectedRow}
+                onClick={async () => {
                 setIsConfirmLoading(true);
                 try {
                   // Handle changes for both silicon and openai sources
@@ -1035,8 +1076,9 @@ export const ModelDeleteDialog = ({
                 }
               }}
             >
-              {t("common.confirm")}
-            </Button>
+                {t("common.confirm")}
+              </Button>
+            </Tooltip>
           ),
       ]}
       width={520}
