@@ -646,13 +646,16 @@ export const ModelAddDialog = ({
       } else {
         // For other model types (LLM, Embedding, VLM, Rerank, etc.)
         // For LLM/VLM the legacy form.maxTokens field is gone; use the new
-        // capacity panel's maxOutputTokens value as the connectivity-probe budget.
+        // capacity panel's maxOutputTokens value as the connectivity-probe
+        // budget. Do NOT fall back to form.maxTokens for capacity types --
+        // the W1/W2 plan deprecates that field for LLM/VLM, and isFormValid
+        // already guarantees form.maxOutputTokens is filled before this
+        // probe runs.
         const resolvedMaxTokens =
           form.type === MODEL_TYPES.EMBEDDING
             ? Number.parseInt(form.vectorDimension, 10)
             : supportsCapacityFields
-              ? Number.parseInt(form.maxOutputTokens || "0", 10) ||
-                parseMaxTokens(form.maxTokens)
+              ? Number.parseInt(form.maxOutputTokens || "0", 10)
               : parseMaxTokens(form.maxTokens);
         const config = {
           modelName: form.name,
@@ -1031,8 +1034,16 @@ export const ModelAddDialog = ({
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
 
-      // Determine the maximum tokens value
-      let maxTokensValue = parseMaxTokens(form.maxTokens) || 0;
+      // Determine the maximum tokens value.
+      // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
+      // input is hidden and must not be read here per the W1/W2 plan
+      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
+      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
+      // a few lines below, keeping the deprecated NOT NULL column aligned
+      // with the W2 source of truth.
+      let maxTokensValue = supportsCapacityFields
+        ? 0
+        : parseMaxTokens(form.maxTokens) || 0;
       if (
         form.type === MODEL_TYPES.EMBEDDING ||
         form.type === MODEL_TYPES.MULTI_EMBEDDING
