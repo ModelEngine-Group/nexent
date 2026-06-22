@@ -8,6 +8,7 @@ import {
   ModelConnectStatus,
   ModelValidationResponse,
   ModelSource,
+  CapacitySuggestion,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -62,9 +63,37 @@ const buildCapacityRequestBody = (model: {
     : {}),
 });
 
+const mapCapacitySuggestionFromApi = (
+  suggestion: any
+): CapacitySuggestion | null => {
+  if (!suggestion) return null;
+  return {
+    suggestions: suggestion.suggestions
+      ? {
+          contextWindowTokens: suggestion.suggestions.context_window_tokens,
+          maxInputTokens: suggestion.suggestions.max_input_tokens,
+          maxOutputTokens: suggestion.suggestions.max_output_tokens,
+          defaultOutputReserveTokens:
+            suggestion.suggestions.default_output_reserve_tokens,
+          tokenizerFamily: suggestion.suggestions.tokenizer_family,
+        }
+      : null,
+    matchKind: suggestion.match_kind,
+    matchConfidence: suggestion.match_confidence,
+    matchExplanation: suggestion.match_explanation || "",
+    suggestedProvider: suggestion.suggested_provider,
+    canonicalModelName: suggestion.canonical_model_name,
+    capabilityProfileVersion: suggestion.capability_profile_version,
+    capacitySourceOnAccept: suggestion.capacity_source_on_accept,
+  };
+};
+
 // Error class
 export class ModelError extends Error {
-  constructor(message: string, public code?: number) {
+  constructor(
+    message: string,
+    public code?: number
+  ) {
     super(message);
     this.name = "ModelError";
     // Override the stack property to only return the message
@@ -340,7 +369,9 @@ export const modelService = {
       log.log("getManageProviderModelList result", result);
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "Failed to get provider model list",
+          result.detail ||
+            result.message ||
+            "Failed to get provider model list",
           response.status
         );
       }
@@ -354,6 +385,7 @@ export const modelService = {
 
   updateSingleModel: async (model: {
     currentDisplayName: string;
+    name?: string;
     displayName?: string;
     url: string;
     apiKey: string;
@@ -385,6 +417,7 @@ export const modelService = {
             ...(model.displayName !== undefined
               ? { display_name: model.displayName }
               : {}),
+            ...(model.name !== undefined ? { model_name: model.name } : {}),
             base_url: model.url,
             api_key: model.apiKey,
             ...(model.maxTokens !== undefined
@@ -422,7 +455,9 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "Failed to update the custom model",
+          result.detail ||
+            result.message ||
+            "Failed to update the custom model",
           response.status
         );
       }
@@ -457,14 +492,30 @@ export const modelService = {
             model_id: m.model_id,
             api_key: m.apiKey,
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
-            ...(m.timeoutSeconds !== undefined ? { timeout_seconds: m.timeoutSeconds } : {}),
-            ...(m.concurrencyLimit !== undefined ? { concurrency_limit: m.concurrencyLimit } : {}),
-            ...(m.contextWindowTokens !== undefined ? { context_window_tokens: m.contextWindowTokens } : {}),
-            ...(m.maxInputTokens !== undefined ? { max_input_tokens: m.maxInputTokens } : {}),
-            ...(m.maxOutputTokens !== undefined ? { max_output_tokens: m.maxOutputTokens } : {}),
-            ...(m.defaultOutputReserveTokens !== undefined ? { default_output_reserve_tokens: m.defaultOutputReserveTokens } : {}),
-            ...(m.tokenizerFamily !== undefined ? { tokenizer_family: m.tokenizerFamily } : {}),
-            ...(m.capacitySource !== undefined ? { capacity_source: m.capacitySource } : {}),
+            ...(m.timeoutSeconds !== undefined
+              ? { timeout_seconds: m.timeoutSeconds }
+              : {}),
+            ...(m.concurrencyLimit !== undefined
+              ? { concurrency_limit: m.concurrencyLimit }
+              : {}),
+            ...(m.contextWindowTokens !== undefined
+              ? { context_window_tokens: m.contextWindowTokens }
+              : {}),
+            ...(m.maxInputTokens !== undefined
+              ? { max_input_tokens: m.maxInputTokens }
+              : {}),
+            ...(m.maxOutputTokens !== undefined
+              ? { max_output_tokens: m.maxOutputTokens }
+              : {}),
+            ...(m.defaultOutputReserveTokens !== undefined
+              ? { default_output_reserve_tokens: m.defaultOutputReserveTokens }
+              : {}),
+            ...(m.tokenizerFamily !== undefined
+              ? { tokenizer_family: m.tokenizerFamily }
+              : {}),
+            ...(m.capacitySource !== undefined
+              ? { capacity_source: m.capacitySource }
+              : {}),
             ...(provider ? { model_factory: provider } : {}),
           }))
         ),
@@ -472,7 +523,9 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "Failed to update the custom model",
+          result.detail ||
+            result.message ||
+            "Failed to update the custom model",
           response.status
         );
       }
@@ -559,7 +612,7 @@ export const modelService = {
         body: JSON.stringify({
           tenant_id: tenantId,
           display_name: displayName,
-          model_type: modelType
+          model_type: modelType,
         }),
         signal,
       });
@@ -600,7 +653,9 @@ export const modelService = {
         model_type: config.modelType,
         api_key: config.apiKey || "sk-no-api-key",
         base_url: config.baseUrl || "",
-        ...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
+        ...(config.maxTokens !== undefined
+          ? { max_tokens: config.maxTokens }
+          : {}),
         embedding_dim: config.embeddingDim || 1024,
       };
 
@@ -628,14 +683,21 @@ export const modelService = {
         return {
           connectivity: result.data.connectivity,
           model_name: result.data.model_name || "UNKNOWN_MODEL",
-          error: result.data.connectivity ? undefined : result.data.error || result.detail || result.message,
+          error: result.data.connectivity
+            ? undefined
+            : result.data.error || result.detail || result.message,
+          capacitySuggestion: mapCapacitySuggestionFromApi(
+            result.data.capacity_suggestion
+          ),
         };
       }
 
       return {
         connectivity: false,
         model_name: result.data?.model_name || "UNKNOWN_MODEL",
-        error: result.detail || result.message || "Connection verification failed",
+        error:
+          result.detail || result.message || "Connection verification failed",
+        capacitySuggestion: null,
       };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -647,7 +709,52 @@ export const modelService = {
         connectivity: false,
         model_name: "UNKNOWN_MODEL",
         error: error instanceof Error ? error.message : String(error),
+        capacitySuggestion: null,
       };
+    }
+  },
+
+  suggestCapacity: async (params: {
+    modelName: string;
+    baseUrl?: string;
+    providerHint?: string;
+    apiKey?: string;
+    modelType?: ModelType;
+  }): Promise<CapacitySuggestion> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.suggestCapacity, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          model_name: params.modelName,
+          ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+          ...(params.providerHint
+            ? { provider_hint: params.providerHint }
+            : {}),
+          ...(params.apiKey ? { api_key: params.apiKey } : {}),
+          ...(params.modelType ? { model_type: params.modelType } : {}),
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS || !result.data) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to suggest model capacity",
+          response.status
+        );
+      }
+      const mapped = mapCapacitySuggestionFromApi(result.data);
+      if (!mapped) {
+        throw new ModelError(
+          "Failed to suggest model capacity",
+          response.status
+        );
+      }
+      return mapped;
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to suggest model capacity:", error);
+      throw new ModelError("Failed to suggest model capacity", 500);
     }
   },
 
@@ -795,7 +902,9 @@ export const modelService = {
         model_type: params.type,
         base_url: params.url,
         api_key: params.apiKey,
-        ...(params.maxTokens !== undefined ? { max_tokens: params.maxTokens } : {}),
+        ...(params.maxTokens !== undefined
+          ? { max_tokens: params.maxTokens }
+          : {}),
         display_name: params.displayName || params.name,
         model_factory: params.modelFactory || "OpenAI-API-Compatible",
         expected_chunk_size: params.expectedChunkSize,
@@ -829,7 +938,9 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
         throw new ModelError(
-          result.detail || result.message || "Failed to create model for tenant",
+          result.detail ||
+            result.message ||
+            "Failed to create model for tenant",
           response.status
         );
       }
@@ -844,6 +955,7 @@ export const modelService = {
   updateManageTenantModel: async (params: {
     tenantId: string;
     currentDisplayName: string;
+    name?: string;
     displayName?: string;
     url: string;
     apiKey: string;
@@ -876,18 +988,39 @@ export const modelService = {
           body: JSON.stringify({
             tenant_id: params.tenantId,
             current_display_name: params.currentDisplayName,
-            ...(params.displayName !== undefined ? { display_name: params.displayName } : {}),
+            ...(params.name !== undefined ? { model_name: params.name } : {}),
+            ...(params.displayName !== undefined
+              ? { display_name: params.displayName }
+              : {}),
             base_url: params.url,
             api_key: params.apiKey,
-            ...(params.maxTokens !== undefined ? { max_tokens: params.maxTokens } : {}),
-            ...(params.expectedChunkSize !== undefined ? { expected_chunk_size: params.expectedChunkSize } : {}),
-            ...(params.maximumChunkSize !== undefined ? { maximum_chunk_size: params.maximumChunkSize } : {}),
-            ...(params.chunkingBatchSize !== undefined ? { chunk_batch: params.chunkingBatchSize } : {}),
-            ...(params.modelFactory !== undefined ? { model_factory: params.modelFactory } : {}),
-            ...(params.modelAppid !== undefined ? { model_appid: params.modelAppid } : {}),
-            ...(params.accessToken !== undefined ? { access_token: params.accessToken } : {}),
-            ...(params.timeoutSeconds !== undefined ? { timeout_seconds: params.timeoutSeconds } : {}),
-            ...(params.concurrencyLimit !== undefined ? { concurrency_limit: params.concurrencyLimit } : {}),
+            ...(params.maxTokens !== undefined
+              ? { max_tokens: params.maxTokens }
+              : {}),
+            ...(params.expectedChunkSize !== undefined
+              ? { expected_chunk_size: params.expectedChunkSize }
+              : {}),
+            ...(params.maximumChunkSize !== undefined
+              ? { maximum_chunk_size: params.maximumChunkSize }
+              : {}),
+            ...(params.chunkingBatchSize !== undefined
+              ? { chunk_batch: params.chunkingBatchSize }
+              : {}),
+            ...(params.modelFactory !== undefined
+              ? { model_factory: params.modelFactory }
+              : {}),
+            ...(params.modelAppid !== undefined
+              ? { model_appid: params.modelAppid }
+              : {}),
+            ...(params.accessToken !== undefined
+              ? { access_token: params.accessToken }
+              : {}),
+            ...(params.timeoutSeconds !== undefined
+              ? { timeout_seconds: params.timeoutSeconds }
+              : {}),
+            ...(params.concurrencyLimit !== undefined
+              ? { concurrency_limit: params.concurrencyLimit }
+              : {}),
             ...buildCapacityRequestBody(params),
           }),
         }
@@ -896,7 +1029,9 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
         throw new ModelError(
-          result.detail || result.message || "Failed to update model for tenant",
+          result.detail ||
+            result.message ||
+            "Failed to update model for tenant",
           response.status
         );
       }
@@ -931,7 +1066,9 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
         throw new ModelError(
-          result.detail || result.message || "Failed to delete model for tenant",
+          result.detail ||
+            result.message ||
+            "Failed to delete model for tenant",
           response.status
         );
       }
@@ -955,7 +1092,12 @@ export const modelService = {
       owned_by?: string;
       max_tokens?: number;
     }>;
-  }): Promise<{ tenantId: string; provider: string; type: string; modelsCount: number }> => {
+  }): Promise<{
+    tenantId: string;
+    provider: string;
+    type: string;
+    modelsCount: number;
+  }> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.manageModelBatchCreate, {
         method: "POST",
@@ -975,7 +1117,9 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
         throw new ModelError(
-          result.detail || result.message || "Failed to batch create models for tenant",
+          result.detail ||
+            result.message ||
+            "Failed to batch create models for tenant",
           response.status
         );
       }
@@ -1001,24 +1145,32 @@ export const modelService = {
     baseUrl?: string;
   }): Promise<any[]> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.manageProviderModelCreate, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: params.tenantId,
-          provider: params.provider,
-          model_type: params.type,
-          api_key: params.apiKey,
-          ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
-        }),
-      });
+      const response = await fetch(
+        API_ENDPOINTS.model.manageProviderModelCreate,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            model_type: params.type,
+            api_key: params.apiKey,
+            ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+          }),
+        }
+      );
 
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
-        throw new ModelError(result.detail || result.message || "Failed to create provider models for tenant", response.status);
+        throw new ModelError(
+          result.detail ||
+            result.message ||
+            "Failed to create provider models for tenant",
+          response.status
+        );
       }
       return result.data || [];
     } catch (error) {
@@ -1035,28 +1187,39 @@ export const modelService = {
     type: ModelType;
   }): Promise<any[]> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.manageProviderModelList, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: params.tenantId,
-          provider: params.provider,
-          model_type: params.type,
-        }),
-      });
+      const response = await fetch(
+        API_ENDPOINTS.model.manageProviderModelList,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            model_type: params.type,
+          }),
+        }
+      );
 
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
-        throw new ModelError(result.detail || result.message || "Failed to get provider selected list for tenant", response.status);
+        throw new ModelError(
+          result.detail ||
+            result.message ||
+            "Failed to get provider selected list for tenant",
+          response.status
+        );
       }
       return result.data || [];
     } catch (error) {
       if (error instanceof ModelError) throw error;
       log.warn("Failed to get manage provider selected list:", error);
-      throw new ModelError("Failed to get provider selected list for tenant", 500);
+      throw new ModelError(
+        "Failed to get provider selected list for tenant",
+        500
+      );
     }
   },
 };

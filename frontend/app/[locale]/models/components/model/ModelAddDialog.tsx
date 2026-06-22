@@ -1,7 +1,16 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
+import {
+  Alert,
+  Modal,
+  Select,
+  Input,
+  Button,
+  Switch,
+  Tooltip,
+  App,
+} from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
   LoaderCircle,
@@ -18,6 +27,7 @@ import {
   SingleModelConfig,
   STTModelConfig,
   TTSModelConfig,
+  CapacitySuggestion,
 } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
@@ -37,6 +47,7 @@ import {
 import {
   buildCapacityPayload,
   capacityFieldKeys,
+  capacityFormFromSuggestion,
   capacityFormFromModel,
   emptyCapacityForm,
   ModelCapacityFields,
@@ -281,6 +292,14 @@ export const ModelAddDialog = ({
   const [form, setForm] = useState(DEFAULT_FORM_STATE);
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
+  const [checkingCapacitySuggestion, setCheckingCapacitySuggestion] =
+    useState(false);
+  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
+    useState(true);
+  const [capacitySuggestion, setCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
+  const [acceptedCapacitySuggestion, setAcceptedCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
   const [connectivityStatus, setConnectivityStatus] = useState<{
     status: ConnectivityStatusType;
     message: string;
@@ -355,6 +374,9 @@ export const ModelAddDialog = ({
   const resetForm = useCallback(() => {
     setForm(DEFAULT_FORM_STATE);
     setConnectivityStatus({ status: null, message: "" });
+    setCapacitySuggestionEnabled(true);
+    setCapacitySuggestion(null);
+    setAcceptedCapacitySuggestion(null);
     setModelList([]);
     setModelSearchTerm("");
     setSelectedModelIds(new Set());
@@ -452,12 +474,22 @@ export const ModelAddDialog = ({
     }));
     // If the key configuration item changes, clear the verification status
     if (
-      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(
-        field
-      ) ||
+      [
+        "type",
+        "name",
+        "url",
+        "apiKey",
+        "maxTokens",
+        "vectorDimension",
+        "provider",
+      ].includes(field) ||
       field === "provider"
     ) {
       setConnectivityStatus({ status: null, message: "" });
+      if (["type", "name", "url", "apiKey", "provider"].includes(field)) {
+        setCapacitySuggestion(null);
+        setAcceptedCapacitySuggestion(null);
+      }
     }
     // Clear model search term when model type changes
     if (field === "type") {
@@ -467,6 +499,51 @@ export const ModelAddDialog = ({
     if (field === "provider") {
       setModelList([]);
       setSelectedModelIds(new Set());
+    }
+  };
+
+  const canSuggestCapacity = () =>
+    supportsCapacityFields &&
+    !form.isBatchImport &&
+    form.name.trim() !== "" &&
+    (form.url.trim() !== "" || form.provider.trim() !== "");
+
+  const applyCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
+    const next = capacityFormFromSuggestion(suggestion);
+    if (!next || Object.keys(next).length === 0) return;
+    setForm((prev) => ({
+      ...prev,
+      ...next,
+      name: suggestion?.canonicalModelName || prev.name,
+      provider: suggestion?.suggestedProvider || prev.provider,
+    }));
+    setAcceptedCapacitySuggestion(suggestion);
+  };
+
+  const handleSuggestCapacity = async () => {
+    if (!canSuggestCapacity()) {
+      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
+      return;
+    }
+    setCheckingCapacitySuggestion(true);
+    try {
+      const suggestion = await modelService.suggestCapacity({
+        modelName: form.name.trim(),
+        baseUrl: form.url.trim(),
+        providerHint: form.provider,
+        apiKey: form.apiKey.trim() || undefined,
+        modelType: resolveConnectivityModelType(form.type),
+      });
+      setCapacitySuggestion(suggestion);
+      if (!suggestion.suggestions) {
+        setAcceptedCapacitySuggestion(null);
+      }
+    } catch (error) {
+      setCapacitySuggestion(null);
+      setAcceptedCapacitySuggestion(null);
+      message.error(t("model.dialog.capacity.suggestion.failed"));
+    } finally {
+      setCheckingCapacitySuggestion(false);
     }
   };
 
@@ -671,6 +748,13 @@ export const ModelAddDialog = ({
 
         const result = await modelService.verifyModelConfigConnectivity(config);
         connectivity = result.connectivity;
+        if (
+          capacitySuggestionEnabled &&
+          supportsCapacityFields &&
+          result.capacitySuggestion
+        ) {
+          setCapacitySuggestion(result.capacitySuggestion);
+        }
       }
 
       // Set connectivity status
@@ -740,9 +824,7 @@ export const ModelAddDialog = ({
       return Number.parseInt(trimmed, 10);
     };
     const tokenizer = capacity.tokenizerFamily.trim();
-    const hasAny = capacityFieldKeys.some(
-      (k) => capacity[k].trim() !== ""
-    );
+    const hasAny = capacityFieldKeys.some((k) => capacity[k].trim() !== "");
     return {
       context_window_tokens: toInt(capacity.contextWindowTokens),
       max_input_tokens: toInt(capacity.maxInputTokens),
@@ -786,8 +868,7 @@ export const ModelAddDialog = ({
       context_window_tokens:
         model.context_window_tokens ?? fallback.context_window_tokens,
       max_input_tokens: model.max_input_tokens ?? fallback.max_input_tokens,
-      max_output_tokens:
-        model.max_output_tokens ?? fallback.max_output_tokens,
+      max_output_tokens: model.max_output_tokens ?? fallback.max_output_tokens,
       default_output_reserve_tokens:
         model.default_output_reserve_tokens ??
         fallback.default_output_reserve_tokens,
@@ -902,9 +983,13 @@ export const ModelAddDialog = ({
   // mixed-type fetches), falling back to the form-level decision.
   const rowSupportsCapacityFields = (model: any): boolean => {
     const rowType = model?.model_type;
-    if (rowType === MODEL_TYPES.EMBEDDING || rowType === MODEL_TYPES.MULTI_EMBEDDING)
+    if (
+      rowType === MODEL_TYPES.EMBEDDING ||
+      rowType === MODEL_TYPES.MULTI_EMBEDDING
+    )
       return false;
-    if (rowType === MODEL_TYPES.STT || rowType === MODEL_TYPES.TTS) return false;
+    if (rowType === MODEL_TYPES.STT || rowType === MODEL_TYPES.TTS)
+      return false;
     if (rowType === MODEL_TYPES.RERANK) return false;
     if (rowType) return true;
     return supportsCapacityFields;
@@ -1033,6 +1118,10 @@ export const ModelAddDialog = ({
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
+      const acceptedModelName =
+        acceptedCapacitySuggestion?.canonicalModelName || form.name;
+      const acceptedProvider =
+        acceptedCapacitySuggestion?.suggestedProvider || undefined;
 
       // Determine the maximum tokens value.
       // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
@@ -1056,12 +1145,13 @@ export const ModelAddDialog = ({
       if (tenantId) {
         const modelParams: any = {
           tenantId,
-          name: form.name,
+          name: acceptedModelName,
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+          modelFactory: acceptedProvider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
@@ -1097,12 +1187,13 @@ export const ModelAddDialog = ({
         await modelService.createManageTenantModel(modelParams);
       } else {
         const modelParams: any = {
-          name: form.name,
+          name: acceptedModelName,
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+          modelFactory: acceptedProvider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
@@ -1142,7 +1233,7 @@ export const ModelAddDialog = ({
       // Note: id is set to 0 as placeholder; backend assigns the actual id when saving
       let modelConfig: SingleModelConfig | STTModelConfig | TTSModelConfig = {
         id: 0,
-        modelName: form.name,
+        modelName: acceptedModelName,
         displayName: form.displayName || form.name,
         apiConfig: {
           apiKey: form.apiKey,
@@ -1729,12 +1820,50 @@ export const ModelAddDialog = ({
                 description={t("model.dialog.capacity.batchDefault.hint")}
               />
             )}
+            {!form.isBatchImport && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-700">
+                    {t("model.dialog.capacity.suggestion.title")}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {t("model.dialog.capacity.suggestion.hint")}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Switch
+                    size="small"
+                    checked={capacitySuggestionEnabled}
+                    onChange={setCapacitySuggestionEnabled}
+                  />
+                  <Button
+                    size="small"
+                    onClick={handleSuggestCapacity}
+                    loading={checkingCapacitySuggestion}
+                    disabled={
+                      !capacitySuggestionEnabled || !canSuggestCapacity()
+                    }
+                  >
+                    {t("model.dialog.capacity.suggestion.check")}
+                  </Button>
+                </div>
+              </div>
+            )}
             <ModelCapacityFields
               value={form}
               onChange={(field, value) => handleFormChange(field, value)}
               validationError={capacityValidationError}
               formMode="add"
               requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+              suggestion={
+                capacitySuggestionEnabled && !form.isBatchImport
+                  ? capacitySuggestion
+                  : null
+              }
+              suggestionLoading={checkingCapacitySuggestion}
+              onUseSuggestion={() =>
+                applyCapacitySuggestion(capacitySuggestion)
+              }
             />
           </div>
         )}

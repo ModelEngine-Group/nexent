@@ -85,15 +85,15 @@ export interface ModelApiConfig {
 // STT model specific configuration interface
 export interface STTModelConfig extends SingleModelConfig {
   modelFactory?: string; // Model factory (e.g., "volcengine", "dashscope")
-  modelAppid?: string;   // App ID for Volcano STT
-  accessToken?: string;  // Access token for Volcano STT
+  modelAppid?: string; // App ID for Volcano STT
+  accessToken?: string; // Access token for Volcano STT
 }
 
 // TTS model specific configuration interface
 export interface TTSModelConfig extends SingleModelConfig {
   modelFactory?: string; // Model factory (e.g., "volcengine", "dashscope")
-  modelAppid?: string;   // App ID for Volcano TTS
-  accessToken?: string;  // Access token for Volcano TTS
+  modelAppid?: string; // App ID for Volcano TTS
+  accessToken?: string; // Access token for Volcano TTS
 }
 
 // Single model configuration interface
@@ -110,6 +110,33 @@ export interface SingleModelConfig {
   tokenizerFamily?: string;
   capacitySource?: string;
   capabilityProfileVersion?: string;
+}
+
+export interface CapacitySuggestionFields {
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  defaultOutputReserveTokens?: number;
+  tokenizerFamily?: string;
+}
+
+export type CapacitySuggestionMatchKind =
+  | "catalog_exact"
+  | "catalog_fuzzy"
+  | "provider_discovery"
+  | "none";
+
+export type CapacitySuggestionConfidence = "high" | "medium" | "low";
+
+export interface CapacitySuggestion {
+  suggestions?: CapacitySuggestionFields | null;
+  matchKind: CapacitySuggestionMatchKind;
+  matchConfidence?: CapacitySuggestionConfidence | null;
+  matchExplanation: string;
+  suggestedProvider?: string | null;
+  canonicalModelName?: string | null;
+  capabilityProfileVersion?: string | null;
+  capacitySourceOnAccept?: "operator" | null;
 }
 
 // Model configuration interface
@@ -136,4 +163,5 @@ export interface ModelValidationResponse {
   connectivity: boolean;
   model_name: string;
   error?: string; // Error message when connectivity fails
+  capacitySuggestion?: CapacitySuggestion | null;
 }
