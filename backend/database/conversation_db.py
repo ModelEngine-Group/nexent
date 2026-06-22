@@ -623,9 +623,18 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         }
 
 
+def _image_exists(session, message_id: int, image_url: str) -> bool:
+    stmt = select(ConversationSourceImage).where(
+        ConversationSourceImage.message_id == message_id,
+        ConversationSourceImage.image_url == image_url,
+        ConversationSourceImage.delete_flag == 'N'
+    ).limit(1)
+    return session.execute(stmt).scalar_one_or_none() is not None
+
+
 def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
     """
-    Create image source reference
+    Create image source reference (skips if the same message_id + image_url already exists).
 
     Args:
         image_data: Dictionary containing image data, must include the following fields:
@@ -634,17 +643,22 @@ def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = Non
         user_id: Reserved parameter for created_by and updated_by fields
 
     Returns:
-        int: Newly created image ID (auto-increment ID)
+        int: Newly created image ID (auto-increment ID), or -1 if skipped due to duplicate
     """
     with get_db_session() as session:
         # Ensure message_id is of integer type
         message_id = int(image_data['message_id'])
+        image_url = image_data['image_url']
+
+        # Skip duplicate: same message_id + image_url already in DB
+        if _image_exists(session, message_id, image_url):
+            return -1
 
         # Prepare data dictionary
         data = {
             "message_id": message_id,
             "conversation_id": image_data.get('conversation_id'),
-            "image_url": image_data['image_url'],
+            "image_url": image_url,
             "delete_flag": 'N',
             # Use the database's CURRENT_TIMESTAMP function
             "create_time": func.current_timestamp()

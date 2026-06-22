@@ -399,6 +399,45 @@ class TestConversationManagementService(unittest.TestCase):
         # create_message_units should not be called for picture_web
         mock_create_message_units.assert_not_called()
 
+    @patch('backend.services.conversation_management_service.create_conversation_message')
+    @patch('backend.services.conversation_management_service.create_source_image')
+    @patch('backend.services.conversation_management_service.create_message_units')
+    def test_save_message_with_picture_web_deduplicates_duplicate_urls(
+        self, mock_create_message_units, mock_create_source_image, mock_create_conversation_message
+    ):
+        """Ensure duplicate image URLs in a single PICTURE_WEB unit are deduplicated before saving."""
+        mock_create_conversation_message.return_value = 789
+
+        images_payload = json.dumps({
+            "images_url": [
+                "https://example.com/liver.jpg",
+                "https://example.com/liver.jpg",  # duplicate
+                "https://example.com/other.jpg",
+            ]
+        })
+
+        message_request = MessageRequest(
+            conversation_id=456,
+            message_idx=3,
+            role="assistant",
+            message=[
+                MessageUnit(type="string", content="Here are some images"),
+                MessageUnit(type="picture_web", content=images_payload)
+            ],
+            minio_files=[]
+        )
+
+        result = save_message(
+            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
+
+        self.assertEqual(result.code, 0)
+        # Only 2 calls (liver.jpg and other.jpg), not 3
+        self.assertEqual(mock_create_source_image.call_count, 2)
+        called_urls = [call.args[0]['image_url'] for call in mock_create_source_image.call_args_list]
+        self.assertEqual(called_urls.count("https://example.com/liver.jpg"), 1)
+        self.assertIn("https://example.com/liver.jpg", called_urls)
+        self.assertIn("https://example.com/other.jpg", called_urls)
+
     @patch('backend.services.conversation_management_service.save_message')
     def test_save_conversation_user(self, mock_save_message):
         # Setup

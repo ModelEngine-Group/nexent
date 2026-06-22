@@ -198,11 +198,16 @@ extra_body=model_config.extra_body,
             raise ValueError(f"{class_name} not found in local")
         else:
             if class_name == "KnowledgeBaseSearchTool":
-                # Filter out conflicting parameters from params to avoid conflicts
-                # These parameters have exclude=True and cannot be passed to __init__
-                # due to smolagents.tools.Tool wrapper restrictions
+                # Filter out conflicting parameters from params to avoid conflicts.
+                # Parameters declared with exclude=True cannot be passed to __init__
+                # due to smolagents.tools.Tool wrapper restrictions; they are set as
+                # attributes on the instance after construction, sourced from metadata.
+                # `document_paths` is intentionally hidden from the LLM and only
+                # populated via tool_params from the northbound interface.
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer",
+                                                 "rerank_model", "display_name_to_index_map",
+                                                 "document_paths"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -216,6 +221,13 @@ extra_body=model_config.extra_body,
                     "rerank_model", None) if tool_config.metadata else None
                 tools_obj.display_name_to_index_map = tool_config.metadata.get(
                     "display_name_to_index_map", {}) if tool_config.metadata else {}
+                # Internal access control: restrict results to documents whose
+                # path_or_url is in the allow list. Only the northbound interface
+                # may populate this; never the LLM.
+                tools_obj.set_document_paths(
+                    tool_config.metadata.get(
+                        "document_paths") if tool_config.metadata else None
+                )
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
@@ -432,6 +444,7 @@ extra_body=model_config.extra_body,
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
+                verification_config=agent_config.verification_config,
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,

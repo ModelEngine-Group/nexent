@@ -136,6 +136,7 @@ export const useSaveGuard = () => {
         max_steps: currentEditedAgent.max_step,
         requested_output_tokens: currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
+        verification_config: currentEditedAgent.verification_config,
         enabled: true,
         business_description: currentEditedAgent.business_description,
         duty_prompt: currentEditedAgent.duty_prompt,

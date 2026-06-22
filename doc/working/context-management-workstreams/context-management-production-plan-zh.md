@@ -709,6 +709,8 @@ flowchart LR
 - 定义确定性线性历史恢复语义：投影器从引用的压缩快照开始，应用 `restore.applied`
   之后的事件。
 - 支持带用户指令的定向手动压缩。
+- 对话页上下文窗口使用率详情气泡增加“刷新”按钮，触发当前会话的手动 compact。后端提供 `POST /conversation/{conversation_id}/compact` 或等价生命周期 API，前端 `TokenUsageIndicator` 透传 `onRefresh`、禁用和 loading 状态。
+- compact 成功后，除写入 W5 `compression.snapshot` 外，还要创建一条可展示的对话历史消息。消息 metadata 至少记录 `event_type=context_compaction`、`compression_ratio`、`source_token_count`、`compressed_token_count` 和 `snapshot_event_id`，前端在压缩消息下方显示压缩比。
 - 增加压缩和恢复生命周期事件及 Hook。
 - 增加经过授权的工作记忆和记忆决策检查、恢复及编辑操作。
 
@@ -717,6 +719,8 @@ flowchart LR
 **验收标准：**
 
 - 恢复可重建压缩快照对应的活动上下文派生视图。
+- “刷新”按钮能触发当前会话 compact，并正确处理无会话、活动运行冲突、权限失败和重复点击。
+- 历史接口返回压缩消息及 metadata，前端展示压缩比。
 
 #### 2.3.3 上下文构建与压缩
 
@@ -813,6 +817,9 @@ flowchart LR
 **方案：**
 
 - 配置独立压缩模型和备用模型。
+- 新增 `CompactionConfig`：`enabled`、`trigger_threshold_tokens`、`summary_json_schema`。模型配置和 Agent 定义均可配置，解析优先级固定为 Agent 定义 > 模型配置 > 系统默认值。
+- `ag_tenant_agent_t` 和 `model_record_t` 增加 JSONB 配置列或拆明确字段；新增 migration，并同步更新 `docker/init.sql` 与 K8s init.sql。
+- 后端在 `create_agent_info.py` 增加 resolver，将模型配置和 Agent 配置合并为 `ContextManagerConfig`。
 - 增加超时、取消、有限 Provider 感知重试、限流策略、成本上限和熔断。
 - 检测无进展压缩，防止无限循环。
 - 语义压缩不可用时使用确定性截断。
