@@ -108,6 +108,35 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         "max_tokens", 0) if not is_embedding_type else 0
     timeout_seconds_value = 120 if not is_embedding_type else None
 
+    # W1/W2 capacity fields. The frontend batch-add resolves these in
+    # buildBatchModelData (row override -> top-level batch default) and
+    # sends them per row tagged with capacity_source. Two cases:
+    #   - capacity_source="operator": the operator explicitly saved these
+    #     values (top-level batch default panel or per-row gear modal).
+    #     Persist them. Without this branch the ModelRequest defaults kick
+    #     in (all None) and every freshly batch-created row lands with
+    #     context_window_tokens=NULL, max_output_tokens=NULL even though
+    #     the user filled the panel -- the glm-5.1/glm-5.2 incident.
+    #   - capacity_source="provider_candidate" (or anything else): per the
+    #     W1 design these are advisory UI hints surfaced from the catalog
+    #     by _extract_capacity_hints. They are shown to the user as
+    #     suggestions but not auto-persisted; only operator acceptance
+    #     should write them.
+    is_operator_capacity = model.get("capacity_source") == "operator"
+    capacity_kwargs = (
+        {
+            "context_window_tokens": model.get("context_window_tokens"),
+            "max_input_tokens": model.get("max_input_tokens"),
+            "max_output_tokens": model.get("max_output_tokens"),
+            "default_output_reserve_tokens": model.get("default_output_reserve_tokens"),
+            "tokenizer_family": model.get("tokenizer_family"),
+            "capacity_source": "operator",
+            "capability_profile_version": model.get("capability_profile_version"),
+        }
+        if is_operator_capacity
+        else {}
+    )
+
     model_obj = ModelRequest(
         model_factory=provider,
         model_name=model_name,
@@ -118,7 +147,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         expected_chunk_size=expected_chunk_size,
         maximum_chunk_size=maximum_chunk_size,
         chunk_batch=chunk_batch,
-        timeout_seconds=timeout_seconds_value
+        timeout_seconds=timeout_seconds_value,
+        **capacity_kwargs,
     )
 
     model_dict = model_obj.model_dump()

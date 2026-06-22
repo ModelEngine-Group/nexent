@@ -622,17 +622,66 @@ export const ModelDeleteDialog = ({
     });
   }, [providerModels, providerModelSearchTerm]);
 
-  // Handle provider config save
+  // Per-row required capacity gate for the provider-management batch confirm.
+  // Unlike ModelAddDialog this dialog has no top-level "batch default capacity"
+  // panel, so each enabled row must itself carry positive context_window_tokens
+  // and max_output_tokens (set via the per-row gear modal). Without this gate
+  // the user could batch-confirm an LLM/VLM row whose catalog supplied no W2
+  // metadata, persisting context_window_tokens=NULL, max_output_tokens=NULL,
+  // and only the backend's DEFAULT_LLM_MAX_TOKENS=4096 legacy sentinel -- the
+  // exact glm-5.2 production incident we just root-caused.
+  //
+  // We deliberately don't fall back to model.max_tokens here: per the W1/W2
+  // plan the legacy column is unconditionally seeded by the provider
+  // adapters, so treating it as a stand-in would mask every missing W2 row.
+  const requiresW2Capacity = (modelType?: ModelType): boolean => {
+    if (!modelType) return false;
+    if (
+      modelType === MODEL_TYPES.EMBEDDING ||
+      modelType === MODEL_TYPES.MULTI_EMBEDDING
+    )
+      return false;
+    if (modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS)
+      return false;
+    if (modelType === MODEL_TYPES.RERANK) return false;
+    return true;
+  };
+  const hasUnconfiguredSelectedRow = useMemo(() => {
+    if (!requiresW2Capacity(deletingModelType as ModelType)) return false;
+    return providerModels.some((m: any) => {
+      if (!pendingSelectedProviderIds.has(m.id)) return false;
+      return !m.context_window_tokens || !m.max_output_tokens;
+    });
+  }, [providerModels, pendingSelectedProviderIds, deletingModelType]);
+
+  // Handle provider config save. In addition to the shared API key /
+  // timeoutSeconds / concurrencyLimit, the "modify config" dialog now also
+  // exposes a top-level capacity panel (Tokenizer hidden) as a per-provider
+  // bulk-apply default, mirroring the batch-add UX. Any filled capacity
+  // field is forwarded to every model under (provider, model_type) so the
+  // user can fix glm-5.x style rows with NULL W2 columns from one place
+  // instead of opening N gear modals.
   const handleProviderConfigSave = async ({
     apiKey,
     maxTokens,
     timeoutSeconds,
     concurrencyLimit,
+    contextWindowTokens,
+    maxInputTokens,
+    maxOutputTokens,
+    defaultOutputReserveTokens,
+    capacitySource,
   }: {
     apiKey?: string;
     maxTokens: number;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }) => {
     setMaxTokens(maxTokens);
     if (
@@ -667,6 +716,15 @@ export const ModelDeleteDialog = ({
             maxTokens: maxTokens || m.maxTokens,
             ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
             ...(concurrencyLimit !== undefined ? { concurrencyLimit } : {}),
+            // Only forward capacity fields the user actually filled in the
+            // bulk panel; omitted fields keep each model's existing value.
+            ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
+            ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+            ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined ? { capacitySource } : {}),
           }));
 
         await modelService.updateBatchModel(
@@ -677,13 +735,32 @@ export const ModelDeleteDialog = ({
         // Show success message since no exception was thrown
         message.success(t("model.dialog.success.updateSuccess"));
 
-        // Synchronize providerModels state with the updated maxTokens
+        // Synchronize providerModels state with the bulk values that landed,
+        // so the row gear modals show the new defaults next time they open.
         setProviderModels((prev) =>
           prev.map((model) => ({
             ...model,
             max_tokens: maxTokens || model.max_tokens,
             timeout_seconds: timeoutSeconds || model.timeout_seconds,
-            concurrency_limit: concurrencyLimit !== undefined ? concurrencyLimit : model.concurrency_limit,
+            concurrency_limit:
+              concurrencyLimit !== undefined
+                ? concurrencyLimit
+                : model.concurrency_limit,
+            ...(contextWindowTokens !== undefined
+              ? { context_window_tokens: contextWindowTokens }
+              : {}),
+            ...(maxInputTokens !== undefined
+              ? { max_input_tokens: maxInputTokens }
+              : {}),
+            ...(maxOutputTokens !== undefined
+              ? { max_output_tokens: maxOutputTokens }
+              : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { default_output_reserve_tokens: defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined
+              ? { capacity_source: capacitySource }
+              : {}),
           }))
         );
       } catch (e) {
@@ -816,11 +893,20 @@ export const ModelDeleteDialog = ({
         selectedSource &&
           selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE &&
           deletingModelType && (
-            <Button
-              key="confirm"
-              type="primary"
-              loading={isConfirmLoading}
-              onClick={async () => {
+            <Tooltip
+              key="confirm-tooltip"
+              title={
+                hasUnconfiguredSelectedRow
+                  ? t("model.dialog.batch.requireRowCapacity")
+                  : ""
+              }
+            >
+              <Button
+                key="confirm"
+                type="primary"
+                loading={isConfirmLoading}
+                disabled={hasUnconfiguredSelectedRow}
+                onClick={async () => {
                 setIsConfirmLoading(true);
                 try {
                   // Handle changes for both silicon and openai sources
@@ -1035,8 +1121,9 @@ export const ModelDeleteDialog = ({
                 }
               }}
             >
-              {t("common.confirm")}
-            </Button>
+                {t("common.confirm")}
+              </Button>
+            </Tooltip>
           ),
       ]}
       width={520}
@@ -1625,10 +1712,27 @@ export const ModelDeleteDialog = ({
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {
-            const modelName = selectedSingleModel.model_name || selectedSingleModel.id;
+            // batch_update_models_for_tenant looks the row up by either a
+            // numeric model_id or a "model_factory/model_name" composite key
+            // (it splits on "/" and passes the prefix as model_factory).
+            // Sending just `model_name` here matched no row in production
+            // because DB rows have model_factory="dashscope" (etc.) and the
+            // missing prefix made get_model_by_name_factory return None --
+            // the gear modal's capacity edits became silent no-ops, which
+            // contributed to the glm-5.x / glm-4.7 soft-delete incident.
+            const baseName =
+              selectedSingleModel.model_name || selectedSingleModel.id;
+            const provider =
+              selectedSingleModel.model_factory || selectedSource;
+            const qualifiedId =
+              baseName && typeof baseName === "string" && baseName.includes("/")
+                ? baseName
+                : provider
+                  ? `${provider}/${baseName}`
+                  : baseName;
 
             const updatePayload: any = {
-              model_id: modelName,
+              model_id: qualifiedId,
               maxTokens: config.maxTokens,
               timeoutSeconds: config.timeoutSeconds,
               concurrencyLimit: config.concurrencyLimit,

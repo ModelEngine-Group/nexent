@@ -233,9 +233,24 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             for model in existing_model_list
         }
 
-        # Delete existing models not present
+        # Delete existing models not present.
+        # The membership key MUST match how existing_model_map (a few lines
+        # above) and the create-or-update branch (a few lines below) build
+        # their lookup key, otherwise the two halves disagree about what
+        # "the same model" means. Both of those use add_repo_to_name, which
+        # omits the slash when model_repo is empty. The naive
+        # `model_repo + "/" + model_name` here always prepends "/" for the
+        # empty-repo case (DashScope catalogs return bare names like
+        # "glm-4.7" and rows land with model_repo=""), so "/glm-4.7" never
+        # matched the catalog's "glm-4.7" entry -- every existing row was
+        # treated as "not in the incoming list" and silently soft-deleted on
+        # every batch_create. Use the same helper to keep both halves
+        # speaking the same language.
         for model in existing_model_list:
-            model_full_name = model["model_repo"] + "/" + model["model_name"]
+            model_full_name = add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            )
             if model_full_name not in model_list_ids:
                 delete_model_record(model["model_id"], user_id, tenant_id)
 
@@ -256,6 +271,31 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
                         update_data["max_tokens"] = new_max_tokens
+                    # Same gap as prepare_model_dict had for the create branch:
+                    # the batch refresh path only touched legacy max_tokens, so
+                    # editing a row's capacity via batch-add (e.g. tweaking the
+                    # top-level batch defaults and re-confirming) silently
+                    # dropped the W1/W2 capacity updates. We mirror the
+                    # operator-vs-candidate rule from prepare_model_dict here:
+                    # only persist W1/W2 capacity when the payload is marked
+                    # capacity_source="operator", so provider-discovered hints
+                    # don't auto-overwrite an existing row on a refresh.
+                    if model.get("capacity_source") == "operator":
+                        for field in (
+                            "context_window_tokens",
+                            "max_input_tokens",
+                            "max_output_tokens",
+                            "default_output_reserve_tokens",
+                            "tokenizer_family",
+                            "capability_profile_version",
+                        ):
+                            new_value = model.get(field)
+                            if new_value is None:
+                                continue
+                            if existing_model.get(field) != new_value:
+                                update_data[field] = new_value
+                        if existing_model.get("capacity_source") != "operator":
+                            update_data["capacity_source"] = "operator"
                     if update_data:
                         update_model_record(existing_model["model_id"], update_data, user_id)
                     continue

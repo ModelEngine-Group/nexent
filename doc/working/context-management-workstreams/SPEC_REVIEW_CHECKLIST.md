@@ -1,10 +1,15 @@
 # Workstream Spec Review Checklist
 
-> Derived from the W1 post-acceptance retrospective (2026-06-16). Apply to
-> every new workstream spec **before** it is marked Accepted. Apply again
-> to every existing spec **before** implementation begins. Each item has
-> concrete sub-questions; "OK" requires an affirmative answer to **all**
-> sub-questions, not just the main one.
+> Items 1-6 derived from the W1 post-acceptance retrospective (2026-06-16).
+> Items 7-10 added after the W1/W2 follow-up retrospective (2026-06-22) —
+> end-to-end testing of the W2 PR plus six weeks of cleanup surfaced four
+> additional bug categories, most damaging being a layer-interaction bug
+> that silently dropped operator capacity edits and soft-deleted the user's
+> freshly-added catalog rows. Apply this checklist to every new workstream
+> spec **before** it is marked Accepted. Apply again to every existing spec
+> **before** implementation begins. Each item has concrete sub-questions;
+> "OK" requires an affirmative answer to **all** sub-questions, not just
+> the main one.
 
 ## How to Use
 
@@ -146,6 +151,189 @@ Sub-questions:
 > only way to find out was to query `model_monitoring_record_t` directly.
 > A reverse-test review during spec evaluation would have caught this.
 
+## Post-W1/W2 Follow-up Additions (2026-06-22)
+
+> Items 7–10 capture lessons from the W2 PR's end-to-end testing window.
+> Where Items 1–6 focus on spec completeness, these focus on
+> implementation contracts that are easy to miss when fixing one reported
+> bug at a time — particularly when the same concept has multiple
+> frontend surfaces, multiple backend constructor sites, or multiple
+> key-derivation halves that must agree.
+
+### 7. Frontend Configuration Surface Matrix
+
+**Main question:** For every form/dialog this workstream modifies, has
+the **complete matrix** of configuration surfaces been enumerated, and
+has each surface's contract (state, validation, save handler, wire
+payload) been verified?
+
+The matrix is at least four surfaces and often six:
+- single-add (`ModelAddDialog`, single-row form)
+- single-edit (`ModelEditDialog`)
+- batch-add top-level defaults (`ModelAddDialog` batch-import panel)
+- batch-add per-row gear modal (`ModelAddDialog` Settings Modal)
+- batch-edit per-row gear modal (`ProviderConfigEditDialog` from
+  `ModelDeleteDialog`)
+- batch-edit Confirm / "修改配置" bulk-apply (`ModelDeleteDialog`
+  footer Confirm + `ProviderConfigEditDialog` with
+  `hideCapacityFields=true`)
+
+Sub-questions:
+- [ ] Does the spec **list** every surface in the matrix that lets an
+      operator configure this concept? Even just to say "intentionally
+      out of scope for this workstream — follow-up W_NN".
+- [ ] For each surface, is the form state initialization documented?
+      (which fields prefill from where; what happens with NULL or empty
+      existing values; what happens with the backend's
+      `DEFAULT_LLM_MAX_TOKENS` sentinel)
+- [ ] For each surface, is the validation contract documented? (which
+      fields are required; whether the Save button is `disabled` only,
+      or the handler also re-checks — see Item 9)
+- [ ] For each surface, is the **save handler's wire payload format**
+      documented? (camelCase vs snake_case; provider-prefix format;
+      numeric model_id vs name; what gets included when fields are
+      optional)
+- [ ] For each batch-mode surface, are the **destructive semantics**
+      called out? ("Confirm in batch-edit deletes existing models not in
+      the incoming list" is the kind of contract that must be visible in
+      the spec, not buried in `batch_create_models_for_tenant`.)
+- [ ] If a fix is applied to one surface, has it been **explicitly
+      replicated** to every other surface that shares the same concept?
+      Or is a follow-up opened for each remaining surface?
+
+> **W1/W2 follow-up lesson**: W1 step 7 named `ModelEditDialog` and the
+> spec acknowledged `ProviderConfigEditDialog` as a sibling. Six weeks
+> later we discovered the same class of fix was missing from FOUR more
+> surfaces: `ModelAddDialog` batch-import per-row gear (commit
+> `4f770de1c`), `ModelAddDialog` single-add payload hygiene (`5985d4ba4`),
+> `ModelEditDialog` defensive isFormValid guard (`60655efbb`), and
+> `ModelDeleteDialog` Confirm gate + provider-level bulk-apply panel
+> (`6dd735162`). The "4-quadrant" view of frontend model config
+> (`add`/`edit` × `single`/`batch`) was never written down, so each
+> single-bug fix shipped while the other three quadrants kept the bug.
+> The capstone incident (commit `67a75f014`) was an interaction between
+> two of those quadrants: batch-edit gear save silently dropping
+> capacity edits, then batch-edit Confirm soft-deleting freshly-added
+> catalog rows on every confirm.
+
+### 8. Pydantic Optional Silent Drop in Constructor Sites
+
+**Main question:** When a new `Optional[X] = None` field is added to a
+request or response schema, has every site that **explicitly constructs**
+that schema been audited and updated to thread the new field through?
+
+Sub-questions:
+- [ ] `grep -rn "ClassName(" backend/ sdk/` produces a finite list. Has
+      every callsite been audited? Are the constructor sites using
+      `**dict` passthrough (safe — new fields flow automatically) or
+      explicit kwargs (unsafe — silent absorption to default)?
+- [ ] For sites using explicit kwargs, is there a test that pins the
+      constructor's `call_args` (not just the return dict — mocking
+      `model_dump` trivially satisfies a return-dict assertion regardless
+      of what the constructor received)?
+- [ ] Is there a regression test where the schema field's intended
+      operator value reaches the DB column, not just the schema default?
+- [ ] If the spec adds a "marker" field (e.g., `capacity_source` with
+      `operator` vs `provider_candidate` semantics), is the
+      operator-vs-marker contract enforced at the constructor site, not
+      just hoped-for at the caller?
+
+> **W1/W2 follow-up lesson**: W1 added W1/W2 capacity fields
+> (`context_window_tokens`, `max_output_tokens`, etc.) to the
+> `ModelRequest` Pydantic schema. The single-add and single-edit service
+> paths used dict passthrough (`dict(model_data) → create_model_record`),
+> so the new fields landed automatically. But `prepare_model_dict` (the
+> batch-create path in `backend/services/model_provider_service.py`,
+> introduced 2025-08-06 and never touched by W1/W2 commits) used
+> `ModelRequest(model_factory=..., model_name=..., max_tokens=...)` —
+> explicit kwargs, no `**`. The new W2 fields were `Optional[int] = None`,
+> so the constructor silently used `None` for them. Every batch-fetched
+> LLM landed with `context_window_tokens=NULL`; only the legacy
+> `max_tokens` mirror persisted (the glm-5.1 / glm-5.2 incident, commit
+> `8bbd6075a`). Worse, the existing test
+> `test_prepare_model_dict_does_not_persist_provider_capacity_candidates`
+> only asserted "the dumped result dict doesn't contain W2 fields" — but
+> the result was controlled by the mocked `model_dump`, so the assertion
+> was trivially satisfied no matter what the constructor received.
+> Strengthening the test to also pin `mock_model_request.call_args`
+> (commit `70d231b2d`) is what now blocks regressions.
+
+### 9. Defensive Save Handler Guards
+
+**Main question:** For every Save / Submit handler whose button is gated
+by `disabled={!isValid()}`, does the handler **also** re-check
+`if (!isValid()) return` at the top of its body?
+
+Sub-questions:
+- [ ] Can the handler be invoked from non-click paths? (Modal `onOk`,
+      form submit, keyboard Enter, programmatic dispatch, third-party
+      component callbacks)
+- [ ] React's `disabled` attribute can lag one tick behind state updates
+      — does the handler tolerate being invoked while it would have been
+      disabled?
+- [ ] If validation fires for required fields, does the handler bail
+      before sending an incomplete payload, or does it send and rely on
+      backend rejection?
+- [ ] Is the same guard pattern applied symmetrically across sibling
+      dialogs? (If one dialog has the guard and a sibling doesn't, the
+      sibling will trip on the same edge case.)
+
+> **W1/W2 follow-up lesson**: `ModelEditDialog.handleSave` had
+> `disabled={!isFormValid()}` on its Save button but no defensive guard
+> inside the handler. A user opened the dialog for glm-5.2 (whose W2
+> columns were NULL in DB because of Item 8), saw empty required fields,
+> somehow triggered save (likely Modal `onOk` firing or a fast-click
+> before the disabled state propagated), and the row landed with
+> `context_window_tokens=NULL, max_output_tokens=NULL` persisted via a
+> partial payload. The Save button being disabled is a hint, not an
+> enforcement. `ProviderConfigEditDialog` already had `if (!valid())
+> return` in its handler — making both dialogs symmetric (commit
+> `60655efbb`) closed the gap.
+
+### 10. Wire-Format Key Consistency Across Halves
+
+**Main question:** For every backend route that does both a "lookup
+existing by key" pass and a "delete-not-in-list by key" pass, do both
+halves compute the **same key** from the same row, by the same helper?
+And does the frontend's outbound payload match what the backend expects?
+
+Sub-questions:
+- [ ] Does every place that builds the key use the **same helper**
+      function (e.g., `add_repo_to_name`)? Or does one half use raw
+      concatenation while the other uses the helper?
+- [ ] If a row field is empty/None, does the key-building helper omit the
+      separator? Does the raw concatenation also omit it? (Inconsistent
+      handling of empty `model_repo` was the glm-4.7 incident.)
+- [ ] Is there a test where one row has an empty key component and the
+      membership check returns the expected result?
+- [ ] Does the frontend's outbound `model_id` (or whatever the lookup
+      handle is) match what the backend's lookup expects? (`{factory}/{name}`
+      vs bare `{name}` vs numeric primary key)
+- [ ] When a frontend silent no-op (Item A) interacts with a backend
+      destructive default (Item B), the failure mode is invisible to the
+      user until it destroys data. Is the layer interaction explicitly
+      tested?
+
+> **W1/W2 follow-up lesson** (commit `67a75f014`):
+> `batch_create_models_for_tenant` built `existing_model_map` keyed by
+> `add_repo_to_name(model_repo, model_name)` — which returns `"glm-4.7"`
+> when `model_repo` is empty. The delete loop ten lines above used
+> `model["model_repo"] + "/" + model["model_name"]` — which returns
+> `"/glm-4.7"`. For DashScope rows (catalog returns bare names like
+> `glm-4.7`; persisted rows have `model_repo=""`), the delete loop's key
+> never matched the catalog id, so every existing row got soft-deleted
+> on every batch_create call. Independently, the frontend gear modal in
+> `ModelDeleteDialog` constructed `model_id = selectedSingleModel.model_name
+> || selectedSingleModel.id`, sending bare `"glm-4.7"` instead of
+> `"dashscope/glm-4.7"`; the backend split on "/" and got no model_factory,
+> so `get_model_by_name_factory(model_name="glm-4.7", model_factory=None)`
+> returned None and logged a warning instead of erroring. The frontend
+> received HTTP 200 with no diff, so the gear modal closed and the user
+> thought their capacity edit landed. The two bugs combined to make gear
+> saves invisible AND the next "Confirm" click soft-delete the user's
+> freshly-added rows. Either bug alone would have been noticed quickly;
+> the interaction is what made the failure mode silent.
+
 ## Severity Calibration
 
 When applying the checklist:
@@ -177,6 +365,26 @@ Each Required action either becomes a spec edit or an explicit follow-up.
 The W1 workstream passed a 26-finding formal review, three rounds of
 implementation PRs, and was marked Accepted. Within 24 hours of
 end-to-end testing, ~17 distinct issues surfaced across catalog
-adoption, frontend UX, and operations. Every issue would have been
-caught by one of the six items above. This checklist is the smallest
+adoption, frontend UX, and operations. Items 1–6 are the smallest
 formalization of that lesson.
+
+Six weeks later, the W2 PR's end-to-end testing surfaced ~20 more
+issues, several of them silent data-loss bugs (gear-save no-op +
+batch_create soft-delete cascade) that destroyed an operator's
+freshly-added catalog rows. Each had at least one of these patterns:
+
+- The same concept had multiple frontend configuration surfaces
+  (`add`/`edit` × `single`/`batch` × `per-row`/`provider-level`); one
+  surface got the fix and the others kept the bug.
+- A new schema field was Optional with default None; one constructor
+  site used `**dict` passthrough and another used explicit kwargs;
+  the kwargs site silently dropped the new field.
+- A save handler relied on `disabled={!isValid()}` alone; the handler
+  fired anyway through a non-click path and persisted a partial row.
+- A backend route built the same row's lookup key two different ways
+  in two adjacent loops; the key inconsistency manifested as cascading
+  soft-deletes on every Confirm click.
+
+Items 7–10 cover those patterns. The combined checklist is what every
+spec should pass before implementation and every PR should answer in
+its description.

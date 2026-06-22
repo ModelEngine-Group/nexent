@@ -34,6 +34,13 @@ interface ModelCapacityFieldsProps {
   formMode?: ModelCapacityFormMode;
   /** Field names that should render a red asterisk and be enforced by validation. */
   requiredFields?: Array<keyof ModelCapacityFormState>;
+  /**
+   * Hide the tokenizer_family input. Used by provider-level "modify config"
+   * bulk-apply mode where one value would be forced onto N models with
+   * different tokenizer families -- almost always wrong, so we drop the
+   * field rather than encourage misuse.
+   */
+  hideTokenizer?: boolean;
 }
 
 const TOKENIZER_FAMILY_OPTIONS = [
@@ -185,6 +192,7 @@ export const ModelCapacityFields = ({
   showDeprecatedMaxTokensWarning,
   formMode = "edit",
   requiredFields = [],
+  hideTokenizer = false,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
@@ -282,26 +290,28 @@ export const ModelCapacityFields = ({
         )}
       </div>
 
-      <div>
-        <label className="block mb-1 text-sm font-medium text-gray-700">
-          <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
-            <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
-          </Tooltip>
-          {requiredSet.has("tokenizerFamily") && (
-            <span className="text-red-500 ml-1">*</span>
-          )}
-        </label>
-        <AutoComplete
-          allowClear
-          value={value.tokenizerFamily}
-          onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
-          options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
-            label: item,
-            value: item,
-          }))}
-          style={{ width: "100%" }}
-        />
-      </div>
+      {!hideTokenizer && (
+        <div>
+          <label className="block mb-1 text-sm font-medium text-gray-700">
+            <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
+              <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
+            </Tooltip>
+            {requiredSet.has("tokenizerFamily") && (
+              <span className="text-red-500 ml-1">*</span>
+            )}
+          </label>
+          <AutoComplete
+            allowClear
+            value={value.tokenizerFamily}
+            onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
+            options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
+              label: item,
+              value: item,
+            }))}
+            style={{ width: "100%" }}
+          />
+        </div>
+      )}
 
       {validationError && (
         <Alert type="error" showIcon message={t(validationError)} />

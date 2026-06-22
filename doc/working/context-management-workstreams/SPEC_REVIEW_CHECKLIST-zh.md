@@ -1,6 +1,10 @@
 # 工作流规范评审检查清单
 
-> 源自 W1 验收后回顾（2026-06-16）。适用于每个新工作流规范在标记为 Accepted **之前**。
+> 检查项 1–6 源自 W1 验收后回顾（2026-06-16）。
+> 检查项 7–10 源自 W1/W2 后续回顾（2026-06-22）——W2 PR 的端到端测试
+> 加上六周的清理工作暴露了四类新 bug，其中最严重的是层间交互 bug：
+> 静默丢弃运维人员的容量编辑，并在用户每次"确认"时软删除其刚添加的目录行。
+> 适用于每个新工作流规范在标记为 Accepted **之前**。
 > 再次适用于每个现有规范在实现开始 **之前**。每个检查项都有具体的子问题；
 > "OK" 要求对 **所有** 子问题给出肯定回答，不仅仅是主问题。
 
@@ -116,6 +120,159 @@
 > 目录被错过。唯一发现的方法是直接查询 `model_monitoring_record_t`。
 > 规范评审期间的反向测试审查会捕获这一点。
 
+## W1/W2 后续追加（2026-06-22）
+
+> 检查项 7–10 来自 W2 PR 的端到端测试窗口。检查项 1–6 关注规范完整性；
+> 这四项关注的是"按报告的单个 bug 修复时容易遗漏的实现契约"——尤其当
+> 同一个概念有多个前端配置面、多个后端构造调用点、或多个必须保持一致
+> 的 key 推导算法分支时。
+
+### 7. 前端配置面矩阵
+
+**主问题：** 对于此工作流修改的每个表单/对话框，是否枚举了配置面的
+**完整矩阵**，并验证了每个配置面的契约（状态、验证、保存处理器、wire
+payload）？
+
+矩阵至少 4 个面，通常是 6 个：
+- 单个添加（`ModelAddDialog` 单行表单）
+- 单个编辑（`ModelEditDialog`）
+- 批量添加顶部默认值（`ModelAddDialog` 批量导入面板）
+- 批量添加每行齿轮弹窗（`ModelAddDialog` Settings Modal）
+- 批量编辑每行齿轮弹窗（从 `ModelDeleteDialog` 唤起的
+  `ProviderConfigEditDialog`）
+- 批量编辑"确认"按钮 / "修改配置"批量应用
+  （`ModelDeleteDialog` 底部确认按钮 + `hideCapacityFields=true` 模式
+  的 `ProviderConfigEditDialog`）
+
+子问题：
+- [ ] 规范是否 **列出了** 矩阵中所有允许运维人员配置此概念的面？
+      即使只是说"此工作流有意排除——后续 W_NN 处理"。
+- [ ] 对于每个配置面，表单状态初始化是否文档化？（哪些字段从哪里预填；
+      已有 NULL 或空字段时的行为；遇到后端注入的 `DEFAULT_LLM_MAX_TOKENS`
+      sentinel 时的行为）
+- [ ] 对于每个配置面，验证契约是否文档化？（哪些字段必填；Save 按钮是仅
+      `disabled` 控制，还是处理器内部也再检查一遍——见检查项 9）
+- [ ] 对于每个配置面，**保存处理器的 wire payload 格式**是否文档化？
+      （camelCase vs snake_case；provider 前缀格式；数字 model_id vs
+      名称；可选字段在什么条件下被包含）
+- [ ] 对于每个批量模式的面，**销毁性语义**是否被点出？
+      （"批量编辑模式下'确认'会删除所有不在 incoming list 中的现存模型"
+      这类契约必须在 spec 中可见，而不是埋在
+      `batch_create_models_for_tenant` 里。）
+- [ ] 如果修复应用到一个面，是否 **明确复制到** 其它所有共享同一概念的
+      面？或者为每个剩余面开了 follow-up？
+
+> **W1/W2 后续教训**：W1 步骤 7 命名了 `ModelEditDialog`，spec 承认
+> `ProviderConfigEditDialog` 是其同级。六周后我们发现同一类修复在四个
+> 面上依然缺失：`ModelAddDialog` 批量导入每行齿轮（commit `4f770de1c`）、
+> `ModelAddDialog` 单加 payload 清理（`5985d4ba4`）、`ModelEditDialog`
+> 防御性 isFormValid 兜底（`60655efbb`）、`ModelDeleteDialog` "确认"
+> 闸 + provider 级批量应用面板（`6dd735162`）。前端模型配置的"4 象限"
+> 视图（`add`/`edit` × `single`/`batch`）从未被写下来，所以每次单 bug
+> 修复都让其它三个象限保留了 bug。压轴事故（commit `67a75f014`）就是
+> 其中两个象限的交互：批量编辑齿轮静默丢弃容量编辑，然后批量编辑确认
+> 在每次点击时软删除刚添加的目录行。
+
+### 8. Pydantic Optional 在构造调用点的静默掉值
+
+**主问题：** 当向 request/response schema 添加一个新的 `Optional[X] = None`
+字段时，是否审查了每一个 **显式构造** 该 schema 的调用点，并更新它们传入
+新字段？
+
+子问题：
+- [ ] `grep -rn "ClassName(" backend/ sdk/` 产出一个有限的列表。是否
+      每个调用点都被审查？这些构造调用点用的是 `**dict` 透传（安全——
+      新字段自动流过去）还是显式 kwargs（不安全——会静默掉到默认值）？
+- [ ] 对于用显式 kwargs 的调用点，是否有测试 pin 住构造器的
+      `call_args`（不是返回 dict——mock `model_dump` 的话返回 dict 断言
+      无论构造器实际收到什么都能平凡通过）？
+- [ ] 是否有回归测试验证 schema 字段的"运维人员期望值"最终落到了 DB 列，
+      而不是只落到了 schema 默认值？
+- [ ] 如果 spec 加了一个"标记"字段（例如 `capacity_source`，`operator`
+      vs `provider_candidate` 语义），operator-vs-marker 契约是在构造调用
+      点强制的，还是只在调用方"希望它"成立？
+
+> **W1/W2 后续教训**：W1 把 W1/W2 容量字段（`context_window_tokens`、
+> `max_output_tokens` 等）加进 `ModelRequest` Pydantic schema。单加和
+> 单编辑 service 路径走的是 dict 透传（`dict(model_data) →
+> create_model_record`），所以新字段自动落库。但
+> `prepare_model_dict`（在 `backend/services/model_provider_service.py`
+> 的批量创建路径，2025-08-06 引入，W1/W2 commit 从未碰过它）用的是
+> `ModelRequest(model_factory=..., model_name=..., max_tokens=...)`
+> ——显式 kwargs，没有 `**`。新的 W2 字段是 `Optional[int] = None`，
+> 所以构造器静默地把它们设成 `None`。每个批量拉取的 LLM 都以
+> `context_window_tokens=NULL` 落库；只有 legacy `max_tokens` mirror
+> 留下了痕迹（glm-5.1 / glm-5.2 事故，commit `8bbd6075a`）。
+> 更糟的是，已有测试
+> `test_prepare_model_dict_does_not_persist_provider_capacity_candidates`
+> 只断言"输出的 dump dict 里不含 W2 字段"——但这个 dump 是 mock 控制的，
+> 所以无论构造器实际接收什么 kwargs 这个断言都平凡通过。强化测试同时
+> pin `mock_model_request.call_args`（commit `70d231b2d`）才真正堵住了
+> 回归口。
+
+### 9. 防御性 Save 处理器兜底
+
+**主问题：** 对于每个由 `disabled={!isValid()}` 控制按钮的 Save / Submit
+处理器，处理器函数体顶部 **是否也** 检查了 `if (!isValid()) return`？
+
+子问题：
+- [ ] 处理器是否可能被非点击路径触发？（Modal `onOk`、表单 submit、
+      键盘 Enter、程序化派发、第三方组件回调）
+- [ ] React 的 `disabled` 属性可能比 state update 慢一拍——处理器是否
+      容忍"在 disabled 状态下被触发"？
+- [ ] 如果验证识别出必填项缺失，处理器是否在发送不完整 payload 之前
+      bail out，还是发出去靠后端拒绝？
+- [ ] 同样的 guard pattern 是否对称应用到同级对话框？（如果一个对话框
+      有 guard 另一个没有，那个缺 guard 的同级会在同一个边界条件上摔跤。）
+
+> **W1/W2 后续教训**：`ModelEditDialog.handleSave` 的 Save 按钮有
+> `disabled={!isFormValid()}` 但处理器内部没有兜底 guard。用户为 glm-5.2
+> 打开这个对话框（W2 列因为检查项 8 的 bug 在 DB 里是 NULL），看到空的
+> 必填字段，不知怎么触发了保存（可能 Modal `onOk` 触发，或在 disabled
+> 状态传播之前的 fast-click），然后这一行就以 `context_window_tokens=NULL,
+> max_output_tokens=NULL` 通过一个不完整 payload 落了库。Save 按钮被
+> disabled 是一个提示，不是一个强制。`ProviderConfigEditDialog` 早就有
+> `if (!valid()) return` 在它的处理器里——让两个对话框对称（commit
+> `60655efbb`）才补上了缺口。
+
+### 10. wire 协议 key 在 backend 两半之间的一致性
+
+**主问题：** 对于每个既要做"按 key 查找现有"又要做"按 key 删除不在
+列表中的"的后端路由，两半是否用 **相同的 key 推导算法** 从同一行计算
+key？前端发出的 payload 是否匹配后端 lookup 的预期？
+
+子问题：
+- [ ] 构造 key 的每一处是否都用了 **同一个 helper 函数**（例如
+      `add_repo_to_name`）？还是其中一半用裸字符串拼接，另一半用 helper？
+- [ ] 如果某个行字段为空/None，构造 key 的 helper 是否忽略分隔符？
+      裸拼接是否也忽略？（对空 `model_repo` 的不一致处理就是
+      glm-4.7 事故。）
+- [ ] 是否有测试覆盖"某行 key 的一个分量为空"的场景，并验证 membership
+      检查返回预期结果？
+- [ ] 前端发出的 `model_id`（或任何 lookup handle）是否匹配后端 lookup
+      预期？（`{factory}/{name}` vs 裸 `{name}` vs 数字主键）
+- [ ] 当一个前端静默 no-op（bug A）和一个后端销毁性默认行为（bug B）
+      相互交互时，失败模式对用户不可见直到数据被销毁。**层间交互**
+      是否被显式测试覆盖？
+
+> **W1/W2 后续教训**（commit `67a75f014`）：
+> `batch_create_models_for_tenant` 构造 `existing_model_map` 用的 key 是
+> `add_repo_to_name(model_repo, model_name)`——当 `model_repo` 为空时
+> 返回 `"glm-4.7"`。同一函数十几行上方的删除循环用的是
+> `model["model_repo"] + "/" + model["model_name"]`——当
+> `model_repo=""` 时返回 `"/glm-4.7"`。对于 DashScope 行（catalog 给
+> 裸名 `glm-4.7`，落库时 `model_repo=""`），删除循环的 key 永远匹配不
+> 上 catalog id，所以每次批量创建调用都会软删所有现存行。独立的另一
+> 个 bug：`ModelDeleteDialog` 齿轮弹窗构造
+> `model_id = selectedSingleModel.model_name || selectedSingleModel.id`，
+> 发出去是裸 `"glm-4.7"` 而不是 `"dashscope/glm-4.7"`；后端按 `/` 拆，
+> 得不到 `model_factory`，所以
+> `get_model_by_name_factory(model_name="glm-4.7", model_factory=None)`
+> 返回 None，记一条 warning 不报错。前端收到 HTTP 200 无 diff，齿轮
+> 弹窗关闭，用户以为容量编辑落地了。这两个 bug 组合起来让齿轮保存不
+> 可见地丢失编辑、然后下次"确认"软删除用户刚添加的行。任何一个单独存
+> 在都会很快被注意到；交互才让失败模式静默。
+
 ## 严重程度校准
 
 应用检查清单时：
@@ -144,4 +301,20 @@
 
 W1 工作流通过了 26 个发现的正式评审、三轮实现 PR，并被标记为 Accepted。
 在端到端测试的 24 小时内，约 17 个不同问题在目录采用、前端 UX 和运维方面浮现。
-每个问题都会被上述六个检查项之一捕获。此检查清单是该教训的最小形式化。
+检查项 1–6 是该教训的最小形式化。
+
+六周后，W2 PR 的端到端测试又暴露了约 20 个问题，其中几个是静默数据丢失
+bug（齿轮保存 no-op + batch_create 软删级联），毁掉了运维人员刚添加的
+目录行。每个 bug 都至少符合以下模式之一：
+
+- 同一个概念有多个前端配置面（`add`/`edit` × `single`/`batch` ×
+  `per-row`/`provider-level`）；一个面修了，其它面继续 buggy。
+- 一个新 schema 字段是 Optional 且默认 None；一个构造调用点用 `**dict`
+  透传，另一个用显式 kwargs；显式 kwargs 那个静默掉了新字段。
+- 一个 save 处理器只靠 `disabled={!isValid()}`；处理器通过非点击路径
+  仍然被触发，落库了不完整行。
+- 一个后端路由在相邻的两个循环里用两种不同方式为同一行算 lookup key；
+  key 不一致导致每次"确认"都触发级联软删。
+
+检查项 7–10 覆盖这些模式。完整的检查清单是每个 spec 在 implementation
+前应该通过的、也是每个 PR 描述里应该回答的。
