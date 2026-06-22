@@ -208,9 +208,6 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Mock supabase
-sys.modules['supabase'] = MagicMock()
-
 # Mock services modules
 sys.modules['services'] = _create_package_mock('services')
 

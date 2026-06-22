@@ -12,6 +12,7 @@ import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
+from pydantic import BaseModel
 
 # Apply patches that need to be active before imports
 from unittest.mock import patch as mock_patch
@@ -39,7 +40,16 @@ class MockToolConfig:
     pass
 
 
+class MockAgentVerificationConfig:
+    @classmethod
+    def model_validate(cls, value):
+        mock_config = MagicMock()
+        mock_config.model_dump.return_value = value
+        return mock_config
+
+
 nexent_core_agents_agent_model.ToolConfig = MockToolConfig
+nexent_core_agents_agent_model.AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model
 nexent_nexent_vector_database = types.ModuleType('nexent.vector_database')
 sys.modules['nexent.vector_database'] = nexent_nexent_vector_database
@@ -73,6 +83,18 @@ sys.modules['services.vectordatabase_service'] = vectordatabase_service_mock
 sys.modules['services.redis_service'] = types.ModuleType('services.redis_service')
 sys.modules['services.group_service'] = types.ModuleType('services.group_service')
 
+# knowledge_summary_app only needs this request model from consts.model. Keeping
+# it local avoids importing unrelated EmailStr models and optional validators.
+consts_model_mock = types.ModuleType('consts.model')
+
+
+class ChangeSummaryRequest(BaseModel):
+    summary_result: str
+
+
+consts_model_mock.ChangeSummaryRequest = ChangeSummaryRequest
+sys.modules['consts.model'] = consts_model_mock
+
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
 utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
@@ -90,7 +112,6 @@ sys.modules['utils.config_utils'] = utils_config_utils_mock
 # Import the modules we need
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
-from pydantic import BaseModel
 from apps.knowledge_summary_app import router
 
 # Create a test app and client

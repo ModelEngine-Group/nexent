@@ -36,11 +36,12 @@ export interface StepContent {
         typeof chatConfig.messageTypes.VIRTUAL |
         typeof chatConfig.messageTypes.MEMORY_SEARCH |
         typeof chatConfig.messageTypes.PREPROCESS |
+        typeof chatConfig.messageTypes.VERIFICATION |
         typeof chatConfig.messageTypes.MAX_STEPS_REACHED
   content: string
   expanded: boolean
   timestamp: number
-  subType?: "thinking" | "code" | "deep_thinking" | "progress" | "file_processed" | "truncation" | "complete" | "error"
+  subType?: "thinking" | "code" | "deep_thinking" | "progress" | "file_processed" | "truncation" | "complete" | "error" | "verification"
   isLoading?: boolean
   _preserve?: boolean
   _messageContainer?: {
@@ -86,6 +87,7 @@ export interface SearchResult {
   text: string
   published_date: string
   source_type?: string
+  search_type?: string
   filename?: string
   score?: number
   score_details?: any

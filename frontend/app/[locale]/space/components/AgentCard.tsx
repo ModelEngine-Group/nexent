@@ -140,9 +140,9 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
     }
   };
 
-  // Handle edit - navigate to agents view
+  // Handle edit - navigate to agents view with agent id
   const handleEdit = () => {
-    router.push("/agents");
+    router.push(`/agents?agent_id=${agent.id}`);
   };
 
   // Handle evaluate - navigate to evaluation page
@@ -173,7 +173,10 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
     setShowDetail(true);
     setIsLoadingDetails(true);
     try {
-      const result = await searchAgentInfo(parseInt(agent.id));
+      // Use current_version_no if available (the currently published version)
+      // Falls back to 0 only if not set (for unpublished/draft agents)
+      const versionNo = agent.current_version_no ?? 0;
+      const result = await searchAgentInfo(parseInt(agent.id), undefined, versionNo);
       if (result.success) {
         setAgentDetails(result.data);
       } else {
