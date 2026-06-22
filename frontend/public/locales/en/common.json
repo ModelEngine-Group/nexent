@@ -1630,6 +1630,10 @@
   "sidebar.assetOwnerResources": "Asset Administrator Resources",
   "sidebar.mcpToolsManagement": "MCP Tools",
   "sidebar.monitoringManagement": "Monitoring & Ops",
+  "sidebar.agentConfig": "Agent Configuration",
+  "sidebar.knowledgeBaseConfig": "Knowledge Base Configuration",
+  "sidebar.modelConfig": "Model Configuration",
+  "sidebar.memoryConfig": "Memory Configuration",
 
   "tenantResources.create": "Create",
   "tenantResources.subtitle": "Manage tenants, users, groups and resources",

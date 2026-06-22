@@ -58,10 +58,10 @@ const ROUTE_CONFIG: RouteConfig[] = [
   { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 1, parentKey: null },
   // Agent Development submenu
   { path: "/agent-dev", Icon: Code, labelKey: "sidebar.agentDev", order: 2, parentKey: null },
-  { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 3, parentKey: "/agent-dev" },
-  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBase", order: 4, parentKey: "/agent-dev" },
-  { path: "/agents", Icon: Bot, labelKey: "sidebar.agentDev", order: 5, parentKey: "/agent-dev" },
-  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 6, parentKey: "/agent-dev" },
+  { path: "/models", Icon: Settings, labelKey: "sidebar.modelConfig", order: 3, parentKey: "/agent-dev" },
+  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBaseConfig", order: 4, parentKey: "/agent-dev" },
+  { path: "/agents", Icon: Bot, labelKey: "sidebar.agentConfig", order: 5, parentKey: "/agent-dev" },
+  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryConfig", order: 6, parentKey: "/agent-dev" },
   // Resource Space submenu
   { path: "/resource-space", Icon: Globe, labelKey: "sidebar.resourceSpace", order: 7, parentKey: null },
   { path: "/agent-space", Icon: Bot, labelKey: "sidebar.agentSpace", order: 8, parentKey: "/resource-space" },
