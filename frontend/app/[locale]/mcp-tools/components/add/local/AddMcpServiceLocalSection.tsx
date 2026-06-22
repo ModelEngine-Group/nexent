@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Button, Form, Input, Select } from "antd";
+import { Alert, Button, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { McpTransportType } from "@/const/mcpTools";
+import { McpDeploymentType, McpTransportType } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { useMcpAddLocal } from "@/hooks/mcpTools/useMcpAddLocal";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
@@ -33,9 +33,13 @@ export default function AddMcpServiceLocalSection({
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [draft, setDraft] = useState<LocalAddMcpDraft>(() => createInitialDraft());
+  const [deploymentType, setDeploymentType] = useState<McpDeploymentType>(
+    McpDeploymentType.REMOTE_LINK
+  );
   const { submit, submitting } = useMcpAddLocal({
     onSuccess: () => {
       setDraft(createInitialDraft());
+      setDeploymentType(McpDeploymentType.REMOTE_LINK);
       form.resetFields();
       onAdded();
     },
@@ -82,7 +86,11 @@ export default function AddMcpServiceLocalSection({
 
   if (!active) return null;
 
-  const isHttpLike = draft.transportType !== McpTransportType.CONTAINER;
+  const isHttpLike = deploymentType === McpDeploymentType.REMOTE_LINK;
+  const isContainer = deploymentType === McpDeploymentType.CONTAINER;
+  const isUnsupported =
+    deploymentType === McpDeploymentType.API ||
+    deploymentType === McpDeploymentType.LOCAL_IMAGE;
 
   return (
     <div className="flex h-full flex-col">
@@ -126,33 +134,51 @@ export default function AddMcpServiceLocalSection({
           <label className="mb-1 block text-sm font-normal text-slate-500">
             {t("mcpTools.addModal.serverType")}
           </label>
-          <Form.Item
-            name="transportType"
-            initialValue={draft.transportType}
-            rules={rules.transportType}
-            className="mb-0"
-          >
+          <Form.Item className="mb-0">
             <Select
-              value={draft.transportType}
-              onChange={(value: McpTransportType) => {
-                patchDraft({ transportType: value });
-                form.setFieldValue("transportType", value);
+              value={deploymentType}
+              onChange={(value: McpDeploymentType) => {
+                setDeploymentType(value);
+                const nextTransport =
+                  value === McpDeploymentType.CONTAINER
+                    ? McpTransportType.CONTAINER
+                    : McpTransportType.URL;
+                patchDraft({ transportType: nextTransport });
+                form.setFieldValue("transportType", nextTransport);
               }}
               className="w-full"
               popupMatchSelectWidth={false}
               options={[
                 {
-                  label: t("mcpTools.serverType.url"),
-                  value: McpTransportType.URL,
+                  label: t("mcpTools.deploymentType.remoteLink"),
+                  value: McpDeploymentType.REMOTE_LINK,
                 },
                 {
-                  label: t("mcpTools.serverType.container"),
-                  value: McpTransportType.CONTAINER,
+                  label: t("mcpTools.deploymentType.container"),
+                  value: McpDeploymentType.CONTAINER,
+                },
+                {
+                  label: t("mcpTools.deploymentType.api"),
+                  value: McpDeploymentType.API,
+                },
+                {
+                  label: t("mcpTools.deploymentType.localImage"),
+                  value: McpDeploymentType.LOCAL_IMAGE,
                 },
               ]}
             />
           </Form.Item>
         </div>
+
+        {(deploymentType === McpDeploymentType.API ||
+          deploymentType === McpDeploymentType.LOCAL_IMAGE) ? (
+          <Alert
+            type="info"
+            showIcon
+            message={t("mcpTools.addModal.unsupportedTitle")}
+            description={t("mcpTools.addModal.unsupportedDescription")}
+          />
+        ) : null}
 
         {isHttpLike ? (
           <>
@@ -205,7 +231,7 @@ export default function AddMcpServiceLocalSection({
               </Form.Item>
             </div>
           </>
-        ) : (
+        ) : isContainer ? (
           <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
             <div>
               <label className="mb-1 block text-sm font-normal text-slate-500">
@@ -242,7 +268,7 @@ export default function AddMcpServiceLocalSection({
               </div>
             </Form.Item>
           </div>
-        )}
+        ) : null}
 
         <TagEditor
           title={t("mcpTools.addModal.tags")}
@@ -253,7 +279,7 @@ export default function AddMcpServiceLocalSection({
       </Form>
 
       <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-100 bg-white px-6 py-4">
-        <Button type="primary" onClick={handleSubmit} loading={submitting}>
+        <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isUnsupported}>
           {t("mcpTools.addModal.saveAndAdd")}
         </Button>
       </div>

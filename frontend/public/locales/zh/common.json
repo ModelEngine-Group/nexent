@@ -1,10 +1,8 @@
-﻿{
+{
   "assistant.name": "Nexent",
-
   "mainPage.layout.title": "Nexent | 智能问答",
   "mainPage.layout.titleTemplate": "%s | Nexent 智能问答",
   "mainPage.layout.description": "创建和配置您自己的智能体",
-
   "chatAttachment.imagePreview": "图片预览",
   "chatAttachment.previewNotSupported": "此文件类型暂不支持在线预览",
   "chatAttachment.downloadToView": "请下载文件后查看",
@@ -12,7 +10,6 @@
   "chatAttachment.downloadSuccess": "文件下载成功",
   "chatAttachment.downloadError": "文件下载失败，请重试",
   "chatAttachment.image": "图片",
-
   "filePreview.loading": "正在加载...",
   "filePreview.loadingDocument": "文档加载中...",
   "filePreview.loadingPage": "页面加载中...",
@@ -40,7 +37,6 @@
   "filePreview.pdf.fitPage": "适应页面",
   "filePreview.pdf.showOutline": "显示目录",
   "filePreview.pdf.hideOutline": "隐藏目录",
-
   "chatInterface.newConversation": "新对话",
   "chatInterface.componentUnmount": "组件卸载",
   "chatInterface.errorCancelingRequest": "取消请求时出错",
@@ -81,7 +77,6 @@
   "chatInterface.close": "关闭",
   "chatInterface.errorLabel": "错误:",
   "chatInterface.failedToUpdateConversationList": "更新对话列表失败:",
-
   "chatPreprocess.step": "步骤",
   "chatPreprocess.thinking": "思考中",
   "chatPreprocess.preprocessResponseEmpty": "预处理响应为空",
@@ -89,14 +84,11 @@
   "chatPreprocess.filePreprocessingFailed": "文件预处理失败:",
   "chatPreprocess.fileUploadFailed": "文件上传失败:",
   "chatPreprocess.parsingFile": "正在解析文件...",
-
   "extractMsg.unknownTitle": "未知标题",
   "extractMsg.noContentDescription": "无内容描述",
   "extractMsg.cannotParseSearchPlaceholder": "无法解析搜索占位符内容:",
   "extractMsg.cannotParseMaxStepsData": "无法解析最大步数数据:",
-
   "chatHeader.doubleClickToEdit": "双击修改标题",
-
   "chatInput.image": "图片",
   "chatInput.cannotReadFileContent": "无法读取文件内容",
   "chatInput.loadingFileContent": "正在加载文件内容...",
@@ -121,7 +113,6 @@
   "chatInput.send": "发送",
   "chatInput.remove": "移除",
   "chatInput.wsConnectionEstablished": "WebSocket 连接已建立",
-
   "chatLeftSidebar.rename": "重命名",
   "chatLeftSidebar.delete": "删除",
   "chatLeftSidebar.newConversation": "新对话",
@@ -145,7 +136,6 @@
   "chatLeftSidebar.running": "正在运行中",
   "chatLeftSidebar.completed": "已完成",
   "chatLeftSidebar.user": "用户",
-
   "page.contactUs": "联系我们",
   "page.aboutUs": "关于我们",
   "page.title": "Nexent 智能体",
@@ -210,7 +200,6 @@
   "page.adminPrompt.intro": "您暂时没有权限访问该页面，请联系管理员为您提升权限。",
   "page.adminPrompt.githubSupport": "在 GitHub 上支持我们",
   "page.adminPrompt.becomeAdmin": "💡 想成为管理员？请访问<1>官网联系页</1>，申请管理员账号。",
-
   "chatStreamMessage.appIconAlt": "应用图标",
   "chatStreamMessage.finalAnswer": "最终回答",
   "chatStreamMessage.sources": "{{count}}条来源",
@@ -228,7 +217,6 @@
   "chatStreamMessage.videoLinkUnavailable": "此视频链接不可用",
   "chatStreamMessage.imageLoadFailed": "图片加载失败",
   "chatStreamMessage.videoLoadFailed": "视频加载失败",
-
   "chatRightPanel.imageLoadFailed": "图片加载失败",
   "chatRightPanel.imageProxyError": "请求图片代理服务失败:",
   "chatRightPanel.unknownTitle": "未知标题",
@@ -253,14 +241,12 @@
   "chatRightPanel.fileDownloadError": "文件下载失败，请重试",
   "chatRightPanel.source.datamate": "来源: Datamate",
   "chatRightPanel.source.nexent": "来源: Nexent",
-
   "chatStreamFinalMessage.copyFailed": "复制失败:",
   "chatStreamFinalMessage.getMessageIdFailed": "获取消息ID失败:",
   "chatStreamFinalMessage.generatingAudio": "正在生成语音...",
   "chatStreamFinalMessage.stopPlaying": "停止播放",
   "chatStreamFinalMessage.audioGenerationFailed": "语音生成失败",
   "chatStreamFinalMessage.maxStepsReached": "步数限制",
-
   "chatStreamHandler.codePrefix": "代码：",
   "chatStreamHandler.callingTool": "工具调用中...",
   "chatStreamHandler.parseSearchContentFailed": "解析搜索内容失败:",
@@ -277,7 +263,6 @@
   "chatStreamHandler.maxStepsReached": "步数限制",
   "chatStreamHandler.maxStepsNotification": "已达到最大步数限制（{{completedSteps}} 步），下方汇总了当前已完成的工作。如需完整结果，可尝试增加步数限制。",
   "chatStreamHandler.parseMaxStepsDataFailed": "解析最大步数数据失败:",
-
   "taskWindow.maxStepsReached": "已达到最大步数限制（{{completedSteps}} 步），正在总结当前工作...",
   "taskWindow.verification.start": "正在自检...",
   "taskWindow.verification.pass": "自检通过",
@@ -302,7 +287,6 @@
   "taskWindow.unknownMessageType": "未知消息类型: {{type}}",
   "taskWindow.noTaskMessages": "暂无任务消息",
   "taskWindow.taskDetails": "任务详情",
-
   "setup.header.button.back": "返回首页",
   "setup.header.title": "快速配置",
   "setup.header.description": "智能生成每一种助手，精准解决每一个问题",
@@ -322,7 +306,6 @@
   "setup.page.error.selectMainModel": "请选择模型",
   "setup.page.error.highlightField.llmMain": "llm.main",
   "setup.page.error.adminOnly": "只有管理员可以访问模型配置页面",
-
   "agent.contextMenu.export": "导出",
   "agent.contextMenu.delete": "删除",
   "agent.contextMenu.copy": "复制",
@@ -415,9 +398,7 @@
   "agent.debug.promptCompare.apply": "一键替换",
   "agent.debug.promptCompare.original": "优化前",
   "agent.debug.promptCompare.optimized": "优化后",
-
   "guide.steps.describeBusinessLogic.title": "描述业务逻辑",
-
   "systemPrompt.button.save": "保存",
   "systemPrompt.button.debug": "调试",
   "systemPrompt.button.expand": "放大查看",
@@ -430,7 +411,6 @@
   "systemPrompt.expandEdit.close": "保存并关闭",
   "systemPrompt.nonEditing.title": "请先选择一个智能体",
   "systemPrompt.nonEditing.subtitle": "请从上方选择一个智能体进行编辑，或创建新的智能体",
-
   "collaborativeAgent.title": "选择协作的智能体",
   "collaborativeAgent.button.add": "添加协作智能体",
   "collaborativeAgent.select.noOptions": "暂无可选择的智能体",
@@ -443,7 +423,6 @@
   "collaborativeAgent.message.notInEditMode": "请先进入编辑模式",
   "collaborativeAgent.message.generatingInProgress": "智能体生成中，请稍候",
   "collaborativeAgent.message.circularDependency": "检测到智能体存在循环调用",
-
   "subAgentPool.button.exitCreate": "退出创建",
   "subAgentPool.management": "智能体管理",
   "subAgentPool.loading": "加载中...",
@@ -464,7 +443,6 @@
   "subAgentPool.tooltip.editAgent": "点击编辑",
   "subAgentPool.tooltip.duplicateNameDisabled": "该智能体因与其他智能体名称（或变量名）相同而被禁用，请修改名称后使用",
   "subAgentPool.message.duplicateNameDisabled": "该智能体因与其他智能体名称（或变量名）相同而被禁用，请修改名称后使用",
-
   "toolConfig.title.paramConfig": "配置参数",
   "toolConfig.message.loadError": "加载工具配置失败",
   "toolConfig.message.loadErrorUseDefault": "加载工具配置失败，使用默认配置",
@@ -542,14 +520,12 @@
   "toolPool.duplicateToolName.content": "您已勾选相同工具名的工具（{{toolName}}），重复选择会导致智能体无法正常运行。是否继续勾选？",
   "toolPool.duplicateToolName.confirm": "继续",
   "toolPool.duplicateToolName.cancel": "取消",
-
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
   "tool.error.configFetchFailed": "获取工具配置失败",
   "tool.message.statusUpdated": "工具{{name}}{{status}}",
   "tool.error.updateFailed": "更新工具状态失败",
   "tool.error.updateRetry": "更新工具状态失败，请稍后重试",
-
   "knowledgeBase.error.checkName": "检查知识库名称失败:",
   "knowledgeBase.status.uploadingAndCreating": "正在上传并创建知识库...",
   "knowledgeBase.status.notReady": "知识库未就绪",
@@ -663,7 +639,6 @@
   "knowledgeBase.embeddingModel.mismatchRequired": "检测到向量化模型不匹配",
   "knowledgeBase.embeddingModel.updateFailed": "更新向量化模型失败",
   "knowledgeBase.embeddingModel.batchUpdateNote": "这将更新 {{count}} 个知识库使用所选的向量化模型。",
-
   "document.error.fetch": "获取文档失败",
   "document.error.load": "加载文档失败",
   "document.error.upload": "上传文档失败",
@@ -767,7 +742,6 @@
   "document.chunk.pagination.range": "{{start}}-{{end}} / 共 {{total}}",
   "document.chunk.pagination.jumpTo": "跳转到",
   "document.chunk.pagination.page": "页",
-
   "model.dialog.title": "添加模型",
   "model.dialog.label.type": "模型类型",
   "model.dialog.label.multimodal": "多模态",
@@ -900,7 +874,6 @@
   "model.status.tooltip": "点击可验证连通性",
   "model.dialog.success.updateSuccess": "更新成功",
   "model.dialog.embeddingConfig.title": "修改向量模型: {{modelName}}",
-
   "appConfig.appName.label": "应用名称",
   "appConfig.appName.placeholder": "请输入您的应用名称",
   "appConfig.description.label": "详情描述",
@@ -921,7 +894,6 @@
   "appConfig.icon.uploadTip": "支持 JPG, PNG 格式，大小不超过 2MB",
   "appConfig.icon.saveError": "图标保存失败，请重试",
   "appConfig.icon.saveErrorLog": "保存图标设置失败:",
-
   "modelConfig.category.llm": "大语言模型",
   "modelConfig.category.embedding": "向量模型",
   "modelConfig.category.reranker": "重排模型",
@@ -955,7 +927,6 @@
   "modelConfig.slider.expectedChunkSize": "期望切片大小",
   "modelConfig.slider.maximumChunkSize": "最大切片大小",
   "modelConfig.input.chunkingBatchSize": "单次请求切片量",
-
   "businessLogic.title": "描述智能体应该如何工作",
   "businessLogic.placeholder": "请描述您的业务场景和需求...",
   "businessLogic.config.title": "配置智能体能力",
@@ -1038,15 +1009,12 @@
   "businessLogic.config.import.forceButton": "直接导入",
   "businessLogic.config.import.forceWarning": "直接导入将保留重复名称；导入后的智能体会处于不可用状态，需手动修改智能体名称和变量名后才能使用。",
   "businessLogic.config.import.regenerateTooltip": "重新生成并导入将调用 LLM 对智能体进行重命名，可能耗时较长。",
-
   "login.expired.title": "登录已过期",
   "login.expired.content": "您的登录信息已过期，请重新登录以继续使用。",
   "login.expired.okText": "立即登录",
   "login.expired.cancelText": "返回首页",
-
   "page.permissionDenied.title": "无权限访问",
   "page.permissionDenied.content": "请切换有权限访问该页面的账号或访问其他页面。",
-
   "auth.notLoggedIn": "您尚未登录",
   "auth.login": "登录",
   "auth.register": "注册",
@@ -1164,7 +1132,6 @@
   "auth.strengthFair": "一般",
   "auth.strengthGood": "良好",
   "auth.strengthStrong": "强",
-
   "toolManagement.refresh.title": "刷新工具列表",
   "toolManagement.refresh.button.refreshing": "刷新中",
   "toolManagement.refresh.button.refresh": "刷新工具",
@@ -1174,14 +1141,12 @@
   "toolManagement.message.refreshSuccess": "工具列表已刷新",
   "toolManagement.message.refreshFailed": "刷新工具列表失败",
   "toolManagement.message.refreshFailedRetry": "刷新工具列表失败，请稍后重试",
-
   "skillPool.title": "选择技能",
   "skillPool.noSkills": "暂无可用技能",
   "skillPool.noDescription": "暂无描述",
   "skillPool.group.official": "官方",
   "skillPool.group.custom": "自定义",
   "skillPool.group.partner": "合作方",
-
   "skillManagement.title": "构建技能",
   "skillManagement.refresh.title": "刷新技能列表",
   "skillManagement.refresh.button": "刷新技能",
@@ -1230,12 +1195,10 @@
   "skillManagement.detail.preview": "预览",
   "skillManagement.detail.noFiles": "暂无文件",
   "skillManagement.detail.selectFile": "请选择左侧文件查看内容",
-
   "skillManagement.delete.confirmTitle": "确认删除技能",
   "skillManagement.delete.confirmContent": "确定要删除技能「{{skillName}}」吗？删除后无法恢复。",
   "skillManagement.delete.success": "技能删除成功",
   "skillManagement.delete.failed": "技能删除失败",
-
   "mcpConfig.modal.title": "MCP服务器配置",
   "mcpConfig.modal.close": "关闭",
   "mcpConfig.modal.updatingTools": "正在更新工具列表...",
@@ -1293,8 +1256,8 @@
   "mcpConfig.addContainer.configPlaceholder": "请输入MCP服务器配置JSON",
   "mcpConfig.addContainer.port": "端口",
   "mcpConfig.addContainer.portPlaceholder": "请输入端口号",
-"mcpConfig.addContainer.serviceName": "服务名称",
-"mcpConfig.addContainer.serviceNamePlaceholder": "请填写服务名称",
+  "mcpConfig.addContainer.serviceName": "服务名称",
+  "mcpConfig.addContainer.serviceNamePlaceholder": "请填写服务名称",
   "mcpConfig.addContainer.button.add": "添加",
   "mcpConfig.addContainer.button.updating": "添加中...",
   "mcpConfig.editServer.title": "编辑MCP服务器",
@@ -1366,7 +1329,6 @@
   "mcpConfig.openApiToMcp.message.refreshSuccess": "刷新工具列表成功",
   "mcpConfig.openApiToMcp.message.refreshFailed": "刷新工具列表失败",
   "mcpConfig.openApiToMcp.message.loadToolsFailed": "加载服务列表失败",
-
   "mcpService.debug.getServerListFailed": "获取MCP服务器列表失败:",
   "mcpService.debug.addServerFailed": "添加MCP服务器失败:",
   "mcpService.debug.updateServerFailed": "更新MCP服务器失败:",
@@ -1405,7 +1367,6 @@
   "mcpService.message.serviceNameAlreadyExists": "MCP服务名称已存在",
   "mcpService.message.fileTooLarge": "文件大小超过限制",
   "mcpService.message.missingMcpImage": "添加容器失败：缺少mcp服务启动镜像",
-
   "agentConfig.tools.refreshSuccess": "工具列表已刷新",
   "agentConfig.tools.refreshFailed": "刷新工具列表失败",
   "agentConfig.tools.fetchFailed": "获取工具列表失败，请稍后重试",
@@ -1440,7 +1401,6 @@
   "agentConfig.skill.saveFailed": "保存技能配置失败",
   "agentConfig.skill.noAgentSelected": "请先选择一个智能体",
   "agentConfig.skill.noParams": "无配置参数",
-
   "embedding.emptyWarningModal.title": "未选择向量模型",
   "embedding.emptyWarningModal.content": "您未选择向量模型，后续知识库配置、记忆功能、知识检索工具以及其他部分智能体工具将无法使用。",
   "embedding.emptyWarningModal.tip": "建议您在模型配置中选择合适的向量模型，以获得完整体验。",
@@ -1471,22 +1431,18 @@
   "embedding.chatMemoryAutoDeselectModal.tip": "建议您联系您的租户管理员进行配置。",
   "embedding.chatMemoryAutoDeselectModal.ok_config": "前往配置",
   "embedding.chatMemoryAutoDeselectModal.ok": "取消",
-
   "chatStreamMain.loadingConversation": "正在加载对话内容...",
   "chatStreamMain.loadError": "加载对话失败",
   "chatStreamMain.retry": "重试",
-
   "agentSelector.loading": "加载中...",
   "agentSelector.selectAgent": "请选择智能体",
   "agentSelector.noAvailableAgents": "暂无可用智能体",
   "agentSelector.agentUnavailable": "此智能体当前不可用，请检查工具配置信息或通知管理员。",
   "agentSelector.pleaseSelectAgent": "请先选择一个智能体",
-
   "memoryDeleteModal.title": "确认清空记忆",
   "memoryDeleteModal.description": "即将清空 <strong>{{title}}</strong> 的所有内容，且该操作不可恢复。",
   "memoryDeleteModal.prompt": "确定要继续吗？",
   "memoryDeleteModal.clear": "清空",
-
   "useMemory.loadConfigError": "加载记忆配置失败，请检查网络连接或联系管理员",
   "useMemory.memoryServiceConnectionError": "记忆服务连接失败，请检查配置或联系管理员",
   "useMemory.loadDataError": "加载记忆数据失败，请稍后重试",
@@ -1498,7 +1454,6 @@
   "useMemory.deleteMemoryError": "删除记忆失败，请稍后重试",
   "useMemory.setMemorySwitchError": "设置记忆开关失败，请稍后重试",
   "useMemory.setMemoryShareOptionError": "设置记忆共享选项失败，请稍后重试",
-
   "memoryService.loadMemoryError": "加载记忆失败，请稍后重试",
   "memoryService.tenantSharedGroupTitle": "租户所有用户的共享记忆",
   "memoryService.agentSharedGroupTitle": "{{agentName}}",
@@ -1506,7 +1461,6 @@
   "memoryService.userPersonalGroupTitle": "用户的个性化记忆",
   "memoryService.userAgentGroupTitle": "{{agentName}}",
   "memoryService.userAgentPlaceholder": "用户智能体记忆",
-
   "memoryManageModal.title": "记忆管理",
   "memoryManageModal.memoryAbility": "记忆能力",
   "memoryManageModal.agentMemoryShare": "智能体记忆共享",
@@ -1523,7 +1477,6 @@
   "memoryManageModal.userPersonalTab": "用户个性化",
   "memoryManageModal.userAgentTab": "用户智能体",
   "memoryManageModal.inputPlaceholder": "请输入记忆内容",
-
   "agentCallRelationship.title": "查看调用关系",
   "agentCallRelationship.loading": "正在加载调用关系...",
   "agentCallRelationship.description": "此流程图显示了 {{name}} 及其所有工具和协作智能体的调用关系",
@@ -1532,7 +1485,6 @@
   "businessLogic.config.error.noAvailableModels": "暂无可用的模型",
   "businessLogic.config.error.modelUpdateFailed": "更新智能体模型失败",
   "businessLogic.config.error.maxStepsUpdateFailed": "更新智能体最大步数失败",
-
   "diagram.button.showDiagram": "显示图表",
   "diagram.button.showCode": "显示代码",
   "diagram.button.zoomOut": "缩小",
@@ -1542,7 +1494,6 @@
   "diagram.format.png": "PNG",
   "diagram.format.selectFormat": "选择格式",
   "diagram.error.renderFailed": "渲染失败",
-
   "space.title": "智能体空间",
   "space.description": "管理和使用您的智能体",
   "space.createAgent": "创建智能体",
@@ -1589,7 +1540,6 @@
   "space.detail.category": "分类",
   "space.detail.usage": "MCP服务器",
   "space.detail.parameters": "参数",
-
   "sidebar.homePage": "首页",
   "sidebar.startChat": "开始问答",
   "sidebar.quickConfig": "快速配置",
@@ -1604,15 +1554,12 @@
   "sidebar.assetOwnerResources": "资产管理员资源",
   "sidebar.mcpToolsManagement": "MCP 工具",
   "sidebar.monitoringManagement": "监控与运维",
-
   "tenantResources.create": "创建",
   "tenantResources.subtitle": "管理租户、用户、用户组和资源",
   "tenantResources.title": "租户资源管理",
-
   "assetOwnerResources.subtitle": "管理资产管理员的用户、模型、知识库和资源",
   "assetOwnerResources.tenantName": "资产管理员",
   "assetOwnerResources.title": "资产管理员资源管理",
-
   "tenantResources.tabs.groups": "用户组",
   "tenantResources.tabs.knowledge": "知识库",
   "tenantResources.tabs.models": "模型",
@@ -1621,7 +1568,6 @@
   "tenantResources.tabs.mcp": "MCP",
   "tenantResources.tabs.skills": "技能",
   "tenantResources.mcp.addService": "添加 MCP 服务",
-
   "tenantResources.skills.refresh": "刷新",
   "tenantResources.skills.empty": "暂无技能",
   "tenantResources.skills.loadFailed": "加载技能列表失败",
@@ -1641,7 +1587,6 @@
   "tenantResources.skills.column.tags": "标签",
   "tenantResources.skills.column.description": "简介",
   "tenantResources.skills.column.updatedAt": "更新时间",
-
   "tenantResources.groups.confirmDelete": "删除用户组\"{{name}}\"？",
   "tenantResources.groups.createGroup": "创建用户组",
   "tenantResources.groups.createNew": "新建用户组",
@@ -1667,10 +1612,8 @@
   "tenantResources.groups.updateFailed": "更新用户组失败",
   "tenantResources.groups.noDescription": "无描述",
   "tenantResources.groups.duplicateName": "用户组名称已存在，请使用其他名称",
-
   "tenantResources.knowledgeBases.enterDescription": "可选描述",
   "tenantResources.knowledgeBases.enterName": "例如：公司文档",
-
   "tenantResources.knowledgeBase.sources": "知识库来源",
   "tenantResources.knowledgeBase.permission": "组内权限",
   "tenantResources.knowledgeBase.permission.EDIT": "可编辑",
@@ -1704,12 +1647,10 @@
   "tenantResources.knowledgeBase.noSummary": "该知识库尚无摘要",
   "tenantResources.knowledgeBase.viewSummary": "摘要概览",
   "tenantResources.knowledgeBase.externalSourceDisabled": "不可操作外部知识库",
-
   "tenantResources.models.status.available": "可用",
   "tenantResources.models.status.unavailable": "不可用",
   "tenantResources.models.status.detecting": "检测中",
   "tenantResources.models.status.not_detected": "未检测",
-
   "tenantResources.models.type.llm": "大语言模型",
   "tenantResources.models.type.embedding": "向量模型",
   "tenantResources.models.type.multi_embedding": "多模态向量模型",
@@ -1719,7 +1660,6 @@
   "tenantResources.models.type.vlm": "图片理解模型",
   "tenantResources.models.type.vlm2": "图片生成模型",
   "tenantResources.models.type.vlm3": "视频理解模型",
-
   "tenantResources.models.confirmDelete": "删除模型？",
   "tenantResources.models.editModel": "编辑模型",
   "tenantResources.models.deleteModel": "删除模型",
@@ -1731,7 +1671,6 @@
   "tenantResources.models.connectivityError": "检查连通性时发生错误",
   "tenantResources.models.enterDescription": "输入模型描述",
   "tenantResources.models.enterName": "输入模型名称",
-
   "tenantResources.tenants.confirmDelete": "删除租户\"{{name}}\"？",
   "tenantResources.tenants.createTenant": "创建租户",
   "tenantResources.tenants.created": "租户已创建",
@@ -1776,7 +1715,6 @@
   "tenantResources.skills.installModal.title": "安装官方技能",
   "tenantResources.skills.installModal.selectAtLeastOne": "请至少选择一个技能",
   "tenantResources.skills.installModal.success": "已成功安装 {{count}} 个技能",
-
   "tenantResources.users.confirmDelete": "删除用户\"{{name}}\"？",
   "tenantResources.users.deleteUser": "删除用户",
   "tenantResources.users.deleted": "用户已删除",
@@ -1785,12 +1723,10 @@
   "tenantResources.users.updated": "用户已更新",
   "tenantResources.users.email": "邮箱",
   "tenantResources.users.role": "角色",
-
   "tenantResources.contactAdmin": "请联系管理员为您分配租户。",
   "tenantResources.noTenantAssigned": "未分配租户",
   "tenantResources.selectTenantDescription": "从列表中选择一个租户来管理其资源。",
   "tenantResources.selectTenantFirst": "请选择一个租户",
-
   "tenantResources.invitation.tab": "邀请码",
   "tenantResources.invitation.invitationCode": "邀请码",
   "tenantResources.invitation.invitationCodePlaceholder": "邀请码（选填，置空可自动生成）",
@@ -1818,26 +1754,22 @@
   "tenantResources.invitation.noGroups": "暂无用户组",
   "tenantResources.invitation.noExpiry": "永久有效",
   "tenantResources.invitation.alreadyExists": "邀请码已存在",
-
   "tenantResources.invitation.codeType.ADMIN_INVITE": "管理员邀请",
   "tenantResources.invitation.codeType.DEV_INVITE": "开发者邀请",
   "tenantResources.invitation.codeType.USER_INVITE": "用户邀请",
   "tenantResources.invitation.codeType.ASSET_OWNER_INVITE": "资产管理员邀请",
   "tenantResources.invitation.assetOwnerTab": "资产管理员邀请码",
-
   "tenantResources.invitation.status.IN_USE": "可用",
   "tenantResources.invitation.status.EXPIRE": "已过期",
   "tenantResources.invitation.status.RUN_OUT": "已用尽",
   "tenantResources.invitation.loadDefaultGroupFailed": "无法加载默认用户组，您可以手动选择用户组。",
   "common.noTenantSelected": "未选择租户",
-
   "market.comingSoon.title": "智能体市场即将推出",
   "market.comingSoon.description": "从我们的市场中发现并安装预构建的AI智能体。通过使用社区创建的解决方案节省时间。",
   "market.comingSoon.feature1": "浏览精选的智能体模板",
   "market.comingSoon.feature2": "一键安装和部署",
   "market.comingSoon.feature3": "与社区分享您自己的智能体",
   "market.comingSoon.badge": "即将推出",
-
   "market.title": "智能体市场",
   "market.description": "发现并下载预构建的智能体",
   "market.searchPlaceholder": "按名称或描述搜索智能体...",
@@ -1854,7 +1786,6 @@
   "market.totalAgents": "共 {{total}} 个智能体",
   "market.error.loadCategories": "加载分类失败",
   "market.error.loadAgents": "加载智能体失败",
-
   "market.detail.title": "智能体详情",
   "market.detail.subtitle": "完整信息和配置",
   "market.detail.tabs.basic": "基础信息",
@@ -1894,7 +1825,6 @@
   "market.detail.mcpServerName": "服务器名称",
   "market.detail.mcpServerUrl": "服务器地址",
   "market.detail.viewDetails": "查看详情",
-
   "market.install.title": "安装智能体",
   "market.install.step.rename": "重命名智能体",
   "market.install.step.model": "选择模型",
@@ -1997,21 +1927,19 @@
   "market.error.server.description": "市场服务器遇到错误。我们的团队已收到通知。请稍后重试。",
   "market.error.unknown.title": "出现问题",
   "market.error.unknown.description": "发生意外错误。请重试。",
-
   "users.comingSoon.title": "用户管理即将推出",
   "users.comingSoon.description": "为管理员提供全面的用户管理系统。控制组织内的访问权限、角色和权限。",
   "users.comingSoon.feature1": "管理用户账户和角色",
   "users.comingSoon.feature2": "配置精细化权限",
   "users.comingSoon.feature3": "监控用户活动和使用情况",
   "users.comingSoon.badge": "即将推出",
-
   "mcpTools.comingSoon.title": "MCP 工具管理即将推出",
   "mcpTools.comingSoon.description": "集中管理 MCP 服务器与工具，在一个页面中完成连接配置、工具同步与健康状态监控。",
   "mcpTools.comingSoon.feature1": "注册并管理多个 MCP 服务器",
   "mcpTools.comingSoon.feature2": "同步、查看和组织 MCP 工具列表",
   "mcpTools.comingSoon.feature3": "监控 MCP 连接状态和使用情况",
   "mcpTools.comingSoon.badge": "即将推出",
-  "mcpTools.page.title": "MCP 服务管理",
+  "mcpTools.page.title": "MCP 仓库",
   "mcpTools.page.subtitle": "统一管理本地与公共市场的 MCP 服务，支持搜索、添加与启用配置。",
   "mcpTools.page.searchPlaceholder": "搜索 MCP 服务名称、描述或标签",
   "mcpTools.page.resultCount": "{{count}} 个结果",
@@ -2282,7 +2210,6 @@
   "mcpTools.detail.links": "链接",
   "mcpTools.detail.noDescription": "暂无描述",
   "mcpTools.detail.editBasic": "编辑",
-
   "monitoring.comingSoon.title": "监控与运维中心即将推出",
   "monitoring.comingSoon.description": "面向智能体的统一监控与运维中心，用于实时跟踪健康状态、性能指标与异常事件。",
   "monitoring.comingSoon.feature1": "监控智能体健康状态、延迟与错误率",
@@ -2346,7 +2273,6 @@
   "monitoring.unit.tokensPerSec": "tokens/秒",
   "monitoring.unit.requests": "请求",
   "monitoring.unit.usd": "美元",
-
   "common.loading": "加载中",
   "common.save": "保存",
   "common.cancel": "取消",
@@ -2400,13 +2326,11 @@
   "common.agentType.single": "单智能体",
   "common.agentType.multi": "多智能体",
   "common.selectAll": "全选",
-
   "user.role.superAdmin": "超级管理员",
   "user.role.admin": "管理员",
   "user.role.dev": "开发者",
   "user.role.user": "普通用户",
   "user.role.assetOwner": "资产管理员",
-
   "profile.title": "个人信息",
   "profile.subtitle": "管理您的账户设置和偏好",
   "profile.profileInfo": "基础信息",
@@ -2449,7 +2373,6 @@
   "profile.deleteAkSkConfirmContent": "您确定要删除 API 密钥吗？",
   "profile.deleteAkSkSuccess": "API 密钥删除成功",
   "profile.deleteAkSkFailed": "删除 API 密钥失败",
-
   "agent.version.manage": "版本管理",
   "agent.version.currentVersion": "当前版本",
   "agent.version.totalVersions": "共 {{count}} 个版本",
@@ -2519,83 +2442,67 @@
   "agent.version.selectDifferentVersions": "请选择两个不同的版本进行对比",
   "agent.version.publishAsA2AAgent": "发布为 A2A Agent",
   "agent.error.agentNotFound": "未找到智能体",
-
   "errorCode.101001": "发生未知错误，请稍后重试",
   "errorCode.101002": "服务暂时不可用，请稍后重试",
   "errorCode.101003": "数据库操作失败，请稍后重试",
   "errorCode.101004": "操作超时，请稍后重试",
   "errorCode.101005": "服务器内部错误，请稍后重试",
-
   "errorCode.102001": "您没有执行此操作的权限",
   "errorCode.102002": "您的登录已过期，请重新登录",
   "errorCode.102003": "登录令牌无效，请重新登录",
   "errorCode.102004": "请求签名验证失败",
   "errorCode.102005": "禁止访问",
-
   "errorCode.103001": "用户不存在",
   "errorCode.103002": "用户注册失败，请稍后重试",
   "errorCode.103003": "用户已存在",
   "errorCode.103004": "用户名或密码错误",
-
   "errorCode.104001": "租户不存在",
   "errorCode.104002": "租户已被禁用",
   "errorCode.104003": "租户配置错误",
-
   "errorCode.105001": "智能体不存在",
   "errorCode.105002": "运行智能体失败，请稍后重试",
   "errorCode.105003": "智能体名称已存在",
   "errorCode.105004": "智能体已被禁用",
   "errorCode.105005": "智能体版本不存在",
-
   "errorCode.106001": "工具不存在",
   "errorCode.106002": "工具执行失败",
   "errorCode.106003": "工具配置无效",
   "errorCode.106101": "连接MCP服务失败",
   "errorCode.106102": "MCP名称包含非法字符",
   "errorCode.106103": "MCP容器操作失败",
-
   "errorCode.107001": "对话不存在",
   "errorCode.107002": "保存对话失败",
   "errorCode.107003": "消息不存在",
   "errorCode.107004": "生成对话标题失败",
-
   "errorCode.108001": "记忆不存在",
   "errorCode.108002": "准备记忆失败",
   "errorCode.108003": "记忆配置无效",
-
   "errorCode.109001": "知识库不存在",
   "errorCode.109002": "同步知识库失败",
   "errorCode.109003": "搜索索引不存在",
   "errorCode.109004": "知识搜索失败",
   "errorCode.109005": "上传知识失败",
-
   "errorCode.110001": "模型不存在",
   "errorCode.110002": "模型配置无效",
   "errorCode.110003": "模型健康检查失败",
   "errorCode.110004": "模型提供商错误",
-
   "errorCode.111001": "语音服务错误",
   "errorCode.111002": "连接语音识别服务失败",
   "errorCode.111003": "连接语音合成服务失败",
   "errorCode.111004": "语音配置无效",
-
   "errorCode.112001": "文件不存在",
   "errorCode.112002": "文件上传失败",
   "errorCode.112003": "文件大小超出限制",
   "errorCode.112004": "不支持的文件类型",
   "errorCode.112005": "文件预处理失败",
-
   "errorCode.113001": "邀请码不存在",
   "errorCode.113002": "邀请码无效",
   "errorCode.113003": "邀请码已过期",
-
   "errorCode.114001": "群组不存在",
   "errorCode.114002": "群组已存在",
   "errorCode.114003": "成员不在群组中",
-
   "errorCode.115001": "数据处理失败",
   "errorCode.115002": "数据解析失败",
-
   "errorCode.130101": "连接DataMate服务失败",
   "errorCode.130201": "Dify服务错误",
   "errorCode.130202": "Dify配置无效，请检查URL和API Key格式",
@@ -2604,64 +2511,50 @@
   "errorCode.130205": "Dify请求频率超限，请稍后重试",
   "errorCode.130206": "Dify响应解析失败，请检查API URL",
   "errorCode.130301": "连接ME服务失败",
-
   "errorCode.000101": "验证失败",
   "errorCode.000102": "参数无效",
   "errorCode.000103": "缺少必填字段",
-
   "errorCode.000201": "您没有执行此操作的权限",
   "errorCode.000202": "禁止访问",
   "errorCode.000203": "您的登录已过期，请重新登录",
   "errorCode.000204": "登录令牌无效，请重新登录",
-
   "errorCode.000301": "外部服务错误",
   "errorCode.000302": "请求过于频繁，请稍后重试",
-
   "errorCode.000401": "文件不存在",
   "errorCode.000402": "文件上传失败",
   "errorCode.000403": "文件大小超出限制",
   "errorCode.000404": "不支持的文件类型",
   "errorCode.000405": "文件预处理失败",
-
   "errorCode.000501": "资源不存在",
   "errorCode.000502": "资源已存在",
   "errorCode.000503": "资源已被禁用",
-
   "errorCode.010101": "对话不存在",
   "errorCode.010102": "消息不存在",
   "errorCode.010103": "保存对话失败",
   "errorCode.010104": "生成对话标题失败",
-
   "errorCode.020101": "配置无效",
   "errorCode.020102": "同步配置失败",
-
   "errorCode.030101": "智能体不存在",
   "errorCode.030102": "智能体已被禁用",
   "errorCode.030103": "运行智能体失败，请稍后重试",
   "errorCode.030104": "智能体名称已存在",
   "errorCode.030105": "智能体版本不存在",
-
   "errorCode.040101": "市场中智能体不存在",
-
   "errorCode.050101": "智能体配置无效",
   "errorCode.050102": "提示词无效",
-
   "errorCode.060101": "知识库不存在",
   "errorCode.060102": "上传知识失败",
   "errorCode.060103": "同步知识库失败",
   "errorCode.060104": "搜索索引不存在",
   "errorCode.060105": "知识搜索失败",
-
   "errorCode.070101": "工具不存在",
   "errorCode.070102": "工具执行失败",
   "errorCode.070103": "工具配置无效",
   "errorCode.070201": "连接MCP服务失败",
   "errorCode.070202": "MCP容器操作失败",
   "errorCode.070301": "MCP名称包含非法字符",
-
   "errorCode.080101": "指标查询失败",
   "errorCode.080201": "告警配置无效",
-
   "errorCode.090101": "模型不存在",
   "errorCode.090102": "模型配置无效",
   "errorCode.090103": "模型健康检查失败",
@@ -2672,29 +2565,23 @@
   "errorCode.090203": "请求频率超限，请稍后重试",
   "errorCode.090204": "模型服务暂时不可用，请稍后重试",
   "errorCode.090205": "连接模型服务失败，请检查网络和模型配置",
-
   "errorCode.100101": "记忆不存在",
   "errorCode.100102": "准备记忆失败",
   "errorCode.100103": "记忆配置无效",
-
   "errorCode.110101": "用户不存在",
   "errorCode.110102": "更新用户信息失败",
   "errorCode.110103": "用户已存在",
   "errorCode.110104": "用户名或密码错误",
   "errorCode.110201": "密码不满足安全要求，请使用更强的密码",
   "errorCode.110202": "新密码不能与旧密码相同",
-
   "errorCode.120101": "租户不存在",
   "errorCode.120102": "租户已被禁用",
   "errorCode.120103": "租户配置错误",
   "errorCode.120104": "租户资源超限",
-
   "errorCode.140101": "北向接口请求失败",
   "errorCode.140201": "北向接口配置无效",
-
   "errorCode.150101": "数据处理失败",
   "errorCode.150102": "数据解析失败",
-
   "errorCode.990101": "发生未知错误，请稍后重试",
   "errorCode.990102": "服务暂时不可用，请稍后重试",
   "errorCode.990103": "数据库操作失败，请稍后重试",
@@ -2703,7 +2590,6 @@
   "errorCode.990201": "配置不存在",
   "errorCode.990202": "配置更新失败",
   "embedding.model.notConfigured": "未配置",
-
   "a2a.discovery.title": "A2A Agent 发现",
   "a2a.discovery.tab.url": "URL 发现",
   "a2a.discovery.tab.nacos": "Nacos 发现",
@@ -2764,7 +2650,6 @@
   "a2a.discovery.editNacosConfig": "编辑配置",
   "a2a.discovery.updateNacosConfigSuccess": "配置更新成功",
   "a2a.discovery.updateNacosConfigFailed": "配置更新失败",
-
   "a2a.agent.name": "名称",
   "a2a.agent.description": "描述",
   "a2a.agent.source": "来源",
@@ -2772,16 +2657,13 @@
   "a2a.agent.supportedInterfaces": "支持的接口",
   "a2a.agent.agentId": "Agent ID",
   "a2a.agent.viewA2ASettings": "查看 A2A Agent 设置",
-
   "a2a.protocol.settings": "协议设置",
   "a2a.protocol.selectProtocol": "选择要使用的协议",
   "a2a.protocol.updateSuccess": "协议更新成功",
   "a2a.protocol.updateFailed": "协议更新失败",
-
   "a2a.status.available": "可用",
   "a2a.status.unavailable": "不可用",
   "a2a.status.unknown": "未知",
-
   "a2a.chat.title": "与 Agent 对话",
   "a2a.chat.placeholder": "输入你的问题...",
   "a2a.chat.send": "发送",
@@ -2790,7 +2672,6 @@
   "a2a.chat.emptyHistory": "开始与 Agent 对话",
   "a2a.chat.noResponse": "未收到响应",
   "a2a.chat.agentUnavailable": "当前 Agent 不可用",
-
   "a2a.server.previewTitle": "A2A Agent 发布预览",
   "a2a.server.previewDescription": "发布后，外部系统可以通过以下地址发现和调用本 Agent",
   "a2a.server.noAgentCard": "暂无 A2A Agent Card 信息",
@@ -2802,7 +2683,6 @@
   "a2a.server.localDevHint": "本地开发：在上述路径前加上 localhost:5013/api",
   "a2a.server.productionHint": "生产环境：将 localhost:5013 替换为您的服务器域名或公网 IP 及端口 5013",
   "a2a.server.urlHint": "需要拼接基础 URL 才能访问。本地开发请使用 localhost:5013/api",
-
   "a2a.service.discoverFailed": "发现 Agent 失败",
   "a2a.service.listFailed": "获取列表失败",
   "a2a.service.getFailed": "获取详情失败",
@@ -2828,7 +2708,6 @@
   "a2a.service.updateProtocolFailed": "更新协议失败",
   "a2a.service.listServerAgentsFailed": "获取 A2A Server 列表失败",
   "a2a.service.chatFailed": "发送聊天消息失败",
-
   "collaborativeAgent.internalAgents": "内部 Agent",
   "collaborativeAgent.externalAgents": "外部 Agent",
   "collaborativeAgent.addExternal": "添加外部 Agent",
@@ -2844,13 +2723,56 @@
   "systemPrompt.optimize.error": "该部分优化失败",
   "systemPrompt.optimize.generating": "正在生成优化后的 prompt 模板...",
   "systemPrompt.optimize.generatingPlaceholder": "正在生成中，请稍候...",
-
   "systemPrompt.finetune.modeLabel": "使用要求",
   "systemPrompt.finetune.modeGeneral": "全局优化",
   "systemPrompt.finetune.modeGeneralDesc": "基于评价反馈对整个部分进行优化",
   "systemPrompt.finetune.modeInsert": "插入内容",
   "systemPrompt.finetune.modeInsertDesc": "在指定位置插入新的内容",
   "systemPrompt.finetune.modeSelect": "替换选中",
-  "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围"
-
+  "systemPrompt.finetune.modeSelectDesc": "替换选中的内容范围",
+  "mcpTools.page.tab.repository": "仓库",
+  "mcpTools.page.tab.mine": "我的",
+  "mcpTools.page.tab.review": "审核中心",
+  "mcpTools.page.searchNameTagPlaceholder": "按名称或标签检索 MCP 服务",
+  "mcpTools.deploymentType.all": "全部类型",
+  "mcpTools.deploymentType.remoteLink": "远程链接",
+  "mcpTools.deploymentType.container": "容器化部署",
+  "mcpTools.deploymentType.api": "API",
+  "mcpTools.deploymentType.localImage": "本地镜像",
+  "mcpTools.repository.empty": "未找到匹配的仓库 MCP 工具。",
+  "mcpTools.repository.install": "安装",
+  "mcpTools.repository.details": "查看详情",
+  "mcpTools.repository.offline": "下架",
+  "mcpTools.repository.offlinePending": "下架接口待接入",
+  "mcpTools.repository.authorFallback": "社区贡献者{{name}}",
+  "mcpTools.repository.noRating": "暂无评分",
+  "mcpTools.repository.installCount": "{{count}} 次安装",
+  "mcpTools.mine.empty": "暂无匹配的 MCP 服务。",
+  "mcpTools.mine.edit": "编辑",
+  "mcpTools.mine.enable": "启用",
+  "mcpTools.mine.disable": "停用",
+  "mcpTools.mine.localService": "我的服务",
+  "mcpTools.mine.publishedService": "已上架仓库",
+  "mcpTools.review.emptyTitle": "暂无待审核 MCP 工具",
+  "mcpTools.review.pendingIntegration": "审核中心前端骨架已就绪，待后端提供审核列表、通过和拒绝接口后即可接入真实数据。",
+  "mcpTools.review.approve": "通过",
+  "mcpTools.review.reject": "拒绝",
+  "mcpTools.review.details": "查看详情",
+  "mcpTools.review.status.all": "全部状态",
+  "mcpTools.review.status.pending": "待审核",
+  "mcpTools.review.status.approved": "已通过",
+  "mcpTools.review.status.rejected": "已拒绝",
+  "mcpTools.addModal.unsupportedTitle": "该添加方式暂未接入",
+  "mcpTools.addModal.unsupportedDescription": "API 和本地镜像添加入口已预留，待后端接口完成后启用提交。",
+  "mcpTools.page.importService": "导入",
+  "mcpTools.page.role.admin": "管理员",
+  "mcpTools.page.role.user": "普通用户",
+  "mcpTools.page.role.adminHint": "可管理仓库与审核中心",
+  "mcpTools.page.role.userHint": "可安装、导入和管理自己的 MCP 工具",
+  "mcpTools.repository.source": "来源：{{source}}",
+  "mcpTools.repository.toolCount": "{{count}} 个工具",
+  "mcpTools.repository.version": "版本号",
+  "mcpTools.repository.rating": "评分",
+  "mcpTools.repository.downloads": "下载量",
+  "mcpTools.repository.installed": "已安装"
 }

@@ -1,314 +1,579 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { InboxOutlined, CloudUploadOutlined } from "@ant-design/icons";
-import { Button, ConfigProvider, Empty, Input, Segmented, Spin } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { App, Button, ConfigProvider, Empty, Segmented, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
+import { CloudUploadOutlined, InboxOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ClipboardCheck, Download, Plus, Puzzle } from "lucide-react";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { Puzzle } from "lucide-react";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
-import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
+import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
+import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
+import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
+import type { CommunityMcpCard, McpServiceItem, McpTagStat } from "@/types/mcpTools";
 import {
-  McpServiceStatus,
+  FILTER_ALL,
+  McpDeploymentType,
+  McpSource,
   McpToolsServicesTab,
 } from "@/const/mcpTools";
+import {
+  filterByDeploymentType,
+  getDeploymentTypeLabelKey,
+  matchesNameOrTag,
+  paginateItems,
+  resolveDeploymentType,
+} from "@/lib/mcpTools";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
-import McpServiceCard from "./components/McpServiceCard";
+import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
+import McpCommunityDetailModal from "./components/add/community/McpCommunityDetailModal";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
-import McpServicesFilterBar from "./components/McpServicesFilterBar";
-import PublishedServiceCard from "./components/PublishedServiceCard";
+import McpToolsPagination from "./components/McpToolsPagination";
+import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
+import MineMcpServiceCard, { type MineMcpCardItem } from "./components/MineMcpServiceCard";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
+import RepositoryMcpCard from "./components/RepositoryMcpCard";
 
-/** Scoped Ant Design theme for MCP tools (primary buttons, etc.). Segmented uses default styling. */
 const mcpToolsTheme = {
   token: { colorPrimary: "#059669", colorInfo: "#0d9488" },
 };
 
+const MINE_PAGE_SIZE = 12;
+type DeploymentFilter = McpDeploymentType | typeof FILTER_ALL;
+
+type DeploymentCountable = {
+  transportType: CommunityMcpCard["transportType"];
+  deploymentType?: McpDeploymentType;
+  configJson?: Record<string, unknown>;
+  serverUrl?: string;
+};
+
+const deploymentCategories = [
+  McpDeploymentType.REMOTE_LINK,
+  McpDeploymentType.CONTAINER,
+  McpDeploymentType.API,
+  McpDeploymentType.LOCAL_IMAGE,
+];
+
+function getDeploymentCategoryStats(
+  items: DeploymentCountable[],
+  t: (key: string) => string
+): Array<{ value: DeploymentFilter; label: string; count: number }> {
+  return [
+    {
+      value: FILTER_ALL,
+      label: t("mcpTools.deploymentType.all"),
+      count: items.length,
+    },
+    ...deploymentCategories.map((deploymentType) => ({
+      value: deploymentType,
+      label: t(getDeploymentTypeLabelKey(deploymentType)),
+      count: items.filter((item) => resolveDeploymentType(item) === deploymentType).length,
+    })),
+  ];
+}
+
 export default function McpToolsPage() {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
   const { pageVariants, pageTransition } = useSetupFlow();
+  const isAdmin = useMemo(
+    () => user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU,
+    [user?.role]
+  );
 
-  const [tab, setTab] = useState<McpToolsServicesTab>(McpToolsServicesTab.IMPORTED);
+  const [tab, setTab] = useState<McpToolsServicesTab>(McpToolsServicesTab.REPOSITORY);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedImported, setSelectedImported] =
-    useState<McpServiceItem | null>(null);
-  const [selectedPublished, setSelectedPublished] =
-    useState<CommunityMcpCard | null>(null);
+  const [addModalInitialTab, setAddModalInitialTab] = useState<McpSource>(McpSource.LOCAL);
+  const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(null);
+  const [selectedRepository, setSelectedRepository] = useState<CommunityMcpCard | null>(null);
+  const [selectedPublished, setSelectedPublished] = useState<CommunityMcpCard | null>(null);
 
-  const list = useMcpServicesList();
-  const myPublished = useMyCommunityMcp(tab === McpToolsServicesTab.PUBLISHED);
+  const localList = useMcpServicesList();
+  const myPublished = useMyCommunityMcp(tab === McpToolsServicesTab.MINE);
+  const repositoryBrowser = useMcpCommunityBrowser(tab === McpToolsServicesTab.REPOSITORY);
+  const quickAdd = useMcpCommunityQuickAdd({ onSuccess: () => setShowAddModal(false) });
+  const detailMcpIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin && tab === McpToolsServicesTab.REVIEW) {
+      setTab(McpToolsServicesTab.REPOSITORY);
+    }
+  }, [isAdmin, tab]);
+
+  const openAddModal = () => {
+    setAddModalInitialTab(McpSource.LOCAL);
+    setShowAddModal(true);
+  };
+
+  const openImportModal = () => {
+    setAddModalInitialTab(McpSource.REGISTRY);
+    setShowAddModal(true);
+  };
+
+  const openLocalDetail = (service: McpServiceItem) => {
+    detailMcpIdRef.current = service.mcpId;
+    setSelectedLocal(service);
+  };
+
+  const closeLocalDetail = () => {
+    detailMcpIdRef.current = null;
+    setSelectedLocal(null);
+  };
 
   const handleToggled = async (mcpId: number) => {
-    const result = await list.refetch();
+    const result = await localList.refetch();
     const updated = result.data?.find((s) => s.mcpId === mcpId);
     if (updated && detailMcpIdRef.current === mcpId) {
-      setSelectedImported(updated);
+      setSelectedLocal(updated);
     }
   };
 
-  const detailMcpIdRef = useRef<number | null>(null);
-  const openDetail = (service: McpServiceItem) => {
-    detailMcpIdRef.current = service.mcpId;
-    setSelectedImported(service);
-  };
-  const closeDetail = () => {
-    detailMcpIdRef.current = null;
-    setSelectedImported(null);
-  };
+  const repositoryCount = repositoryBrowser.services.length;
+  const mineCount = localList.services.length + myPublished.items.length;
+  const reviewCount = 0;
 
-  const handleSelectPublished = (item: CommunityMcpCard) => {
-    setSelectedPublished(item);
-  };
+  const searchActions = (
+    <>
+      <Button
+        icon={<Download className="h-4 w-4" />}
+        onClick={openImportModal}
+        className="h-10 rounded-xl px-4 font-medium"
+      >
+        {t("mcpTools.page.importService")}
+      </Button>
+      <Button
+        type="primary"
+        icon={<Plus className="h-4 w-4" />}
+        onClick={openAddModal}
+        className="h-10 rounded-xl px-4 font-semibold shadow-sm"
+      >
+        {t("mcpTools.page.addService")}
+      </Button>
+    </>
+  );
 
-  const closePublished = () => {
-    setSelectedPublished(null);
-  };
+  const userTabOptions = [
+    {
+      value: McpToolsServicesTab.REPOSITORY,
+      label: (
+        <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
+          <InboxOutlined className="text-sm" aria-hidden />
+          <span>{t("mcpTools.page.tab.repository")}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+            {repositoryCount}
+          </span>
+        </span>
+      ),
+    },
+    {
+      value: McpToolsServicesTab.MINE,
+      label: (
+        <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
+          <CloudUploadOutlined className="text-sm" aria-hidden />
+          <span>{t("mcpTools.page.tab.mine")}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+            {mineCount}
+          </span>
+        </span>
+      ),
+    },
+  ];
 
-  const resultCount =
-    tab === McpToolsServicesTab.IMPORTED
-      ? list.filteredServices.length
-      : myPublished.filteredItems.length;
+  const adminTabOptions = [
+    ...userTabOptions,
+    {
+      value: McpToolsServicesTab.REVIEW,
+      label: (
+        <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
+          <SafetyCertificateOutlined className="text-sm" aria-hidden />
+          <span>{t("mcpTools.page.tab.review")}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+            {reviewCount}
+          </span>
+        </span>
+      ),
+    },
+  ];
+
+  const tabOptions = isAdmin ? adminTabOptions : userTabOptions;
 
   return (
     <ConfigProvider theme={mcpToolsTheme}>
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-      {/*
-        Own scroll + scrollbar-gutter on this page only: avoids layout shift when
-        tabs change height, without changing global ClientLayout.
-      */}
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
-        <motion.div
-          initial="initial"
-          animate="in"
-          exit="out"
-          variants={pageVariants}
-          transition={pageTransition}
-          className="mx-auto w-full max-w-7xl px-6 py-10"
-        >
-          <div className="flex flex-col gap-6">
-            {/* Title + add service (same row on sm+) */}
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="mb-1 flex flex-col gap-3 sm:mb-0 sm:flex-row sm:items-end sm:justify-between"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-sm shadow-emerald-900/10">
-                  <Puzzle className="h-6 w-6 text-white" />
-                </div>
-                <div className="min-w-0">
-                  <h1 className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">
-                    {t("mcpTools.page.title")}
-                  </h1>
-                  <p className="mt-1 text-slate-600 dark:text-slate-300">
-                    {t("mcpTools.page.subtitle")}
-                  </p>
-                </div>
-              </div>
-              <Button
-                type="primary"
-                size="middle"
-                onClick={() => setShowAddModal(true)}
-                className="w-full shrink-0 rounded-md px-4 font-semibold shadow-sm transition hover:translate-y-[-1px] hover:shadow-md sm:ml-auto sm:w-auto"
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col bg-slate-50/40">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+          <motion.div
+            initial="initial"
+            animate="in"
+            exit="out"
+            variants={pageVariants}
+            transition={pageTransition}
+            className="mx-auto w-full max-w-7xl px-6 py-8"
+          >
+            <div className="flex flex-col gap-6">
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="overflow-hidden rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-cyan-50 p-6 shadow-sm"
               >
-                {t("mcpTools.page.addService")}
-              </Button>
-            </motion.div>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-900/10">
+                      <Puzzle className="h-7 w-7 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <h1 className="text-3xl font-bold text-emerald-800 dark:text-emerald-400">
+                        {t("mcpTools.page.title")}
+                      </h1>
+                      <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+                        {t("mcpTools.page.subtitle")}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                    <Tag color={isAdmin ? "green" : "blue"} className="m-0 rounded-full px-3 py-1 text-sm">
+                      {isAdmin ? t("mcpTools.page.role.admin") : t("mcpTools.page.role.user")}
+                    </Tag>
+                    <span className="text-xs text-slate-500">
+                      {isAdmin ? t("mcpTools.page.role.adminHint") : t("mcpTools.page.role.userHint")}
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
 
-            {/* Tab switch + result count (same row) */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <Segmented
-                value={tab}
-                onChange={(value) => setTab(value as McpToolsServicesTab)}
-                options={[
-                  {
-                    value: McpToolsServicesTab.IMPORTED,
-                    label: (
-                      <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
-                        <InboxOutlined className="text-sm" aria-hidden />
-                        <span>{t("mcpTools.page.tab.imported")}</span>
-                      </span>
-                    ),
-                  },
-                  {
-                    value: McpToolsServicesTab.PUBLISHED,
-                    label: (
-                      <span className="inline-flex h-full w-full items-center justify-center gap-1.5 text-sm">
-                        <CloudUploadOutlined className="text-sm" aria-hidden />
-                        <span>{t("mcpTools.page.tab.published")}</span>
-                      </span>
-                    ),
-                  },
-                ]}
-                className="h-9 w-full max-w-xs rounded-md border border-slate-200 bg-slate-100 p-[2px] text-sm shadow-sm sm:w-auto [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:rounded-md [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:h-full [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:px-3 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-thumb]:rounded-md [&_.ant-segmented-thumb]:bg-white [&_.ant-segmented-thumb]:shadow-sm [&_.ant-segmented-thumb]:top-[2px] [&_.ant-segmented-thumb]:bottom-[2px]"
+              <div className="rounded-2xl border border-slate-200 bg-white p-[3px] shadow-sm">
+                <Segmented
+                  block
+                  value={tab}
+                  onChange={(value) => setTab(value as McpToolsServicesTab)}
+                  options={tabOptions}
+                  className="h-11 w-full rounded-xl bg-transparent text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:flex-1 [&_.ant-segmented-item]:rounded-lg [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:h-full [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:justify-center [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-item-selected]:text-emerald-700 [&_.ant-segmented-thumb]:rounded-lg [&_.ant-segmented-thumb]:bg-emerald-50 [&_.ant-segmented-thumb]:shadow-sm"
+                />
+              </div>
+
+              {tab === McpToolsServicesTab.REPOSITORY ? (
+                <RepositoryView
+                  browser={repositoryBrowser}
+                  localServices={localList.services}
+                  isAdmin={isAdmin}
+                  actions={searchActions}
+                  onSelect={setSelectedRepository}
+                  onInstall={quickAdd.open}
+                  onOffline={() => message.info(t("mcpTools.repository.offlinePending"))}
+                />
+              ) : null}
+
+              {tab === McpToolsServicesTab.MINE ? (
+                <MineView
+                  localList={localList}
+                  myPublished={myPublished}
+                  actions={searchActions}
+                  onEditLocal={openLocalDetail}
+                  onEditCommunity={setSelectedPublished}
+                  onToggled={handleToggled}
+                />
+              ) : null}
+
+              {tab === McpToolsServicesTab.REVIEW && isAdmin ? (
+                <ReviewCenterView actions={searchActions} />
+              ) : null}
+
+              {selectedLocal ? (
+                <McpServiceDetailModal
+                  selectedService={selectedLocal}
+                  onClose={closeLocalDetail}
+                  onToggled={handleToggled}
+                />
+              ) : null}
+
+              {selectedRepository ? (
+                <McpCommunityDetailModal
+                  service={selectedRepository}
+                  onClose={() => setSelectedRepository(null)}
+                  onQuickAdd={quickAdd.open}
+                />
+              ) : null}
+
+              <PublishedServiceDetailModal
+                open={Boolean(selectedPublished)}
+                service={selectedPublished}
+                onClose={() => setSelectedPublished(null)}
               />
-              <span className="pb-0.5 text-xs text-slate-400 sm:shrink-0 sm:text-right">
-                {t("mcpTools.page.resultCount", { count: resultCount })}
-              </span>
+
+              {quickAdd.visible ? <CommunityQuickAddModal controller={quickAdd} /> : null}
+
+              <AddMcpServiceModal
+                open={showAddModal}
+                initialTab={addModalInitialTab}
+                onClose={() => setShowAddModal(false)}
+              />
             </div>
-
-            {tab === McpToolsServicesTab.IMPORTED ? (
-              <ImportedView list={list} onSelect={openDetail} />
-            ) : (
-              <PublishedView
-                myPublished={myPublished}
-                onSelect={handleSelectPublished}
-              />
-            )}
-
-            {selectedImported ? (
-              <McpServiceDetailModal
-                selectedService={selectedImported}
-                onClose={closeDetail}
-                onToggled={handleToggled}
-              />
-            ) : null}
-
-            <PublishedServiceDetailModal
-              open={Boolean(selectedPublished)}
-              service={selectedPublished}
-              onClose={closePublished}
-            />
-
-            <AddMcpServiceModal
-              open={showAddModal}
-              onClose={() => setShowAddModal(false)}
-            />
-          </div>
-        </motion.div>
+          </motion.div>
+        </div>
       </div>
-    </div>
     </ConfigProvider>
   );
 }
 
-type ServicesListController = ReturnType<typeof useMcpServicesList>;
-
-function ImportedView({
-  list,
+function RepositoryView({
+  browser,
+  localServices,
+  isAdmin,
+  actions,
   onSelect,
+  onInstall,
+  onOffline,
 }: {
-  list: ServicesListController;
-  onSelect: (service: McpServiceItem) => void;
+  browser: ReturnType<typeof useMcpCommunityBrowser>;
+  localServices: McpServiceItem[];
+  isAdmin: boolean;
+  actions: React.ReactNode;
+  onSelect: (service: CommunityMcpCard) => void;
+  onInstall: (service: CommunityMcpCard) => void;
+  onOffline: (service: CommunityMcpCard) => void;
 }) {
   const { t } = useTranslation("common");
+  const [deploymentType, setDeploymentType] = useState<DeploymentFilter>(FILTER_ALL);
+
+  const categoryStats = useMemo(
+    () => getDeploymentCategoryStats(browser.services, t),
+    [browser.services, t]
+  );
+
+  const filteredServices = useMemo(() => {
+    return filterByDeploymentType(browser.services, deploymentType).filter((item) =>
+      matchesNameOrTag(item, browser.filters.search)
+    );
+  }, [browser.services, browser.filters.search, deploymentType]);
+
+  const isInstalled = (service: CommunityMcpCard) => {
+    return localServices.some((localService) => {
+      if (service.communityId && localService.communityId === service.communityId) return true;
+      return localService.name === service.name;
+    });
+  };
 
   return (
-    <>
-      <SearchAndFilterRow
-        searchValue={list.filters.search}
-        onSearchChange={(value) => list.updateFilter("search", value)}
-        searchPlaceholder={String(t("mcpTools.page.searchPlaceholder"))}
-        filters={
-          <McpServicesFilterBar
-            source={list.filters.source}
-            transport={list.filters.transport}
-            tag={list.filters.tag}
-            tagStats={list.tagStats}
-            onSourceChange={(value) => list.updateFilter("source", value)}
-            onTransportChange={(value) => list.updateFilter("transport", value)}
-            onTagChange={(value) => list.updateFilter("tag", value)}
-          />
-        }
+    <div className="space-y-4">
+      <McpToolsSearchFilterBar
+        search={browser.filters.search}
+        deploymentType={deploymentType}
+        categoryStats={categoryStats}
+        actions={(
+          <>
+            <span className="flex h-10 items-center text-xs text-slate-400">
+              {t("mcpTools.page.resultCount", { count: filteredServices.length })}
+            </span>
+            {actions}
+          </>
+        )}
+        onSearchChange={(value) => browser.updateFilter("search", value)}
+        onDeploymentTypeChange={setDeploymentType}
       />
 
-      {list.loading ? (
-        <PlaceholderBox>{t("mcpTools.page.loading")}</PlaceholderBox>
-      ) : list.filteredServices.length === 0 ? (
-        <PlaceholderBox>{t("mcpTools.page.empty")}</PlaceholderBox>
+      {browser.loading ? (
+        <PlaceholderBox><Spin /></PlaceholderBox>
+      ) : filteredServices.length === 0 ? (
+        <PlaceholderBox><Empty description={t("mcpTools.repository.empty")} /></PlaceholderBox>
       ) : (
         <ResponsiveCardGrid>
-          {list.filteredServices.map((service) => (
-            <McpServiceCard
-              key={`${service.mcpId}`}
+          {filteredServices.map((service, index) => (
+            <RepositoryMcpCard
+              key={`${service.communityId || service.name}-${index}`}
               service={service}
+              isAdmin={isAdmin}
+              installed={isInstalled(service)}
+              onInstall={onInstall}
               onSelect={onSelect}
+              onOffline={onOffline}
             />
           ))}
         </ResponsiveCardGrid>
       )}
-    </>
+
+      <McpToolsPagination
+        mode="cursor"
+        page={browser.page}
+        resultCount={filteredServices.length}
+        hasPrevPage={browser.hasPrevPage}
+        hasNextPage={browser.hasNextPage}
+        onPrevPage={browser.prevPage}
+        onNextPage={browser.nextPage}
+      />
+    </div>
   );
 }
 
-function PublishedView({
+function MineView({
+  localList,
   myPublished,
-  onSelect,
+  actions,
+  onEditLocal,
+  onEditCommunity,
+  onToggled,
 }: {
+  localList: ReturnType<typeof useMcpServicesList>;
   myPublished: ReturnType<typeof useMyCommunityMcp>;
-  onSelect: (item: CommunityMcpCard) => void;
+  actions: React.ReactNode;
+  onEditLocal: (service: McpServiceItem) => void;
+  onEditCommunity: (service: CommunityMcpCard) => void;
+  onToggled: (mcpId: number) => Promise<void>;
 }) {
   const { t } = useTranslation("common");
+  const toggle = useMcpServiceToggle();
+  const [search, setSearch] = useState("");
+  const [deploymentType, setDeploymentType] = useState<DeploymentFilter>(FILTER_ALL);
+  const [tag, setTag] = useState(FILTER_ALL);
+  const [page, setPage] = useState(1);
+
+  const tagStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of [...localList.services, ...myPublished.items]) {
+      for (const raw of item.tags || []) {
+        const next = String(raw || "").trim();
+        if (!next) continue;
+        counts.set(next, (counts.get(next) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .map(([tagName, count]): McpTagStat => ({ tag: tagName, count }))
+      .sort((a, b) => a.tag.localeCompare(b.tag));
+  }, [localList.services, myPublished.items]);
+
+  const items = useMemo<MineMcpCardItem[]>(() => {
+    return [
+      ...localList.services.map((service) => ({ kind: "local" as const, service })),
+      ...myPublished.items.map((service) => ({ kind: "community" as const, service })),
+    ];
+  }, [localList.services, myPublished.items]);
+
+  const categoryStats = useMemo(
+    () => getDeploymentCategoryStats(items.map((item) => item.service), t),
+    [items, t]
+  );
+
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      const service = item.service;
+      if (!matchesNameOrTag(service, search)) return false;
+      if (tag !== FILTER_ALL && !(service.tags || []).includes(tag)) return false;
+      if (deploymentType !== FILTER_ALL && resolveDeploymentType(service) !== deploymentType) return false;
+      return true;
+    });
+  }, [items, search, tag, deploymentType]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, tag, deploymentType]);
+
+  const pagedItems = paginateItems(filteredItems, page, MINE_PAGE_SIZE);
+  const loading = localList.loading || myPublished.loading;
+
+  const handleToggle = async (service: McpServiceItem) => {
+    await toggle.toggle(service);
+    await onToggled(service.mcpId);
+  };
 
   return (
-    <>
-      <SearchAndFilterRow
-        searchValue={myPublished.search}
-        onSearchChange={(value) => myPublished.updateFilter("search", value)}
-        searchPlaceholder={String(t("mcpTools.community.searchPlaceholder"))}
-        filters={
-          <McpServicesFilterBar
-            transport={myPublished.filters.transport}
-            tag={myPublished.filters.tag}
-            tagStats={myPublished.tagStats}
-            onTransportChange={(value) =>
-              myPublished.updateFilter("transport", value)
-            }
-            onTagChange={(value) => myPublished.updateFilter("tag", value)}
-          />
-        }
+    <div className="space-y-4">
+      <McpToolsSearchFilterBar
+        search={search}
+        deploymentType={deploymentType}
+        categoryStats={categoryStats}
+        actions={(
+          <>
+            <span className="flex h-10 items-center text-xs text-slate-400">
+              {t("mcpTools.page.resultCount", { count: filteredItems.length })}
+            </span>
+            {actions}
+          </>
+        )}
+        onSearchChange={setSearch}
+        onDeploymentTypeChange={setDeploymentType}
       />
 
-      {myPublished.loading ? (
-        <PlaceholderBox>
-          <Spin />
-        </PlaceholderBox>
-      ) : myPublished.filteredItems.length === 0 ? (
-        <PlaceholderBox>
-          <Empty description={t("mcpTools.community.mine.empty")} />
-        </PlaceholderBox>
+      {loading ? (
+        <PlaceholderBox><Spin /></PlaceholderBox>
+      ) : filteredItems.length === 0 ? (
+        <PlaceholderBox><Empty description={t("mcpTools.mine.empty")} /></PlaceholderBox>
       ) : (
         <ResponsiveCardGrid>
-          {myPublished.filteredItems.map((item) => (
-            <PublishedServiceCard
-              key={`${item.communityId}-${item.name}`}
-              service={item}
-              onSelect={onSelect}
-            />
-          ))}
+          {pagedItems.map((item) => {
+            const key = item.kind === "local"
+              ? `local-${item.service.mcpId}`
+              : `community-${item.service.communityId || item.service.name}`;
+            return (
+              <MineMcpServiceCard
+                key={key}
+                item={item}
+                toggling={item.kind === "local" ? toggle.isToggling(item.service.mcpId) : false}
+                onEditLocal={onEditLocal}
+                onEditCommunity={onEditCommunity}
+                onToggle={handleToggle}
+              />
+            );
+          })}
         </ResponsiveCardGrid>
       )}
-    </>
+
+      <McpToolsPagination
+        mode="offset"
+        current={page}
+        pageSize={MINE_PAGE_SIZE}
+        total={filteredItems.length}
+        onChange={setPage}
+      />
+    </div>
   );
 }
 
-function SearchAndFilterRow({
-  searchValue,
-  onSearchChange,
-  searchPlaceholder,
-  filters,
-}: {
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  searchPlaceholder: string;
-  filters: React.ReactNode;
-}) {
+function ReviewCenterView({ actions }: { actions: React.ReactNode }) {
+  const { t } = useTranslation("common");
+  const [search, setSearch] = useState("");
+  const [deploymentType, setDeploymentType] = useState<DeploymentFilter>(FILTER_ALL);
+  const [tag, setTag] = useState(FILTER_ALL);
+  const [status, setStatus] = useState(FILTER_ALL);
+
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-      <Input
-        value={searchValue}
-        onChange={(event) => onSearchChange(event.target.value)}
-        placeholder={searchPlaceholder}
-        size="middle"
-        allowClear
-        className="w-full rounded-md text-sm lg:flex-1"
+    <div className="space-y-4">
+      <McpToolsSearchFilterBar
+        search={search}
+        deploymentType={deploymentType}
+        status={status}
+        statusOptions={[
+          { value: FILTER_ALL, label: t("mcpTools.review.status.all") },
+          { value: "pending", label: t("mcpTools.review.status.pending") },
+          { value: "approved", label: t("mcpTools.review.status.approved") },
+          { value: "rejected", label: t("mcpTools.review.status.rejected") },
+        ]}
+        actions={actions}
+        onSearchChange={setSearch}
+        onDeploymentTypeChange={setDeploymentType}
+        onStatusChange={setStatus}
       />
-      {filters ? (
-        <div className="w-full lg:w-auto lg:shrink-0">{filters}</div>
-      ) : null}
+
+      <div className="rounded-3xl border border-dashed border-emerald-200 bg-white p-10 text-center shadow-sm">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+          <ClipboardCheck className="h-7 w-7" />
+        </div>
+        <h3 className="mt-4 text-lg font-semibold text-slate-900">
+          {t("mcpTools.review.emptyTitle")}
+        </h3>
+        <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
+          {t("mcpTools.review.pendingIntegration")}
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Tag color="green" className="rounded-full">{t("mcpTools.review.approve")}</Tag>
+          <Tag color="red" className="rounded-full">{t("mcpTools.review.reject")}</Tag>
+          <Tag color="blue" className="rounded-full">{t("mcpTools.review.details")}</Tag>
+        </div>
+      </div>
     </div>
   );
 }
@@ -317,9 +582,7 @@ function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="grid gap-4"
-      style={{
-        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-      }}
+      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}
     >
       {children}
     </div>
@@ -328,7 +591,7 @@ function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {
 
 function PlaceholderBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-dashed border-slate-200 bg-white/60 px-6 py-12 text-center text-slate-500">
+    <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-slate-500 shadow-sm">
       {children}
     </div>
   );

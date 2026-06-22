@@ -2,6 +2,7 @@ import {
   FILTER_ALL,
   McpSource,
   type McpContainerStatus,
+  type McpDeploymentType,
   type McpHealthStatus,
   type McpServiceStatus,
   type McpTransportType,
@@ -137,6 +138,12 @@ export interface CommunityMcpCard {
   configJson?: Record<string, unknown>;
   registryJson?: Record<string, unknown>;
   tags?: string[];
+  authorName?: string;
+  authorDisplayName?: string;
+  rating?: number;
+  installCount?: number;
+  deploymentType?: McpDeploymentType;
+  reviewStatus?: "pending" | "approved" | "rejected" | "offline";
 }
 
 export interface McpServiceItem {
@@ -159,6 +166,10 @@ export interface McpServiceItem {
   containerStatus?: McpContainerStatus;
   authorizationToken?: string;
   customHeaders?: Record<string, string>;
+  isListedInRepository?: boolean;
+  communityId?: number;
+  deploymentType?: McpDeploymentType;
+  reviewStatus?: "pending" | "approved" | "rejected" | "offline";
 }
 
 export interface McpTagStat {

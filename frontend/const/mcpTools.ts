@@ -44,8 +44,16 @@ export enum McpServerStatus {
 
 /** Main MCP tools page: imported workspace services vs. published community list. */
 export enum McpToolsServicesTab {
-  IMPORTED = "imported",
-  PUBLISHED = "published",
+  REPOSITORY = "repository",
+  MINE = "mine",
+  REVIEW = "review",
+}
+
+export enum McpDeploymentType {
+  REMOTE_LINK = "remote_link",
+  CONTAINER = "container",
+  API = "api",
+  LOCAL_IMAGE = "local_image",
 }
 
 /** Sentinel value used by toolbar `Select`s to mean "no filter applied". */

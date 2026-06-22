@@ -11,19 +11,21 @@ import AddMcpServiceCommunitySection from "./community/AddMcpServiceCommunitySec
 
 interface AddMcpServiceModalProps {
   open: boolean;
+  initialTab?: McpSource;
   onClose: () => void;
 }
 
 export default function AddMcpServiceModal({
   open,
+  initialTab = McpSource.LOCAL,
   onClose,
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
-  const [tab, setTab] = useState<McpSource>(McpSource.LOCAL);
+  const [tab, setTab] = useState<McpSource>(initialTab);
 
   useEffect(() => {
-    if (!open) setTab(McpSource.LOCAL);
-  }, [open]);
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
 
   if (!open) return null;
 
