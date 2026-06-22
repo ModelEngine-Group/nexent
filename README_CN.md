@@ -68,6 +68,8 @@ bash deploy.sh k8s
 
 Kubernetes 真实实现为 `bash deploy/k8s/deploy.sh`。它会读取同一个根目录 `.env`，并显式渲染为 Helm ConfigMap 和 Secret 覆盖值。PVC 可通过 `--persistence-mode local|dynamic|existing`、`--storage-class`、`--local-path`、`--local-node-name`、`--existing-claim-prefix` 控制。
 
+根目录卸载入口为 `bash uninstall.sh docker ...` 或 `bash uninstall.sh k8s ...`，具体实现仍分别在 `deploy/docker/uninstall.sh` 和 `deploy/k8s/uninstall.sh`。
+
 详细部署指南请参考 [Kubernetes 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/kubernetes-installation.html)。
 
 # ✨ 核心特性

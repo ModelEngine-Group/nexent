@@ -4,6 +4,35 @@
 
 ## 🏗️ 构建和推送镜像
 
+推荐使用统一构建入口：
+
+```bash
+# 按部署组件构建指定版本镜像
+bash deploy/images/build.sh \
+  --components application,data-process,terminal \
+  --version v2.2.1 \
+  --registry general \
+  --platform linux/amd64,linux/arm64 \
+  --push
+
+# 按同一组件集合构建 latest 镜像
+bash deploy/images/build.sh \
+  --components application,data-process \
+  --version latest \
+  --registry general \
+  --platform linux/amd64 \
+  --load
+
+# 需要时也可以只构建单个镜像
+bash deploy/images/build.sh --image web --version v2.2.1 --dry-run
+```
+
+组件到镜像的映射：
+- `application` 构建 `nexent`、`nexent-web`、`nexent-mcp`
+- `data-process` 构建 `nexent-data-process`
+- `terminal` 构建 `nexent-ubuntu-terminal`
+- `infrastructure`、`supabase`、`monitoring` 不构建 Nexent 应用镜像
+
 ```bash
 # 🛠️ 创建并使用支持多架构构建的新构建器实例
 docker buildx create --name nexent_builder --use

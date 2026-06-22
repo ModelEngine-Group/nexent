@@ -469,6 +469,7 @@ copy_deployment_bundle() {
   echo "========================================"
 
   cp "$PROJECT_ROOT/deploy.sh" "$OUTPUT_DIR/deploy.sh"
+  cp "$PROJECT_ROOT/uninstall.sh" "$OUTPUT_DIR/uninstall.sh"
   cp "$PROJECT_ROOT/VERSION" "$OUTPUT_DIR/VERSION"
   cp "$PROJECT_ROOT/.env.example" "$OUTPUT_DIR/.env.example"
 
@@ -495,7 +496,7 @@ copy_deployment_bundle() {
   esac
 
   find "$OUTPUT_DIR" -name '.git' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/load-images.sh" "$OUTPUT_DIR/offline-install.sh" 2>/dev/null || true
+  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" "$OUTPUT_DIR/offline-install.sh" 2>/dev/null || true
   find "$OUTPUT_DIR/deploy" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
   echo "✅ Deployment bundle copied"

@@ -70,6 +70,21 @@ deployment_trim() {
   printf '%s' "$value"
 }
 
+deployment_validate_password() {
+  local password="$1"
+
+  [ -n "$password" ] || return 1
+  [ "${#password}" -ge 8 ] || return 1
+  [[ "$password" =~ [A-Z] ]] || return 1
+  [[ "$password" =~ [a-z] ]] || return 1
+  [[ "$password" =~ [0-9] ]] || return 1
+  return 0
+}
+
+deployment_password_validation_message() {
+  printf '%s\n' "Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers."
+}
+
 deployment_ensure_root_env() {
   local project_root="$1"
   local docker_dir="${2:-$project_root/docker}"

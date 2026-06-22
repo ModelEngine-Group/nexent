@@ -1221,6 +1221,7 @@ prompt_super_admin_password() {
   echo "" >&2
   echo "🔐 Super Admin User Password Setup" >&2
   echo "   Email: suadmin@nexent.com" >&2
+  echo "   Requirement: $(deployment_password_validation_message)" >&2
   echo "" >&2
 
   while [ $attempts -lt $max_attempts ]; do
@@ -1232,6 +1233,12 @@ prompt_super_admin_password() {
     # Check if password is empty
     if [ -z "$password" ]; then
       echo "   ❌ Password cannot be empty. Please try again." >&2
+      attempts=$((attempts + 1))
+      continue
+    fi
+
+    if ! deployment_validate_password "$password"; then
+      echo "   ❌ $(deployment_password_validation_message)" >&2
       attempts=$((attempts + 1))
       continue
     fi

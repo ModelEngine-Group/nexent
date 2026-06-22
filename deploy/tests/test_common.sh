@@ -166,6 +166,24 @@ assert_eq "2" "$(deployment_tui_previous_step 3)" "TUI previous step should skip
 assert_eq "$(sed -n '1p' "$SCRIPT_DIR/../../VERSION")" "$(deployment_read_version "")" "deployment version should come from root VERSION"
 assert_eq "v-test" "$(deployment_read_version "v-test")" "explicit deployment version should win"
 
+assert_success "password validation should accept frontend-compatible passwords" deployment_validate_password "Nexent123"
+if deployment_validate_password "nexent123"; then
+  echo "FAIL: password without uppercase letters should be rejected"
+  exit 1
+fi
+if deployment_validate_password "NEXENT123"; then
+  echo "FAIL: password without lowercase letters should be rejected"
+  exit 1
+fi
+if deployment_validate_password "NexentPwd"; then
+  echo "FAIL: password without numbers should be rejected"
+  exit 1
+fi
+if deployment_validate_password "Nex123"; then
+  echo "FAIL: password shorter than 8 characters should be rejected"
+  exit 1
+fi
+
 ENV_TEST_ROOT="$TMP_DIR/env-root"
 mkdir -p "$ENV_TEST_ROOT/docker"
 printf 'FROM_DOCKER=yes\n' > "$ENV_TEST_ROOT/docker/.env"

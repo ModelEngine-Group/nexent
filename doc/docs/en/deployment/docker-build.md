@@ -1,5 +1,34 @@
 ### 🏗️ Build and Push Images
 
+Recommended unified build entry:
+
+```bash
+# Build images for selected deployment components with a fixed version tag
+bash deploy/images/build.sh \
+  --components application,data-process,terminal \
+  --version v2.2.1 \
+  --registry general \
+  --platform linux/amd64,linux/arm64 \
+  --push
+
+# Build the same component set as latest
+bash deploy/images/build.sh \
+  --components application,data-process \
+  --version latest \
+  --registry general \
+  --platform linux/amd64 \
+  --load
+
+# Build one explicit image when needed
+bash deploy/images/build.sh --image web --version v2.2.1 --dry-run
+```
+
+Component mapping:
+- `application` builds `nexent`, `nexent-web`, and `nexent-mcp`
+- `data-process` builds `nexent-data-process`
+- `terminal` builds `nexent-ubuntu-terminal`
+- `infrastructure`, `supabase`, and `monitoring` do not build Nexent application images
+
 ```bash
 # 🛠️ Create and use a new builder instance that supports multi-architecture builds
 docker buildx create --name nexent_builder --use

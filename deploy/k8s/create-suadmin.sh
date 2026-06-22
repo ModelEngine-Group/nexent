@@ -6,11 +6,21 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHART_DIR="$SCRIPT_DIR/nexent"
 COMMON_VALUES="$CHART_DIR/charts/nexent-common/values.yaml"
 NAMESPACE="nexent"
 RELEASE_NAME="nexent"
 SUPER_ADMIN_EMAIL="suadmin@nexent.com"
+DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+else
+  echo "Error: shared deployment helper not found: $DEPLOYMENT_COMMON"
+  exit 1
+fi
 
 # Prompt user to enter password for super admin user with confirmation
 prompt_super_admin_password() {
@@ -22,6 +32,7 @@ prompt_super_admin_password() {
   echo "" >&2
   echo "🔐 Super Admin User Password Setup" >&2
   echo "   Email: suadmin@nexent.com" >&2
+  echo "   Requirement: $(deployment_password_validation_message)" >&2
   echo "" >&2
 
   while [ $attempts -lt $max_attempts ]; do
@@ -31,6 +42,12 @@ prompt_super_admin_password() {
 
     if [ -z "$password" ]; then
       echo "   ❌ Password cannot be empty. Please try again." >&2
+      attempts=$((attempts + 1))
+      continue
+    fi
+
+    if ! deployment_validate_password "$password"; then
+      echo "   ❌ $(deployment_password_validation_message)" >&2
       attempts=$((attempts + 1))
       continue
     fi
