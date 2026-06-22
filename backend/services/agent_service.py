@@ -73,7 +73,7 @@ from database import skill_db
 from database.attachment_db import upload_fileobj
 from services.skill_service import SkillService
 from services.file_management_service import is_allowed_skill_upload_path
-from database.agent_version_db import query_version_list
+from database.agent_version_db import query_version_list, query_current_version_no
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids, query_external_sub_agents
@@ -1068,6 +1068,12 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     agent_info["is_available"] = is_available
     agent_info["unavailable_reasons"] = unavailable_reasons
 
+    # Set current_version_no from draft record (version_no=0)
+    # This ensures the returned data always has the current published version info
+    if version_no > 0:
+        draft_version_no = query_current_version_no(agent_id, tenant_id)
+        agent_info["current_version_no"] = draft_version_no
+
     return agent_info
 
 
@@ -1184,6 +1190,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "max_steps": request.max_steps,
                 "requested_output_tokens": request.requested_output_tokens,
                 "provide_run_summary": request.provide_run_summary,
+                "verification_config": request.verification_config,
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
@@ -1710,6 +1717,7 @@ async def export_agent_by_agent_id(
                                           max_steps=agent_info["max_steps"],
                                           requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           provide_run_summary=agent_info["provide_run_summary"],
+                                          verification_config=agent_info.get("verification_config"),
                                           duty_prompt=agent_info.get(
                                               "duty_prompt"),
                                           constraint_prompt=agent_info.get(
@@ -1865,6 +1873,7 @@ async def import_agent_by_agent_id(
                                          "max_steps": import_agent_info.max_steps,
                                          "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "provide_run_summary": import_agent_info.provide_run_summary,
+                                         "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
@@ -2233,6 +2242,7 @@ async def prepare_agent_run(
         override_version_no=agent_request.version_no,
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
+        tool_params=agent_request.tool_params,
     )
 
     # Mount conversation-level reusable ContextManager if enabled

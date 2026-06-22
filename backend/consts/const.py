@@ -486,7 +486,7 @@ NORTHBOUND_EXTERNAL_URL = os.getenv(
 
 
 # APP Version
-APP_VERSION = "v2.2.0"
+APP_VERSION = "v2.2.1"
 
 
 # Skill Creation Streaming Configuration

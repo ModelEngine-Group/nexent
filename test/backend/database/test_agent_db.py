@@ -133,6 +133,7 @@ class MockAgent:
         self.is_new = True
         self.enable_context_manager = False
         self.requested_output_tokens = None
+        self.verification_config = None
         self.greeting_message = None
         self.example_questions = None
         self.current_version_no = None

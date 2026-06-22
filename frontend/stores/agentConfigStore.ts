@@ -10,7 +10,13 @@
 
 import { create } from "zustand";
 
-import { Agent, Tool, AgentConfigUpdate, Skill } from "@/types/agentConfig";
+import {
+  Agent,
+  Tool,
+  AgentConfigUpdate,
+  Skill,
+  DEFAULT_AGENT_VERIFICATION_CONFIG,
+} from "@/types/agentConfig";
 import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
 /**
@@ -39,6 +45,7 @@ export type EditableAgent = Pick<
   | "business_logic_model_id"
   | "prompt_template_id"
   | "prompt_template_name"
+  | "verification_config"
   | "sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
@@ -172,6 +179,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     business_logic_model_id: llmConfig?.id || 0,
     prompt_template_id: 0,
     prompt_template_name: "system_default",
+    verification_config: { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
     sub_agent_id_list: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
@@ -204,6 +212,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_id: agent.business_logic_model_id || 0,
         prompt_template_id: agent.prompt_template_id ?? 0,
         prompt_template_name: agent.prompt_template_name || "system_default",
+        verification_config: agent.verification_config || { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
         sub_agent_id_list: agent.sub_agent_id_list || [],
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
@@ -322,6 +331,8 @@ const isDirty = (
       editedAgent.business_logic_model_id !== 0 ||
       (editedAgent.prompt_template_id ?? 0) !== 0 ||
       (editedAgent.prompt_template_name || "system_default") !== "system_default" ||
+      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
+        JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
       normalizeArray(editedAgent.group_ids || []).length > 0 ||
       normalizeArray(editedAgent.sub_agent_id_list || []).length > 0 ||
       normalizeArray(editedAgent.external_sub_agent_id_list || []).length > 0 ||
@@ -352,6 +363,8 @@ const isDirty = (
     baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
     (baselineAgent.prompt_template_id ?? 0) !== (editedAgent.prompt_template_id ?? 0) ||
     (baselineAgent.prompt_template_name || "system_default") !== (editedAgent.prompt_template_name || "system_default") ||
+    JSON.stringify(baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
+      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) ||
     JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
       JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
     JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==

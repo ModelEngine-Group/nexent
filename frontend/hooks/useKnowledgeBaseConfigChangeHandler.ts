@@ -10,7 +10,8 @@ export type ToolKbType =
   | "dify_search"
   | "datamate_search"
   | "idata_search"
-  | "haotian_search";
+  | "haotian_search"
+  | "aidp_search";
 
 /**
  * Configuration for Dify tool
@@ -37,11 +38,19 @@ export interface IdataConfig {
 }
 
 /**
+ * Configuration for AIDP tool
+ */
+export interface AidpConfig {
+  serverUrl: string;
+  apiKey: string;
+}
+
+/**
  * Options for useKnowledgeBaseConfigChangeHandler hook
  */
 export interface UseKnowledgeBaseConfigChangeHandlerOptions {
   toolKbType: ToolKbType | null;
-  config: DifyConfig | DatamateConfig | IdataConfig | undefined;
+  config: DifyConfig | DatamateConfig | IdataConfig | AidpConfig | undefined;
   onConfigChange: () => void;
 }
 
@@ -70,6 +79,13 @@ export function useKnowledgeBaseConfigChangeHandler({
     apiKey: "",
     userId: "",
   });
+
+  const prevAidpConfig = useRef<AidpConfig>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
+  const aidpDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track if initial load is complete to avoid duplicate API calls
   const isInitialLoadComplete = useRef(false);
@@ -170,12 +186,56 @@ export function useKnowledgeBaseConfigChangeHandler({
     }
   }, [toolKbType, config, onConfigChange]);
 
+  useEffect(() => {
+    if (toolKbType !== "aidp_search" || !config) {
+      return;
+    }
+
+    const aidpConfig = config as AidpConfig;
+
+    if (!prevAidpConfig.current.serverUrl && !prevAidpConfig.current.apiKey) {
+      prevAidpConfig.current = { ...aidpConfig };
+      return;
+    }
+
+    const hasServerUrlChanged =
+      aidpConfig.serverUrl !== prevAidpConfig.current.serverUrl;
+    const hasApiKeyChanged = aidpConfig.apiKey !== prevAidpConfig.current.apiKey;
+
+    if (hasServerUrlChanged || hasApiKeyChanged) {
+      // Clear existing debounce timer
+      if (aidpDebounceRef.current) {
+        clearTimeout(aidpDebounceRef.current);
+      }
+      // Debounce: wait 500ms after last change before triggering API call
+      aidpDebounceRef.current = setTimeout(() => {
+        onConfigChange();
+        prevAidpConfig.current = { ...aidpConfig };
+        isInitialLoadComplete.current = true;
+      }, 500);
+    }
+  }, [toolKbType, config, onConfigChange]);
+
   // Reset handler - useful when modal closes to reset the tracking state
   const resetTracker = useCallback(() => {
     prevDifyConfig.current = { serverUrl: "", apiKey: "" };
     prevDatamateServerUrl.current = "";
     prevIdataConfig.current = { serverUrl: "", apiKey: "", userId: "" };
+    prevAidpConfig.current = { serverUrl: "", apiKey: "" };
     isInitialLoadComplete.current = false;
+    if (aidpDebounceRef.current) {
+      clearTimeout(aidpDebounceRef.current);
+      aidpDebounceRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (aidpDebounceRef.current) {
+        clearTimeout(aidpDebounceRef.current);
+      }
+    };
   }, []);
 
   return {

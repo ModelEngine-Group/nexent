@@ -117,6 +117,67 @@ class ToolConfig(BaseModel):
     usage: Optional[str] = Field(description="MCP server name", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
 
+
+VerificationEvent = Literal[
+    "tool_precheck",
+    "tool_result",
+    "retrieval",
+    "code_execution",
+    "handoff",
+    "final_answer",
+]
+VerificationStrictness = Literal["lenient", "balanced", "strict"]
+VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
+
+
+class AgentVerificationConfig(BaseModel):
+    """Configuration for layered ReAct self-verification."""
+
+    enabled: bool = Field(description="Whether self-verification is enabled", default=True)
+    step_verification_enabled: bool = Field(
+        description="Whether to verify critical ReAct step events",
+        default=True,
+    )
+    final_verification_enabled: bool = Field(
+        description="Whether to verify final answer candidates before returning them",
+        default=True,
+    )
+    llm_verification_enabled: bool = Field(
+        description="Whether to use the LLM as a final-answer verifier after deterministic checks",
+        default=True,
+    )
+    max_final_rounds: int = Field(
+        description="Maximum number of final-answer verification attempts",
+        default=2,
+        ge=1,
+        le=5,
+    )
+    strictness: VerificationStrictness = Field(
+        description="Verification strictness profile",
+        default="balanced",
+    )
+    fail_policy: VerificationFailPolicy = Field(
+        description="Policy when final verification still fails after repair attempts",
+        default="repair_then_controlled_summary",
+    )
+    pass_score: float = Field(
+        description="Minimum verifier score for final answers",
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+    )
+    critical_events: List[VerificationEvent] = Field(
+        description="Critical ReAct events that should be verified",
+        default_factory=lambda: [
+            "tool_precheck",
+            "tool_result",
+            "retrieval",
+            "code_execution",
+            "handoff",
+            "final_answer",
+        ],
+    )
+
 class AgentConfig(BaseModel):
     name: str = Field(description="Agent name")
     description: str = Field(description="Agent description")
@@ -157,6 +218,10 @@ class AgentConfig(BaseModel):
     safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved W2 safe input budget snapshot for request execution",
         default=None,
+    )
+    verification_config: AgentVerificationConfig = Field(
+        description="Layered ReAct self-verification configuration",
+        default_factory=AgentVerificationConfig,
     )
 
 
