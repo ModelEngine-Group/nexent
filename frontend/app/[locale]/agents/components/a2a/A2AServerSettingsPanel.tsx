@@ -109,7 +109,7 @@ export default function A2AServerSettingsPanel({
               <div className="flex flex-col gap-1 min-w-0 w-full">
                 <code className="text-xs bg-gray-100 px-2 py-1 rounded break-all">{previewData.agentCardUrl}</code>
                 <span className="text-xs text-gray-500">
-                  {t("a2a.server.urlHint", { defaultValue: "Append base URL to access. For local dev: localhost:5013" })}
+                  {t("a2a.server.urlHint", { defaultValue: "Append base URL to access. For local dev: localhost:5013(or 30013)" })}
                 </span>
               </div>
             </div>
@@ -162,10 +162,10 @@ export default function A2AServerSettingsPanel({
                 {t("a2a.server.usageTitle", { defaultValue: "How to use these endpoints" })}
               </p>
               <p className="mb-1">
-                {t("a2a.server.localDevHint", { defaultValue: "For local development: prepend localhost:5013 to the paths above." })}
+                {t("a2a.server.localDevHint", { defaultValue: "For local development: prepend localhost:5013(or 30013) to the paths above." })}
               </p>
               <p>
-                {t("a2a.server.productionHint", { defaultValue: "For production: replace localhost:5013 with your server domain or public IP and port 5013." })}
+                {t("a2a.server.productionHint", { defaultValue: "For production: replace localhost with your server domain or public IP." })}
               </p>
             </div>
           </div>

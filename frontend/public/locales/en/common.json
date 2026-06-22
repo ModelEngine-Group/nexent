@@ -2757,9 +2757,9 @@
   "a2a.server.protocolVersion": "Protocol Version",
   "a2a.server.restEndpoints": "REST Endpoints",
   "a2a.server.usageTitle": "How to use these endpoints",
-  "a2a.server.localDevHint": "For local development: prepend localhost:5013/api to the paths above.",
-  "a2a.server.productionHint": "For production: replace localhost:5013 with your server domain or public IP and port 5013.",
-  "a2a.server.urlHint": "Append base URL to access. For local dev: localhost:5013/api",
+  "a2a.server.localDevHint": "For local development: prepend localhost:5013/api (docker), localhost:30013/api(k8s)",
+  "a2a.server.productionHint": "For production: replace localhost with your server domain or public IP.",
+  "a2a.server.urlHint": "Append base URL to access. For local dev: localhost:5013(or 30013)/api",
 
   "a2a.service.discoverFailed": "Failed to discover agent",
   "a2a.service.listFailed": "Failed to get list",
