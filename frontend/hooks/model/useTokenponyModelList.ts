@@ -13,10 +13,6 @@ interface UseTokenPonyModelListProps {
     apiKey: string;
     provider: string; // Expected to be "tokenpony"
     maxTokens: string;
-    // W2 capacity-panel top-level default for max_output_tokens. Threaded
-    // through so the row max_tokens fallback honors the new field; without
-    // it batch-add rows fall back to the legacy 4096 sentinel.
-    maxOutputTokens: string;
     isMultimodal: boolean;
   };
   setModelList: (models: any[]) => void;
@@ -78,21 +74,12 @@ export const useTokenPonyModelList = ({
       }
 
       // Ensure token-based models have a default max_tokens value.
-      // Fallback order: catalog value -> top-level batch default for the new
-      // W2 max_output_tokens field -> legacy max_tokens input -> hardcoded
-      // safety net. Without including form.maxOutputTokens the new capacity
-      // panel's value never reaches the row, and gear modals fall through to
-      // the 4096 sentinel even when the user has filled a sensible default.
       const modelsWithDefaults =
         modelType === "stt"
           ? models
           : models.map((model: any) => ({
               ...model,
-              max_tokens:
-                model.max_tokens ||
-                parseInt(form.maxOutputTokens) ||
-                parseInt(form.maxTokens) ||
-                4096,
+              max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
             }));
       setModelList(modelsWithDefaults);
 

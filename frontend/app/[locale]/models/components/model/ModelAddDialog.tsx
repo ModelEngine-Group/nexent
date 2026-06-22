@@ -498,11 +498,17 @@ export const ModelAddDialog = ({
         return false;
       }
       // Per-row required capacity gate for LLM/VLM batch import: every
-      // enabled row's effective context_window and max_output (row override
-      // → catalog value → top-level batch default) must resolve to a
-      // positive value. Without this gate a user can toggle on a row whose
-      // catalog hasn't supplied context_window while leaving the batch
-      // default empty, and the Add button would still light up.
+      // enabled row's effective context_window and max_output (row's W2
+      // value → top-level batch default) must resolve to a positive value.
+      // Without this gate a user can toggle on a row whose catalog hasn't
+      // supplied context_window while leaving the batch default empty, and
+      // the Add button would still light up.
+      //
+      // We deliberately do NOT fall back to model.max_tokens here. Per the
+      // W1/W2 production plan the legacy column is unconditionally seeded
+      // with DEFAULT_LLM_MAX_TOKENS (4096) by the provider adapters, so
+      // treating it as a stand-in for max_output_tokens would mask missing
+      // W2 metadata and let any row pass validation.
       if (supportsCapacityFields) {
         const batchDefaults = capacityFormToSnakePayload(form);
         for (const model of modelList) {
@@ -511,9 +517,7 @@ export const ModelAddDialog = ({
           const effectiveContextWindow =
             model.context_window_tokens ?? batchDefaults.context_window_tokens;
           const effectiveMaxOutput =
-            model.max_output_tokens ??
-            model.max_tokens ??
-            batchDefaults.max_output_tokens;
+            model.max_output_tokens ?? batchDefaults.max_output_tokens;
           if (!effectiveContextWindow || !effectiveMaxOutput) {
             return false;
           }
@@ -908,17 +912,24 @@ export const ModelAddDialog = ({
     setSelectedModelForSettings(model);
     setModelMaxTokens(model.max_tokens?.toString() || "");
     if (rowSupportsCapacityFields(model)) {
-      // Merge order: row override (incl. capacityFormFromModel's max_tokens
-      // promotion) wins, falling back to the top-level batch defaults the
-      // user typed into the capacity panel. The gear modal must reflect
-      // exactly what the row will end up using if the user clicks save
-      // without further edits — otherwise users see empty required fields
-      // and either bypass save or get confused about which value applies.
+      // Merge order: row's W2 capacity values (from provider catalog hints)
+      // win, falling back to the top-level batch defaults typed into the
+      // capacity panel. The gear modal must reflect exactly what the row
+      // will end up using if the user clicks save without further edits.
+      //
+      // Crucially we do NOT pass model.max_tokens into capacityFormFromModel.
+      // Per the W1/W2 production plan, max_tokens is a deprecated legacy
+      // alias and "never used as a context window after migration". On
+      // batch-fetched rows the backend providers (Dashscope, Silicon,
+      // ModelEngine, TokenPony) unconditionally inject the legacy column
+      // with DEFAULT_LLM_MAX_TOKENS=4096 to keep the NOT-NULL contract;
+      // promoting that sentinel into max_output_tokens here makes the gear
+      // modal show 4096 every time the upstream catalog omits real W2
+      // metadata, shadowing the user's batch defaults.
       const rowMapped = capacityFormFromModel({
         contextWindowTokens: model.context_window_tokens,
         maxInputTokens: model.max_input_tokens,
         maxOutputTokens: model.max_output_tokens,
-        maxTokens: model.max_tokens,
         defaultOutputReserveTokens: model.default_output_reserve_tokens,
         tokenizerFamily: model.tokenizer_family,
       });
