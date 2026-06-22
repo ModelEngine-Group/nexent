@@ -81,10 +81,10 @@ The `_create_procedural_memory()` method exists in both `AsyncMemory` and `Memor
 **AsyncMemory signature:**
 ```python
 async def _create_procedural_memory(
-    self, 
-    messages, 
-    metadata=None, 
-    llm=None, 
+    self,
+    messages,
+    metadata=None,
+    llm=None,
     prompt=None
 )
 ```
@@ -92,9 +92,9 @@ async def _create_procedural_memory(
 **Memory (sync) signature:**
 ```python
 def _create_procedural_memory(
-    self, 
-    messages, 
-    metadata=None, 
+    self,
+    messages,
+    metadata=None,
     prompt=None
 )
 ```
