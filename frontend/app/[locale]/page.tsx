@@ -76,7 +76,6 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.3 }}
           className="max-w-2xl text-slate-600 dark:text-slate-300 text-lg md:text-xl mb-8"
         >
-          {t("page.description")}
         </motion.p>
 
         {/* Three parallel buttons - responsive: row on wide, column on narrow */}
@@ -124,8 +123,6 @@ export default function Homepage() {
             transition={{ duration: 0.8, delay: 0.5 }}
             className="mt-12 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
           >
-            <AlertTriangle className="h-4 w-4" />
-            <span>{t("page.dataProtection")}</span>
           </motion.div>
         )}
       </section>

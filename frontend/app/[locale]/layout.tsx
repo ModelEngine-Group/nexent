@@ -20,13 +20,13 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   // Simple metadata for now - can be enhanced later with i18n
   return {
-    title: "Nexent - AI Agent Platform",
+    title: "南医小智 - AI Agent 平台",
     description:
       "A powerful AI agent platform for intelligent conversations and automation",
     icons: {
-      icon: "/favicon.png",
-      shortcut: "/favicon.png",
-      apple: "/favicon.png",
+      icon: "/nfyy-logo.png",
+      shortcut: "/nfyy-logo.png",
+      apple: "/nfyy-logo.png",
     },
   };
 }

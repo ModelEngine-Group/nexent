@@ -1,5 +1,5 @@
 ﻿{
-  "assistant.name": "Nexent",
+    "assistant.name": "南医小智",
 
   "mainPage.layout.title": "Nexent | AI Agents",
   "mainPage.layout.titleTemplate": "%s | Nexent AI Agents",
@@ -148,8 +148,8 @@
 
   "page.contactUs": "Contact Us",
   "page.aboutUs": "About Us",
-  "page.title": "Nexent",
-  "page.subtitle": "One prompt, infinite possibilities",
+  "page.title": "NanYi XiaoZhi",
+  "page.subtitle": "Nanfang Hospital Intelligent Agent Center",
   "page.description": "No orchestration, no complex drag-and-drop required. Integrate data, models, and tools into one intelligent hub.",
   "page.startChat": "Start Chatting",
   "page.quickConfig": "Quick Setup",

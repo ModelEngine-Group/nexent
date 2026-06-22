@@ -18,28 +18,7 @@ export function FooterLayout() {
       <div className="flex items-center gap-8">
         <span className="text-sm text-slate-900 dark:text-white">
           {t("page.copyright", { year: new Date().getFullYear() })}
-          <span className="ml-1">· {appVersion || APP_VERSION}</span>
         </span>
-      </div>
-      <div className="flex items-center gap-6">
-        <Link
-          href="https://github.com/nexent-hub/nexent?tab=License-1-ov-file#readme"
-          className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-        >
-          {t("page.termsOfUse")}
-        </Link>
-        <Link
-          href="http://nexent.tech/contact"
-          className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors"
-        >
-          {t("page.contactUs")}
-        </Link>
-        <Link
-          href="http://nexent.tech/about"
-          className="text-sm text-slate-600 dark:text-slate-300 dark:hover:text-white transition-colors"
-        >
-          {t("page.aboutUs")}
-        </Link>
       </div>
     </div>
   );
