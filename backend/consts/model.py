@@ -175,6 +175,21 @@ class ModelCapacitySuggestionResponse(BaseModel):
     capacity_source_on_accept: Optional[Literal["operator"]] = None
 
 
+class CapacityCoverageBareModel(BaseModel):
+    model_id: int
+    model_name: str
+    model_factory: Optional[str] = None
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    max_tokens: Optional[int] = None
+    suggestion_available: bool = False
+
+
+class CapacityCoverageResponse(BaseModel):
+    total_llm_vlm: int
+    bare_count: int
+    bare_models: List[CapacityCoverageBareModel] = Field(default_factory=list)
+
+
 class ProviderModelRequest(BaseModel):
     provider: str
     model_type: str

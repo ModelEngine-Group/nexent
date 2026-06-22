@@ -16,6 +16,7 @@ import logging
 
 from consts.model import (
     BatchCreateModelsRequest,
+    CapacityCoverageResponse,
     CapacitySuggestionFields,
     ModelRequest,
     ModelCapacitySuggestionRequest,
@@ -54,6 +55,7 @@ from services.model_management_service import (
     list_models_for_tenant,
     list_llm_models_for_tenant,
     list_models_for_admin,
+    get_capacity_coverage,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -165,6 +167,17 @@ async def suggest_model_capacity(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to suggest model capacity: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/capacity-coverage", response_model=CapacityCoverageResponse)
+async def get_model_capacity_coverage(authorization: Optional[str] = Header(None)):
+    """Return bare-capacity LLM/VLM coverage for the current tenant."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        return get_capacity_coverage(tenant_id)
+    except Exception as e:
+        logging.error(f"Failed to get model capacity coverage: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 

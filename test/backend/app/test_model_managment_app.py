@@ -144,6 +144,39 @@ async def test_suggest_capacity_bad_request(client, auth_header, user_credential
     assert "model_name is required" in response.json()["detail"]
 
 
+@pytest.mark.asyncio
+async def test_capacity_coverage_success(client, auth_header, user_credentials, mocker):
+    """Test capacity coverage endpoint uses current tenant."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_coverage = mocker.patch(
+        'backend.apps.model_managment_app.get_capacity_coverage',
+        return_value={
+            "total_llm_vlm": 2,
+            "bare_count": 1,
+            "bare_models": [
+                {
+                    "model_id": 11,
+                    "model_name": "gpt-4o",
+                    "model_factory": "openai",
+                    "model_type": "llm",
+                    "max_tokens": 16384,
+                    "suggestion_available": True,
+                }
+            ],
+        },
+    )
+
+    response = client.get("/model/capacity-coverage", headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["total_llm_vlm"] == 2
+    assert data["bare_count"] == 1
+    assert data["bare_models"][0]["max_tokens"] == 16384
+    assert data["bare_models"][0]["suggestion_available"] is True
+    mock_coverage.assert_called_once_with(user_credentials[1])
+
+
 # Tests for /model/create endpoint
 @pytest.mark.asyncio
 async def test_create_model_success(client, auth_header, user_credentials, sample_model_data, mocker):
