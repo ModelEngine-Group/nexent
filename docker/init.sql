@@ -1112,13 +1112,11 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1104, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
 (1105, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage'),
 (1106, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
--- Agent Development submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1107, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
 (1108, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
 (1109, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
 (1110, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
--- Resource Space submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1111, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
 (1112, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
@@ -1131,13 +1129,11 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1203, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
 (1204, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
 (1205, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
--- Agent Development submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1206, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
 (1207, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
 (1208, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
 (1209, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
--- Resource Space submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1210, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
 (1211, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
@@ -1157,13 +1153,11 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1403, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
 (1404, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
 (1405, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage');
--- Agent Development submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1406, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
 (1407, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
 (1408, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
 (1409, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
--- Resource Space submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1410, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
 (1411, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
@@ -1176,12 +1170,10 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1503, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
 (1504, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
 (1505, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/owner-manage');
--- Agent Development submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1506, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
 (1507, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
 (1508, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev');
--- Resource Space submenu
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
 (1509, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
 (1510, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
