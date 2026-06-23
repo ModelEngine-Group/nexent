@@ -18,6 +18,7 @@ from database.agent_evaluation_db import (
     get_agent_evaluation,
     list_agent_evaluation_cases,
     list_agent_evaluations_by_agent,
+    soft_delete_agent_evaluation,
     update_agent_evaluation_case_result,
     update_agent_evaluation_status,
 )
@@ -206,6 +207,7 @@ def execute_agent_evaluation_run(
                     status="COMPLETED",
                     predict=predict,
                     score=score,
+                    pass_status="pass" if score == 1 else "fail",
                     reason=reason,
                     updated_by=user_id,
                 )
@@ -218,6 +220,7 @@ def execute_agent_evaluation_run(
                     agent_evaluation_case_id=case_id,
                     tenant_id=tenant_id,
                     status="FAILED",
+                    pass_status="fail",
                     error_message=str(exc),
                     updated_by=user_id,
                 )
@@ -273,17 +276,55 @@ def list_agent_evaluation_cases_impl(
     return list_agent_evaluation_cases(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id, limit=limit, offset=offset)
 
 
+def delete_agent_evaluation_run_impl(
+    agent_evaluation_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Soft-delete an evaluation run.
+
+    Only the creator can delete the run. Tenant admins are handled at the
+    service layer when permissions are extended.
+    """
+    run = get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
+    if run.get("created_by") != user_id:
+        raise ValueError("Only the creator can delete this evaluation run")
+    soft_delete_agent_evaluation(agent_evaluation_id, tenant_id, user_id)
+
+
 def generate_agent_evaluation_report_impl(
     agent_evaluation_id: int,
     tenant_id: str,
 ) -> bytes:
-    """Generate an Excel report for a completed evaluation run."""
+    """Generate an Excel report containing only FAILED cases.
+
+    Storage policy: passed cases in ``agent_evaluation_case_t`` already have
+    ``predict`` / ``reason`` / ``label.answer`` cleared, so an "all pass" run
+    will produce a Summary sheet plus an empty Failed Cases sheet.
+    """
     run = get_agent_evaluation(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id)
-    cases = list_agent_evaluation_cases(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id, limit=100000, offset=0)
+    all_cases = list_agent_evaluation_cases(
+        agent_evaluation_id=agent_evaluation_id,
+        tenant_id=tenant_id,
+        limit=100000,
+        offset=0,
+    )
+
+    failed_cases = [
+        c for c in all_cases
+        if c.get("status") == "FAILED"
+        or c.get("score") == 0
+        or c.get("pass_status") == "fail"
+    ]
+    pass_count = sum(
+        1 for c in all_cases
+        if c.get("status") != "FAILED" and c.get("score") == 1
+    )
+    fail_count = len(failed_cases)
+    total = len(all_cases)
+    pass_rate = f"{(pass_count / total * 100):.2f}%" if total else "-"
 
     wb = Workbook()
-
-    # Sheet 1: Summary
     ws_summary = wb.active
     ws_summary.title = "Summary"
 
@@ -297,11 +338,14 @@ def generate_agent_evaluation_report_impl(
         ("Agent Version", run.get("agent_version_no", "")),
         ("Evaluation Set ID", run.get("evaluation_set_id", "")),
         ("Status", run.get("status", "")),
-        ("Total Cases", run.get("progress_total", 0)),
-        ("Completed Cases", run.get("progress_done", 0)),
+        ("Total Cases", total),
+        ("Passed Cases", pass_count),
+        ("Failed Cases", fail_count),
+        ("Pass Rate", pass_rate),
         ("Overall Score", f"{run.get('score_overall', 0):.4f}" if run.get('score_overall') is not None else "-"),
         ("Error Message", run.get("error_message") or "-"),
         ("Created At", run.get("create_time") or "-"),
+        ("Report Scope", "Failed cases only"),
     ]
 
     ws_summary.append(["Field", "Value"])
@@ -315,8 +359,7 @@ def generate_agent_evaluation_report_impl(
     ws_summary.column_dimensions["A"].width = 24
     ws_summary.column_dimensions["B"].width = 60
 
-    # Sheet 2: Case Details
-    ws_cases = wb.create_sheet("Case Details")
+    ws_cases = wb.create_sheet("Failed Cases")
 
     case_headers = [
         "Case ID",
@@ -325,8 +368,8 @@ def generate_agent_evaluation_report_impl(
         "Expected Answer",
         "Model Answer",
         "Score",
-        "Reason",
-        "Status",
+        "Judge Reason",
+        "Case Status",
         "Error Message",
     ]
     ws_cases.append(case_headers)
@@ -335,12 +378,19 @@ def generate_agent_evaluation_report_impl(
         cell.fill = header_fill
         cell.alignment = center
 
-    for idx, c in enumerate(cases, start=1):
+    for c in failed_cases:
         inputs = c.get("inputs") or {}
         label = c.get("label") or {}
         predict = c.get("predict") or {}
         score = c.get("score")
-        score_str = f"{score:.4f}" if isinstance(score, (int, float)) else str(score) if score is not None else "-"
+        if score == 0:
+            score_str = "0.0000"
+        elif isinstance(score, (int, float)):
+            score_str = f"{score:.4f}"
+        elif score is not None:
+            score_str = str(score)
+        else:
+            score_str = "-"
 
         ws_cases.append([
             c.get("agent_evaluation_case_id", ""),
@@ -354,15 +404,9 @@ def generate_agent_evaluation_report_impl(
             c.get("error_message") or "",
         ])
 
-    ws_cases.column_dimensions["A"].width = 14   # Case ID
-    ws_cases.column_dimensions["B"].width = 50   # Query
-    ws_cases.column_dimensions["C"].width = 40   # Context
-    ws_cases.column_dimensions["D"].width = 40   # Expected Answer
-    ws_cases.column_dimensions["E"].width = 40   # Model Answer
-    ws_cases.column_dimensions["F"].width = 10   # Score
-    ws_cases.column_dimensions["G"].width = 50   # Reason
-    ws_cases.column_dimensions["H"].width = 12   # Status
-    ws_cases.column_dimensions["I"].width = 40   # Error Message
+    widths = {"A": 14, "B": 50, "C": 40, "D": 40, "E": 40, "F": 10, "G": 50, "H": 12, "I": 40}
+    for col, w in widths.items():
+        ws_cases.column_dimensions[col].width = w
 
     out = io.BytesIO()
     wb.save(out)

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from services.agent_evaluation_service import (
     create_agent_evaluation_run_impl,
+    delete_agent_evaluation_run_impl,
     generate_agent_evaluation_report_impl,
     get_agent_evaluation_run_impl,
     list_agent_evaluation_cases_impl,
@@ -114,7 +115,7 @@ async def download_agent_evaluation_report_api(
             iter([data]),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
-                "Content-Disposition": f"attachment; filename=evaluation_report_{agent_evaluation_id}.xlsx"
+                "Content-Disposition": f"attachment; filename=evaluation_report_{agent_evaluation_id}_failed.xlsx"
             },
         )
     except ValueError as ve:
@@ -122,3 +123,24 @@ async def download_agent_evaluation_report_api(
     except Exception as exc:
         logger.exception("Download agent evaluation report error: %r", exc)
         raise HTTPException(status_code=500, detail="Download agent evaluation report error")
+
+
+@router.delete("/{agent_evaluation_id}")
+async def delete_agent_evaluation_api(
+    agent_evaluation_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Soft-delete an evaluation run. Only the creator may delete."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        delete_agent_evaluation_run_impl(
+            agent_evaluation_id=agent_evaluation_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success"})
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as exc:
+        logger.exception("Delete agent evaluation error: %r", exc)
+        raise HTTPException(status_code=500, detail="Delete agent evaluation error")

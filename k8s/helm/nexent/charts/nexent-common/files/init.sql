@@ -1993,6 +1993,7 @@ CREATE TABLE IF NOT EXISTS nexent.agent_evaluation_case_t (
 
     score DOUBLE PRECISION,
     reason TEXT,
+    pass_status VARCHAR(16),
 
     status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     error_message TEXT,
@@ -2006,10 +2007,12 @@ CREATE TABLE IF NOT EXISTS nexent.agent_evaluation_case_t (
 
 CREATE INDEX IF NOT EXISTS ix_agent_eval_case_eval_id ON nexent.agent_evaluation_case_t(agent_evaluation_id);
 CREATE INDEX IF NOT EXISTS ix_agent_eval_case_tenant_id ON nexent.agent_evaluation_case_t(tenant_id);
+CREATE INDEX IF NOT EXISTS ix_agent_eval_case_pass_status ON nexent.agent_evaluation_case_t(tenant_id, agent_evaluation_id, pass_status);
 
 COMMENT ON TABLE nexent.agent_evaluation_case_t IS 'Per-case evaluation results.';
-COMMENT ON COLUMN nexent.agent_evaluation_case_t.predict IS 'Predict JSON: {answer: string, raw?: any}';
+COMMENT ON COLUMN nexent.agent_evaluation_case_t.predict IS 'Predict JSON: {answer: string, raw?: any}. Cleared to NULL for pass cases to save space.';
 COMMENT ON COLUMN nexent.agent_evaluation_case_t.status IS 'Case status: PENDING/RUNNING/COMPLETED/FAILED';
+COMMENT ON COLUMN nexent.agent_evaluation_case_t.pass_status IS 'Judge result: pass / fail. pass cases clear predict/reason/label.answer.';
 CREATE INDEX IF NOT EXISTS ix_user_cas_session_session_id
     ON nexent.user_cas_session_t (session_id);
 CREATE INDEX IF NOT EXISTS ix_user_cas_session_user_id

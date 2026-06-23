@@ -109,6 +109,7 @@ export const API_ENDPOINTS = {
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
+    delete: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
@@ -116,6 +117,7 @@ export const API_ENDPOINTS = {
     detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
     cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
     report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
+    delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,

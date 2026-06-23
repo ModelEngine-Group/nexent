@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from consts.model import AgentRequest
 from database.agent_version_db import query_version_list
+from database.client import get_db_session
+from database.db_models import AgentEvaluation
 from database.evaluation_set_db import (
     create_evaluation_set,
     get_evaluation_set,
@@ -12,6 +14,7 @@ from database.evaluation_set_db import (
     insert_evaluation_set_cases,
     list_evaluation_set_cases,
     list_evaluation_sets,
+    soft_delete_evaluation_set,
     update_evaluation_set_case_count,
 )
 
@@ -159,3 +162,32 @@ def resolve_latest_published_version_no(agent_id: int, tenant_id: str) -> int:
     if latest is None:
         raise ValueError("failed to resolve latest published version")
     return int(latest)
+
+
+def count_active_runs_using_set(evaluation_set_id: int, tenant_id: str) -> int:
+    """Return the number of active (non-soft-deleted) evaluation runs referencing the set."""
+    with get_db_session() as session:
+        return session.query(AgentEvaluation).filter(
+            AgentEvaluation.evaluation_set_id == evaluation_set_id,
+            AgentEvaluation.tenant_id == tenant_id,
+            AgentEvaluation.delete_flag == "N",
+        ).count()
+
+
+def delete_evaluation_set_impl(
+    evaluation_set_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Soft-delete an evaluation set.
+
+    Blocked when any active evaluation run still references the set, so historical
+    runs never lose their context. Use ``count_active_runs_using_set`` first if
+    the caller wants to surface the referenced count to the user before deletion.
+    """
+    referenced = count_active_runs_using_set(evaluation_set_id, tenant_id)
+    if referenced > 0:
+        raise ValueError(
+            f"evaluation set is referenced by {referenced} evaluation run(s); cannot delete"
+        )
+    soft_delete_evaluation_set(evaluation_set_id, tenant_id, user_id)

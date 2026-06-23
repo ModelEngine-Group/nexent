@@ -30,11 +30,30 @@ export type AgentEvaluationRun = {
   agent_id: number;
   agent_version_no: number;
   evaluation_set_id: number;
+  evaluation_set_name?: string;
+  judge_model_id?: number;
+  judge_model_name?: string;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
   progress_total?: number;
   progress_done?: number;
   score_overall?: number | null;
+  pass_count?: number | null;
+  fail_count?: number | null;
   error_message?: string | null;
+  create_time?: string;
+};
+
+export type EvaluationHistoryItem = {
+  agent_evaluation_id: number;
+  agent_version_no: number;
+  evaluation_set_name?: string;
+  judge_model_name?: string;
+  status: AgentEvaluationRun["status"];
+  score_overall?: number | null;
+  pass_count?: number | null;
+  fail_count?: number | null;
+  progress_total?: number;
+  progress_done?: number;
   create_time?: string;
 };
 
@@ -56,6 +75,7 @@ export type AgentEvaluationCase = {
   } | null;
   score?: number | null;
   reason?: string | null;
+  pass_status?: "PASS" | "FAIL" | null;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
   error_message?: string | null;
 };

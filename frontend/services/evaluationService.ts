@@ -175,4 +175,26 @@ export const evaluationService = {
     }
     return result.data || [];
   },
+
+  deleteEvaluationSet: async (setId: number): Promise<void> => {
+    const resp = await fetch(API_ENDPOINTS.evaluationSets.delete(setId), {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!resp.ok) {
+      const result = await resp.json().catch(() => ({}));
+      throw new Error(result.detail || result.message || "Delete evaluation set failed");
+    }
+  },
+
+  deleteAgentEvaluation: async (evaluationId: number): Promise<void> => {
+    const resp = await fetch(API_ENDPOINTS.agentEvaluations.delete(evaluationId), {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!resp.ok) {
+      const result = await resp.json().catch(() => ({}));
+      throw new Error(result.detail || result.message || "Delete evaluation failed");
+    }
+  },
 };

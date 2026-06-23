@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services.evaluation_set_service import (
     create_evaluation_set_from_cases,
     create_evaluation_set_from_jsonl,
+    delete_evaluation_set_impl,
     get_evaluation_set_impl,
     list_evaluation_set_cases_impl,
     list_evaluation_sets_impl,
@@ -174,3 +175,24 @@ async def list_evaluation_set_cases_api(
     except Exception as exc:
         logger.exception("List evaluation set cases error: %r", exc)
         raise HTTPException(status_code=500, detail="List evaluation set cases error")
+
+
+@router.delete("/{evaluation_set_id}")
+async def delete_evaluation_set_api(
+    evaluation_set_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    """Soft-delete an evaluation set.
+
+    Blocked when any active evaluation run still references the set, so
+    historical runs never lose their context.
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        delete_evaluation_set_impl(evaluation_set_id, tenant_id, user_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success"})
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as exc:
+        logger.exception("Delete evaluation set error: %r", exc)
+        raise HTTPException(status_code=500, detail="Delete evaluation set error")

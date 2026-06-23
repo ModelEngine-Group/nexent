@@ -1,8 +1,9 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func, Integer
 from database.client import as_dict, get_db_session
-from database.db_models import AgentEvaluation, AgentEvaluationCase
+from database.db_models import AgentEvaluation, AgentEvaluationCase, EvaluationSet
 
 logger = logging.getLogger("agent_evaluation_db")
 
@@ -30,7 +31,20 @@ def create_agent_evaluation(
         )
         session.add(rec)
         session.flush()
-        return as_dict(rec)
+
+        # Also fetch evaluation set name for the response
+        es_row = (
+            session.query(EvaluationSet.name)
+            .filter(
+                EvaluationSet.evaluation_set_id == evaluation_set_id,
+                EvaluationSet.tenant_id == tenant_id,
+            )
+            .scalar()
+        )
+
+        result = as_dict(rec)
+        result["evaluation_set_name"] = es_row
+        return result
 
 
 def update_agent_evaluation_status(
@@ -77,18 +91,49 @@ def list_agent_evaluations_by_agent(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     with get_db_session() as session:
+        pass_count_expr = func.sum(
+            func.cast(
+                AgentEvaluationCase.pass_status == "pass",
+                Integer,
+            )
+        ).label("pass_count")
+
         q = (
-            session.query(AgentEvaluation)
+            session.query(
+                AgentEvaluation,
+                EvaluationSet.name.label("evaluation_set_name"),
+                func.count(AgentEvaluationCase.agent_evaluation_case_id).label("case_count"),
+                pass_count_expr,
+            )
+            .outerjoin(
+                EvaluationSet,
+                (AgentEvaluation.evaluation_set_id == EvaluationSet.evaluation_set_id)
+                & (AgentEvaluation.tenant_id == EvaluationSet.tenant_id),
+            )
+            .outerjoin(
+                AgentEvaluationCase,
+                AgentEvaluation.agent_evaluation_id == AgentEvaluationCase.agent_evaluation_id,
+            )
             .filter(
                 AgentEvaluation.tenant_id == tenant_id,
                 AgentEvaluation.agent_id == agent_id,
                 AgentEvaluation.delete_flag == "N",
             )
+            .group_by(AgentEvaluation.agent_evaluation_id, EvaluationSet.name)
             .order_by(AgentEvaluation.create_time.desc())
             .offset(offset)
             .limit(limit)
         )
-        return [as_dict(x) for x in q.all()]
+        rows = q.all()
+        results = []
+        for eval_row, evaluation_set_name, case_count, pass_count in rows:
+            rec = as_dict(eval_row)
+            rec["evaluation_set_name"] = evaluation_set_name
+            rec["case_count"] = case_count or 0
+            rec["pass_count"] = pass_count or 0
+            rec["fail_count"] = (case_count or 0) - (pass_count or 0)
+            results.append(rec)
+        return results
 
 
 def create_agent_evaluation_cases(
@@ -129,24 +174,50 @@ def update_agent_evaluation_case_result(
     score: Optional[float] = None,
     reason: Optional[str] = None,
     error_message: Optional[str] = None,
+    pass_status: Optional[str] = None,
     updated_by: Optional[str] = None,
 ) -> None:
+    """Update a case result.
+
+    Storage policy: when a case is judged as ``pass`` (either via an explicit
+    ``pass_status="pass"`` argument or an observed ``score == 1``), the heavy
+    detail fields (``predict``, ``reason``, ``label.answer``) are cleared to
+    save space. Only failed cases retain the full detail for debugging.
+    """
     updates: Dict[str, Any] = {"status": status, "updated_by": updated_by}
-    if predict is not None:
-        updates["predict"] = predict
+
+    is_pass = (pass_status == "pass") or (score == 1)
+
+    if not is_pass:
+        if predict is not None:
+            updates["predict"] = predict
+        if reason is not None:
+            updates["reason"] = reason
+    else:
+        # Pass case: trim heavy fields regardless of what was passed in.
+        updates["predict"] = None
+        updates["reason"] = None
+        updates["label"] = {"answer": ""}
+
     if score is not None:
         updates["score"] = score
-    if reason is not None:
-        updates["reason"] = reason
+    if pass_status is not None:
+        updates["pass_status"] = pass_status
     if error_message is not None:
         updates["error_message"] = error_message
 
     with get_db_session() as session:
-        session.query(AgentEvaluationCase).filter(
+        rows = session.query(AgentEvaluationCase).filter(
             AgentEvaluationCase.agent_evaluation_case_id == agent_evaluation_case_id,
             AgentEvaluationCase.tenant_id == tenant_id,
             AgentEvaluationCase.delete_flag == "N",
         ).update(updates, synchronize_session=False)
+        if rows == 0:
+            logger.warning(
+                "agent_evaluation_case not updated: id=%s, tenant=%s",
+                agent_evaluation_case_id,
+                tenant_id,
+            )
 
 
 def list_agent_evaluation_cases(
@@ -180,3 +251,25 @@ def get_agent_evaluation_case(agent_evaluation_case_id: int, tenant_id: str) -> 
         if not rec:
             raise ValueError("agent evaluation case not found")
         return as_dict(rec)
+
+
+def soft_delete_agent_evaluation(
+    agent_evaluation_id: int,
+    tenant_id: str,
+    deleted_by: str,
+) -> None:
+    """Soft-delete an evaluation run by setting delete_flag='Y'.
+
+    Raises ``ValueError`` when the run is not found or has already been deleted.
+    """
+    with get_db_session() as session:
+        rows = session.query(AgentEvaluation).filter(
+            AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
+            AgentEvaluation.tenant_id == tenant_id,
+            AgentEvaluation.delete_flag == "N",
+        ).update(
+            {"delete_flag": "Y", "updated_by": deleted_by},
+            synchronize_session=False,
+        )
+        if rows == 0:
+            raise ValueError("agent evaluation not found or already deleted")

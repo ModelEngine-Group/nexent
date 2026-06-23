@@ -125,3 +125,25 @@ def get_evaluation_set_cases_all(evaluation_set_id: int, tenant_id: str) -> List
             .order_by(EvaluationSetCase.order_no.asc(), EvaluationSetCase.evaluation_set_case_id.asc())
         )
         return [as_dict(x) for x in q.all()]
+
+
+def soft_delete_evaluation_set(
+    evaluation_set_id: int,
+    tenant_id: str,
+    deleted_by: str,
+) -> None:
+    """Soft-delete an evaluation set by setting delete_flag='Y'.
+
+    Raises ``ValueError`` when the set is not found or has already been deleted.
+    """
+    with get_db_session() as session:
+        rows = session.query(EvaluationSet).filter(
+            EvaluationSet.evaluation_set_id == evaluation_set_id,
+            EvaluationSet.tenant_id == tenant_id,
+            EvaluationSet.delete_flag == "N",
+        ).update(
+            {"delete_flag": "Y", "updated_by": deleted_by},
+            synchronize_session=False,
+        )
+        if rows == 0:
+            raise ValueError("evaluation set not found or already deleted")
