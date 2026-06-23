@@ -159,3 +159,23 @@ def test_pick_provider_from_base_url_uses_shared_host_map():
     assert pick_provider_from_base_url("https://api.siliconflow.cn/v1") == "silicon"
     assert pick_provider_from_base_url("https://api.tokenpony.ai/v1") == "tokenpony"
     assert pick_provider_from_base_url("http://localhost:8000/v1") is None
+
+
+def test_pick_provider_from_base_url_recognises_extended_patterns():
+    # Patterns added to mirror frontend PROVIDER_HINTS (modelConfig.ts).
+    assert pick_provider_from_base_url("https://api.deepseek.com/v1") == "deepseek"
+    assert pick_provider_from_base_url("https://api.jina.ai/v1") == "jina"
+    # Broader OpenAI pattern: Azure OpenAI hosted endpoints also resolve.
+    assert pick_provider_from_base_url("https://myorg.openai.azure.com/v1") == "openai"
+    # Aliyun generic host without "dashscope" substring still resolves to
+    # dashscope so capacity lookup can hit the existing dashscope catalog.
+    assert pick_provider_from_base_url("https://bailian.aliyuncs.com/v1") == "dashscope"
+    # Full-URL substring matching: self-hosted reverse proxy with the
+    # provider name in the path is recognised (matches frontend behaviour).
+    assert pick_provider_from_base_url("https://corp.example.com/openai/v1") == "openai"
+
+
+def test_pick_provider_from_base_url_dashscope_wins_over_aliyuncs():
+    # Both substrings present; order in HOST_PROVIDER_PATTERNS makes
+    # dashscope win, which is the correct (more-specific) routing.
+    assert pick_provider_from_base_url("https://dashscope.aliyuncs.com/v1") == "dashscope"

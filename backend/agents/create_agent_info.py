@@ -1284,11 +1284,8 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
-<<<<<<< HEAD
     requested_output_tokens: int | None = None,
-=======
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
->>>>>>> origin/develop
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)

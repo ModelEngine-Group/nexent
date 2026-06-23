@@ -2,7 +2,6 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Optional
-from urllib.parse import urlparse
 
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
@@ -45,27 +44,36 @@ class CapacitySuggestionResult:
     capacity_source_on_accept: Optional[str] = None
 
 
+# Substring patterns matched against the lower-cased base_url. Order matters:
+# `in` returns the first hit, so place more-specific patterns before broader
+# ones (e.g. `dashscope` before `aliyuncs`). Patterns mirror frontend
+# PROVIDER_HINTS in `frontend/const/modelConfig.ts` so backend provider-by-URL
+# detection stays consistent with the icon the user sees in the UI.
 HOST_PROVIDER_PATTERNS = (
-    ("api.openai.com", "openai"),
     ("dashscope", "dashscope"),
+    ("aliyuncs", "dashscope"),
     ("siliconflow", "silicon"),
     ("silicon", "silicon"),
-    ("tokenpony", "tokenpony"),
     ("modelengine", "modelengine"),
-    ("openrouter", "modelengine"),
+    ("openai", "openai"),
+    ("deepseek", "deepseek"),
+    ("jina", "jina"),
+    ("tokenpony", "tokenpony"),
+    ("bytedance", "volcengine"),
 )
 
 SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
 
 
 def pick_provider_from_base_url(base_url: Optional[str]) -> Optional[str]:
+    # Match the entire lower-cased base_url, mirroring the frontend
+    # detectProviderFromUrl helper. Substring `in` check, first hit wins.
     if not base_url:
         return None
 
-    parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
-    host = (parsed.hostname or parsed.netloc or base_url).lower()
+    lowered = base_url.lower()
     for pattern, provider in HOST_PROVIDER_PATTERNS:
-        if pattern in host:
+        if pattern in lowered:
             return provider
     return None
 
