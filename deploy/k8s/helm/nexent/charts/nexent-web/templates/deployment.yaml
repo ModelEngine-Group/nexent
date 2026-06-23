@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: nexent-web
+      annotations:
+        checksum/nexent-web: {{ dig "rolloutChecksums" "web" "" .Values.global | quote }}
     spec:
       containers:
         - name: nexent-web

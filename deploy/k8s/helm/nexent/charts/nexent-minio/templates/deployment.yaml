@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: nexent-minio
+      annotations:
+        checksum/nexent-minio: {{ dig "rolloutChecksums" "minio" "" .Values.global | quote }}
     spec:
       containers:
         - name: minio

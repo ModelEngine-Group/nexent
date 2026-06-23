@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: nexent-data-process
+      annotations:
+        checksum/nexent-backend: {{ dig "rolloutChecksums" "backend" "" .Values.global | quote }}
     spec:
       containers:
         - name: nexent-data-process

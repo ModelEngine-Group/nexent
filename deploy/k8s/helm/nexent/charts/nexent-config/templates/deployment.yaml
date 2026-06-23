@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: nexent-config
+      annotations:
+        checksum/nexent-backend: {{ dig "rolloutChecksums" "backend" "" .Values.global | quote }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       containers:

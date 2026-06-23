@@ -118,6 +118,9 @@ while [[ $# -gt 0 ]]; do
       EXISTING_CLAIM_PREFIX="$2"
       shift 2
       ;;
+    --rotate-secrets|--refresh-es-key)
+      shift
+      ;;
     *)
       shift
       ;;
@@ -578,6 +581,18 @@ ensure_namespace() {
     fi
 }
 
+helm_upgrade_release() {
+    helm upgrade --install nexent "$CHART_DIR" \
+        --namespace "$NAMESPACE" \
+        -f "$GENERATED_VALUES" \
+        -f "$GENERATED_RUNTIME_VALUES" \
+        -f "$GENERATED_PERSISTENCE_VALUES" \
+        -f "$GENERATED_SECRETS_VALUES" \
+        --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
+        --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
+        --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
+}
+
 # Select deployment version (speed or full)
 select_deployment_version() {
     echo "=========================================="
@@ -695,6 +710,14 @@ load_existing_minio_secrets() {
     return 0
 }
 
+load_existing_elasticsearch_api_key() {
+    local existing_api_key
+    existing_api_key="$(get_existing_secret_value "ELASTICSEARCH_API_KEY")" || return 1
+    [ -n "$existing_api_key" ] || return 1
+    ELASTICSEARCH_API_KEY="$existing_api_key"
+    return 0
+}
+
 # Generate Supabase secrets (only for full version)
 generate_supabase_secrets() {
     if [ "$DEPLOYMENT_VERSION" != "full" ]; then
@@ -785,45 +808,31 @@ pull_mcp_image() {
     echo ""
 }
 
-restart_supabase_auth_services() {
-    if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-        return 0
-    fi
-
-    echo ""
-    echo "Restarting Supabase auth services to pick up current secrets..."
-    for svc in supabase-auth supabase-kong; do
-        echo "  Restarting nexent-$svc..."
-        kubectl rollout restart deployment/nexent-$svc -n "$NAMESPACE" 2>/dev/null || true
-    done
-
-    for svc in supabase-auth supabase-kong; do
-        echo "  Waiting for nexent-$svc..."
-        if kubectl rollout status deployment/nexent-$svc -n "$NAMESPACE" --timeout=300s >/dev/null 2>&1; then
-            echo "  nexent-$svc is ready."
-        else
-            echo "  Warning: nexent-$svc did not become ready within timeout."
-        fi
-    done
-}
-
-restart_minio_for_current_secrets() {
-    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure" || return 0
-
-    echo ""
-    echo "Restarting MinIO to ensure current credentials are loaded..."
-    kubectl rollout restart deployment/nexent-minio -n "$NAMESPACE" 2>/dev/null || true
-    if kubectl rollout status deployment/nexent-minio -n "$NAMESPACE" --timeout=300s >/dev/null 2>&1; then
-        echo "  nexent-minio is ready."
-    else
-        echo "  Warning: nexent-minio did not become ready within timeout."
-    fi
-}
-
 render_runtime_secret_values() {
     local gotrue_db_url
+    local runtime_config_hash
+    local backend_checksum
+    local minio_checksum
+    local supabase_checksum
+    local web_checksum
+    local ssh_checksum
+
     gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
+    runtime_config_hash="$(deployment_sha256_file "$GENERATED_RUNTIME_VALUES")"
+    backend_checksum="$(deployment_sha256_string "runtime=${runtime_config_hash}|elastic=$(env_or_default ELASTICSEARCH_API_KEY "")|postgres=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")|minio=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
+    minio_checksum="$(deployment_sha256_string "root=$(env_or_default MINIO_ROOT_USER "nexent"):$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")|client=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
+    supabase_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|base=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|pg=$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")|db=${gotrue_db_url}")"
+    web_checksum="$(deployment_sha256_string "market=$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")|model=$(env_or_default MODEL_ENGINE_ENABLED "false")")"
+    ssh_checksum="$(deployment_sha256_string "ssh=$(env_or_default SSH_USERNAME "nexent"):$(env_or_default SSH_PASSWORD "nexent@2025")")"
+
     {
+        echo "global:"
+        echo "  rolloutChecksums:"
+        printf '    backend: %s\n' "$(yaml_quote "$backend_checksum")"
+        printf '    minio: %s\n' "$(yaml_quote "$minio_checksum")"
+        printf '    supabase: %s\n' "$(yaml_quote "$supabase_checksum")"
+        printf '    web: %s\n' "$(yaml_quote "$web_checksum")"
+        printf '    ssh: %s\n' "$(yaml_quote "$ssh_checksum")"
         echo "nexent-common:"
         echo "  secrets:"
         printf '    elasticPassword: %s\n' "$(yaml_quote "$(env_or_default ELASTIC_PASSWORD "nexent@2025")")"
@@ -892,6 +901,14 @@ apply() {
     # Step 4: Generate Supabase secrets (only for full version)
     generate_supabase_secrets
 
+    if [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ]; then
+        if [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
+            echo "Using ELASTICSEARCH_API_KEY from root .env."
+        elif load_existing_elasticsearch_api_key; then
+            echo "Reusing existing ELASTICSEARCH_API_KEY from Kubernetes secret."
+        fi
+    fi
+
     render_runtime_secret_values
 
     # Step 5: Configure Terminal tool (OpenSSH) only when selected.
@@ -937,18 +954,7 @@ apply() {
     # Step 7: Deploy using Helm
     ensure_namespace
     echo "Deploying Helm chart..."
-    helm upgrade --install nexent "$CHART_DIR" \
-        --namespace "$NAMESPACE" \
-        -f "$GENERATED_VALUES" \
-        -f "$GENERATED_RUNTIME_VALUES" \
-        -f "$GENERATED_PERSISTENCE_VALUES" \
-        -f "$GENERATED_SECRETS_VALUES" \
-        --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
-        --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
-        --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
-
-    restart_minio_for_current_secrets
-    restart_supabase_auth_services
+    helm_upgrade_release
 
     # Step 9: Wait for Elasticsearch to be ready and initialize API key
     echo ""
@@ -962,36 +968,42 @@ apply() {
     if kubectl wait --for=condition=ready pod -l app=nexent-elasticsearch -n $NAMESPACE --timeout=300s; then
         echo "Elasticsearch pod is ready."
 
-        # Initialize Elasticsearch API key
+        # Initialize Elasticsearch API key only when it is missing, invalid, or explicitly refreshed.
         INIT_ES_SCRIPT="$SCRIPT_DIR/init-elasticsearch.sh"
         if [ -f "$INIT_ES_SCRIPT" ]; then
             echo "Running Elasticsearch initialization script..."
-            if bash "$INIT_ES_SCRIPT"; then
+            local es_key_before
+            local es_key_after
+            es_key_before="$(get_existing_secret_value "ELASTICSEARCH_API_KEY" || true)"
+            if DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" bash "$INIT_ES_SCRIPT"; then
+                es_key_after="$(get_existing_secret_value "ELASTICSEARCH_API_KEY" || true)"
                 echo "Elasticsearch API key initialized successfully."
 
-                # Restart backend services to pick up the new ES API key
-                echo ""
-                echo "Restarting backend services..."
-                local backend_services="config runtime mcp northbound"
-                deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && backend_services="$backend_services data-process"
-                for svc in $backend_services; do
-                    echo "  Restarting nexent-$svc..."
-                    kubectl rollout restart deployment/nexent-$svc -n $NAMESPACE 2>/dev/null || true
-                done
+                if [ "$es_key_before" != "$es_key_after" ]; then
+                    echo ""
+                    echo "ELASTICSEARCH_API_KEY updated; refreshing Helm values and rolling affected backend services..."
+                    ELASTICSEARCH_API_KEY="$es_key_after"
+                    render_runtime_secret_values
+                    helm_upgrade_release
 
-                # Wait for backend services to be ready
-                echo ""
-                echo "Waiting for backend services to be ready..."
-                sleep 5
-                for svc in $backend_services; do
-                    echo "  Waiting for nexent-$svc..."
-                    if kubectl wait --for=condition=ready pod -l app=nexent-$svc -n $NAMESPACE --timeout=300s 2>/dev/null; then
-                        echo "  nexent-$svc is ready."
-                    else
-                        echo "  Error: nexent-$svc did not become ready within timeout."
-                        deploy_success=false
-                    fi
-                done
+                    local backend_services="config runtime mcp northbound"
+                    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && backend_services="$backend_services data-process"
+
+                    echo ""
+                    echo "Waiting for backend services to be ready..."
+                    sleep 5
+                    for svc in $backend_services; do
+                        echo "  Waiting for nexent-$svc..."
+                        if kubectl wait --for=condition=ready pod -l app=nexent-$svc -n $NAMESPACE --timeout=300s 2>/dev/null; then
+                            echo "  nexent-$svc is ready."
+                        else
+                            echo "  Error: nexent-$svc did not become ready within timeout."
+                            deploy_success=false
+                        fi
+                    done
+                else
+                    echo "ELASTICSEARCH_API_KEY unchanged; backend rollout is not needed."
+                fi
             else
                 echo "Error: Elasticsearch initialization script failed."
                 deploy_success=false
@@ -1062,6 +1074,8 @@ print_usage() {
     echo "  --local-path PATH          Base path for local PVs"
     echo "  --local-node-name NAME     Node name for local PV nodeAffinity"
     echo "  --existing-claim-prefix P  Existing PVC prefix, rendered as P-<component>"
+    echo "  --rotate-secrets           Force rotation of deployment secrets"
+    echo "  --refresh-es-key           Force recreation of ELASTICSEARCH_API_KEY"
     echo "  --help, -h                 Show this help message"
     echo ""
     echo "Uninstall: bash uninstall.sh"

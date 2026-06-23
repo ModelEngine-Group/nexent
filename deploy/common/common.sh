@@ -139,15 +139,65 @@ deployment_update_env_var_file() {
   local key="$2"
   local value="$3"
   local escaped_value
+  local current_value
+
+  DEPLOYMENT_LAST_ENV_WRITE_CHANGED="false"
 
   touch "$env_file"
   escaped_value=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/&/\\&/g')
 
   if grep -q "^${key}=" "$env_file"; then
+    current_value="$(deployment_get_env_var_file "$env_file" "$key" || true)"
+    if [ "$current_value" = "$value" ]; then
+      return 0
+    fi
     sed -i.bak "s~^${key}=.*~${key}=\"${escaped_value}\"~" "$env_file"
     rm -f "${env_file}.bak"
   else
     printf '%s="%s"\n' "$key" "$value" >> "$env_file"
+  fi
+  DEPLOYMENT_LAST_ENV_WRITE_CHANGED="true"
+}
+
+deployment_get_env_var_file() {
+  local env_file="$1"
+  local key="$2"
+  local line value
+
+  [ -f "$env_file" ] || return 1
+  line="$(grep -E "^${key}=" "$env_file" | tail -n 1 || true)"
+  [ -n "$line" ] || return 1
+  value="${line#*=}"
+  value="${value%$'\r'}"
+  value="$(printf '%s' "$value" | sed 's/[[:space:]]*$//')"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value#\'}"
+    value="${value%\'}"
+  fi
+  printf '%s' "$value"
+}
+
+deployment_sha256_string() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | awk '{print $1}'
+  else
+    printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+deployment_sha256_file() {
+  local file="$1"
+  [ -f "$file" ] || {
+    deployment_sha256_string ""
+    return 0
+  }
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    shasum -a 256 "$file" | awk '{print $1}'
   fi
 }
 
@@ -184,6 +234,8 @@ deployment_init_defaults() {
   DEPLOYMENT_CONFIG_PATH=""
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
   DEPLOYMENT_RECONFIGURE="false"
+  DEPLOYMENT_ROTATE_SECRETS="false"
+  DEPLOYMENT_REFRESH_ES_KEY="false"
   DEPLOYMENT_LOCAL_CONFIG_PATH="$(deployment_default_local_config_path)"
   DEPLOYMENT_LOADED_SCHEMA_VERSION=""
   DEPLOYMENT_LOADED_APP_VERSION=""
@@ -227,6 +279,14 @@ deployment_parse_common_args() {
         ;;
       --reconfigure)
         DEPLOYMENT_RECONFIGURE="true"
+        shift
+        ;;
+      --rotate-secrets)
+        DEPLOYMENT_ROTATE_SECRETS="true"
+        shift
+        ;;
+      --refresh-es-key)
+        DEPLOYMENT_REFRESH_ES_KEY="true"
         shift
         ;;
       --config)
@@ -1363,6 +1423,8 @@ deployment_prepare_config() {
       --registry-profile) DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT="true" ;;
       --app-version|--version) DEPLOYMENT_APP_VERSION_EXPLICIT="true" ;;
       --monitoring-provider) DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT="true" ;;
+      --rotate-secrets) DEPLOYMENT_ROTATE_SECRETS="true" ;;
+      --refresh-es-key) DEPLOYMENT_REFRESH_ES_KEY="true" ;;
     esac
   done
 

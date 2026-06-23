@@ -73,6 +73,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --version VERSION"
       echo "  --use-local-config"
       echo "  --reconfigure"
+      echo "  --rotate-secrets"
+      echo "  --refresh-es-key"
       echo "  --config PATH"
       echo "  --root-dir PATH"
       echo ""
@@ -441,16 +443,18 @@ persist_deploy_options() {
 }
 
 generate_minio_ak_sk() {
-  if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
-    echo "   Reusing existing MinIO access keys from root .env"
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] && [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
+    echo "   MinIO credentials unchanged; reusing root .env values"
     export MINIO_ACCESS_KEY
     export MINIO_SECRET_KEY
-    update_env_var "MINIO_ACCESS_KEY" "$MINIO_ACCESS_KEY"
-    update_env_var "MINIO_SECRET_KEY" "$MINIO_SECRET_KEY"
     return 0
   fi
 
-  echo "🔑 Generating MinIO keys..."
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ]; then
+    echo "🔁 Rotating MinIO keys..."
+  else
+    echo "🔑 Generating missing MinIO keys..."
+  fi
 
   if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "mingw" ] || [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "msys" ]; then
     # Windows
@@ -498,42 +502,86 @@ generate_jwt() {
 }
 
 generate_supabase_keys() {
-  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    # Function to generate Supabase secrets
-    echo "🔑 Generating Supabase keys..."
+  if [ "$DEPLOYMENT_VERSION" != "full" ]; then
+    return 0
+  fi
 
-    # Generate fresh keys on every run for security
+  echo "🔑 Checking Supabase keys..."
+
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] \
+    && [ -n "${JWT_SECRET:-}" ] \
+    && [ -n "${SECRET_KEY_BASE:-}" ] \
+    && [ -n "${VAULT_ENC_KEY:-}" ] \
+    && [ -n "${SUPABASE_KEY:-}" ] \
+    && [ -n "${SERVICE_ROLE_KEY:-}" ]; then
+    echo "   Supabase secrets unchanged; reusing root .env values"
+    return 0
+  fi
+
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${JWT_SECRET:-}" ]; then
     export JWT_SECRET=$(openssl rand -base64 32 | tr -d '[:space:]')
-    export SECRET_KEY_BASE=$(openssl rand -base64 64 | tr -d '[:space:]')
-    export VAULT_ENC_KEY=$(openssl rand -base64 32 | tr -d '[:space:]')
-
-    # Generate JWT-dependent keys using the new JWT_SECRET
-    local anon_key=$(generate_jwt "anon")
-    local service_role_key=$(generate_jwt "service_role")
-
-    # Update or add all keys to the .env file
     update_env_var "JWT_SECRET" "$JWT_SECRET"
+  fi
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${SECRET_KEY_BASE:-}" ]; then
+    export SECRET_KEY_BASE=$(openssl rand -base64 64 | tr -d '[:space:]')
     update_env_var "SECRET_KEY_BASE" "$SECRET_KEY_BASE"
+  fi
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${VAULT_ENC_KEY:-}" ]; then
+    export VAULT_ENC_KEY=$(openssl rand -base64 32 | tr -d '[:space:]')
     update_env_var "VAULT_ENC_KEY" "$VAULT_ENC_KEY"
-    update_env_var "SUPABASE_KEY" "$anon_key"
-    update_env_var "SERVICE_ROLE_KEY" "$service_role_key"
+  fi
 
-    # Reload the environment variables from the updated root .env file
-    set -a
-    source "$ROOT_ENV_FILE"
-    set +a
-    echo "   ✅ Supabase keys generated successfully"
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${SUPABASE_KEY:-}" ]; then
+    SUPABASE_KEY=$(generate_jwt "anon")
+    export SUPABASE_KEY
+    update_env_var "SUPABASE_KEY" "$SUPABASE_KEY"
+  fi
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${SERVICE_ROLE_KEY:-}" ]; then
+    SERVICE_ROLE_KEY=$(generate_jwt "service_role")
+    export SERVICE_ROLE_KEY
+    update_env_var "SERVICE_ROLE_KEY" "$SERVICE_ROLE_KEY"
+  fi
+
+  set -a
+  source "$ROOT_ENV_FILE"
+  set +a
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ]; then
+    echo "   ✅ Supabase secrets rotated"
+  else
+    echo "   ✅ Missing Supabase secrets generated"
   fi
 }
 
+validate_elasticsearch_api_key() {
+  local api_key="$1"
+  local http_code
+  [ -n "$api_key" ] || return 1
+  http_code=$(docker exec nexent-elasticsearch curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: ApiKey $api_key" \
+    "http://localhost:9200/_security/_authenticate" 2>/dev/null || true)
+  [ "$http_code" = "200" ]
+}
 
 generate_elasticsearch_api_key() {
   # Function to generate Elasticsearch API key
   wait_for_elasticsearch_healthy || { echo "   ❌ Elasticsearch health check failed"; return 0; }
 
+  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] \
+    && [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] \
+    && [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
+    echo "🔑 Validating existing ELASTICSEARCH_API_KEY..."
+    if validate_elasticsearch_api_key "$ELASTICSEARCH_API_KEY"; then
+      echo "   ELASTICSEARCH_API_KEY unchanged; existing key is valid"
+      return 0
+    fi
+    echo "   Existing ELASTICSEARCH_API_KEY is invalid; generating a replacement"
+  elif [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" = "true" ]; then
+    echo "🔁 Refreshing ELASTICSEARCH_API_KEY by request..."
+  fi
+
   # Generate API key
   echo "🔑 Generating ELASTICSEARCH_API_KEY..."
-  API_KEY_JSON=$(docker exec nexent-elasticsearch curl -s -u "elastic:$ELASTIC_PASSWORD" "http://localhost:9200/_security/api_key" -H "Content-Type: application/json" -d '{"name":"my_api_key","role_descriptors":{"my_role":{"cluster":["all"],"index":[{"names":["*"],"privileges":["all"]}]}}}')
+  API_KEY_JSON=$(docker exec nexent-elasticsearch curl -s -u "elastic:${ELASTIC_PASSWORD:-nexent@2025}" "http://localhost:9200/_security/api_key" -H "Content-Type: application/json" -d '{"name":"my_api_key","role_descriptors":{"my_role":{"cluster":["all"],"index":[{"names":["*"],"privileges":["all"]}]}}}')
 
   # Extract API key and add to .env
   ELASTICSEARCH_API_KEY=$(echo "$API_KEY_JSON" | grep -o '"encoded":"[^"]*"' | awk -F'"' '{print $4}')
@@ -733,6 +781,11 @@ update_env_var() {
   local key="$1"
   local value="$2"
   deployment_update_env_var_file "$ROOT_ENV_FILE" "$key" "$value"
+  if [ "${DEPLOYMENT_LAST_ENV_WRITE_CHANGED:-false}" = "true" ]; then
+    echo "   📝 .env updated: $key"
+  else
+    echo "   ↺ .env unchanged: $key"
+  fi
 }
 
 create_dir_with_permission() {

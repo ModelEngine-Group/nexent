@@ -16,16 +16,23 @@ update_env_var() {
   local key="$1"
   local value="$2"
   local escaped_value
+  local current_value
 
   touch "$ENV_FILE"
   escaped_value=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/&/\\&/g')
 
   if grep -q "^${key}=" "$ENV_FILE"; then
+    current_value="$(grep "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d'=' -f2- | sed 's/[[:space:]]*$//;s/^"//;s/"$//;s/^'\''//;s/'\''$//')"
+    if [ "$current_value" = "$value" ]; then
+      echo "   ↺ root .env unchanged: $key"
+      return 0
+    fi
     sed -i.bak "s~^${key}=.*~${key}=${escaped_value}~" "$ENV_FILE"
     rm -f "${ENV_FILE}.bak"
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
+  echo "   📝 root .env updated: $key"
 }
 
 # Function to copy and prepare .env file

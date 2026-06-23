@@ -17,6 +17,8 @@ spec:
     metadata:
       labels:
         app: nexent-openssh-server
+      annotations:
+        checksum/nexent-ssh: {{ dig "rolloutChecksums" "ssh" "" .Values.global | quote }}
     spec:
       containers:
         - name: openssh-server

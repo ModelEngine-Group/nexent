@@ -209,5 +209,17 @@ assert_contains "$(cat "$ENV_TEST_ROOT/.env")" "ROOT_ONLY=yes" "existing root .e
 
 deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "ROOT_ONLY" "updated"
 assert_contains "$(cat "$ENV_TEST_ROOT/.env")" 'ROOT_ONLY="updated"' "env updater should update root env values"
+assert_eq "true" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should mark changed writes"
+
+ENV_CONTENT_BEFORE="$(cat "$ENV_TEST_ROOT/.env")"
+deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "ROOT_ONLY" "updated"
+assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should mark identical writes unchanged"
+assert_eq "$ENV_CONTENT_BEFORE" "$(cat "$ENV_TEST_ROOT/.env")" "env updater should not rewrite identical quoted values"
+
+printf 'UNQUOTED=value\nSINGLE_QUOTED='\''value2'\''\n' >> "$ENV_TEST_ROOT/.env"
+assert_eq "value" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED")" "env getter should read unquoted values"
+assert_eq "value2" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "SINGLE_QUOTED")" "env getter should read single-quoted values"
+deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED" "value"
+assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should normalize unquoted identical values"
 
 echo "All deployment common tests passed."

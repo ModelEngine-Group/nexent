@@ -18,6 +18,8 @@ spec:
     metadata:
       labels:
         app: nexent-supabase-kong
+      annotations:
+        checksum/nexent-supabase: {{ dig "rolloutChecksums" "supabase" "" .Values.global | quote }}
     spec:
       containers:
         - name: kong
