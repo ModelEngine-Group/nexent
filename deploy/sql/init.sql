@@ -329,7 +329,6 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.description IS 'Description';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_description IS 'Manually entered by the user to describe the entire business process';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_name IS 'Name of the model used';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.max_steps IS 'Maximum number of steps';
-COMMENT ON COLUMN nexent.ag_tenant_agent_t.prompt IS 'System prompt';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.parent_agent_id IS 'Parent Agent ID';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.tenant_id IS 'Belonging tenant';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enabled IS 'Enable flag';

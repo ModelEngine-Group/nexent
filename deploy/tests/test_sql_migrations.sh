@@ -85,6 +85,13 @@ SQL
 INIT_SQL_FILE="$TMP_DIR/init.sql"
 printf 'create schema if not exists nexent;\ncreate table if not exists nexent.model_record_t(id int);\ncreate table if not exists nexent.knowledge_record_t(id int);\ncreate table if not exists nexent.ag_tenant_agent_t(id int);\ncreate table if not exists nexent.conversation_record_t(id int);\ncreate table if not exists nexent.conversation_message_t(id int);\ncreate table if not exists nexent.ag_tool_info_t(id int);\n' > "$INIT_SQL_FILE"
 
+if grep -Eq '^COMMENT ON COLUMN nexent\.ag_tenant_agent_t\.prompt ' "$DEPLOY_ROOT/sql/init.sql"; then
+  fail "init SQL should not comment ag_tenant_agent_t.prompt because a later migration drops that column"
+fi
+if grep -Eq '^COMMENT ON COLUMN nexent\.model_record_t\.is_deep_thinking ' "$DEPLOY_ROOT/sql/init.sql"; then
+  fail "init SQL should not comment model_record_t.is_deep_thinking because a later migration drops that column"
+fi
+
 PLAN_FILE="$TMP_DIR/plan.sql"
 PATH="$BIN_DIR:$PATH" \
 CAPTURE_PLAN="$PLAN_FILE" \
