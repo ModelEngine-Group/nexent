@@ -39,6 +39,8 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: NEXENT_SQL_STARTUP_MODE
+              value: "wait"
             - name: DOCKER_ENVIRONMENT
               value: {{ .Values.config.dockerEnvironment | quote }}
             - name: PYTHONPATH

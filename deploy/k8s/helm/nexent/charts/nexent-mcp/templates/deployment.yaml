@@ -36,6 +36,8 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: NEXENT_SQL_STARTUP_MODE
+              value: "wait"
             - name: skip_proxy
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK

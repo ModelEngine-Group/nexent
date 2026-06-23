@@ -79,6 +79,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
       <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: migrate
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -106,6 +107,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -132,6 +134,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -159,6 +162,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -207,6 +211,7 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
     environment:
       <<: [*proxy-vars, *es-vars, *minio-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
       DOCKER_ENVIRONMENT: "true"
       DISABLE_RAY_DASHBOARD: ${DISABLE_RAY_DASHBOARD:-false}
       DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}
