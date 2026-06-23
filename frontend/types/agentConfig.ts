@@ -51,7 +51,7 @@ export interface AgentVerificationConfig {
 }
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
-  enabled: true,
+  enabled: false,
   step_verification_enabled: true,
   final_verification_enabled: true,
   llm_verification_enabled: true,
