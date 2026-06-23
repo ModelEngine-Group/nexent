@@ -118,7 +118,12 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
     )
 
     assert response.status_code == HTTPStatus.OK
-    data = response.json()
+    body = response.json()
+    # Response uses the shared {message, data} envelope so the frontend
+    # service layer can unwrap /model/* responses uniformly. See
+    # suggest_model_capacity for the rationale.
+    assert body["message"] == "Successfully suggested model capacity"
+    data = body["data"]
     assert data["match_kind"] == "catalog_exact"
     assert data["suggestions"]["context_window_tokens"] == 128000
     assert data["suggested_provider"] == "openai"
@@ -169,7 +174,9 @@ async def test_capacity_coverage_success(client, auth_header, user_credentials, 
     response = client.get("/model/capacity-coverage", headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
-    data = response.json()
+    body = response.json()
+    assert body["message"] == "Successfully retrieved model capacity coverage"
+    data = body["data"]
     assert data["total_llm_vlm"] == 2
     assert data["bare_count"] == 1
     assert data["bare_models"][0]["max_tokens"] == 16384

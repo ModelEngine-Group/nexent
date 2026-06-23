@@ -16,7 +16,6 @@ import logging
 
 from consts.model import (
     BatchCreateModelsRequest,
-    CapacityCoverageResponse,
     CapacitySuggestionFields,
     ModelRequest,
     ModelCapacitySuggestionRequest,
@@ -153,15 +152,26 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post("/suggest-capacity", response_model=ModelCapacitySuggestionResponse)
+@router.post("/suggest-capacity")
 async def suggest_model_capacity(
     request: ModelCapacitySuggestionRequest,
     authorization: Optional[str] = Header(None),
 ):
-    """Return a non-mutating capacity suggestion for a model add/edit form."""
+    """Return a non-mutating capacity suggestion for a model add/edit form.
+
+    Response uses the shared `/model/*` envelope ({message, data}) so the
+    frontend service layer can unwrap it the same way as every other
+    `/model/*` route. Returning the bare Pydantic model broke the dialog
+    and coverage-banner integrations because the frontend reads
+    `result.data` unconditionally.
+    """
     try:
         get_current_user_id(authorization)
-        return _suggest_capacity_for_request(request)
+        result = _suggest_capacity_for_request(request)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully suggested model capacity",
+            "data": jsonable_encoder(result),
+        })
     except ValueError as e:
         logging.error(f"Invalid capacity suggestion request: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -170,12 +180,20 @@ async def suggest_model_capacity(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/capacity-coverage", response_model=CapacityCoverageResponse)
+@router.get("/capacity-coverage")
 async def get_model_capacity_coverage(authorization: Optional[str] = Header(None)):
-    """Return bare-capacity LLM/VLM coverage for the current tenant."""
+    """Return bare-capacity LLM/VLM coverage for the current tenant.
+
+    Wrapped in the shared `{message, data}` envelope; see
+    `suggest_model_capacity` for the same rationale.
+    """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        return get_capacity_coverage(tenant_id)
+        result = get_capacity_coverage(tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved model capacity coverage",
+            "data": jsonable_encoder(result),
+        })
     except Exception as e:
         logging.error(f"Failed to get model capacity coverage: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
