@@ -48,6 +48,7 @@ test = [
     "mock",
     "pytest-asyncio",
     "pytest-mock",
+    "pytest-xdist",
     "fastapi[testclient]",
     "selenium",
     "botocore"
