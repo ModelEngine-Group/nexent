@@ -138,6 +138,32 @@ for module_path in [
 ]:
     sys.modules.setdefault(module_path, mock.MagicMock())
 
+
+# Provide real implementations for the utils.model_name_utils helpers used by
+# the module under test. Without these, attribute access on the MagicMock
+# yields a callable that returns yet another MagicMock, which silently breaks
+# every dict-key lookup downstream (`existing_model_map[<MagicMock>]` never
+# matches the string id sent by the provider response).
+def _real_add_repo_to_name(model_repo, model_name):
+    if "/" in (model_name or ""):
+        return model_name
+    if model_repo:
+        return f"{model_repo}/{model_name}"
+    return model_name
+
+
+def _real_split_repo_name(full_name):
+    if not full_name:
+        return ("", "")
+    if "/" in full_name:
+        head, _, tail = full_name.rpartition("/")
+        return (head, tail)
+    return ("", full_name)
+
+
+sys.modules["utils.model_name_utils"].add_repo_to_name = _real_add_repo_to_name
+sys.modules["utils.model_name_utils"].split_repo_name = _real_split_repo_name
+
 # services.providers.base should NOT be mocked as it contains _classify_provider_error used in tests
 
 # SiliconModelProvider and ModelEngineProvider will be imported from their real modules
