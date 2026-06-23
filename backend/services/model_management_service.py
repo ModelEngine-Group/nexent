@@ -48,6 +48,48 @@ INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
 CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
 
 
+# OpenTelemetry counter for silent catalog-matcher failures during the
+# capacity-coverage scan. The matcher is called per row so we cannot raise --
+# but the silent fallback to suggestion_available=False would hide a corrupt
+# catalog entry that turns every "available" hint into "false" across a whole
+# tenant. The counter gives staging/CI a single number to watch.
+#
+# Guarded the same way as the SDK monitor module: if OpenTelemetry is not
+# installed (some deployments run without it), the counter is None and the
+# increment becomes a no-op.
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _capacity_suggestion_meter = _otel_metrics.get_meter(__name__)
+    _capacity_suggestion_coverage_errors_total = _capacity_suggestion_meter.create_counter(
+        name="model_capacity_suggestion_coverage_errors_total",
+        description=(
+            "Count of catalog-matcher exceptions raised while computing the "
+            "per-row `suggestion_available` flag in /model/capacity-coverage. "
+            "Non-zero means catalog data or matcher logic is broken; "
+            "operators see every row as suggestion_available=False."
+        ),
+        unit="errors",
+    )
+except Exception:  # pragma: no cover - OTel is optional at runtime
+    _capacity_suggestion_coverage_errors_total = None
+
+
+def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> None:
+    if _capacity_suggestion_coverage_errors_total is None:
+        return
+    try:
+        _capacity_suggestion_coverage_errors_total.add(
+            1,
+            {
+                "model_id": str(model_id) if model_id is not None else "unknown",
+                "error_type": type(exc).__name__,
+            },
+        )
+    except Exception:  # pragma: no cover - never break coverage for telemetry
+        pass
+
+
 def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
     """Allow the three multimodal slots to share display names across slots."""
     if not existing_models:
@@ -105,7 +147,13 @@ def _capacity_suggestion_available(model: Dict[str, Any]) -> bool:
         )
         return result.match_kind != CapacitySuggestionMatchKind.NONE
     except Exception as exc:
+        # A catalog-matcher exception must not break /capacity-coverage --
+        # the endpoint scans every LLM/VLM row, and one bad row would make
+        # the whole tenant view explode. We fall back to False and emit a
+        # counter so a corrupt catalog is visible in metrics instead of
+        # silently turning every row into "no suggestion available".
         logger.debug("Capacity coverage suggestion check failed for model_id=%s: %s", model.get("model_id"), exc)
+        _record_capacity_coverage_error(model.get("model_id"), exc)
         return False
 
 

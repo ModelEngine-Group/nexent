@@ -1985,3 +1985,41 @@ def test_capacity_suggestion_available_uses_catalog_matcher():
         model_type="llm",
         enabled=True,
     )
+
+
+def test_capacity_suggestion_available_records_error_on_exception():
+    """A catalog-matcher exception falls back to False AND increments the
+    coverage-error counter. Without the counter a corrupt catalog entry would
+    silently flip every row's suggestion_available to False with zero signal.
+    """
+    svc = import_svc()
+
+    model = {
+        "model_id": 42,
+        "model_repo": "",
+        "model_name": "broken-model",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+
+    with mock.patch.object(svc, "suggest_capacity", side_effect=RuntimeError("catalog corrupt")), \
+            mock.patch.object(svc, "_record_capacity_coverage_error") as mock_record:
+        assert svc._capacity_suggestion_available(model) is False
+
+    mock_record.assert_called_once()
+    recorded_args = mock_record.call_args[0]
+    assert recorded_args[0] == 42
+    assert isinstance(recorded_args[1], RuntimeError)
+
+
+def test_record_capacity_coverage_error_no_op_when_counter_disabled():
+    """The recorder must not raise when OpenTelemetry is unavailable; the
+    counter is None and the call becomes a no-op so coverage scans keep
+    working in deployments without telemetry installed.
+    """
+    svc = import_svc()
+
+    with mock.patch.object(svc, "_capacity_suggestion_coverage_errors_total", None):
+        # Should not raise.
+        svc._record_capacity_coverage_error(7, RuntimeError("boom"))
