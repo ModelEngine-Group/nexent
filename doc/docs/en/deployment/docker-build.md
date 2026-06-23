@@ -3,31 +3,38 @@
 Recommended unified build entry:
 
 ```bash
-# Build images for selected deployment components with a fixed version tag
+# Run interactive selection, similar to the deploy scripts
+bash deploy/images/build.sh
+
+# Build selected images with a fixed version tag
 bash deploy/images/build.sh \
-  --components application,data-process,terminal \
+  --images main,web,mcp,data-process,terminal \
   --version v2.2.1 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
   --push
 
-# Build the same component set as latest
+# Build the same image set as latest
 bash deploy/images/build.sh \
-  --components application,data-process \
+  --images main,web,mcp,data-process \
   --version latest \
   --registry general \
   --platform linux/amd64 \
   --load
 
-# Build one explicit image when needed
-bash deploy/images/build.sh --image web --version v2.2.1 --dry-run
+# Build one or more explicit images when needed
+bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
 ```
 
-Component mapping:
-- `application` builds `nexent`, `nexent-web`, and `nexent-mcp`
-- `data-process` builds `nexent-data-process`
-- `terminal` builds `nexent-ubuntu-terminal`
-- `infrastructure`, `supabase`, and `monitoring` do not build Nexent application images
+When run in a terminal without arguments, `deploy/images/build.sh` prompts for images, image version (`VERSION`, `latest`, or custom), registry, platform, and output mode. Use `--interactive` to force the same prompts.
+
+Image options:
+- `--main` builds `nexent`
+- `--web` builds `nexent-web`
+- `--data-process` builds `nexent-data-process`
+- `--mcp` builds `nexent-mcp`
+- `--terminal` builds `nexent-ubuntu-terminal`
+- `--docs` builds `nexent-docs`
 
 ```bash
 # 🛠️ Create and use a new builder instance that supports multi-architecture builds

@@ -35,27 +35,43 @@ assert_not_contains() {
   fi
 }
 
-output="$(bash "$BUILD_SCRIPT" --components application,data-process --version latest --registry general --dry-run)"
-assert_contains "$output" "nexent/nexent:latest" "application component should build main image with latest tag"
-assert_contains "$output" "nexent/nexent-web:latest" "application component should build web image with latest tag"
-assert_contains "$output" "nexent/nexent-mcp:latest" "application component should build mcp image with latest tag"
-assert_contains "$output" "nexent/nexent-data-process:latest" "data-process component should build data-process image with latest tag"
-assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "terminal image should not be built when terminal component is absent"
+output="$(bash "$BUILD_SCRIPT" --images main,web,mcp,data-process --version latest --registry general --dry-run)"
+assert_contains "$output" "nexent/nexent:latest" "image list should build main image with latest tag"
+assert_contains "$output" "nexent/nexent-web:latest" "image list should build web image with latest tag"
+assert_contains "$output" "nexent/nexent-mcp:latest" "image list should build mcp image with latest tag"
+assert_contains "$output" "nexent/nexent-data-process:latest" "image list should build data-process image with latest tag"
+assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "terminal image should not be built when terminal image is absent"
 
-output="$(bash "$BUILD_SCRIPT" --components terminal --version v9.9.9 --registry mainland --dry-run)"
-assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "terminal component should build terminal image with selected version"
-assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent:v9.9.9" "application image should not be built for terminal-only component"
+output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --dry-run)"
+assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "terminal option should build terminal image with selected version"
+assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent:v9.9.9" "main image should not be built for terminal-only option"
+
+output="$(bash "$BUILD_SCRIPT" --web --docs --version v8.8.8 --registry general --dry-run)"
+assert_contains "$output" "nexent/nexent-web:v8.8.8" "web option should build web image"
+assert_contains "$output" "nexent/nexent-docs:v8.8.8" "docs option should build docs image"
+assert_not_contains "$output" "nexent/nexent-data-process:v8.8.8" "data-process image should not be built when option is absent"
 
 output="$(bash "$BUILD_SCRIPT" --image web --version v1.2.3 --registry general --dry-run)"
 assert_contains "$output" "nexent/nexent-web:v1.2.3" "explicit image build should keep supporting selected versions"
 assert_not_contains "$output" "nexent/nexent:v1.2.3" "single image build should not build main image"
 
 output="$(bash "$BUILD_SCRIPT" --components infrastructure,supabase,monitoring --version latest --dry-run)"
-assert_contains "$output" "No Nexent images selected for build." "non-application components should produce no Nexent image builds"
+assert_contains "$output" "No Nexent images selected for build." "legacy non-application components should produce no Nexent image builds"
 
-if bash "$BUILD_SCRIPT" --components infrastructure,unknown --dry-run >/tmp/nexent-image-build-invalid.log 2>&1; then
-  fail "unknown component should fail"
+if bash "$BUILD_SCRIPT" --images main,unknown --dry-run >/tmp/nexent-image-build-invalid.log 2>&1; then
+  fail "unknown image should fail"
 fi
-assert_contains "$(cat /tmp/nexent-image-build-invalid.log)" "Unsupported component for image build: unknown" "unknown component should explain the error"
+assert_contains "$(cat /tmp/nexent-image-build-invalid.log)" "Unsupported image: unknown" "unknown image should explain the error"
+
+output="$(
+  printf 'main,web,mcp,data-process\n2\n1\n1\n1\n' | \
+    bash "$BUILD_SCRIPT" --interactive
+)"
+assert_contains "$output" "Nexent image build configuration" "interactive mode should show configuration prompt"
+assert_contains "$output" "nexent/nexent:latest" "interactive mode should accept latest version selection"
+assert_contains "$output" "nexent/nexent-web:latest" "interactive image selection should include web image"
+assert_contains "$output" "nexent/nexent-mcp:latest" "interactive image selection should include mcp image"
+assert_contains "$output" "nexent/nexent-data-process:latest" "interactive image selection should include data-process image"
+assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactive image selection should exclude unselected terminal image"
 
 echo "All image build tests passed."

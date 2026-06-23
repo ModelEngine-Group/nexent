@@ -7,31 +7,38 @@
 推荐使用统一构建入口：
 
 ```bash
-# 按部署组件构建指定版本镜像
+# 类似部署脚本，进入交互式选择
+bash deploy/images/build.sh
+
+# 按镜像构建指定版本
 bash deploy/images/build.sh \
-  --components application,data-process,terminal \
+  --images main,web,mcp,data-process,terminal \
   --version v2.2.1 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
   --push
 
-# 按同一组件集合构建 latest 镜像
+# 按同一镜像集合构建 latest 镜像
 bash deploy/images/build.sh \
-  --components application,data-process \
+  --images main,web,mcp,data-process \
   --version latest \
   --registry general \
   --platform linux/amd64 \
   --load
 
-# 需要时也可以只构建单个镜像
-bash deploy/images/build.sh --image web --version v2.2.1 --dry-run
+# 需要时也可以只构建一个或多个指定镜像
+bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
 ```
 
-组件到镜像的映射：
-- `application` 构建 `nexent`、`nexent-web`、`nexent-mcp`
-- `data-process` 构建 `nexent-data-process`
-- `terminal` 构建 `nexent-ubuntu-terminal`
-- `infrastructure`、`supabase`、`monitoring` 不构建 Nexent 应用镜像
+在终端无参数运行 `deploy/images/build.sh` 时，会依次选择镜像、镜像版本（根 `VERSION`、`latest` 或自定义）、镜像源、平台和输出方式。也可以用 `--interactive` 强制进入同样的选择流程。
+
+镜像选项：
+- `--main` 构建 `nexent`
+- `--web` 构建 `nexent-web`
+- `--data-process` 构建 `nexent-data-process`
+- `--mcp` 构建 `nexent-mcp`
+- `--terminal` 构建 `nexent-ubuntu-terminal`
+- `--docs` 构建 `nexent-docs`
 
 ```bash
 # 🛠️ 创建并使用支持多架构构建的新构建器实例
