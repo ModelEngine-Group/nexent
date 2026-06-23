@@ -1,5 +1,5 @@
 import { Button, Tag } from "antd";
-import { Download, Eye, Star, Trash2 } from "lucide-react";
+import { Download, Eye, GitBranch, Star, Trash2, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import {
@@ -47,6 +47,7 @@ export default function RepositoryMcpCard({
           transportType={service.transportType}
           deploymentType={deploymentType}
           label={deploymentLabel}
+          seed={service.name}
           className="!h-10 !w-10 rounded-xl"
         />
         <div className="min-w-0">
@@ -89,16 +90,21 @@ export default function RepositoryMcpCard({
         </Tag>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
-        <span>{formatRegistryVersion(service.version || "")}</span>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
-          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-          {rating.toFixed(1)}/5
+          <GitBranch className="h-3.5 w-3.5 text-slate-400" />
+          {formatRegistryVersion(service.version || "")}
         </span>
-        <span className="inline-flex items-center gap-1">
-          <Download className="h-3.5 w-3.5 text-slate-400" />
-          {installCount}
-        </span>
+        <div className="ml-auto flex items-center gap-4">
+          <span className="inline-flex items-center gap-1">
+            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            {rating > 0 ? `${rating.toFixed(1)}/5` : t("mcpTools.repository.noRating")}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Download className="h-3.5 w-3.5 text-slate-400" />
+            {installCount}
+          </span>
+        </div>
       </div>
 
       <div className="mt-auto grid grid-cols-2 gap-2 pt-4">

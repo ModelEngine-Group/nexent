@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, ConfigProvider, Empty, Segmented, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
@@ -59,6 +59,7 @@ import MineMcpServiceCard, {
 } from "./components/MineMcpServiceCard";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
+import RepositoryMcpDetailModal from "./components/RepositoryMcpDetailModal";
 
 const mcpToolsTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#0284c7" },
@@ -139,6 +140,16 @@ export default function McpToolsPage() {
   const quickAdd = useMcpCommunityQuickAdd({
     onSuccess: () => setShowAddModal(false),
   });
+  const isRepositoryInstalled = useCallback((service: CommunityMcpCard) => {
+    return localList.services.some((localService) => {
+      if (
+        service.communityId &&
+        localService.communityId === service.communityId
+      )
+        return true;
+      return localService.name === service.name;
+    });
+  }, [localList.services]);
   const detailMcpIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -383,10 +394,11 @@ export default function McpToolsPage() {
               ) : null}
 
               {selectedRepository ? (
-                <McpCommunityDetailModal
+                <RepositoryMcpDetailModal
                   service={selectedRepository}
+                  installed={isRepositoryInstalled(selectedRepository)}
                   onClose={() => setSelectedRepository(null)}
-                  onQuickAdd={quickAdd.open}
+                  onInstall={quickAdd.open}
                 />
               ) : null}
 

@@ -1,5 +1,5 @@
 import { Button, Dropdown, Tag, type MenuProps } from "antd";
-import { Clock, Edit3, MoreHorizontal, Power } from "lucide-react";
+import { CheckCircle, Circle, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -9,7 +9,6 @@ import {
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
-import StatusBadge from "./shared/StatusBadge";
 import TransportIcon from "./shared/TransportIcon";
 
 export type MineMcpCardItem =
@@ -57,13 +56,11 @@ export default function MineMcpServiceCard({
   const isLocal = item.kind === "local";
   const localService = isLocal ? item.service : null;
   const isEnabled = localService?.enabled === McpServiceStatus.ENABLED;
-  const showHub =
-    item.kind === "community" ||
-    Boolean(localService?.isListedInRepository || localService?.communityId);
   const reviewStatus = onlineService?.reviewStatus || service.reviewStatus;
-  const sourceLabel = isLocal
-    ? t("mcpTools.mine.localService")
-    : t("mcpTools.mine.publishedService");
+  const isPending = reviewStatus === "pending";
+  const isInRepository = isLocal
+    ? Boolean(localService?.isListedInRepository) && onlineService?.reviewStatus === "approved"
+    : reviewStatus === "approved";
   const currentVersion = formatRegistryVersion(service.version || "");
   const syncedOnlineVersion = formatRegistryVersion(
     onlineVersion ||
@@ -92,41 +89,38 @@ export default function MineMcpServiceCard({
   return (
     <div className="group flex min-h-[292px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+        <div className={`flex min-w-0 gap-3 ${isPending ? "items-center" : "items-start"}`}>
           <TransportIcon
             transportType={service.transportType}
             deploymentType={deploymentType}
             label={deploymentLabel}
+            seed={service.name}
             className="!h-10 !w-10 rounded-xl"
           />
           <div className="min-w-0">
-            <h3
-              className="line-clamp-1 text-lg font-semibold text-slate-900"
-              title={service.name}
-            >
-              {service.name}
-            </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              {t("mcpTools.repository.source", { source: sourceLabel })}
-            </p>
+            <div className="flex items-center gap-2">
+              <h3
+                className="line-clamp-1 text-lg font-semibold text-slate-900"
+                title={service.name}
+              >
+                {service.name}
+              </h3>
+              {isInRepository ? (
+                <Tag color="blue" className="m-0 rounded-full shrink-0 inline-flex items-center gap-1">
+                  <Cloud className="h-3 w-3" />
+                  Hub
+                </Tag>
+              ) : null}
+            </div>
+            {isPending ? (
+              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-600">
+                <Hourglass className="h-3.5 w-3.5" />
+                {t("mcpTools.mine.reviewPending")}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-1.5">
-          <div className="flex flex-wrap justify-end gap-1.5">
-            {showHub ? (
-              <Tag color="processing" className="m-0 rounded-full">
-                Hub
-              </Tag>
-            ) : null}
-            {reviewStatus ? (
-              <Tag color={getReviewStatusColor(reviewStatus)} className="m-0 rounded-full">
-                {t(`mcpTools.review.status.${reviewStatus}`)}
-              </Tag>
-            ) : null}
-            {localService ? (
-              <StatusBadge status={localService.enabled} />
-            ) : null}
-          </div>
           <Dropdown
             menu={{ items: actionItems }}
             trigger={["click"]}
@@ -171,9 +165,23 @@ export default function MineMcpServiceCard({
         </Tag>
       </div>
 
+      {/* Creator */}
+      <p className="mt-2 text-xs text-slate-400">
+        <User className="mr-0.5 inline h-3 w-3" />
+        {t("mcpTools.mine.createdByMe")}
+      </p>
+
       <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
-        <span>{currentVersion}</span>
-        <span>{syncedOnlineVersion}</span>
+        <span className="inline-flex items-center gap-1">
+          <Circle className="h-3 w-3 fill-blue-500 text-white" />
+          {t("mcpTools.mine.currentVersion")}{currentVersion}
+        </span>
+        {isInRepository && syncedOnlineVersion !== "-" ? (
+          <span className="inline-flex items-center gap-1 text-green-600">
+            <CheckCircle className="h-3.5 w-3.5" />
+            {t("mcpTools.mine.onlineVersion")}{syncedOnlineVersion}
+          </span>
+        ) : null}
         <span className="inline-flex items-center gap-1">
           <Clock className="h-3.5 w-3.5 text-slate-400" />
           {updatedAt}
@@ -210,12 +218,6 @@ export default function MineMcpServiceCard({
       </div>
     </div>
   );
-}
-
-function getReviewStatusColor(status: string) {
-  if (status === "approved") return "green";
-  if (status === "rejected") return "red";
-  return "gold";
 }
 
 function resolveToolCount(item: MineMcpCardItem): number {
