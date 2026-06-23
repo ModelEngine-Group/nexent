@@ -515,7 +515,12 @@ export const ModelAddDialog = ({
       ...prev,
       ...next,
       name: suggestion?.canonicalModelName || prev.name,
-      provider: suggestion?.suggestedProvider || prev.provider,
+      // Do NOT overwrite `provider` from the catalog suggestion. The catalog's
+      // `suggested_provider` namespace (deepseek, openai, jina, ...) is a
+      // superset of the frontend dropdown's allowed values
+      // (modelengine / silicon / dashscope / tokenpony / custom); writing an
+      // unknown one back into `model_factory` makes the model disappear from
+      // the active list and the edit dropdown.
     }));
     setAcceptedCapacitySuggestion(suggestion);
   };
@@ -530,7 +535,11 @@ export const ModelAddDialog = ({
       const suggestion = await modelService.suggestCapacity({
         modelName: form.name.trim(),
         baseUrl: form.url.trim(),
-        providerHint: form.provider,
+        // Only send providerHint when the user actually picked it (batch mode
+        // exposes the dropdown). In single-add mode the form keeps a hidden
+        // default ("modelengine") that the user never sees, so forwarding it
+        // would falsely pin catalog lookup to that provider.
+        ...(form.isBatchImport ? { providerHint: form.provider } : {}),
         apiKey: form.apiKey.trim() || undefined,
         modelType: resolveConnectivityModelType(form.type),
       });
@@ -1120,8 +1129,8 @@ export const ModelAddDialog = ({
           : form.type;
       const acceptedModelName =
         acceptedCapacitySuggestion?.canonicalModelName || form.name;
-      const acceptedProvider =
-        acceptedCapacitySuggestion?.suggestedProvider || undefined;
+      // `acceptedCapacitySuggestion?.suggestedProvider` is intentionally NOT
+      // used here. See applyCapacitySuggestion above for the rationale.
 
       // Determine the maximum tokens value.
       // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
@@ -1151,7 +1160,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          modelFactory: acceptedProvider,
+          modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
@@ -1193,7 +1202,7 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          modelFactory: acceptedProvider,
+          modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 

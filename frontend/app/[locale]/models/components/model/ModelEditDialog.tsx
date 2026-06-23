@@ -170,7 +170,11 @@ export const ModelEditDialog = ({
       ...prev,
       ...next,
       name: suggestion?.canonicalModelName || prev.name,
-      modelFactory: suggestion?.suggestedProvider || prev.modelFactory,
+      // Do NOT overwrite `modelFactory` from the catalog suggestion. The
+      // catalog's `suggested_provider` namespace (deepseek, openai, jina,
+      // ...) is a superset of the frontend dropdown's allowed values; writing
+      // an unknown one back into `model_factory` makes the model disappear
+      // from the active list and the edit dropdown.
     }));
     setAcceptedCapacitySuggestion(suggestion);
   };
@@ -344,8 +348,8 @@ export const ModelEditDialog = ({
       const newDisplayName = form.displayName;
       const acceptedModelName =
         acceptedCapacitySuggestion?.canonicalModelName || form.name;
-      const acceptedProvider =
-        acceptedCapacitySuggestion?.suggestedProvider || undefined;
+      // `acceptedCapacitySuggestion?.suggestedProvider` is intentionally NOT
+      // used here. See applyCapacitySuggestion above for the rationale.
 
       // Use manage interface if tenantId is provided
       if (tenantId) {
@@ -367,8 +371,7 @@ export const ModelEditDialog = ({
           chunkingBatchSize: isEmbeddingModel
             ? parseInt(form.chunkingBatchSize) || 10
             : undefined,
-          modelFactory:
-            acceptedProvider || (isVoiceModel ? form.modelFactory : undefined),
+          modelFactory: isVoiceModel ? form.modelFactory : undefined,
           modelAppid:
             isVoiceModel && form.modelFactory === "volcengine"
               ? form.modelAppid
@@ -400,7 +403,7 @@ export const ModelEditDialog = ({
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
-          source: (acceptedProvider as any) || model.source,
+          source: model.source,
           // Send chunk size range for embedding models
           ...(isEmbeddingModel
             ? {
@@ -469,9 +472,7 @@ export const ModelEditDialog = ({
                 accessToken:
                   form.modelFactory === "volcengine" ? form.accessToken : "",
               }
-            : acceptedProvider
-              ? { modelFactory: acceptedProvider }
-              : {}),
+            : {}),
         },
       });
 
