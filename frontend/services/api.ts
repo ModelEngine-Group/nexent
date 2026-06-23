@@ -332,6 +332,9 @@ export const API_ENDPOINTS = {
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
+    communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
+    communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
+    communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
   },
   memory: {

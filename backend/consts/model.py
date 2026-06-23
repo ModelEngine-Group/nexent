@@ -1195,9 +1195,11 @@ class AddMcpServiceRequest(BaseModel):
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    version: Optional[str] = Field(None, description="MCP version")
+    community_id: Optional[int] = Field(None, gt=0, description="Linked community record ID")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
 
-    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1213,10 +1215,12 @@ class AddContainerMcpServiceRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    version: Optional[str] = Field(None, description="MCP version")
+    community_id: Optional[int] = Field(None, gt=0, description="Linked community record ID")
     port: int = Field(..., ge=1, le=65535, description="Host port for the container")
     mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
 
-    @field_validator("name", "description", "authorization_token", mode="before")
+    @field_validator("name", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1233,8 +1237,11 @@ class UpdateMcpServiceRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+    config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON")
+    version: Optional[str] = Field(None, description="MCP version")
+    community_id: Optional[int] = Field(None, gt=0, description="Linked community record ID")
 
-    @field_validator("name", "server_url", "description", "authorization_token", mode="before")
+    @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):
@@ -1315,6 +1322,24 @@ class CommunityListRequest(BaseModel):
         return value
 
 
+class CommunityReviewListRequest(CommunityListRequest):
+    """Request model for listing MCP community review submissions"""
+    status: Optional[str] = Field(None, description="Review status filter")
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _strip_status(cls, value: Any):
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CommunityReviewActionRequest(BaseModel):
+    """Request model for approving or rejecting an MCP community submission"""
+    community_id: int = Field(..., gt=0, description="Community record ID")
+
+
 class CommunityPublishRequest(BaseModel):
     """Publish a local MCP to the community; optional fields override the snapshot."""
 
@@ -1343,12 +1368,14 @@ class CommunityUpdateRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     version: Optional[str] = Field(None, description="MCP version")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    mcp_server: Optional[str] = Field(None, max_length=500, description="MCP server URL")
+    transport_type: Optional[str] = Field(None, description="Transport type")
     config_json: Optional[Dict[str, Any]] = Field(
         None,
         description="Container MCP configuration JSON (omit to leave unchanged)",
     )
 
-    @field_validator("name", "description", "version", mode="before")
+    @field_validator("name", "description", "version", "mcp_server", "transport_type", mode="before")
     @classmethod
     def _strip_text(cls, value: Any):
         if isinstance(value, str):

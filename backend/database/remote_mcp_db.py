@@ -16,18 +16,11 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     :param user_id: User ID
     :return: Created MCP record
 
-    Note: Only fields defined in the McpRecord model are inserted.
-    Fields like 'transport_type' and 'version' are not part of McpRecord
-    and will be ignored.
     """
-    # Filter to only include fields that exist in the model
-    # McpRecord fields: mcp_id, tenant_id, user_id, mcp_name, mcp_server, status,
-    # container_id, container_port, authorization_token, source, registry_json,
-    # config_json, enabled, tags, description, create_time, update_time, created_by, updated_by, delete_flag
     allowed_fields = {
         'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
-        'authorization_token', 'custom_headers', 'source', 'registry_json', 'config_json',
-        'enabled', 'tags', 'description'
+        'authorization_token', 'custom_headers', 'source', 'version', 'community_id',
+        'registry_json', 'config_json', 'enabled', 'tags', 'description'
     }
 
     filtered_data = {k: v for k, v in mcp_data.items() if k in allowed_fields and v is not None}
@@ -145,6 +138,8 @@ def update_mcp_record_manage_fields_by_id(
     authorization_token: str | None,
     custom_headers: Dict[str, Any] | None,
     config_json: Dict[str, Any] | None,
+    version: str | None,
+    community_id: int | None,
 ) -> None:
     with get_db_session() as session:
         session.query(McpRecord).filter(
@@ -161,9 +156,40 @@ def update_mcp_record_manage_fields_by_id(
                 "authorization_token": authorization_token,
                 "custom_headers": custom_headers,
                 "config_json": config_json,
+                "version": version,
+                "community_id": community_id,
                 "updated_by": user_id,
             }
         )
+
+
+def update_mcp_record_community_id_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    community_id: int | None,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"community_id": community_id, "updated_by": user_id})
+
+
+def clear_mcp_record_community_id(
+    *,
+    tenant_id: str,
+    user_id: str,
+    community_id: int,
+) -> None:
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.community_id == community_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"community_id": None, "updated_by": user_id})
 
 
 def update_mcp_record_enabled_by_id(

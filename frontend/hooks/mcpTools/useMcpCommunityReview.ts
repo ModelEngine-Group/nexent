@@ -2,44 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  fetchCommunityMcpCards,
-  fetchCommunityMcpTagStats,
-} from "@/services/mcpToolsService";
-import type {
-  CommunityMcpCard,
-  McpTagStat,
-  McpTransportFilter,
-} from "@/types/mcpTools";
-import { FILTER_ALL } from "@/const/mcpTools";
-import { MCP_SEARCH_DEBOUNCE_MS, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
+import { listCommunityMcpReviewTools } from "@/services/mcpToolsService";
+import type { CommunityMcpCard, McpTransportFilter } from "@/types/mcpTools";
+import { FILTER_ALL, MCP_SEARCH_DEBOUNCE_MS, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
-export type CommunityTransportFilter = McpTransportFilter;
-
-interface CommunityFilters {
+interface CommunityReviewFilters {
   search: string;
   transport: McpTransportFilter;
   tag: string;
+  status: string;
 }
 
-const INITIAL_FILTERS: CommunityFilters = {
+const INITIAL_FILTERS: CommunityReviewFilters = {
   search: "",
   transport: FILTER_ALL,
   tag: FILTER_ALL,
+  status: FILTER_ALL,
 };
 
-/**
- * Browsing state (search + filters + cursor pagination + tag stats) for the
- * community MCP list.
- */
-export function useMcpCommunityBrowser(enabled: boolean) {
-  const [filters, setFilters] = useState<CommunityFilters>(INITIAL_FILTERS);
-  const [debouncedSearch, setDebouncedSearch] = useState(
-    INITIAL_FILTERS.search
-  );
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([
-    null,
-  ]);
+export function useMcpCommunityReview(enabled: boolean) {
+  const [filters, setFilters] = useState<CommunityReviewFilters>(INITIAL_FILTERS);
+  const [debouncedSearch, setDebouncedSearch] = useState(INITIAL_FILTERS.search);
+  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
 
   useEffect(() => {
@@ -53,23 +37,25 @@ export function useMcpCommunityBrowser(enabled: boolean) {
   useEffect(() => {
     setCursorHistory([null]);
     setPageIndex(0);
-  }, [debouncedSearch, filters.transport, filters.tag]);
+  }, [debouncedSearch, filters.transport, filters.tag, filters.status]);
 
   const query = useQuery({
     queryKey: [
-      ...MCP_TOOLS_QUERY_KEYS.communityList,
+      ...MCP_TOOLS_QUERY_KEYS.communityReview,
       debouncedSearch,
       filters.transport,
       filters.tag,
+      filters.status,
       cursorHistory[pageIndex],
     ],
     enabled,
     queryFn: async () => {
-      const result = await fetchCommunityMcpCards({
+      const result = await listCommunityMcpReviewTools({
         search: debouncedSearch || undefined,
-        transportType: filters.transport === FILTER_ALL ? undefined : filters.transport,
+        transport_type: filters.transport === FILTER_ALL ? undefined : filters.transport,
         tag: filters.tag === FILTER_ALL ? undefined : filters.tag,
-        cursor: cursorHistory[pageIndex],
+        status: filters.status === FILTER_ALL ? undefined : filters.status,
+        cursor: cursorHistory[pageIndex] || undefined,
       });
       return result.data;
     },
@@ -77,35 +63,17 @@ export function useMcpCommunityBrowser(enabled: boolean) {
     refetchOnWindowFocus: false,
   });
 
-  const tagStatsQuery = useQuery({
-    queryKey: [...MCP_TOOLS_QUERY_KEYS.communityTags],
-    enabled,
-    queryFn: async () => {
-      const result = await fetchCommunityMcpTagStats();
-      return result.data;
-    },
-    staleTime: 60_000,
-  });
-
   const services: CommunityMcpCard[] = useMemo(
-    () => (query.data?.items ?? []).filter((item) => item.reviewStatus === "approved"),
+    () => query.data?.items ?? [],
     [query.data?.items]
   );
   const nextCursor = query.data?.nextCursor ?? null;
-  const tagStats: McpTagStat[] = useMemo(
-    () => tagStatsQuery.data ?? [],
-    [tagStatsQuery.data]
-  );
-
   const hasPrevPage = pageIndex > 0;
   const hasNextPage = Boolean(nextCursor);
 
   const nextPage = useCallback(() => {
     if (!nextCursor) return;
-    setCursorHistory((prev) => {
-      const truncated = prev.slice(0, pageIndex + 1);
-      return [...truncated, nextCursor];
-    });
+    setCursorHistory((prev) => [...prev.slice(0, pageIndex + 1), nextCursor]);
     setPageIndex((prev) => prev + 1);
   }, [nextCursor, pageIndex]);
 
@@ -113,9 +81,9 @@ export function useMcpCommunityBrowser(enabled: boolean) {
     setPageIndex((prev) => Math.max(0, prev - 1));
   }, []);
 
-  const updateFilter = <K extends keyof CommunityFilters>(
+  const updateFilter = <K extends keyof CommunityReviewFilters>(
     key: K,
-    value: CommunityFilters[K]
+    value: CommunityReviewFilters[K]
   ) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
@@ -123,7 +91,6 @@ export function useMcpCommunityBrowser(enabled: boolean) {
   return useMemo(
     () => ({
       services,
-      tagStats,
       loading: query.isLoading || query.isFetching,
       filters,
       updateFilter,
@@ -136,7 +103,6 @@ export function useMcpCommunityBrowser(enabled: boolean) {
     }),
     [
       services,
-      tagStats,
       query.isLoading,
       query.isFetching,
       filters,

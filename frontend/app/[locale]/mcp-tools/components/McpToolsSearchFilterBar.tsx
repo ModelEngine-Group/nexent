@@ -41,8 +41,8 @@ export default function McpToolsSearchFilterBar({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-        <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-center">
+      <div className="flex flex-row items-center gap-3 overflow-x-auto">
+        <div className="grid min-w-[240px] flex-1 gap-3 grid-cols-[minmax(160px,1fr)_auto] items-center">
           <Input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
@@ -61,7 +61,7 @@ export default function McpToolsSearchFilterBar({
             />
           ) : null}
         </div>
-        {actions ? <div className="flex shrink-0 flex-wrap gap-2 xl:justify-end">{actions}</div> : null}
+        {actions ? <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div> : null}
       </div>
       {categoryStats?.length ? (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
@@ -74,8 +74,8 @@ export default function McpToolsSearchFilterBar({
                 onClick={() => onDeploymentTypeChange(item.value)}
                 className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition ${
                   selected
-                    ? "border-emerald-500 bg-emerald-500 font-medium text-white shadow-sm"
-                    : "border-slate-200 bg-slate-50 text-slate-600 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                    ? "border-blue-500 bg-blue-500 font-medium text-white shadow-sm"
+                    : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                 }`}
               >
                 <span>{item.label}</span>

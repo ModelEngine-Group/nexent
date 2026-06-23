@@ -1,44 +1,60 @@
-import { ContainerOutlined, LinkOutlined } from "@ant-design/icons";
-import { McpTransportType } from "@/const/mcpTools";
+import {
+  ApiOutlined,
+  CloudOutlined,
+  ContainerOutlined,
+  LinkOutlined,
+} from "@ant-design/icons";
+import { McpDeploymentType, McpTransportType } from "@/const/mcpTools";
 
 interface TransportVisual {
   Icon: typeof LinkOutlined;
   className: string;
 }
 
-/**
- * Visual mapping for transport-type icons rendered on MCP cards.
- * Only URL and CONTAINER are mapped explicitly; legacy HTTP/SSE values
- * fall back to the URL visual.
- */
-const TRANSPORT_VISUALS: Record<string, TransportVisual> = {
-  [McpTransportType.URL]: {
+const DEPLOYMENT_VISUALS: Record<string, TransportVisual> = {
+  [McpDeploymentType.REMOTE_LINK]: {
     Icon: LinkOutlined,
     className: "bg-sky-50 text-sky-600",
   },
-  [McpTransportType.CONTAINER]: {
+  [McpDeploymentType.CONTAINER]: {
     Icon: ContainerOutlined,
     className: "bg-violet-50 text-violet-600",
   },
+  [McpDeploymentType.API]: {
+    Icon: ApiOutlined,
+    className: "bg-emerald-50 text-emerald-600",
+  },
+  [McpDeploymentType.LOCAL_IMAGE]: {
+    Icon: CloudOutlined,
+    className: "bg-amber-50 text-amber-600",
+  },
 };
 
-const DEFAULT_VISUAL: TransportVisual = {
-  Icon: LinkOutlined,
-  className: "bg-sky-50 text-sky-600",
+const TRANSPORT_VISUALS: Record<string, TransportVisual> = {
+  [McpTransportType.URL]: DEPLOYMENT_VISUALS[McpDeploymentType.REMOTE_LINK],
+  [McpTransportType.CONTAINER]: DEPLOYMENT_VISUALS[McpDeploymentType.CONTAINER],
 };
+
+const DEFAULT_VISUAL: TransportVisual =
+  DEPLOYMENT_VISUALS[McpDeploymentType.REMOTE_LINK];
 
 interface TransportIconProps {
   transportType: string;
+  deploymentType?: string;
   label?: string;
   className?: string;
 }
 
 export default function TransportIcon({
   transportType,
+  deploymentType,
   label,
   className,
 }: TransportIconProps) {
-  const visual = TRANSPORT_VISUALS[transportType] || DEFAULT_VISUAL;
+  const visual =
+    (deploymentType && DEPLOYMENT_VISUALS[deploymentType]) ||
+    TRANSPORT_VISUALS[transportType] ||
+    DEFAULT_VISUAL;
   const Icon = visual.Icon;
 
   return (

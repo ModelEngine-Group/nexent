@@ -131,6 +131,7 @@ export const MCP_TOOLS_QUERY_KEYS = {
   tools: (mcpId: number) => ["mcp-tools", "service-tools", mcpId] as const,
   registryList: ["mcp-tools", "registry"] as const,
   communityList: ["mcp-tools", "community"] as const,
+  communityReview: ["mcp-tools", "community-review"] as const,
   communityTags: ["mcp-tools", "community-tags"] as const,
   myCommunity: ["mcp-tools", "my-community"] as const,
 };

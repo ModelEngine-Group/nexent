@@ -144,6 +144,7 @@ export interface CommunityMcpCard {
   installCount?: number;
   deploymentType?: McpDeploymentType;
   reviewStatus?: "pending" | "approved" | "rejected" | "offline";
+  reviewType?: "initial_listing" | "version_update";
 }
 
 export interface McpServiceItem {
@@ -170,6 +171,7 @@ export interface McpServiceItem {
   communityId?: number;
   deploymentType?: McpDeploymentType;
   reviewStatus?: "pending" | "approved" | "rejected" | "offline";
+  reviewType?: "initial_listing" | "version_update";
 }
 
 export interface McpTagStat {
@@ -199,6 +201,9 @@ export interface UpdateMcpServicePayload {
   tags: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  config_json?: Record<string, unknown>;
+  version?: string;
+  community_id?: number;
 }
 
 export interface ToggleMcpServicePayload {

@@ -11,12 +11,13 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_community_record_t (
     tenant_id VARCHAR(100),
     user_id VARCHAR(100),
     mcp_name VARCHAR(100) NOT NULL,
-    mcp_server VARCHAR(500) NOT NULL,
+    mcp_server VARCHAR(500),
     source VARCHAR(30) DEFAULT 'community',
     version VARCHAR(50),
     registry_json JSONB,
     transport_type VARCHAR(30),
     config_json JSON,
+    review_status VARCHAR(30) DEFAULT 'pending',
     tags TEXT[],
     description TEXT,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -39,6 +40,7 @@ COMMENT ON COLUMN nexent.mcp_community_record_t.version IS 'MCP version';
 COMMENT ON COLUMN nexent.mcp_community_record_t.registry_json IS 'Full MCP server metadata JSON for discovery and quick import';
 COMMENT ON COLUMN nexent.mcp_community_record_t.transport_type IS 'Transport type: url/container';
 COMMENT ON COLUMN nexent.mcp_community_record_t.config_json IS 'Public-shareable MCP configuration JSON';
+COMMENT ON COLUMN nexent.mcp_community_record_t.review_status IS 'Review status: pending/approved/rejected/offline';
 COMMENT ON COLUMN nexent.mcp_community_record_t.tags IS 'Tags';
 COMMENT ON COLUMN nexent.mcp_community_record_t.description IS 'Description';
 COMMENT ON COLUMN nexent.mcp_community_record_t.create_time IS 'Creation time';
@@ -55,6 +57,12 @@ CREATE INDEX IF NOT EXISTS idx_mcp_community_name_delete
 
 CREATE INDEX IF NOT EXISTS idx_mcp_community_transport_delete
     ON nexent.mcp_community_record_t (transport_type, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_review_delete
+    ON nexent.mcp_community_record_t (review_status, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_community_tenant_review_delete
+    ON nexent.mcp_community_record_t (tenant_id, review_status, delete_flag);
 
 CREATE INDEX IF NOT EXISTS idx_mcp_community_user_delete
     ON nexent.mcp_community_record_t (user_id, delete_flag);

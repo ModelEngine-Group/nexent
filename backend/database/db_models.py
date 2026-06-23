@@ -506,6 +506,8 @@ class McpRecord(TableBase):
     )
     source = Column(
         String(30), doc="Source type: local/mcp_registry/community")
+    version = Column(String(50), doc="MCP version")
+    community_id = Column(Integer, doc="Published community record ID")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
@@ -536,6 +538,10 @@ class McpCommunityRecord(TableBase):
     transport_type = Column(
         String(30), doc="Transport type: http/sse/container")
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    review_status = Column(
+        String(30), default="pending", doc="Review status: pending/approved/rejected/offline")
+    review_type = Column(
+        String(30), default="initial_listing", doc="Review submission type: initial_listing/version_update")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
 

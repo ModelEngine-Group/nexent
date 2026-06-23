@@ -9,6 +9,8 @@ BEGIN;
 -- 1) Extend mcp_record_t with final column names (idempotent)
 ALTER TABLE IF EXISTS nexent.mcp_record_t
     ADD COLUMN IF NOT EXISTS source VARCHAR(30),
+    ADD COLUMN IF NOT EXISTS version VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS community_id INTEGER,
     ADD COLUMN IF NOT EXISTS registry_json JSONB,
     ADD COLUMN IF NOT EXISTS config_json JSON,
     ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE,
@@ -18,6 +20,8 @@ ALTER TABLE IF EXISTS nexent.mcp_record_t
 
 -- 2) Add comments for new columns
 COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry/community';
+COMMENT ON COLUMN nexent.mcp_record_t.version IS 'MCP version';
+COMMENT ON COLUMN nexent.mcp_record_t.community_id IS 'Published community record ID';
 COMMENT ON COLUMN nexent.mcp_record_t.registry_json IS 'Full MCP registry server.json snapshot';
 COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
 COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
@@ -37,5 +41,8 @@ CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_server
 
 CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tags_gin
     ON nexent.mcp_record_t USING GIN (tags);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_community_id
+    ON nexent.mcp_record_t (community_id, delete_flag);
 
 COMMIT;

@@ -4,25 +4,45 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, ConfigProvider, Empty, Segmented, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { CloudUploadOutlined, InboxOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { ClipboardCheck, Download, Plus, Puzzle } from "lucide-react";
+import {
+  CloudUploadOutlined,
+  InboxOutlined,
+  SafetyCertificateOutlined,
+} from "@ant-design/icons";
+import { CheckCircle, Clock, Download, Plus, Puzzle, XCircle } from "lucide-react";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
+import { useMcpCommunityReview } from "@/hooks/mcpTools/useMcpCommunityReview";
 import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
 import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
-import type { CommunityMcpCard, McpServiceItem, McpTagStat } from "@/types/mcpTools";
+import {
+  approveCommunityMcpTool,
+  deleteCommunityMcpTool,
+  publishCommunityMcpTool,
+  rejectCommunityMcpTool,
+  updateCommunityMcpTool,
+} from "@/services/mcpToolsService";
+import type {
+  CommunityMcpCard,
+  McpContainerConfigPayload,
+  McpServiceItem,
+  McpTagStat,
+} from "@/types/mcpTools";
 import {
   FILTER_ALL,
   McpDeploymentType,
   McpSource,
   McpToolsServicesTab,
+  McpTransportType,
 } from "@/const/mcpTools";
 import {
   filterByDeploymentType,
+  formatRegistryDate,
+  formatRegistryVersion,
   getDeploymentTypeLabelKey,
   matchesNameOrTag,
   paginateItems,
@@ -34,12 +54,14 @@ import McpCommunityDetailModal from "./components/add/community/McpCommunityDeta
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
 import McpToolsPagination from "./components/McpToolsPagination";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
-import MineMcpServiceCard, { type MineMcpCardItem } from "./components/MineMcpServiceCard";
+import MineMcpServiceCard, {
+  type MineMcpCardItem,
+} from "./components/MineMcpServiceCard";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
 
 const mcpToolsTheme = {
-  token: { colorPrimary: "#059669", colorInfo: "#0d9488" },
+  token: { colorPrimary: "#2563eb", colorInfo: "#0284c7" },
 };
 
 const MINE_PAGE_SIZE = 12;
@@ -72,14 +94,16 @@ function getDeploymentCategoryStats(
     ...deploymentCategories.map((deploymentType) => ({
       value: deploymentType,
       label: t(getDeploymentTypeLabelKey(deploymentType)),
-      count: items.filter((item) => resolveDeploymentType(item) === deploymentType).length,
+      count: items.filter(
+        (item) => resolveDeploymentType(item) === deploymentType
+      ).length,
     })),
   ];
 }
 
 export default function McpToolsPage() {
   const { t } = useTranslation("common");
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { user } = useAuthorizationContext();
   const { pageVariants, pageTransition } = useSetupFlow();
   const isAdmin = useMemo(
@@ -87,17 +111,34 @@ export default function McpToolsPage() {
     [user?.role]
   );
 
-  const [tab, setTab] = useState<McpToolsServicesTab>(McpToolsServicesTab.REPOSITORY);
+  const [tab, setTab] = useState<McpToolsServicesTab>(
+    McpToolsServicesTab.REPOSITORY
+  );
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addModalInitialTab, setAddModalInitialTab] = useState<McpSource>(McpSource.LOCAL);
-  const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(null);
-  const [selectedRepository, setSelectedRepository] = useState<CommunityMcpCard | null>(null);
-  const [selectedPublished, setSelectedPublished] = useState<CommunityMcpCard | null>(null);
+  const [addModalInitialTab, setAddModalInitialTab] = useState<McpSource>(
+    McpSource.LOCAL
+  );
+  const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(
+    null
+  );
+  const [selectedRepository, setSelectedRepository] =
+    useState<CommunityMcpCard | null>(null);
+  const [selectedReview, setSelectedReview] =
+    useState<CommunityMcpCard | null>(null);
+  const [selectedPublished, setSelectedPublished] =
+    useState<CommunityMcpCard | null>(null);
 
   const localList = useMcpServicesList();
   const myPublished = useMyCommunityMcp(tab === McpToolsServicesTab.MINE);
-  const repositoryBrowser = useMcpCommunityBrowser(tab === McpToolsServicesTab.REPOSITORY);
-  const quickAdd = useMcpCommunityQuickAdd({ onSuccess: () => setShowAddModal(false) });
+  const repositoryBrowser = useMcpCommunityBrowser(
+    tab === McpToolsServicesTab.REPOSITORY
+  );
+  const reviewBrowser = useMcpCommunityReview(
+    tab === McpToolsServicesTab.REVIEW && isAdmin
+  );
+  const quickAdd = useMcpCommunityQuickAdd({
+    onSuccess: () => setShowAddModal(false),
+  });
   const detailMcpIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -134,9 +175,39 @@ export default function McpToolsPage() {
     }
   };
 
+  const handleRepositoryOffline = (service: CommunityMcpCard) => {
+    if (!service.communityId) return;
+    modal.confirm({
+      title: t("mcpTools.mine.unpublishOnlineVersionTitle"),
+      content: t("mcpTools.mine.unpublishOnlineVersionDescription", {
+        name: service.name,
+      }),
+      okText: t("mcpTools.repository.offline"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: async () => {
+        try {
+          await deleteCommunityMcpTool(service.communityId!);
+          message.success(t("mcpTools.mine.unpublishOnlineVersionSuccess"));
+          await Promise.all([
+            repositoryBrowser.refetch(),
+            myPublished.refetch(),
+            localList.refetch(),
+          ]);
+        } catch {
+          message.error(t("mcpTools.mine.unpublishOnlineVersionFailed"));
+        }
+      },
+    });
+  };
+
   const repositoryCount = repositoryBrowser.services.length;
-  const mineCount = localList.services.length + myPublished.items.length;
-  const reviewCount = 0;
+  const mineCount = getDeduplicatedMineItems(
+    localList.services,
+    myPublished.items
+  ).length;
+  const reviewCount = reviewBrowser.services.length;
 
   const searchActions = (
     <>
@@ -220,15 +291,15 @@ export default function McpToolsPage() {
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
-                className="overflow-hidden rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-cyan-50 p-6 shadow-sm"
+                className="overflow-hidden rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-sky-50 p-6 shadow-sm"
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-900/10">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-sky-600 shadow-lg shadow-blue-900/10">
                       <Puzzle className="h-7 w-7 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <h1 className="text-3xl font-bold text-emerald-800 dark:text-emerald-400">
+                      <h1 className="text-3xl font-bold text-blue-800 dark:text-blue-400">
                         {t("mcpTools.page.title")}
                       </h1>
                       <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
@@ -237,11 +308,18 @@ export default function McpToolsPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-                    <Tag color={isAdmin ? "green" : "blue"} className="m-0 rounded-full px-3 py-1 text-sm">
-                      {isAdmin ? t("mcpTools.page.role.admin") : t("mcpTools.page.role.user")}
+                    <Tag
+                      color="blue"
+                      className="m-0 rounded-full px-3 py-1 text-sm"
+                    >
+                      {isAdmin
+                        ? t("mcpTools.page.role.admin")
+                        : t("mcpTools.page.role.user")}
                     </Tag>
                     <span className="text-xs text-slate-500">
-                      {isAdmin ? t("mcpTools.page.role.adminHint") : t("mcpTools.page.role.userHint")}
+                      {isAdmin
+                        ? t("mcpTools.page.role.adminHint")
+                        : t("mcpTools.page.role.userHint")}
                     </span>
                   </div>
                 </div>
@@ -253,7 +331,7 @@ export default function McpToolsPage() {
                   value={tab}
                   onChange={(value) => setTab(value as McpToolsServicesTab)}
                   options={tabOptions}
-                  className="h-11 w-full rounded-xl bg-transparent text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:flex-1 [&_.ant-segmented-item]:rounded-lg [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:h-full [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:justify-center [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-item-selected]:text-emerald-700 [&_.ant-segmented-thumb]:rounded-lg [&_.ant-segmented-thumb]:bg-emerald-50 [&_.ant-segmented-thumb]:shadow-sm"
+                  className="h-11 w-full rounded-xl bg-transparent text-sm [&_.ant-segmented-group]:h-full [&_.ant-segmented-item]:flex-1 [&_.ant-segmented-item]:rounded-lg [&_.ant-segmented-item-label]:flex [&_.ant-segmented-item-label]:h-full [&_.ant-segmented-item-label]:items-center [&_.ant-segmented-item-label]:justify-center [&_.ant-segmented-item-label]:px-4 [&_.ant-segmented-item-label]:text-sm [&_.ant-segmented-item-selected]:text-blue-700 [&_.ant-segmented-thumb]:rounded-lg [&_.ant-segmented-thumb]:bg-blue-50 [&_.ant-segmented-thumb]:shadow-sm"
                 />
               </div>
 
@@ -265,7 +343,7 @@ export default function McpToolsPage() {
                   actions={searchActions}
                   onSelect={setSelectedRepository}
                   onInstall={quickAdd.open}
-                  onOffline={() => message.info(t("mcpTools.repository.offlinePending"))}
+                  onOffline={handleRepositoryOffline}
                 />
               ) : null}
 
@@ -281,7 +359,19 @@ export default function McpToolsPage() {
               ) : null}
 
               {tab === McpToolsServicesTab.REVIEW && isAdmin ? (
-                <ReviewCenterView actions={searchActions} />
+                <ReviewCenterView
+                  browser={reviewBrowser}
+                  actions={searchActions}
+                  onSelect={setSelectedReview}
+                  onReviewed={async () => {
+                    await Promise.all([
+                      reviewBrowser.refetch(),
+                      repositoryBrowser.refetch(),
+                      myPublished.refetch(),
+                      localList.refetch(),
+                    ]);
+                  }}
+                />
               ) : null}
 
               {selectedLocal ? (
@@ -300,13 +390,22 @@ export default function McpToolsPage() {
                 />
               ) : null}
 
+              {selectedReview ? (
+                <McpCommunityDetailModal
+                  service={selectedReview}
+                  onClose={() => setSelectedReview(null)}
+                />
+              ) : null}
+
               <PublishedServiceDetailModal
                 open={Boolean(selectedPublished)}
                 service={selectedPublished}
                 onClose={() => setSelectedPublished(null)}
               />
 
-              {quickAdd.visible ? <CommunityQuickAddModal controller={quickAdd} /> : null}
+              {quickAdd.visible ? (
+                <CommunityQuickAddModal controller={quickAdd} />
+              ) : null}
 
               <AddMcpServiceModal
                 open={showAddModal}
@@ -339,7 +438,8 @@ function RepositoryView({
   onOffline: (service: CommunityMcpCard) => void;
 }) {
   const { t } = useTranslation("common");
-  const [deploymentType, setDeploymentType] = useState<DeploymentFilter>(FILTER_ALL);
+  const [deploymentType, setDeploymentType] =
+    useState<DeploymentFilter>(FILTER_ALL);
 
   const categoryStats = useMemo(
     () => getDeploymentCategoryStats(browser.services, t),
@@ -347,14 +447,18 @@ function RepositoryView({
   );
 
   const filteredServices = useMemo(() => {
-    return filterByDeploymentType(browser.services, deploymentType).filter((item) =>
-      matchesNameOrTag(item, browser.filters.search)
+    return filterByDeploymentType(browser.services, deploymentType).filter(
+      (item) => matchesNameOrTag(item, browser.filters.search)
     );
   }, [browser.services, browser.filters.search, deploymentType]);
 
   const isInstalled = (service: CommunityMcpCard) => {
     return localServices.some((localService) => {
-      if (service.communityId && localService.communityId === service.communityId) return true;
+      if (
+        service.communityId &&
+        localService.communityId === service.communityId
+      )
+        return true;
       return localService.name === service.name;
     });
   };
@@ -365,22 +469,28 @@ function RepositoryView({
         search={browser.filters.search}
         deploymentType={deploymentType}
         categoryStats={categoryStats}
-        actions={(
+        actions={
           <>
             <span className="flex h-10 items-center text-xs text-slate-400">
-              {t("mcpTools.page.resultCount", { count: filteredServices.length })}
+              {t("mcpTools.page.resultCount", {
+                count: filteredServices.length,
+              })}
             </span>
             {actions}
           </>
-        )}
+        }
         onSearchChange={(value) => browser.updateFilter("search", value)}
         onDeploymentTypeChange={setDeploymentType}
       />
 
       {browser.loading ? (
-        <PlaceholderBox><Spin /></PlaceholderBox>
+        <PlaceholderBox>
+          <Spin />
+        </PlaceholderBox>
       ) : filteredServices.length === 0 ? (
-        <PlaceholderBox><Empty description={t("mcpTools.repository.empty")} /></PlaceholderBox>
+        <PlaceholderBox>
+          <Empty description={t("mcpTools.repository.empty")} />
+        </PlaceholderBox>
       ) : (
         <ResponsiveCardGrid>
           {filteredServices.map((service, index) => (
@@ -426,11 +536,15 @@ function MineView({
   onToggled: (mcpId: number) => Promise<void>;
 }) {
   const { t } = useTranslation("common");
+  const { message, modal } = App.useApp();
   const toggle = useMcpServiceToggle();
   const [search, setSearch] = useState("");
-  const [deploymentType, setDeploymentType] = useState<DeploymentFilter>(FILTER_ALL);
+  const [deploymentType, setDeploymentType] =
+    useState<DeploymentFilter>(FILTER_ALL);
   const [tag, setTag] = useState(FILTER_ALL);
   const [page, setPage] = useState(1);
+  const [publishingKey, setPublishingKey] = useState<string | null>(null);
+  const [unpublishingKey, setUnpublishingKey] = useState<string | null>(null);
 
   const tagStats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -447,14 +561,32 @@ function MineView({
   }, [localList.services, myPublished.items]);
 
   const items = useMemo<MineMcpCardItem[]>(() => {
-    return [
-      ...localList.services.map((service) => ({ kind: "local" as const, service })),
-      ...myPublished.items.map((service) => ({ kind: "community" as const, service })),
-    ];
+    return getDeduplicatedMineItems(localList.services, myPublished.items);
   }, [localList.services, myPublished.items]);
 
+  const onlineServiceByCommunityId = useMemo(() => {
+    const services = new Map<number, CommunityMcpCard>();
+    for (const service of myPublished.items) {
+      if (service.communityId) services.set(service.communityId, service);
+    }
+    return services;
+  }, [myPublished.items]);
+
+  const onlineServiceByName = useMemo(() => {
+    const services = new Map<string, CommunityMcpCard>();
+    for (const service of myPublished.items) {
+      if (service.name)
+        services.set(service.name.trim().toLowerCase(), service);
+    }
+    return services;
+  }, [myPublished.items]);
+
   const categoryStats = useMemo(
-    () => getDeploymentCategoryStats(items.map((item) => item.service), t),
+    () =>
+      getDeploymentCategoryStats(
+        items.map((item) => item.service),
+        t
+      ),
     [items, t]
   );
 
@@ -462,8 +594,13 @@ function MineView({
     return items.filter((item) => {
       const service = item.service;
       if (!matchesNameOrTag(service, search)) return false;
-      if (tag !== FILTER_ALL && !(service.tags || []).includes(tag)) return false;
-      if (deploymentType !== FILTER_ALL && resolveDeploymentType(service) !== deploymentType) return false;
+      if (tag !== FILTER_ALL && !(service.tags || []).includes(tag))
+        return false;
+      if (
+        deploymentType !== FILTER_ALL &&
+        resolveDeploymentType(service) !== deploymentType
+      )
+        return false;
       return true;
     });
   }, [items, search, tag, deploymentType]);
@@ -480,42 +617,152 @@ function MineView({
     await onToggled(service.mcpId);
   };
 
+  const refreshMineData = async () => {
+    await Promise.all([localList.refetch(), myPublished.refetch()]);
+  };
+
+  const handleSubmitVersionUpdate = async (
+    item: MineMcpCardItem,
+    onlineService?: CommunityMcpCard
+  ) => {
+    const key = getMineItemKey(item);
+    setPublishingKey(key);
+    try {
+      if (item.kind === "community") {
+        const service = item.service;
+        if (!service.communityId) return;
+        await updateCommunityMcpTool({
+          community_id: service.communityId,
+          name: service.name.trim(),
+          description: (service.description || "").trim(),
+          version: (service.version || "").trim(),
+          tags: service.tags || [],
+          registry_json: service.registryJson,
+        });
+      } else if (onlineService?.communityId) {
+        const service = item.service;
+        const configJson = toMcpContainerConfigPayload(service.configJson);
+        await updateCommunityMcpTool({
+          community_id: onlineService.communityId,
+          name: service.name.trim(),
+          description: (service.description || "").trim(),
+          version: (service.version || "").trim(),
+          tags: service.tags || [],
+          registry_json: service.registryJson || onlineService.registryJson,
+          mcp_server: configJson ? undefined : service.serverUrl,
+          transport_type: configJson
+            ? McpTransportType.CONTAINER
+            : McpTransportType.URL,
+          config_json: configJson,
+        });
+      } else if (item.kind === "local") {
+        const service = item.service;
+        const configJson = toMcpContainerConfigPayload(service.configJson);
+        await publishCommunityMcpTool({
+          mcp_id: service.mcpId,
+          name: service.name.trim(),
+          description: service.description,
+          version: (service.version || "").trim(),
+          tags: service.tags || [],
+          mcp_server: configJson ? undefined : service.serverUrl,
+          config_json: configJson,
+        });
+      }
+      message.success(t("mcpTools.mine.submitVersionUpdateSuccess"));
+      await refreshMineData();
+    } catch {
+      message.error(t("mcpTools.mine.submitVersionUpdateFailed"));
+    } finally {
+      setPublishingKey(null);
+    }
+  };
+
+  const handleUnpublishOnline = (
+    item: MineMcpCardItem,
+    onlineService: CommunityMcpCard
+  ) => {
+    if (!onlineService.communityId) return;
+    modal.confirm({
+      title: t("mcpTools.mine.unpublishOnlineVersionTitle"),
+      content: t("mcpTools.mine.unpublishOnlineVersionDescription", {
+        name: onlineService.name || item.service.name,
+      }),
+      okText: t("mcpTools.mine.unpublishOnlineVersion"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: async () => {
+        const key = getMineItemKey(item);
+        setUnpublishingKey(key);
+        try {
+          await deleteCommunityMcpTool(onlineService.communityId!);
+          message.success(t("mcpTools.mine.unpublishOnlineVersionSuccess"));
+          await refreshMineData();
+        } catch {
+          message.error(t("mcpTools.mine.unpublishOnlineVersionFailed"));
+        } finally {
+          setUnpublishingKey(null);
+        }
+      },
+    });
+  };
+
   return (
     <div className="space-y-4">
       <McpToolsSearchFilterBar
         search={search}
         deploymentType={deploymentType}
         categoryStats={categoryStats}
-        actions={(
+        actions={
           <>
             <span className="flex h-10 items-center text-xs text-slate-400">
               {t("mcpTools.page.resultCount", { count: filteredItems.length })}
             </span>
             {actions}
           </>
-        )}
+        }
         onSearchChange={setSearch}
         onDeploymentTypeChange={setDeploymentType}
       />
 
       {loading ? (
-        <PlaceholderBox><Spin /></PlaceholderBox>
+        <PlaceholderBox>
+          <Spin />
+        </PlaceholderBox>
       ) : filteredItems.length === 0 ? (
-        <PlaceholderBox><Empty description={t("mcpTools.mine.empty")} /></PlaceholderBox>
+        <PlaceholderBox>
+          <Empty description={t("mcpTools.mine.empty")} />
+        </PlaceholderBox>
       ) : (
         <ResponsiveCardGrid>
           {pagedItems.map((item) => {
-            const key = item.kind === "local"
-              ? `local-${item.service.mcpId}`
-              : `community-${item.service.communityId || item.service.name}`;
+            const key = getMineItemKey(item);
+            const onlineService =
+              item.kind === "local"
+                ? resolveOnlineService(
+                    item.service,
+                    onlineServiceByCommunityId,
+                    onlineServiceByName
+                  )
+                : item.service;
             return (
               <MineMcpServiceCard
                 key={key}
                 item={item}
-                toggling={item.kind === "local" ? toggle.isToggling(item.service.mcpId) : false}
+                onlineService={onlineService}
+                onlineVersion={onlineService?.version}
+                toggling={
+                  item.kind === "local"
+                    ? toggle.isToggling(item.service.mcpId)
+                    : false
+                }
+                publishing={publishingKey === key}
+                unpublishing={unpublishingKey === key}
                 onEditLocal={onEditLocal}
                 onEditCommunity={onEditCommunity}
                 onToggle={handleToggle}
+                onSubmitVersionUpdate={handleSubmitVersionUpdate}
+                onUnpublishOnline={handleUnpublishOnline}
               />
             );
           })}
@@ -533,49 +780,285 @@ function MineView({
   );
 }
 
-function ReviewCenterView({ actions }: { actions: React.ReactNode }) {
+function getDeduplicatedMineItems(
+  localServices: McpServiceItem[],
+  publishedServices: CommunityMcpCard[]
+): MineMcpCardItem[] {
+  const linkedCommunityIds = new Set<number>();
+  const localNames = new Set<string>();
+
+  for (const service of localServices) {
+    if (service.communityId) linkedCommunityIds.add(service.communityId);
+    localNames.add(normalizeMcpName(service.name));
+  }
+
+  const visiblePublishedServices = publishedServices.filter((service) => {
+    if (service.communityId && linkedCommunityIds.has(service.communityId)) {
+      return false;
+    }
+    return !localNames.has(normalizeMcpName(service.name));
+  });
+
+  return [
+    ...localServices.map((service) => ({
+      kind: "local" as const,
+      service,
+    })),
+    ...visiblePublishedServices.map((service) => ({
+      kind: "community" as const,
+      service,
+    })),
+  ];
+}
+
+function normalizeMcpName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function getMineItemKey(item: MineMcpCardItem): string {
+  return item.kind === "local"
+    ? `local-${item.service.mcpId}`
+    : `community-${item.service.communityId || item.service.name}`;
+}
+
+function toMcpContainerConfigPayload(
+  value?: Record<string, unknown>
+): McpContainerConfigPayload | undefined {
+  if (!value || typeof value.mcpServers !== "object" || !value.mcpServers) {
+    return undefined;
+  }
+  return value as unknown as McpContainerConfigPayload;
+}
+
+function resolveOnlineService(
+  service: McpServiceItem,
+  serviceByCommunityId: Map<number, CommunityMcpCard>,
+  serviceByName: Map<string, CommunityMcpCard>
+): CommunityMcpCard | undefined {
+  if (service.communityId) {
+    const matchedService = serviceByCommunityId.get(service.communityId);
+    if (matchedService) return matchedService;
+  }
+  return serviceByName.get(service.name.trim().toLowerCase());
+}
+
+function ReviewCenterView({
+  browser,
+  actions,
+  onSelect,
+  onReviewed,
+}: {
+  browser: ReturnType<typeof useMcpCommunityReview>;
+  actions: React.ReactNode;
+  onSelect: (service: CommunityMcpCard) => void;
+  onReviewed: () => Promise<void>;
+}) {
   const { t } = useTranslation("common");
-  const [search, setSearch] = useState("");
-  const [deploymentType, setDeploymentType] = useState<DeploymentFilter>(FILTER_ALL);
-  const [tag, setTag] = useState(FILTER_ALL);
-  const [status, setStatus] = useState(FILTER_ALL);
+  const { message } = App.useApp();
+  const [deploymentType, setDeploymentType] =
+    useState<DeploymentFilter>(FILTER_ALL);
+  const [reviewingId, setReviewingId] = useState<number | null>(null);
+
+  const categoryStats = useMemo(
+    () => getDeploymentCategoryStats(browser.services, t),
+    [browser.services, t]
+  );
+
+  const filteredServices = useMemo(() => {
+    return filterByDeploymentType(browser.services, deploymentType);
+  }, [browser.services, deploymentType]);
+
+  const handleReview = async (
+    service: CommunityMcpCard,
+    action: "approve" | "reject"
+  ) => {
+    if (!service.communityId) return;
+    setReviewingId(service.communityId);
+    try {
+      if (action === "approve") {
+        await approveCommunityMcpTool(service.communityId);
+        message.success(t("mcpTools.review.approveSuccess"));
+      } else {
+        await rejectCommunityMcpTool(service.communityId);
+        message.success(t("mcpTools.review.rejectSuccess"));
+      }
+      await onReviewed();
+    } catch {
+      message.error(t("mcpTools.review.actionFailed"));
+    } finally {
+      setReviewingId(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
       <McpToolsSearchFilterBar
-        search={search}
+        search={browser.filters.search}
         deploymentType={deploymentType}
-        status={status}
+        status={browser.filters.status}
         statusOptions={[
           { value: FILTER_ALL, label: t("mcpTools.review.status.all") },
           { value: "pending", label: t("mcpTools.review.status.pending") },
           { value: "approved", label: t("mcpTools.review.status.approved") },
           { value: "rejected", label: t("mcpTools.review.status.rejected") },
+          { value: "offline", label: t("mcpTools.review.status.offline") },
         ]}
-        actions={actions}
-        onSearchChange={setSearch}
+        categoryStats={categoryStats}
+        actions={
+          <>
+            <span className="flex h-10 items-center text-xs text-slate-400">
+              {t("mcpTools.page.resultCount", {
+                count: filteredServices.length,
+              })}
+            </span>
+            {actions}
+          </>
+        }
+        onSearchChange={(value) => browser.updateFilter("search", value)}
         onDeploymentTypeChange={setDeploymentType}
-        onStatusChange={setStatus}
+        onStatusChange={(value) => browser.updateFilter("status", value)}
       />
 
-      <div className="rounded-3xl border border-dashed border-emerald-200 bg-white p-10 text-center shadow-sm">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-          <ClipboardCheck className="h-7 w-7" />
+      {browser.loading ? (
+        <PlaceholderBox>
+          <Spin />
+        </PlaceholderBox>
+      ) : filteredServices.length === 0 ? (
+        <PlaceholderBox>
+          <Empty description={t("mcpTools.review.emptyTitle")} />
+        </PlaceholderBox>
+      ) : (
+        <ResponsiveCardGrid>
+          {filteredServices.map((service, index) => (
+            <ReviewMcpCard
+              key={`${service.communityId || service.name}-${index}`}
+              service={service}
+              reviewing={reviewingId === service.communityId}
+              onSelect={() => onSelect(service)}
+              onApprove={() => handleReview(service, "approve")}
+              onReject={() => handleReview(service, "reject")}
+            />
+          ))}
+        </ResponsiveCardGrid>
+      )}
+
+      <McpToolsPagination
+        mode="cursor"
+        page={browser.page}
+        resultCount={filteredServices.length}
+        hasPrevPage={browser.hasPrevPage}
+        hasNextPage={browser.hasNextPage}
+        onPrevPage={browser.prevPage}
+        onNextPage={browser.nextPage}
+      />
+    </div>
+  );
+}
+
+function ReviewMcpCard({
+  service,
+  reviewing,
+  onSelect,
+  onApprove,
+  onReject,
+}: {
+  service: CommunityMcpCard;
+  reviewing: boolean;
+  onSelect: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const { t } = useTranslation("common");
+  const deploymentType = resolveDeploymentType(service);
+  const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
+  const reviewStatus = service.reviewStatus || "pending";
+  const reviewType = service.reviewType || "initial_listing";
+  const isPending = reviewStatus === "pending";
+
+  return (
+    <div className="flex min-h-[260px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="line-clamp-1 text-lg font-semibold text-slate-900" title={service.name}>
+            {service.name}
+          </h3>
+          <p className="mt-1 text-xs text-slate-500">
+            {t("mcpTools.review.submitter", {
+              name: service.authorDisplayName || service.authorName || "-",
+            })}
+          </p>
         </div>
-        <h3 className="mt-4 text-lg font-semibold text-slate-900">
-          {t("mcpTools.review.emptyTitle")}
-        </h3>
-        <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
-          {t("mcpTools.review.pendingIntegration")}
-        </p>
-        <div className="mt-5 flex flex-wrap justify-center gap-2">
-          <Tag color="green" className="rounded-full">{t("mcpTools.review.approve")}</Tag>
-          <Tag color="red" className="rounded-full">{t("mcpTools.review.reject")}</Tag>
-          <Tag color="blue" className="rounded-full">{t("mcpTools.review.details")}</Tag>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <Tag color={getReviewStatusColor(reviewStatus)} className="m-0 rounded-full">
+            {t(`mcpTools.review.status.${reviewStatus}`)}
+          </Tag>
+          <Tag color={getReviewTypeColor(reviewType)} className="m-0 rounded-full">
+            {t(`mcpTools.review.type.${reviewType}`)}
+          </Tag>
         </div>
+      </div>
+
+      <p className="mt-4 line-clamp-2 min-h-[44px] text-sm leading-6 text-slate-600" title={service.description}>
+        {service.description || t("mcpTools.detail.noDescription")}
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <Tag color="blue" className="m-0 rounded-full">
+          {deploymentLabel}
+        </Tag>
+        {service.tags?.slice(0, 3).map((tag) => (
+          <Tag key={`${service.communityId || service.name}-${tag}`} className="m-0 rounded-full bg-slate-50">
+            {tag}
+          </Tag>
+        ))}
+        {(service.tags?.length || 0) > 3 ? (
+          <Tag className="m-0 rounded-full bg-slate-50">
+            +{(service.tags?.length || 0) - 3}
+          </Tag>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
+        <span>{formatRegistryVersion(service.version || "")}</span>
+        <span className="inline-flex items-center gap-1">
+          <Clock className="h-3.5 w-3.5 text-slate-400" />
+          {formatRegistryDate(service.updatedAt || service.createdAt || "")}
+        </span>
+      </div>
+
+      <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
+        <Button onClick={onSelect}>{t("mcpTools.review.details")}</Button>
+        <Button
+          type="primary"
+          icon={<CheckCircle className="h-3.5 w-3.5" />}
+          loading={reviewing}
+          disabled={!isPending}
+          onClick={onApprove}
+        >
+          {t("mcpTools.review.approve")}
+        </Button>
+        <Button
+          danger
+          icon={<XCircle className="h-3.5 w-3.5" />}
+          loading={reviewing}
+          disabled={!isPending}
+          onClick={onReject}
+        >
+          {t("mcpTools.review.reject")}
+        </Button>
       </div>
     </div>
   );
+}
+
+function getReviewStatusColor(status: string) {
+  if (status === "approved") return "green";
+  if (status === "rejected") return "red";
+  return "gold";
+}
+
+function getReviewTypeColor(reviewType: string) {
+  return reviewType === "version_update" ? "purple" : "blue";
 }
 
 function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {

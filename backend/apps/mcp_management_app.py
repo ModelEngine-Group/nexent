@@ -15,14 +15,19 @@ from consts.model import (
     RegistryListQuery,
     CommunityListRequest,
     CommunityPublishRequest,
+    CommunityReviewActionRequest,
+    CommunityReviewListRequest,
     CommunityUpdateRequest,
 )
 from services.mcp_management_service import (
     list_community_mcp_services,
     list_community_mcp_tag_stats,
+    approve_community_mcp_service,
+    list_community_mcp_review_services,
     list_my_community_mcp_services,
     list_registry_mcp_services,
     publish_community_mcp_service,
+    reject_community_mcp_service,
     update_community_mcp_service,
     delete_community_mcp_service,
 )
@@ -146,6 +151,105 @@ async def list_community_mcp_tag_stats_api(
         )
 
 
+@router.get("/community/review/list")
+async def list_community_mcp_review_services_api(
+    query: CommunityReviewListRequest = Depends(),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    """
+    List MCP community submissions for administrator review.
+    """
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        data = await list_community_mcp_review_services(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            status=query.status,
+            search=query.search,
+            tag=query.tag,
+            transport_type=query.transport_type,
+            cursor=query.cursor,
+            limit=query.limit,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": data},
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to list MCP community review services: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list MCP community review services"
+        )
+
+
+@router.post("/community/review/approve")
+async def approve_community_mcp_service_api(
+    payload: CommunityReviewActionRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    """
+    Approve an MCP community submission.
+    """
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        await approve_community_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            community_id=payload.community_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
+    except McpNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to approve MCP community service: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to approve MCP community service"
+        )
+
+
+@router.post("/community/review/reject")
+async def reject_community_mcp_service_api(
+    payload: CommunityReviewActionRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    """
+    Reject an MCP community submission.
+    """
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        await reject_community_mcp_service(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            community_id=payload.community_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
+    except McpNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to reject MCP community service: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to reject MCP community service"
+        )
+
+
 @router.post("/community/publish")
 async def publish_community_mcp_service_api(
     payload: CommunityPublishRequest,
@@ -211,6 +315,9 @@ async def update_community_mcp_service_api(
             tags=payload.tags,
             version=payload.version,
             registry_json=payload.registry_json,
+            mcp_server=payload.mcp_server,
+            config_json=payload.config_json,
+            transport_type=payload.transport_type,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -281,8 +388,11 @@ async def list_my_community_mcp_services_api(
     List MCP services published by the current user to the community.
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
-        data = await list_my_community_mcp_services(tenant_id=tenant_id)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        data = await list_my_community_mcp_services(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": data},
