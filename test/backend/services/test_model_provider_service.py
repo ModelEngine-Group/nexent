@@ -1355,6 +1355,37 @@ def test_merge_existing_model_tokens_verify_function_call():
             tenant_id, provider, model_type)
 
 
+def test_merge_existing_model_tokens_empty_model_repo_matches_bare_name():
+    """Regression: DashScope-style rows have empty model_repo. The lookup key
+    must use add_repo_to_name so the row matches the bare "glm-4.7" id from
+    the provider response. The legacy code built "/glm-4.7" via raw
+    concatenation, so the merge silently no-opped -- same wire-key bug as
+    batch_create_models_for_tenant's delete loop.
+    """
+    model_list = [{"id": "glm-4.7", "model_type": "llm"}]
+    tenant_id = "test-tenant"
+    provider = "dashscope"
+    model_type = "llm"
+
+    existing_models = [
+        {
+            "model_repo": "",
+            "model_name": "glm-4.7",
+            "max_tokens": 131072,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=existing_models,
+    ):
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type
+        )
+
+        assert result[0]["max_tokens"] == 131072
+
+
 # ============================================================================
 # Test-cases for get_provider_models
 # ============================================================================

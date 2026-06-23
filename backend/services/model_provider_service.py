@@ -224,11 +224,20 @@ def merge_existing_model_attributes(
     if not model_list or not existing_model_list:
         return model_list
 
-    # Create a mapping table for existing models for quick lookup
+    # Create a mapping table for existing models for quick lookup.
+    # Use add_repo_to_name so the lookup key matches the format used by
+    # provider responses and downstream consumers. Naive `model_repo + "/" +
+    # model_name` prepends a leading slash when model_repo is empty
+    # (DashScope-style bare names like "glm-4.7" land with model_repo=""),
+    # so "/glm-4.7" never matches the catalog's "glm-4.7" entry and the
+    # merge silently no-ops -- the same wire-key bug fixed in
+    # batch_create_models_for_tenant's delete loop.
     existing_model_map = {}
     for existing_model in existing_model_list:
-        model_full_name = existing_model["model_repo"] + \
-            "/" + existing_model["model_name"]
+        model_full_name = add_repo_to_name(
+            model_repo=existing_model["model_repo"],
+            model_name=existing_model["model_name"],
+        )
         existing_model_map[model_full_name] = existing_model
 
     # Iterate through the model list, merge specified fields from existing models
