@@ -243,6 +243,9 @@ export const API_ENDPOINTS = {
     knowledgeSets: `${API_BASE_URL}/haotian/knowledge-sets`,
     testConnection: `${API_BASE_URL}/haotian/test-connection`,
   },
+  aidp: {
+    knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,

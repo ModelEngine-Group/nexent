@@ -8,7 +8,8 @@ export type ToolKbType =
   | "dify_search"
   | "datamate_search"
   | "idata_search"
-  | "haotian_search";
+  | "haotian_search"
+  | "aidp_search";
 
 // Knowledge base selector component props
 export interface KnowledgeBaseSelectorProps {
@@ -42,6 +43,8 @@ export function getKnowledgeBaseSourcesForTool(toolType: ToolKbType): string[] {
       return ["datamate"];
     case "idata_search":
       return ["idata"];
+    case "aidp_search":
+      return ["aidp"];
     default:
       return ["nexent"];
   }
@@ -53,6 +56,7 @@ const SKILL_TO_TOOL_MAP: Record<string, ToolKbType> = {
   "search-dify": "dify_search",
   "search-datamate": "datamate_search",
   "search-idata": "idata_search",
+  "search-aidp": "aidp_search",
 };
 
 /**
@@ -90,7 +94,7 @@ export function skillRequiresKbSelection(params: { name: string }[]): boolean {
  */
 export function getKbParamNameForSkill(skillName: string): string {
   const toolType = getToolTypeForSkill(skillName);
-  if (toolType === "dify_search" || toolType === "idata_search") {
+  if (toolType === "dify_search" || toolType === "idata_search" || toolType === "haotian_search" || toolType === "aidp_search") {
     return "dataset_ids";
   }
   return "index_names";

@@ -133,7 +133,7 @@ def _normalize_northbound_attachments(
     tenant_id: str,
 ) -> Optional[List[Dict[str, Any]]]:
     """Convert northbound attachment references into internal minio_files objects.
-    
+
     Supports two formats:
     1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
     2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]

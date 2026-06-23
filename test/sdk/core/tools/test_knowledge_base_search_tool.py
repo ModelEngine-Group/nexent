@@ -1776,3 +1776,88 @@ class TestDocumentPathsAccessControl:
 
         assert "No results found" in str(excinfo.value)
 
+    def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
+        """Filter should tolerate a FieldInfo default instead of a concrete list.
+
+        Regression: smolagents' Tool wrapper does not expand FieldInfo defaults for
+        parameters declared with `exclude=True`, so `self._internal_document_paths`
+        may arrive as a FieldInfo. The filter must unwrap it instead of failing with
+        `TypeError: argument of type 'FieldInfo' is not iterable`.
+        """
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        field_info_default = FieldInfo(default=["s3://bucket/doc1.txt"])
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+        # Simulate a FieldInfo being assigned directly (e.g. from smolagents wrapper).
+        tool._internal_document_paths = field_info_default
+
+        results = self._create_mock_formatted_results_with_paths(
+            ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+        )
+        filtered = tool._filter_by_document_paths(results)
+
+        assert len(filtered) == 1
+        assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
+    def test_filter_by_document_paths_unwraps_fieldinfo_default_factory(self, mock_vdb_core, mock_embedding_model):
+        """Filter should tolerate a FieldInfo with default_factory."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        field_info_factory = FieldInfo(
+            default_factory=lambda: ["s3://bucket/doc2.txt"]
+        )
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+        tool._internal_document_paths = field_info_factory
+
+        results = self._create_mock_formatted_results_with_paths(
+            ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+        )
+        filtered = tool._filter_by_document_paths(results)
+
+        assert len(filtered) == 1
+        assert filtered[0]["path_or_url"] == "s3://bucket/doc2.txt"
+
+    def test_set_document_paths_unwraps_fieldinfo(self, mock_vdb_core, mock_embedding_model):
+        """set_document_paths should also accept FieldInfo input defensively."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+
+        field_info = FieldInfo(default=["s3://bucket/doc1.txt"])
+        tool.set_document_paths(field_info)
+
+        results = self._create_mock_formatted_results_with_paths(
+            ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+        )
+        filtered = tool._filter_by_document_paths(results)
+
+        assert len(filtered) == 1
+        assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"

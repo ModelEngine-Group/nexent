@@ -57,6 +57,9 @@ class AnalyzeTextFileTool(Tool):
         "llm_model": {
             "description": "The LLM model to use"
         },
+        "selected_model_id": {
+            "description": "Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used."
+        },
         "validate_url_access": {
             "description": "Callback function to validate URL access permissions (passed to LoadSaveObjectManager)"
         }
@@ -85,6 +88,9 @@ class AnalyzeTextFileTool(Tool):
             description="The LLM model to use",
             default=None,
             exclude=True),
+        selected_model_id: int = Field(
+            description="Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used.",
+            default=None),
         validate_url_access: callable = Field(
             description="Callback function to validate URL access permissions",
             default=None,
@@ -94,6 +100,7 @@ class AnalyzeTextFileTool(Tool):
         self.storage_client = storage_client
         self.observer = observer
         self.llm_model = llm_model
+        self.selected_model_id = selected_model_id
         self.data_process_service_url = data_process_service_url
 
         # Create LoadSaveObjectManager with the storage client and validation callback

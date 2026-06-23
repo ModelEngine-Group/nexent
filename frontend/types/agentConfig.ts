@@ -51,7 +51,7 @@ export interface AgentVerificationConfig {
 }
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
-  enabled: true,
+  enabled: false,
   step_verification_enabled: true,
   final_verification_enabled: true,
   llm_verification_enabled: true,
@@ -143,6 +143,20 @@ export interface ToolParam {
   description_zh?: string;
   default?: string;
   depends_on?: string;
+}
+
+export interface AidpKnowledgeBaseItem {
+  kds_id: string;
+  kds_name: string;
+  description?: string;
+  document_count?: number;
+  chunk_count?: number;
+}
+
+export interface AidpKnowledgeBaseListResponse {
+  value: AidpKnowledgeBaseItem[];
+  total_count?: number;
+  next_link?: string | null;
 }
 
 export interface SkillParam {
