@@ -932,7 +932,8 @@ CREATE TABLE IF NOT EXISTS nexent.role_permission_t (
     user_role VARCHAR(30) NOT NULL,
     permission_category VARCHAR(30),
     permission_type VARCHAR(30),
-    permission_subtype VARCHAR(30)
+    permission_subtype VARCHAR(30),
+    parent_key VARCHAR(50)
 );
 
 -- Add comments for role_permission_t table
@@ -942,14 +943,12 @@ COMMENT ON COLUMN nexent.role_permission_t.user_role IS 'User role: SU, ADMIN, D
 COMMENT ON COLUMN nexent.role_permission_t.permission_category IS 'Permission category';
 COMMENT ON COLUMN nexent.role_permission_t.permission_type IS 'Permission type';
 COMMENT ON COLUMN nexent.role_permission_t.permission_subtype IS 'Permission subtype';
+COMMENT ON COLUMN nexent.role_permission_t.parent_key IS 'Parent menu key for hierarchical menus, NULL for first-level menus';
 
 -- 6. Insert role permission data after clearing old data
 DELETE FROM nexent.role_permission_t;
 
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
-(1, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(2, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(3, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (4, 'SU', 'RESOURCE', 'AGENT', 'READ'),
 (5, 'SU', 'RESOURCE', 'AGENT', 'DELETE'),
 (6, 'SU', 'RESOURCE', 'KB', 'READ'),
@@ -987,19 +986,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (38, 'SU', 'RESOURCE', 'GROUP', 'READ'),
 (39, 'SU', 'RESOURCE', 'GROUP', 'UPDATE'),
 (40, 'SU', 'RESOURCE', 'GROUP', 'DELETE'),
-(41, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(42, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(43, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(44, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(45, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(46, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(47, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(48, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(49, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(50, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(51, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(52, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(53, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (54, 'ADMIN', 'RESOURCE', 'AGENT', 'CREATE'),
 (55, 'ADMIN', 'RESOURCE', 'AGENT', 'READ'),
 (56, 'ADMIN', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1038,18 +1024,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (89, 'ADMIN', 'RESOURCE', 'GROUP', 'READ'),
 (90, 'ADMIN', 'RESOURCE', 'GROUP', 'UPDATE'),
 (91, 'ADMIN', 'RESOURCE', 'GROUP', 'DELETE'),
-(92, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(93, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(94, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(95, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(96, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(97, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(98, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(99, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(100, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(101, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(102, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(103, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
 (104, 'DEV', 'RESOURCE', 'AGENT', 'CREATE'),
 (105, 'DEV', 'RESOURCE', 'AGENT', 'READ'),
 (106, 'DEV', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1075,10 +1049,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (126, 'DEV', 'RESOURCE', 'MODEL', 'READ'),
 (127, 'DEV', 'RESOURCE', 'TENANT.INFO', 'READ'),
 (128, 'DEV', 'RESOURCE', 'GROUP', 'READ'),
-(129, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(130, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(131, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(132, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
 (133, 'USER', 'RESOURCE', 'AGENT', 'READ'),
 (134, 'USER', 'RESOURCE', 'USER.ROLE', 'READ'),
 (135, 'USER', 'RESOURCE', 'MEM.SETTING', 'READ'),
@@ -1089,17 +1059,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (140, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
 (141, 'USER', 'RESOURCE', 'TENANT.INFO', 'READ'),
 (142, 'USER', 'RESOURCE', 'GROUP', 'READ'),
-(143, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(144, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(145, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(146, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(147, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(148, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(149, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(150, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(151, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(152, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(153, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
 (154, 'SPEED', 'RESOURCE', 'AGENT', 'CREATE'),
 (155, 'SPEED', 'RESOURCE', 'AGENT', 'READ'),
 (156, 'SPEED', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1134,13 +1093,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (189, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'READ'),
 (190, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'UPDATE'),
 (191, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'DELETE'),
-(192, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(193, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(194, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(195, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(196, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(197, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(198, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
 (199, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'CREATE'),
 (200, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'READ'),
 (201, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1161,10 +1113,87 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (216, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'READ'),
 (217, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'UPDATE'),
 (218, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'DELETE'),
-(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ'),
-(220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(221, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/asset-owner-resources')
-;
+(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ');
+
+-- SU Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1001, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1002, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage');
+
+-- ADMIN Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1101, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1102, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1103, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1104, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1105, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage'),
+(1106, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1107, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1108, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1109, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
+(1110, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1111, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1112, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1113, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+-- DEV Menus (NO /resource-manage, root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1201, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1202, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1203, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1204, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1205, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1206, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1207, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1208, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
+(1209, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1210, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1211, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1212, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+-- USER Menus (Minimal, all root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1301, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1302, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1303, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
+(1304, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
+
+-- SPEED Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1401, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1402, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1403, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1404, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1405, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1406, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1407, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1408, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
+(1409, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1410, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1411, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1412, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+-- ASSET_OWNER Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1501, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1502, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1503, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1504, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1505, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/owner-manage');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1506, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1507, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1508, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1509, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1510, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1511, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)

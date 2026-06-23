@@ -39,24 +39,6 @@ except Exception:
     # the necessary entries later within its patch context.
     pass
 
-# Ensure the concrete openai_llm submodule is available in sys.modules so that
-# string-based patch targets resolve outside of temporary patch contexts.
-try:
-    _openai_name = "nexent.core.models.openai_llm"
-    _openai_path = Path(__file__).resolve().parents[4] / "sdk" / "nexent" / "core" / "models" / "openai_llm.py"
-    if _openai_path.exists() and _openai_name not in sys.modules:
-        _spec = importlib.util.spec_from_file_location(_openai_name, _openai_path)
-        _mod = importlib.util.module_from_spec(_spec)
-        sys.modules[_openai_name] = _mod
-        assert _spec and _spec.loader
-        _spec.loader.exec_module(_mod)
-        pkg = sys.modules.get("nexent.core.models")
-        if pkg is not None and not hasattr(pkg, "openai_llm"):
-            setattr(pkg, "openai_llm", _mod)
-except Exception:
-    # Best-effort only; if this fails tests will still attempt to load/open the module later.
-    pass
-
 # Dynamically load the openai_llm module to avoid importing full sdk package
 MODULE_NAME = "nexent.core.models.openai_llm"
 MODULE_PATH = (
@@ -110,13 +92,13 @@ def _setup_stubs():
     smol_memory.MemoryStep = type("MemoryStep", (), {})
     sys.modules["smolagents.memory"] = smol_memory
     smol_monitoring = types.ModuleType("smolagents.monitoring")
-    smol_monitoring.TokenUsage = type("TokenUsage", (), {
-        "__init__": lambda self, input_tokens=0, output_tokens=0: (
-            setattr(self, "input_tokens", input_tokens),
-            setattr(self, "output_tokens", output_tokens),
-            None,
-        )[-1]
-    })
+
+    class TokenUsage:
+        def __init__(self, input_tokens=0, output_tokens=0):
+            self.input_tokens = input_tokens
+            self.output_tokens = output_tokens
+
+    smol_monitoring.TokenUsage = TokenUsage
     sys.modules["smolagents.monitoring"] = smol_monitoring
 
     # Stub OpenAIServerModel base class
@@ -247,14 +229,16 @@ mock_memory_module = MagicMock()
 mock_memory_module.ActionStep = type("ActionStep", (), {})
 mock_memory_module.AgentMemory = type("AgentMemory", (), {})
 mock_memory_module.MemoryStep = type("MemoryStep", (), {})
-mock_monitoring_module = MagicMock()
-mock_monitoring_module.TokenUsage = type("TokenUsage", (), {
-    "__init__": lambda self, input_tokens=0, output_tokens=0: (
-        setattr(self, "input_tokens", input_tokens),
-        setattr(self, "output_tokens", output_tokens),
-        None,
-    )[-1]
-})
+mock_smolagents_monitoring = types.ModuleType("smolagents.monitoring")
+
+
+class MockTokenUsage:
+    def __init__(self, input_tokens=0, output_tokens=0):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+mock_smolagents_monitoring.TokenUsage = MockTokenUsage
 
 # Mock monitoring modules
 monitoring_manager_mock = MagicMock()
@@ -318,13 +302,15 @@ class MockProcessType:
 nexent_core_utils_mock.observer = MagicMock()
 nexent_core_utils_mock.observer.MessageObserver = MockMessageObserver
 nexent_core_utils_mock.observer.ProcessType = MockProcessType
+nexent_core_utils_mock.token_estimation = types.ModuleType("nexent.core.utils.token_estimation")
+nexent_core_utils_mock.token_estimation.estimate_tokens_text = lambda text: len(str(text).split())
 
 # Assemble smolagents.* paths and monitoring mocks
 module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.models": mock_models_module,
     "smolagents.memory": mock_memory_module,
-    "smolagents.monitoring": mock_monitoring_module,
+    "smolagents.monitoring": mock_smolagents_monitoring,
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(),
@@ -333,6 +319,7 @@ module_mocks = {
     "nexent.monitor": nexent_monitor_mock,
     "nexent.monitor.monitoring": nexent_monitor_mock,
     "nexent.core.utils.observer": nexent_core_utils_mock.observer,
+    "nexent.core.utils.token_estimation": nexent_core_utils_mock.token_estimation,
 }
 
 # Ensure openai package exists with DefaultHttpxClient for patches
@@ -422,6 +409,10 @@ with patch.dict("sys.modules", module_mocks):
         mock_message.role = MagicMock()
         return mock_message
 
+sys.modules[MODULE_NAME] = openai_llm_module
+models_pkg = sys.modules.get("nexent.core.models")
+if models_pkg is not None:
+    setattr(models_pkg, "openai_llm", openai_llm_module)
 
 # ---------------------------------------------------------------------------
 # Tests for check_connectivity
