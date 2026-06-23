@@ -138,6 +138,32 @@ for module_path in [
 ]:
     sys.modules.setdefault(module_path, mock.MagicMock())
 
+
+# Provide real implementations for the utils.model_name_utils helpers used by
+# the module under test. Without these, attribute access on the MagicMock
+# yields a callable that returns yet another MagicMock, which silently breaks
+# every dict-key lookup downstream (`existing_model_map[<MagicMock>]` never
+# matches the string id sent by the provider response).
+def _real_add_repo_to_name(model_repo, model_name):
+    if "/" in (model_name or ""):
+        return model_name
+    if model_repo:
+        return f"{model_repo}/{model_name}"
+    return model_name
+
+
+def _real_split_repo_name(full_name):
+    if not full_name:
+        return ("", "")
+    if "/" in full_name:
+        head, _, tail = full_name.rpartition("/")
+        return (head, tail)
+    return ("", full_name)
+
+
+sys.modules["utils.model_name_utils"].add_repo_to_name = _real_add_repo_to_name
+sys.modules["utils.model_name_utils"].split_repo_name = _real_split_repo_name
+
 # services.providers.base should NOT be mocked as it contains _classify_provider_error used in tests
 
 # SiliconModelProvider and ModelEngineProvider will be imported from their real modules
@@ -1353,6 +1379,37 @@ def test_merge_existing_model_tokens_verify_function_call():
 
         mock_get_models.assert_called_once_with(
             tenant_id, provider, model_type)
+
+
+def test_merge_existing_model_tokens_empty_model_repo_matches_bare_name():
+    """Regression: DashScope-style rows have empty model_repo. The lookup key
+    must use add_repo_to_name so the row matches the bare "glm-4.7" id from
+    the provider response. The legacy code built "/glm-4.7" via raw
+    concatenation, so the merge silently no-opped -- same wire-key bug as
+    batch_create_models_for_tenant's delete loop.
+    """
+    model_list = [{"id": "glm-4.7", "model_type": "llm"}]
+    tenant_id = "test-tenant"
+    provider = "dashscope"
+    model_type = "llm"
+
+    existing_models = [
+        {
+            "model_repo": "",
+            "model_name": "glm-4.7",
+            "max_tokens": 131072,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=existing_models,
+    ):
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type
+        )
+
+        assert result[0]["max_tokens"] == 131072
 
 
 # ============================================================================

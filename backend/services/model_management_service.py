@@ -1,7 +1,13 @@
 import logging
 from typing import List, Dict, Any, Optional
 
-from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
+from consts.const import (
+    CAPACITY_SUGGESTION_ENABLED,
+    CAPACITY_VISIBILITY_ENABLED,
+    LOCALHOST_IP,
+    LOCALHOST_NAME,
+    DOCKER_INTERNAL_HOST,
+)
 from consts.model import ModelConnectStatusEnum
 from consts.provider import (
     ProviderEnum,
@@ -26,6 +32,7 @@ from services.model_provider_service import (
     get_provider_models,
 )
 from services.model_health_service import embedding_dimension_check, _infer_model_factory
+from services.model_capacity_suggestion_service import CapacitySuggestionMatchKind, suggest_capacity
 from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
@@ -38,6 +45,49 @@ from nexent.memory.memory_service import clear_model_memories
 logger = logging.getLogger("model_management_service")
 
 INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
+CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
+
+
+# OpenTelemetry counter for silent catalog-matcher failures during the
+# capacity-coverage scan. The matcher is called per row so we cannot raise --
+# but the silent fallback to suggestion_available=False would hide a corrupt
+# catalog entry that turns every "available" hint into "false" across a whole
+# tenant. The counter gives staging/CI a single number to watch.
+#
+# Guarded the same way as the SDK monitor module: if OpenTelemetry is not
+# installed (some deployments run without it), the counter is None and the
+# increment becomes a no-op.
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _capacity_suggestion_meter = _otel_metrics.get_meter(__name__)
+    _capacity_suggestion_coverage_errors_total = _capacity_suggestion_meter.create_counter(
+        name="model_capacity_suggestion_coverage_errors_total",
+        description=(
+            "Count of catalog-matcher exceptions raised while computing the "
+            "per-row `suggestion_available` flag in /model/capacity-coverage. "
+            "Non-zero means catalog data or matcher logic is broken; "
+            "operators see every row as suggestion_available=False."
+        ),
+        unit="errors",
+    )
+except Exception:  # pragma: no cover - OTel is optional at runtime
+    _capacity_suggestion_coverage_errors_total = None
+
+
+def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> None:
+    if _capacity_suggestion_coverage_errors_total is None:
+        return
+    try:
+        _capacity_suggestion_coverage_errors_total.add(
+            1,
+            {
+                "model_id": str(model_id) if model_id is not None else "unknown",
+                "error_type": type(exc).__name__,
+            },
+        )
+    except Exception:  # pragma: no cover - never break coverage for telemetry
+        pass
 
 
 def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
@@ -76,6 +126,69 @@ def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
     if model_data.get("model_type") in ("embedding", "multi_embedding"):
         return
     model_data["max_tokens"] = max_output
+
+
+def _is_bare_capacity_model(model: Dict[str, Any]) -> bool:
+    return model.get("context_window_tokens") is None or model.get("max_output_tokens") is None
+
+
+def _capacity_suggestion_available(model: Dict[str, Any]) -> bool:
+    if not CAPACITY_SUGGESTION_ENABLED:
+        return False
+
+    try:
+        model_name = add_repo_to_name(model.get("model_repo", ""), model.get("model_name", ""))
+        result = suggest_capacity(
+            model_name=model_name,
+            base_url=model.get("base_url"),
+            provider_hint=model.get("model_factory"),
+            model_type=model.get("model_type"),
+            enabled=CAPACITY_SUGGESTION_ENABLED,
+        )
+        return result.match_kind != CapacitySuggestionMatchKind.NONE
+    except Exception as exc:
+        # A catalog-matcher exception must not break /capacity-coverage --
+        # the endpoint scans every LLM/VLM row, and one bad row would make
+        # the whole tenant view explode. We fall back to False and emit a
+        # counter so a corrupt catalog is visible in metrics instead of
+        # silently turning every row into "no suggestion available".
+        logger.debug("Capacity coverage suggestion check failed for model_id=%s: %s", model.get("model_id"), exc)
+        _record_capacity_coverage_error(model.get("model_id"), exc)
+        return False
+
+
+def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
+    """Return bare-capacity LLM/VLM coverage for one tenant."""
+    if not CAPACITY_VISIBILITY_ENABLED:
+        return {
+            "total_llm_vlm": 0,
+            "bare_count": 0,
+            "bare_models": [],
+        }
+
+    records = get_model_records(None, tenant_id)
+    scoped_records = [
+        model for model in records
+        if model.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
+    ]
+    bare_models = [
+        {
+            "model_id": model["model_id"],
+            "model_name": add_repo_to_name(model.get("model_repo", ""), model.get("model_name", "")),
+            "model_factory": model.get("model_factory"),
+            "model_type": model.get("model_type"),
+            "max_tokens": model.get("max_tokens"),
+            "suggestion_available": _capacity_suggestion_available(model),
+        }
+        for model in scoped_records
+        if _is_bare_capacity_model(model)
+    ]
+
+    return {
+        "total_llm_vlm": len(scoped_records),
+        "bare_count": len(bare_models),
+        "bare_models": bare_models,
+    }
 
 
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
@@ -647,4 +760,3 @@ async def list_models_for_admin(
     except Exception as e:
         logging.error(f"Failed to retrieve admin model list: {str(e)}")
         raise Exception(f"Failed to retrieve admin model list: {str(e)}")
-

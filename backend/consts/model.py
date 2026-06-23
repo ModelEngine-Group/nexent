@@ -148,6 +148,48 @@ class ModelRequest(BaseModel):
     capability_profile_version: Optional[str] = None
 
 
+class CapacitySuggestionFields(BaseModel):
+    context_window_tokens: Optional[int] = None
+    max_input_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    default_output_reserve_tokens: Optional[int] = None
+    tokenizer_family: Optional[str] = None
+
+
+class ModelCapacitySuggestionRequest(BaseModel):
+    model_name: str = Field(..., min_length=1, max_length=512)
+    base_url: Optional[str] = None
+    provider_hint: Optional[str] = None
+    api_key: Optional[str] = None
+    model_type: Optional[str] = None
+
+
+class ModelCapacitySuggestionResponse(BaseModel):
+    suggestions: Optional[CapacitySuggestionFields] = None
+    match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "none"]
+    match_confidence: Optional[Literal["high", "medium", "low"]] = None
+    match_explanation: str
+    suggested_provider: Optional[str] = None
+    canonical_model_name: Optional[str] = None
+    capability_profile_version: Optional[str] = None
+    capacity_source_on_accept: Optional[Literal["operator"]] = None
+
+
+class CapacityCoverageBareModel(BaseModel):
+    model_id: int
+    model_name: str
+    model_factory: Optional[str] = None
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    max_tokens: Optional[int] = None
+    suggestion_available: bool = False
+
+
+class CapacityCoverageResponse(BaseModel):
+    total_llm_vlm: int
+    bare_count: int
+    bare_models: List[CapacityCoverageBareModel] = Field(default_factory=list)
+
+
 class ProviderModelRequest(BaseModel):
     provider: str
     model_type: str

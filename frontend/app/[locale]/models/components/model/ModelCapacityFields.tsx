@@ -1,5 +1,7 @@
-import { Alert, AutoComplete, Input, Tag, Tooltip } from "antd";
+import { Alert, AutoComplete, Button, Input, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
+
+import type { CapacitySuggestion } from "@/types/modelConfig";
 
 export type CapacitySource =
   | "operator"
@@ -41,6 +43,17 @@ interface ModelCapacityFieldsProps {
    * field rather than encourage misuse.
    */
   hideTokenizer?: boolean;
+  suggestion?: CapacitySuggestion | null;
+  onUseSuggestion?: () => void;
+  suggestionLoading?: boolean;
+  /**
+   * Numeric value from the deprecated `max_tokens` column on the model record.
+   * When set AND the user-visible maxOutputTokens input is empty, the panel
+   * surfaces a prompt with the value and an "Apply" button -- instead of
+   * silently writing it into the form. Independent from the suggest-capacity
+   * flow.
+   */
+  legacyMaxTokensCandidate?: number;
 }
 
 const TOKENIZER_FAMILY_OPTIONS = [
@@ -166,22 +179,34 @@ export const capacityFormFromModel = (model: {
   contextWindowTokens?: number;
   maxInputTokens?: number;
   maxOutputTokens?: number;
-  /** Legacy alias — auto-promoted to maxOutputTokens when the new field is empty. */
+  /** Legacy alias — surfaced via `legacyMaxTokensCandidate` prompt instead of being
+   *  silently written into the form. See ModelCapacityFields. */
   maxTokens?: number;
   defaultOutputReserveTokens?: number;
   tokenizerFamily?: string;
 }): ModelCapacityFormState => ({
   contextWindowTokens: model.contextWindowTokens?.toString() || "",
   maxInputTokens: model.maxInputTokens?.toString() || "",
-  // W1 step 4 deprecates max_tokens. Promote legacy value into the new field
-  // for display so the user sees the value and the deprecation warning
-  // resolves on save (the saved value lands in max_output_tokens column).
-  maxOutputTokens:
-    model.maxOutputTokens?.toString() || model.maxTokens?.toString() || "",
+  maxOutputTokens: model.maxOutputTokens?.toString() || "",
   defaultOutputReserveTokens:
     model.defaultOutputReserveTokens?.toString() || "",
   tokenizerFamily: model.tokenizerFamily || "",
 });
+
+export const capacityFormFromSuggestion = (
+  suggestion: CapacitySuggestion | null | undefined
+): Partial<ModelCapacityFormState> => {
+  const fields = suggestion?.suggestions;
+  if (!fields) return {};
+  return {
+    contextWindowTokens: fields.contextWindowTokens?.toString() || "",
+    maxInputTokens: fields.maxInputTokens?.toString() || "",
+    maxOutputTokens: fields.maxOutputTokens?.toString() || "",
+    defaultOutputReserveTokens:
+      fields.defaultOutputReserveTokens?.toString() || "",
+    tokenizerFamily: fields.tokenizerFamily || "",
+  };
+};
 
 export const ModelCapacityFields = ({
   value,
@@ -193,12 +218,25 @@ export const ModelCapacityFields = ({
   formMode = "edit",
   requiredFields = [],
   hideTokenizer = false,
+  suggestion,
+  onUseSuggestion,
+  suggestionLoading = false,
+  legacyMaxTokensCandidate,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
+
+  // Show the actionable legacy-value prompt only while the input is still
+  // empty -- once the user applies (or types their own value), the prompt
+  // disappears so we don't keep nagging.
+  const showLegacyMaxTokensPrompt =
+    legacyMaxTokensCandidate !== undefined &&
+    legacyMaxTokensCandidate > 0 &&
+    value.maxOutputTokens.trim() === "";
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
   const hasValues = hasCapacityValues(value);
+  const hasSuggestion = Boolean(suggestion?.suggestions);
   const requiredSet = new Set<keyof ModelCapacityFormState>(requiredFields);
   const isAddMode = formMode === "add";
 
@@ -212,9 +250,7 @@ export const ModelCapacityFields = ({
         <Tooltip title={t(tooltipKey)}>
           <span>{t(labelKey)}</span>
         </Tooltip>
-        {requiredSet.has(field) && (
-          <span className="text-red-500 ml-1">*</span>
-        )}
+        {requiredSet.has(field) && <span className="text-red-500 ml-1">*</span>}
       </label>
       <Input
         type="number"
@@ -244,11 +280,92 @@ export const ModelCapacityFields = ({
         </div>
       )}
 
-      {showDeprecatedMaxTokensWarning && (
+      {showLegacyMaxTokensPrompt ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={t("model.dialog.capacity.legacyMaxTokensDetected", {
+            value: legacyMaxTokensCandidate,
+            defaultValue: `Detected legacy max_tokens = ${legacyMaxTokensCandidate}. Apply it as max_output_tokens?`,
+          })}
+          action={
+            <Button
+              size="small"
+              type="primary"
+              onClick={() =>
+                onChange(
+                  "maxOutputTokens",
+                  String(legacyMaxTokensCandidate)
+                )
+              }
+            >
+              {t("model.dialog.capacity.legacyMaxTokens.apply", {
+                defaultValue: "Apply",
+              })}
+            </Button>
+          }
+        />
+      ) : showDeprecatedMaxTokensWarning ? (
         <Alert
           type="warning"
           showIcon
           message={t("model.dialog.capacity.deprecatedMaxTokens")}
+        />
+      ) : null}
+
+      {suggestion && (
+        <Alert
+          type={hasSuggestion ? "success" : "info"}
+          showIcon
+          message={
+            hasSuggestion
+              ? t("model.dialog.capacity.suggestion.found")
+              : t("model.dialog.capacity.suggestion.notFound")
+          }
+          description={
+            <div className="space-y-2">
+              <div className="text-xs">
+                {suggestion.matchExplanation ||
+                  t("model.dialog.capacity.suggestion.noExplanation")}
+              </div>
+              {hasSuggestion && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {suggestion.matchKind && (
+                    <Tag>
+                      {t(
+                        `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
+                        { defaultValue: suggestion.matchKind }
+                      )}
+                    </Tag>
+                  )}
+                  {suggestion.matchConfidence && (
+                    <Tag color="blue">
+                      {t(
+                        `model.dialog.capacity.suggestion.confidence.${suggestion.matchConfidence}`,
+                        { defaultValue: suggestion.matchConfidence }
+                      )}
+                    </Tag>
+                  )}
+                  {suggestion.canonicalModelName && (
+                    <Tag color="green">{suggestion.canonicalModelName}</Tag>
+                  )}
+                  {suggestion.suggestedProvider && (
+                    <Tag color="purple">{suggestion.suggestedProvider}</Tag>
+                  )}
+                  {onUseSuggestion && (
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={suggestionLoading}
+                      onClick={onUseSuggestion}
+                    >
+                      {t("model.dialog.capacity.suggestion.use")}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          }
         />
       )}
 
@@ -303,7 +420,9 @@ export const ModelCapacityFields = ({
           <AutoComplete
             allowClear
             value={value.tokenizerFamily}
-            onChange={(nextValue) => onChange("tokenizerFamily", nextValue || "")}
+            onChange={(nextValue) =>
+              onChange("tokenizerFamily", nextValue || "")
+            }
             options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
               label: item,
               value: item,

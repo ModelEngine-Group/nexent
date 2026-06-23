@@ -76,13 +76,17 @@ Values that used to be invisible:
   debug logs; the UI keeps the existing empty capacity form.
 
 Capacity suggestion is controlled by `CAPACITY_SUGGESTION_ENABLED` and by a
-frontend Add/Edit switch that is shown in every single-model capacity surface:
-the normal Add/Edit dialogs and the per-model configuration path inside batch
-provider flows. The switch controls whether W11 shows user-facing capacity
-suggestions from deterministic inference and the future provider-capacity
-interface. The recommended default is **on** because suggestions are
-non-mutating, visibly attributed, and still require explicit operator
-acceptance before persistence.
+frontend Add/Edit switch. The global flag defaults **on**. The user-visible
+switch also defaults **on** and lets an operator suppress capacity suggestions
+inside the current Add/Edit dialog. The switch controls only the "guess capacity
+for me" experience from deterministic inference and future provider-capacity
+interfaces.
+
+Bare-capacity visibility is separate. It is controlled by
+`CAPACITY_VISIBILITY_ENABLED`, default **on**, and is intentionally not exposed
+as a normal user-facing switch in Version 1. Treat it as a developer/operator
+rollback lever for the "this row is missing capacity" warnings, not as an
+operator preference in the Add/Edit form.
 
 ## Visibility for Existing Bare-Capacity Models
 
@@ -147,12 +151,26 @@ any row whose capacity is incomplete. The badge:
   this model. Click to fill capacity values now." (i18n keys below.)
 - Clicking the badge opens the same `ModelEditDialog` that the
   existing pencil/gear control opens, with the capacity panel
-  pre-expanded and (if W11 suggestion can match) the suggestion
-  prefilled.
+  pre-expanded. If `CAPACITY_SUGGESTION_ENABLED=true` and the dialog's
+  suggestion switch is on, the dialog immediately calls `/suggest-capacity`
+  for that row and pre-fills any catalog match. If suggestions are globally
+  disabled or the dialog switch is off, the repair entry opens the same panel
+  without suggestion prefill and still shows legacy `max_tokens` guidance when
+  available.
 
 The badge and repair affordance are visible to administrators or users with
 model-management permission. They are not exposed as a repair link to users who
 cannot manage models.
+
+Permission checks must use existing authorization primitives, not W11-specific
+ad hoc role parsing. Frontend code must derive visibility from
+`useAuthorization()` using `user.role` from `USER_ROLES` and the existing
+`hasPermission` / `hasAnyPermission` helpers. Backend code must keep using the
+bearer-token identity parsed by `utils.auth_utils.get_current_user_id` and the
+existing `/model/manage/*` authorization path for model-management operations.
+Before implementation, grep the current permission string used for Model
+Management navigation/API access and record that exact string in the PR; W11 UI
+checks must reuse it for "model-management permission".
 
 The badge condition is `context_window_tokens IS NULL OR
 max_output_tokens IS NULL`, matching the W1 resolver's
@@ -215,6 +233,7 @@ Each `bare_models[]` entry:
 | `model_name` | string | Raw display value |
 | `model_factory` | string | Current value, often `OpenAI-API-Compatible` |
 | `model_type` | string | `llm` or `vlm` |
+| `max_tokens` | integer/null | Legacy value shown as review evidence only |
 | `suggestion_available` | boolean | Whether `/suggest-capacity` can prefill |
 
 The endpoint is intentionally small. Frontend filters and sorts
@@ -247,8 +266,8 @@ When `CAPACITY_SUGGESTION_ENABLED` is off:
 When `CAPACITY_SUGGESTION_ENABLED` is on, the same controls may additionally
 prefill suggested values from W11's catalog match or later provider-capacity
 interfaces. Suggestion UI is also controlled by a visible Add/Edit switch,
-default on, across both normal single-model dialogs and per-model configuration
-inside batch provider flows.
+default on, across normal single-model Add/Edit dialogs in Version 1. Per-model
+configuration inside batch/provider flows is explicit follow-up work.
 
 Files touched (new sub-list, not replacing the existing
 Repository Touchpoints section):
@@ -319,9 +338,12 @@ suggestion-on-add UX because:
   whether the suggestion flag is on.
 
 If Phase 1 ships in week N, Phase 1.5 should ship in week N+1 as a default-on
-visibility feature. It can still be disabled by operators if needed, but it is
-not gated by the capacity-suggestion switch because it does not propose or save
-capacity values.
+visibility feature. If operators need a rollback for this visibility layer, use
+a separate `CAPACITY_VISIBILITY_ENABLED` flag, default `true`, and optional
+tenant config key `capacity_visibility_enabled`. This flag is a developer-level
+rollback control in Version 1, not a visible product switch. It is not gated by
+`CAPACITY_SUGGESTION_ENABLED` or by the Add/Edit capacity-suggestion switch
+because it does not propose or save capacity values.
 
 ### Legacy `max_tokens` Guidance, Not Auto-Repair
 
@@ -437,6 +459,47 @@ action that writes through the existing model-management endpoints with
 capacity values. A catalog exact/fuzzy suggestion can still result in runtime
 `capacity_source = 'profile'` after save, but only if the accepted provider and
 canonical model name make W1's exact catalog lookup succeed.
+
+### Connectivity Validation Response Shape
+
+Existing connectivity validation responses keep their current `message` and
+`data` envelope. On a successful validation, W11 adds one optional field inside
+`data`:
+
+| Backend field | Frontend mapped field | Type | Notes |
+| --- | --- | --- | --- |
+| `capacity_suggestion` | `capacitySuggestion` | `ModelCapacitySuggestionResponse/null` | `null` when `CAPACITY_SUGGESTION_ENABLED=false`, when the dialog switch is off, or when no suggestion is available |
+
+The backend must return `capacity_suggestion: null` rather than omitting the
+field for enabled Version 1 paths. Frontend service mapping must always expose
+`capacitySuggestion: null | SuggestCapacityResponse`, so dialog code does not
+branch on missing properties. Suggestion failure never changes connectivity
+success or failure.
+
+### Accepted Suggestion Save Payload
+
+Frontend state may use camelCase, but backend requests use snake_case. The
+accepted-suggestion payload is intentionally explicit so optional Pydantic
+fields cannot silently fall back to `None`.
+
+| Frontend state / payload | Backend request field | Persisted column | Notes |
+| --- | --- | --- | --- |
+| `acceptedCapacity.contextWindowTokens` | `context_window_tokens` | `model_record_t.context_window_tokens` | Persist only after operator clicks "Use suggestion" or edits the field |
+| `acceptedCapacity.maxInputTokens` | `max_input_tokens` | `model_record_t.max_input_tokens` | Optional capacity field; omit only when still unset |
+| `acceptedCapacity.maxOutputTokens` | `max_output_tokens` | `model_record_t.max_output_tokens` | Required for a repaired LLM/VLM row to stop being bare |
+| `acceptedCapacity.defaultOutputReserveTokens` | `default_output_reserve_tokens` | `model_record_t.default_output_reserve_tokens` | Operator-confirmed value |
+| `acceptedCapacity.tokenizerFamily` | `tokenizer_family` | `model_record_t.tokenizer_family` | Operator-confirmed value when present |
+| `acceptedSuggestion.suggestedProvider` | `model_factory` | `model_record_t.model_factory` | Persist only when the operator accepts canonicalization |
+| `acceptedSuggestion.canonicalModelName` | `model_name` | `model_record_t.model_name` | Persist only when the operator accepts canonicalization |
+| `acceptedSuggestion.matchKind` | `accepted_suggestion_match_kind` | none | Audit/metrics input only; do not persist as model capacity authority |
+| `acceptedSuggestion.capabilityProfileVersion` | `accepted_capability_profile_version` | none | Metadata only; runtime must re-prove profile match from saved provider/model |
+| `acceptedSuggestion.capacitySourceOnAccept` | `capacity_source` | `model_record_t.capacity_source` | Always saved as `operator` for accepted writes |
+
+If the operator accepts capacity values but declines canonical provider/model
+changes for a fuzzy match, the save payload includes capacity fields and
+`capacity_source = operator` but leaves `model_factory` / `model_name` as the
+operator chose. Runtime must not claim `profile` unless W1 exact lookup later
+succeeds.
 
 ## Design
 
@@ -588,15 +651,23 @@ the global env flag decides behavior.
 
 ## Migration, Deliverables, and Phases
 
-- Phase 1: catalog exact/fuzzy match only. Ship behind
-  `CAPACITY_SUGGESTION_ENABLED=true` by default, with the frontend Add/Edit
-  suggestion switch defaulting on.
+- Phase 1: catalog exact/fuzzy match only for normal single-model Add/Edit
+  dialogs. Ship behind `CAPACITY_SUGGESTION_ENABLED=true` by default, with the
+  frontend Add/Edit suggestion switch defaulting on.
+- Phase 1.5: bare-capacity coverage visibility for Model Management,
+  agent-edit selector warnings, and the operator dashboard. Ship behind
+  `CAPACITY_VISIBILITY_ENABLED=true` by default. This switch is developer-only
+  in Version 1 and is not shown in the frontend.
 - Phase 2: integrate catalog suggestion output into connectivity validation
   response. No provider discovery in Version 1.
 - Version 2: add provider discovery for supported adapters when credentials are
   available from connectivity validation or an explicit `/suggest-capacity`
   request, after the provider-capacity interface, timeout, rate-limit, and
   credential-handling contracts are accepted.
+- Follow-up after Version 1: extend suggestion UI to batch/provider surfaces
+  listed in the matrix below. Until that follow-up lands, batch/provider paths
+  may show bare-capacity visibility where applicable but do not prefill W11
+  suggestions.
 - Phase 4: extend `_infer_model_factory` to all LLM/VLM paths via the shared
   host-to-provider map; keep embedding behavior compatible.
 - Phase 5: remove the feature flag once dogfood and SLO evidence passes.
@@ -631,6 +702,22 @@ the global env flag decides behavior.
    - `model_capacity_suggestion_accept_total{match_kind,provider}`
    - `model_capacity_suggestion_dispatch_profile_hit_total{provider}`
 
+Constructor audit required before implementation:
+
+- `rg "ModelCapacitySuggestion(Request|Response|Fields)\\(" backend/ test/`
+  must produce a finite list; every explicit constructor site must either pass
+  all new optional fields through intentionally or use validated dict
+  passthrough.
+- `rg "capacity_suggestion" backend/ test/` must audit every connectivity
+  validation response constructor. Tests must pin constructor `call_args` when
+  mocks are used, not only the returned dict.
+- `rg "ModelRequest\\(" backend/ test/` must be re-run because accepted
+  suggestions save through existing model-management endpoints. Any explicit
+  `ModelRequest(...)` constructor that can carry accepted capacity fields must
+  thread `context_window_tokens`, `max_input_tokens`, `max_output_tokens`,
+  `default_output_reserve_tokens`, `tokenizer_family`, `capacity_source`, and
+  canonical provider/model values intentionally.
+
 ### Frontend Service Layer
 
 8. Add `modelService.suggestCapacity(...)` in
@@ -656,11 +743,11 @@ the global env flag decides behavior.
 14. On save, accepted suggestion metadata is included in the existing save
     payload so backend can persist provider/model canonicalization and capacity
     fields according to the save rules above.
-15. The capacity suggestion switch is rendered in every Add/Edit capacity
-    surface, including normal single-model dialogs and per-model configuration
-    opened from batch provider flows. Turning it off suppresses suggestion
-    calls and suggestion chips for that dialog, but does not suppress
-    bare-capacity warnings.
+15. In Version 1, the capacity suggestion switch is rendered in normal
+    single-model Add/Edit dialogs. Turning it off suppresses suggestion calls
+    and suggestion chips for that dialog, but does not suppress bare-capacity
+    warnings. Rendering the switch in per-row batch/provider dialogs is a
+    follow-up after Version 1.
 16. When no suggestion exists for `context_window_tokens`, render the context
     window control as a preset-capable selector instead of a plain numeric
     input. The selector must allow the operator to either choose a common preset
@@ -707,13 +794,66 @@ from them save as `capacity_source = 'operator'`.
 19. `ModelEditDialog`: if an existing custom OpenAI-compatible LLM/VLM has null
     capacity fields or `model_factory = OpenAI-API-Compatible`, show
     "Suggestion available" after validation or explicit check.
-20. `ProviderConfigEditDialog` per-model gear path: reuse the same edit logic
-    when invoked for one model. Provider-level batch config remains out of scope
-    and keeps capacity fields hidden per CM-032.
-21. `ModelDeleteDialog` provider browser flow: when enabling a provider model
-    whose record is missing capacity values, surface the suggestion as an "Add
-    capacity" prompt. Existing provider-sourced `model_factory` values are not
-    overwritten unless the operator accepts a suggestion.
+20. Follow-up after Version 1: `ProviderConfigEditDialog` per-model gear path
+    reuses the same edit logic when invoked for one model. Provider-level batch
+    config remains out of scope and keeps capacity fields hidden per CM-032.
+21. Follow-up after Version 1: `ModelDeleteDialog` provider browser flow
+    surfaces suggestions as an "Add capacity" prompt when an enabled provider
+    model record is missing capacity values. Existing provider-sourced
+    `model_factory` values are not overwritten unless the operator accepts a
+    suggestion.
+
+### Frontend Configuration Surface Matrix
+
+Every surface below must be covered in implementation notes and tests before
+that surface is changed. Version 1 changes only normal single-model Add/Edit for
+suggestions, plus the separate coverage visibility surfaces. Batch/provider
+suggestion surfaces are explicit follow-up work so they are not silently missed.
+
+| Surface | Version 1 status | W11 behavior | State initialization | Validation and save guard | Wire payload |
+| --- | --- | --- | --- | --- | --- |
+| Single add: `ModelAddDialog` single-row form | In scope | Runs suggestion after successful connectivity validation; optional standalone check after validated `model_name`/`base_url` changes | Starts `empty`; suggestion fields become `suggested`; user edits become `operator` | Existing required capacity validation remains; submit handler re-checks validity before sending | Sends existing model payload plus accepted capacity fields and accepted canonical provider/model metadata |
+| Single edit: `ModelEditDialog` | In scope | Shows suggestions for null-capacity or OpenAI-compatible LLM/VLM rows after validation or explicit check | Existing DB values load as `operator`; null values load as `empty`; legacy `max_tokens` is displayed as evidence only | Save button disabled when invalid and `handleSave` returns before API call if invalid | Sends numeric `model_id` for row update plus accepted capacity/canonicalization fields |
+| Batch add top-level defaults: `ModelAddDialog` batch-import panel | Out of scope for suggestions in Version 1 | Capacity suggestions are not applied as a provider-level default because capacity is per-model | No W11 capacity state | No new W11 validation | No W11 capacity fields in provider-level default payload |
+| Batch add per-row gear: `ModelAddDialog` settings modal | Follow-up after Version 1 | Reuses single-model suggestion UI for one selected model | Selected row values initialize the same `empty/suggested/operator` state; null remains `empty` | Gear save handler re-checks validity before mutating row state | Stores accepted capacity fields on that row only; provider/model canonicalization applies only to that row |
+| Batch edit per-row gear: `ProviderConfigEditDialog` from `ModelDeleteDialog` | Follow-up after Version 1 | Reuses single-model suggestion UI for one existing provider model | Existing row values load as `operator`; null remains `empty`; suggestion never overwrites `operator` fields | Gear save handler re-checks validity and must surface lookup failure as an error, not a silent close | Uses the backend's expected row handle exactly; prefer numeric `model_id` when present, otherwise canonical `{model_factory}/{model_name}` |
+| Batch edit Confirm / provider-level bulk apply: `ModelDeleteDialog` footer Confirm + `ProviderConfigEditDialog hideCapacityFields=true` | Out of scope for suggestions in Version 1 | Capacity remains hidden and out of scope per CM-032 | No W11 capacity state | Confirm handler keeps existing validation and must not send partial capacity fields | Confirm payload must preserve existing rows and must not delete rows because W11-only fields are absent |
+
+Batch-edit destructive semantics must stay explicit for the follow-up: any
+backend route that creates/updates a provider model list and soft-deletes
+records not in the incoming list must use the same key helper for the
+existing-row lookup map and the delete-not-in-list membership check.
+
+### Save Handler and Wire-Key Safety
+
+All Save, Submit, and OK handlers touched by Version 1 W11 must guard inside
+the handler body, not only through disabled buttons:
+
+```ts
+if (!isFormValid()) {
+  return;
+}
+```
+
+The guard applies to `ModelAddDialog` and `ModelEditDialog` paths that can
+persist W11 capacity or canonicalization values in Version 1. The same guard
+must be applied to `ProviderConfigEditDialog` and `ModelDeleteDialog` when the
+batch/provider follow-up touches those paths. Tests must cover at least one
+non-click entry path, such as modal `onOk`, keyboard submit, or programmatic
+handler invocation.
+
+Wire-key contract for the batch/provider follow-up:
+
+- Row updates use numeric `model_id` whenever the backend row exists.
+- Provider browser rows without a numeric ID use one canonical helper to build
+  `{model_factory}/{model_name}`. Empty `model_repo` or namespace components
+  must not introduce a leading slash.
+- The same backend helper must build keys for lookup, update, and
+  delete-not-in-list checks. Raw string concatenation is not allowed in one half
+  of the route while a helper is used in another half.
+- Regression tests must include a row with empty `model_repo` and a DashScope
+  style bare model name, proving gear-save updates the intended row and the
+  following Confirm does not soft-delete it.
 
 ### Error and Fallback Handling
 
@@ -764,8 +904,10 @@ Frontend:
 - `frontend/app/[locale]/models/components/model/ModelAddDialog.tsx`
 - `frontend/app/[locale]/models/components/model/ModelEditDialog.tsx`
 - `frontend/app/[locale]/models/components/model/ProviderConfigEditDialog`
-  (per-model gear path only; provider-level batch capacity remains out of scope)
+  (follow-up after Version 1; provider-level batch capacity remains out of
+  scope)
 - `frontend/app/[locale]/models/components/model/ModelDeleteDialog.tsx`
+  (follow-up after Version 1 for provider browser suggestions)
 - `frontend/app/[locale]/models/components/model/ModelCapacityFields.tsx`
 - `frontend/services/modelService.ts`
 - `frontend/public/locales/en/common.json`
@@ -779,7 +921,8 @@ Call-site evidence to verify during implementation:
 - Model add/edit service mapping already has camelCase/snake_case capacity
   helpers in `frontend/services/modelService.ts`.
 - Capacity UI is shared through `ModelCapacityFields.tsx`, rendered by add/edit
-  and per-model provider config paths.
+  and per-model provider config paths. Version 1 changes only normal
+  single-model Add/Edit usage; provider config usage is follow-up.
 
 ## Operational Dependencies
 
@@ -792,7 +935,9 @@ no DB migration.
 | `nexent-web` | Image rebuild + `compose up --force-recreate` (flow D) | Frontend dialog, service, and i18n changes |
 | `nexent-postgresql` | No change | No schema migration |
 | `consts.const` | Add `CAPACITY_SUGGESTION_ENABLED`, default `true` | Global feature flag |
+| `consts.const` | Add optional `CAPACITY_VISIBILITY_ENABLED`, default `true` | Rollback for bare-capacity warnings only |
 | Tenant config | Optional key `capacity_suggestion_enabled`; unset means inherit env flag | Staged tenant rollout |
+| Tenant config | Optional key `capacity_visibility_enabled`; unset means inherit env flag | Visibility-layer rollback, independent of suggestions |
 | Monitoring | Add endpoint and acceptance metrics listed above | Phase 2 observation |
 
 Rollout sequence:
@@ -814,6 +959,9 @@ Rollback:
 - Frontend hides suggestion UI and ignores `capacity_suggestion` from
   connectivity validation.
 - Backend route returns disabled/no-op or is not called.
+- Set `CAPACITY_VISIBILITY_ENABLED=false` only if the bare-capacity warning
+  surfaces themselves need rollback. Turning off suggestions alone must not
+  hide badges, selector warnings, or the dashboard widget.
 - No data migration is needed. Previously accepted operator capacity values
   remain ordinary operator configuration.
 
@@ -828,6 +976,13 @@ Rollback:
 - `_fuzzy_catalog_match` rejects ambiguous final-segment matches.
 - Version 2 provider discovery tests verify chat/completions token usage is
   never treated as hard capacity metadata.
+- Constructor-audit tests pin explicit Pydantic constructor `call_args` for
+  `ModelCapacitySuggestionResponse`, connectivity validation response objects,
+  and any `ModelRequest(...)` constructor that can carry accepted capacity
+  values.
+- Follow-up batch/provider tests: wire-key regression covers a batch provider
+  row with empty `model_repo`, verifying per-row gear save updates the intended
+  row and the next Confirm does not soft-delete it.
 
 ### Integration Tests
 
@@ -863,6 +1018,10 @@ Rollback:
   submit; saved row has those values and `capacity_source = operator`.
 - Disable feature flag; add/edit flows work exactly as before and W1 resolver
   tests still pass.
+- Disable only `CAPACITY_SUGGESTION_ENABLED`; bare-capacity badges, agent-edit
+  warnings, and the dashboard coverage widget still render. Disable
+  `CAPACITY_VISIBILITY_ENABLED`; those visibility surfaces hide without changing
+  saved model capacity values.
 
 ### Copy-Paste Demo Script
 
@@ -926,6 +1085,46 @@ Expected fields:
 }
 ```
 
+Bare-capacity coverage demo:
+
+Start from a tenant that contains one configured LLM/VLM row and one
+bare-capacity LLM/VLM row. If the environment has no bare row, create one
+through the existing model-management add flow before W1-required capacity
+fields are filled, or insert an equivalent test fixture in a disposable tenant.
+The bare row must have `context_window_tokens IS NULL OR max_output_tokens IS
+NULL`; embedding/rerank rows must not count.
+
+```bash
+curl -sS http://127.0.0.1:5010/api/v1/models/capacity-coverage \
+  -H 'Authorization: Bearer <token>'
+```
+
+Expected fields:
+
+```json
+{
+  "total_llm_vlm": 2,
+  "bare_count": 1,
+  "bare_models": [
+    {
+      "model_type": "llm",
+      "max_tokens": 131072
+    }
+  ]
+}
+```
+
+UI verification:
+
+- Open Model Management filtered to LLM/VLM rows. The bare row shows the yellow
+  badge inline with the model name; clicking it opens `ModelEditDialog` with the
+  capacity panel expanded.
+- Open the agent-edit model selector and choose the bare row. The selector item
+  shows the warning subtitle, the selected-model notice appears above Save, and
+  Save remains allowed.
+- Open the operator dashboard. With `bare_count > 0`, the capacity coverage
+  widget renders and "View all" opens Model Management filtered to bare rows.
+
 Post-save verification SQL:
 
 ```sql
@@ -964,16 +1163,19 @@ SLOs during rollout:
 Definition of done:
 
 - Phase 1 and Phase 2 ship behind `CAPACITY_SUGGESTION_ENABLED`, default on,
-  and every Add/Edit capacity surface includes the user-visible suggestion
-  switch.
+  and normal single-model Add/Edit capacity surfaces include the user-visible
+  suggestion switch.
+- Phase 1.5 ships behind `CAPACITY_VISIBILITY_ENABLED`, default on, as a
+  developer-level rollback lever. The frontend does not expose a normal user
+  switch for bare-capacity warnings in Version 1.
 - Internal dogfood verifies exact and fuzzy suggestions for every approved
   catalog entry.
 - Provider discovery is out of Version 1 and ships only in Version 2 after
   credential logging, rate-limit, and timeout tests pass.
 - `_infer_model_factory` covers LLM/VLM add paths and preserves embedding
   behavior.
-- All frontend sibling paths listed above are covered or explicitly out of
-  scope in tests.
+- Batch/provider sibling paths listed above are explicitly marked follow-up or
+  out of scope in Version 1 tests.
 - Dogfood and SLO checks pass for two consecutive weeks.
 - The feature flag is removed only after the rollback plan has been tested.
 

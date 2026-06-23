@@ -108,6 +108,8 @@ consts_const_mod = types.ModuleType("consts.const")
 consts_const_mod.LOCALHOST_IP = "127.0.0.1"
 consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
+consts_const_mod.CAPACITY_SUGGESTION_ENABLED = True
+consts_const_mod.CAPACITY_VISIBILITY_ENABLED = True
 consts_const_mod.DATA_PROCESS_SERVICE = "http://data-process"
 consts_const_mod.FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024
 consts_const_mod.MAX_CONCURRENT_UPLOADS = 5
@@ -1873,3 +1875,151 @@ async def test_batch_create_models_for_tenant_update_branch_skips_provider_candi
             assert "max_output_tokens" not in called_update_data
             assert "tokenizer_family" not in called_update_data
             assert called_update_data.get("capacity_source") != "provider_candidate"
+
+
+def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": 1,
+            "model_repo": "",
+            "model_name": "gpt-4o",
+            "model_factory": "openai",
+            "model_type": "llm",
+            "context_window_tokens": 128000,
+            "max_output_tokens": 16384,
+            "max_tokens": 16384,
+            "base_url": "https://api.openai.com/v1",
+        },
+        {
+            "model_id": 2,
+            "model_repo": "",
+            "model_name": "glm-5",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 131072,
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+        {
+            "model_id": 3,
+            "model_repo": "",
+            "model_name": "vision-model",
+            "model_factory": "custom",
+            "model_type": "vlm",
+            "context_window_tokens": 32000,
+            "max_output_tokens": None,
+            "max_tokens": 8192,
+            "base_url": "https://example.com/v1",
+        },
+        {
+            "model_id": 4,
+            "model_repo": "",
+            "model_name": "embedding-model",
+            "model_factory": "openai",
+            "model_type": "embedding",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 1536,
+            "base_url": "https://api.openai.com/v1",
+        },
+        {
+            "model_id": 5,
+            "model_repo": "",
+            "model_name": "rerank-model",
+            "model_factory": "custom",
+            "model_type": "rerank",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 512,
+            "base_url": "https://example.com/v1",
+        },
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "_capacity_suggestion_available", side_effect=[True, False]):
+        result = svc.get_capacity_coverage("tenant-a")
+
+    assert result["total_llm_vlm"] == 3
+    assert result["bare_count"] == 2
+    assert [model["model_id"] for model in result["bare_models"]] == [2, 3]
+    assert result["bare_models"][0]["max_tokens"] == 131072
+    assert result["bare_models"][0]["suggestion_available"] is True
+    assert result["bare_models"][1]["suggestion_available"] is False
+
+
+def test_get_capacity_coverage_visibility_flag_off():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
+            mock.patch.object(svc, "get_model_records") as mock_get_records:
+        result = svc.get_capacity_coverage("tenant-a")
+
+    assert result == {"total_llm_vlm": 0, "bare_count": 0, "bare_models": []}
+    mock_get_records.assert_not_called()
+
+
+def test_capacity_suggestion_available_uses_catalog_matcher():
+    svc = import_svc()
+
+    model = {
+        "model_id": 10,
+        "model_repo": "",
+        "model_name": "gpt-4o",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+    fake_result = mock.MagicMock()
+    fake_result.match_kind = svc.CapacitySuggestionMatchKind.CATALOG_EXACT
+
+    with mock.patch.object(svc, "suggest_capacity", return_value=fake_result) as mock_suggest:
+        assert svc._capacity_suggestion_available(model) is True
+
+    mock_suggest.assert_called_once_with(
+        model_name="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_hint="openai",
+        model_type="llm",
+        enabled=True,
+    )
+
+
+def test_capacity_suggestion_available_records_error_on_exception():
+    """A catalog-matcher exception falls back to False AND increments the
+    coverage-error counter. Without the counter a corrupt catalog entry would
+    silently flip every row's suggestion_available to False with zero signal.
+    """
+    svc = import_svc()
+
+    model = {
+        "model_id": 42,
+        "model_repo": "",
+        "model_name": "broken-model",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+
+    with mock.patch.object(svc, "suggest_capacity", side_effect=RuntimeError("catalog corrupt")), \
+            mock.patch.object(svc, "_record_capacity_coverage_error") as mock_record:
+        assert svc._capacity_suggestion_available(model) is False
+
+    mock_record.assert_called_once()
+    recorded_args = mock_record.call_args[0]
+    assert recorded_args[0] == 42
+    assert isinstance(recorded_args[1], RuntimeError)
+
+
+def test_record_capacity_coverage_error_no_op_when_counter_disabled():
+    """The recorder must not raise when OpenTelemetry is unavailable; the
+    counter is None and the call becomes a no-op so coverage scans keep
+    working in deployments without telemetry installed.
+    """
+    svc = import_svc()
+
+    with mock.patch.object(svc, "_capacity_suggestion_coverage_errors_total", None):
+        # Should not raise.
+        svc._record_capacity_coverage_error(7, RuntimeError("boom"))
