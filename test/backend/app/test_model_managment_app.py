@@ -131,6 +131,92 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
 
 
 @pytest.mark.asyncio
+async def test_suggest_capacity_real_serialization_uses_envelope(client, auth_header, user_credentials, mocker):
+    """End-to-end serialization test: hit /model/suggest-capacity without
+    mocking the catalog matcher, so the response goes through the real
+    Pydantic serializer and JSONResponse envelope. Asserts the {message,
+    data} envelope shape and the nested catalog match. This is the safety
+    net for wire-format drift -- the headline W11 V1 bug shipped past
+    every existing unit test because nothing exercised the real
+    backend-to-wire format.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    response = client.post(
+        "/model/suggest-capacity",
+        json={
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "llm",
+        },
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    # Envelope must be present at the top level. This is the contract the
+    # frontend modelService reads (`result.data`); breaking it makes both
+    # the suggestion alert and the coverage banner dead end-to-end without
+    # any unit test catching it.
+    assert isinstance(body, dict)
+    assert set(body.keys()) >= {"message", "data"}
+    assert body["message"] == "Successfully suggested model capacity"
+
+    data = body["data"]
+    assert data["match_kind"] == "catalog_exact"
+    assert data["match_confidence"] == "high"
+    assert data["suggested_provider"] == "openai"
+    assert data["canonical_model_name"] == "gpt-4o"
+    assert data["capability_profile_version"] == "openai/gpt-4o@1"
+    assert data["capacity_source_on_accept"] == "operator"
+    # Nested capacity dict is also envelope-free at this level: it sits
+    # directly under data.suggestions, mirroring the snake_case wire format
+    # that mapCapacitySuggestionFromApi expects.
+    assert data["suggestions"]["context_window_tokens"] > 0
+    assert data["suggestions"]["max_output_tokens"] > 0
+
+
+@pytest.mark.asyncio
+async def test_capacity_coverage_real_serialization_uses_envelope(client, auth_header, user_credentials, mocker):
+    """End-to-end serialization test for /model/capacity-coverage. Mocks the
+    service layer but lets the route serialize a real dict through
+    JSONResponse so the envelope contract is enforced at the wire boundary.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.get_capacity_coverage',
+        return_value={
+            "total_llm_vlm": 3,
+            "bare_count": 1,
+            "bare_models": [
+                {
+                    "model_id": 99,
+                    "model_name": "glm-5",
+                    "model_factory": "OpenAI-API-Compatible",
+                    "model_type": "llm",
+                    "max_tokens": 131072,
+                    "suggestion_available": False,
+                }
+            ],
+        },
+    )
+
+    response = client.get("/model/capacity-coverage", headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert isinstance(body, dict)
+    assert set(body.keys()) >= {"message", "data"}
+    assert body["message"] == "Successfully retrieved model capacity coverage"
+
+    data = body["data"]
+    assert data["total_llm_vlm"] == 3
+    assert data["bare_count"] == 1
+    assert data["bare_models"][0]["model_id"] == 99
+    assert data["bare_models"][0]["suggestion_available"] is False
+
+
+@pytest.mark.asyncio
 async def test_suggest_capacity_bad_request(client, auth_header, user_credentials, mocker):
     """Test standalone capacity suggestion endpoint maps invalid input to 400."""
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
