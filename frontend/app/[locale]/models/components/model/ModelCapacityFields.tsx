@@ -46,6 +46,14 @@ interface ModelCapacityFieldsProps {
   suggestion?: CapacitySuggestion | null;
   onUseSuggestion?: () => void;
   suggestionLoading?: boolean;
+  /**
+   * Numeric value from the deprecated `max_tokens` column on the model record.
+   * When set AND the user-visible maxOutputTokens input is empty, the panel
+   * surfaces a prompt with the value and an "Apply" button -- instead of
+   * silently writing it into the form. Independent from the suggest-capacity
+   * flow.
+   */
+  legacyMaxTokensCandidate?: number;
 }
 
 const TOKENIZER_FAMILY_OPTIONS = [
@@ -171,18 +179,15 @@ export const capacityFormFromModel = (model: {
   contextWindowTokens?: number;
   maxInputTokens?: number;
   maxOutputTokens?: number;
-  /** Legacy alias — auto-promoted to maxOutputTokens when the new field is empty. */
+  /** Legacy alias — surfaced via `legacyMaxTokensCandidate` prompt instead of being
+   *  silently written into the form. See ModelCapacityFields. */
   maxTokens?: number;
   defaultOutputReserveTokens?: number;
   tokenizerFamily?: string;
 }): ModelCapacityFormState => ({
   contextWindowTokens: model.contextWindowTokens?.toString() || "",
   maxInputTokens: model.maxInputTokens?.toString() || "",
-  // W1 step 4 deprecates max_tokens. Promote legacy value into the new field
-  // for display so the user sees the value and the deprecation warning
-  // resolves on save (the saved value lands in max_output_tokens column).
-  maxOutputTokens:
-    model.maxOutputTokens?.toString() || model.maxTokens?.toString() || "",
+  maxOutputTokens: model.maxOutputTokens?.toString() || "",
   defaultOutputReserveTokens:
     model.defaultOutputReserveTokens?.toString() || "",
   tokenizerFamily: model.tokenizerFamily || "",
@@ -216,8 +221,17 @@ export const ModelCapacityFields = ({
   suggestion,
   onUseSuggestion,
   suggestionLoading = false,
+  legacyMaxTokensCandidate,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
+
+  // Show the actionable legacy-value prompt only while the input is still
+  // empty -- once the user applies (or types their own value), the prompt
+  // disappears so we don't keep nagging.
+  const showLegacyMaxTokensPrompt =
+    legacyMaxTokensCandidate !== undefined &&
+    legacyMaxTokensCandidate > 0 &&
+    value.maxOutputTokens.trim() === "";
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
@@ -266,13 +280,38 @@ export const ModelCapacityFields = ({
         </div>
       )}
 
-      {showDeprecatedMaxTokensWarning && (
+      {showLegacyMaxTokensPrompt ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={t("model.dialog.capacity.legacyMaxTokensDetected", {
+            value: legacyMaxTokensCandidate,
+            defaultValue: `Detected legacy max_tokens = ${legacyMaxTokensCandidate}. Apply it as max_output_tokens?`,
+          })}
+          action={
+            <Button
+              size="small"
+              type="primary"
+              onClick={() =>
+                onChange(
+                  "maxOutputTokens",
+                  String(legacyMaxTokensCandidate)
+                )
+              }
+            >
+              {t("model.dialog.capacity.legacyMaxTokens.apply", {
+                defaultValue: "Apply",
+              })}
+            </Button>
+          }
+        />
+      ) : showDeprecatedMaxTokensWarning ? (
         <Alert
           type="warning"
           showIcon
           message={t("model.dialog.capacity.deprecatedMaxTokens")}
         />
-      )}
+      ) : null}
 
       {suggestion && (
         <Alert

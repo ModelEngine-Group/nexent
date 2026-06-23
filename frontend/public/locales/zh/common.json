@@ -825,6 +825,8 @@
   "model.dialog.capacity.error.reserveExceedsOutput": "输出预留Token数不能超过最大输出Token数。",
   "model.dialog.capacity.error.requiredMissing": "上下文窗口和最大输入Token数为必填项。",
   "model.dialog.capacity.deprecatedMaxTokens": "max_tokens 已废弃，请使用 max_output_tokens。",
+  "model.dialog.capacity.legacyMaxTokensDetected": "检测到旧的「最大Tokens数」为 {{value}}，是否填入最大输出Token数？",
+  "model.dialog.capacity.legacyMaxTokens.apply": "应用",
   "model.dialog.capacity.source.operator": "人工配置",
   "model.dialog.capacity.source.profile": "能力档案",
   "model.dialog.capacity.source.provider_candidate": "供应商候选",

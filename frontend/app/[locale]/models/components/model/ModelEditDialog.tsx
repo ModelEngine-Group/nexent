@@ -636,15 +636,18 @@ export const ModelEditDialog = ({
               onUseSuggestion={() =>
                 applyCapacitySuggestion(capacitySuggestion)
               }
-              // The deprecation warning only makes sense when the form still
-              // has no max_output_tokens after capacityFormFromModel ran.
-              // capacityFormFromModel auto-promotes legacy max_tokens into
-              // the form's maxOutputTokens, so this stays true only when
-              // neither column is populated on the model record.
+              // Legacy max_tokens is now surfaced via the actionable
+              // legacyMaxTokensCandidate prompt (no more silent promote in
+              // capacityFormFromModel). Keep the plain deprecation banner
+              // fallback for the rare case where the record has neither
+              // column populated, so users still see the migration nudge.
               showDeprecatedMaxTokensWarning={
                 Boolean(model.maxTokens) &&
                 !model.maxOutputTokens &&
                 !form.maxOutputTokens
+              }
+              legacyMaxTokensCandidate={
+                model.maxOutputTokens ? undefined : model.maxTokens
               }
             />
           </div>
@@ -1018,6 +1021,11 @@ export const ProviderConfigEditDialog = ({
               Boolean(initialMaxTokens) &&
               !initialCapacity?.maxOutputTokens &&
               !capacityForm.maxOutputTokens
+            }
+            legacyMaxTokensCandidate={
+              initialCapacity?.maxOutputTokens
+                ? undefined
+                : initialCapacity?.maxTokens
             }
           />
         )}

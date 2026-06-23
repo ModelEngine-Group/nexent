@@ -854,6 +854,8 @@
   "model.dialog.capacity.error.reserveExceedsOutput": "Output reserve cannot exceed max output tokens.",
   "model.dialog.capacity.error.requiredMissing": "Context window and max input tokens are required.",
   "model.dialog.capacity.deprecatedMaxTokens": "max_tokens is deprecated; use max_output_tokens.",
+  "model.dialog.capacity.legacyMaxTokensDetected": "Detected legacy max_tokens = {{value}}. Apply it as max_output_tokens?",
+  "model.dialog.capacity.legacyMaxTokens.apply": "Apply",
   "model.dialog.capacity.source.operator": "Operator",
   "model.dialog.capacity.source.profile": "Profile",
   "model.dialog.capacity.source.provider_candidate": "Provider Candidate",
