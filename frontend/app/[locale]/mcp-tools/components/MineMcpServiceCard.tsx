@@ -1,5 +1,5 @@
 import { Button, Dropdown, Tag, type MenuProps } from "antd";
-import { CheckCircle, Circle, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, User } from "lucide-react";
+import { ArrowDownFromLine, CheckCircle, Circle, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -33,6 +33,7 @@ interface MineMcpServiceCardProps {
     item: MineMcpCardItem,
     onlineService: CommunityMcpCard
   ) => void;
+  onDelete: (item: MineMcpCardItem) => void;
 }
 
 export default function MineMcpServiceCard({
@@ -47,6 +48,7 @@ export default function MineMcpServiceCard({
   onToggle,
   onSubmitVersionUpdate,
   onUnpublishOnline,
+  onDelete,
 }: MineMcpServiceCardProps) {
   const { t } = useTranslation("common");
   const service = item.service;
@@ -72,17 +74,30 @@ export default function MineMcpServiceCard({
     {
       key: "submit-version-update",
       label: t("mcpTools.mine.submitVersionUpdate"),
+      icon: <RefreshCw className="h-3.5 w-3.5" />,
       disabled: publishing,
       onClick: () => onSubmitVersionUpdate(item, onlineService),
     },
+    ...(isInRepository
+      ? [
+          {
+            key: "unpublish-online-version" as const,
+            label: t("mcpTools.mine.unpublishOnlineVersion"),
+            icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
+            danger: true,
+            disabled: unpublishing,
+            onClick: () => {
+              if (onlineService) onUnpublishOnline(item, onlineService);
+            },
+          },
+        ]
+      : []),
     {
-      key: "unpublish-online-version",
-      label: t("mcpTools.mine.unpublishOnlineVersion"),
+      key: "delete",
+      label: t("mcpTools.mine.delete"),
+      icon: <Trash2 className="h-3.5 w-3.5" />,
       danger: true,
-      disabled: !onlineService || unpublishing,
-      onClick: () => {
-        if (onlineService) onUnpublishOnline(item, onlineService);
-      },
+      onClick: () => onDelete(item),
     },
   ];
 

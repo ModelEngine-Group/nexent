@@ -20,19 +20,19 @@ interface TransportVisual {
 const DEPLOYMENT_VISUALS: Record<string, TransportVisual> = {
   [McpDeploymentType.REMOTE_LINK]: {
     Icon: LinkOutlined,
-    className: "bg-sky-50 text-sky-600",
+    className: "bg-blue-50 text-blue-600",
   },
   [McpDeploymentType.CONTAINER]: {
     Icon: ContainerOutlined,
-    className: "bg-violet-50 text-violet-600",
+    className: "bg-blue-50 text-blue-600",
   },
   [McpDeploymentType.API]: {
     Icon: ApiOutlined,
-    className: "bg-emerald-50 text-emerald-600",
+    className: "bg-blue-50 text-blue-600",
   },
   [McpDeploymentType.LOCAL_IMAGE]: {
     Icon: CloudOutlined,
-    className: "bg-amber-50 text-amber-600",
+    className: "bg-blue-50 text-blue-600",
   },
 };
 
@@ -50,14 +50,14 @@ const ICON_POOL: Array<typeof LinkOutlined> = [
 ];
 
 const COLOR_POOL: string[] = [
+  "bg-blue-50 text-blue-600",
   "bg-sky-50 text-sky-600",
-  "bg-violet-50 text-violet-600",
-  "bg-emerald-50 text-emerald-600",
-  "bg-amber-50 text-amber-600",
-  "bg-rose-50 text-rose-600",
   "bg-indigo-50 text-indigo-600",
-  "bg-teal-50 text-teal-600",
-  "bg-fuchsia-50 text-fuchsia-600",
+  "bg-blue-100 text-blue-700",
+  "bg-sky-100 text-sky-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-blue-50 text-blue-600",
+  "bg-sky-50 text-sky-600",
 ];
 
 const DEFAULT_VISUAL: TransportVisual =

@@ -1,5 +1,5 @@
 import { Button, Tag } from "antd";
-import { Download, Eye, GitBranch, Star, Trash2, Wrench } from "lucide-react";
+import { Circle, Download, Eye, Star, Trash2, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import {
@@ -92,7 +92,7 @@ export default function RepositoryMcpCard({
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
-          <GitBranch className="h-3.5 w-3.5 text-slate-400" />
+          <Circle className="h-3 w-3 fill-blue-500 text-white" />
           {formatRegistryVersion(service.version || "")}
         </span>
         <div className="ml-auto flex items-center gap-4">

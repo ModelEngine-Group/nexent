@@ -68,6 +68,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "tags": row.get("tags") or [],
         "reviewStatus": row.get("review_status") or MCP_REVIEW_PENDING,
         "reviewType": row.get("review_type") or MCP_REVIEW_TYPE_INITIAL_LISTING,
+        "previousVersion": (row.get("registry_json") or {}).get("_previousVersion") if isinstance(row.get("registry_json"), dict) else None,
     }
 
 
@@ -243,7 +244,9 @@ async def update_community_mcp_service(
         raise McpNotFoundError("Community MCP record not found")
 
     existing_config_json = current.get("config_json") if isinstance(current.get("config_json"), dict) else None
-    next_registry_json = registry_json if isinstance(registry_json, dict) else current.get("registry_json")
+    next_registry_json = registry_json if isinstance(registry_json, dict) else (current.get("registry_json") or {})
+    if isinstance(next_registry_json, dict) and version and current.get("version") and version != current.get("version"):
+        next_registry_json = {**next_registry_json, "_previousVersion": current.get("version")}
     next_config_json = config_json if isinstance(config_json, dict) else existing_config_json
     next_transport_type = transport_type
     if next_transport_type is None and isinstance(config_json, dict):

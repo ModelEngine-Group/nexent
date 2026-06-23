@@ -9,7 +9,7 @@ import {
   InboxOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
-import { CheckCircle, Clock, Download, Plus, Puzzle, XCircle } from "lucide-react";
+import { CheckCircle, Clock, Download, Eye, Plus, Puzzle, XCircle } from "lucide-react";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -22,6 +22,7 @@ import { useMcpServiceToggle } from "@/hooks/mcpTools/useMcpServiceToggle";
 import {
   approveCommunityMcpTool,
   deleteCommunityMcpTool,
+  deleteMcpToolService,
   publishCommunityMcpTool,
   rejectCommunityMcpTool,
   updateCommunityMcpTool,
@@ -42,7 +43,6 @@ import {
 import {
   filterByDeploymentType,
   formatRegistryDate,
-  formatRegistryVersion,
   getDeploymentTypeLabelKey,
   matchesNameOrTag,
   paginateItems,
@@ -60,6 +60,7 @@ import MineMcpServiceCard, {
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
 import RepositoryMcpDetailModal from "./components/RepositoryMcpDetailModal";
+import TransportIcon from "./components/shared/TransportIcon";
 
 const mcpToolsTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#0284c7" },
@@ -220,7 +221,7 @@ export default function McpToolsPage() {
   ).length;
   const reviewCount = reviewBrowser.services.length;
 
-  const searchActions = (
+  const searchActions = tab === McpToolsServicesTab.MINE ? (
     <>
       <Button
         icon={<Download className="h-4 w-4" />}
@@ -238,7 +239,7 @@ export default function McpToolsPage() {
         {t("mcpTools.page.addService")}
       </Button>
     </>
-  );
+  ) : null;
 
   const userTabOptions = [
     {
@@ -719,6 +720,32 @@ function MineView({
     });
   };
 
+  const handleDelete = (item: MineMcpCardItem) => {
+    modal.confirm({
+      title: t("mcpTools.mine.deleteConfirmTitle"),
+      content: t("mcpTools.mine.deleteConfirmDescription", {
+        name: item.service.name,
+      }),
+      okText: t("mcpTools.mine.delete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: async () => {
+        try {
+          if (item.kind === "local") {
+            await deleteMcpToolService(item.service.mcpId);
+          } else if (item.service.communityId) {
+            await deleteCommunityMcpTool(item.service.communityId);
+          }
+          message.success(t("mcpTools.mine.deleteSuccess"));
+          await refreshMineData();
+        } catch {
+          message.error(t("mcpTools.mine.deleteFailed"));
+        }
+      },
+    });
+  };
+
   return (
     <div className="space-y-4">
       <McpToolsSearchFilterBar
@@ -775,6 +802,7 @@ function MineView({
                 onToggle={handleToggle}
                 onSubmitVersionUpdate={handleSubmitVersionUpdate}
                 onUnpublishOnline={handleUnpublishOnline}
+                onDelete={handleDelete}
               />
             );
           })}
@@ -867,18 +895,28 @@ function ReviewCenterView({
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const [deploymentType, setDeploymentType] =
-    useState<DeploymentFilter>(FILTER_ALL);
+  const [statusFilter, setStatusFilter] = useState<string>(FILTER_ALL);
   const [reviewingId, setReviewingId] = useState<number | null>(null);
 
-  const categoryStats = useMemo(
-    () => getDeploymentCategoryStats(browser.services, t),
-    [browser.services, t]
-  );
+  const statusTabs = useMemo(() => {
+    const items = browser.services;
+    const counts: Record<string, number> = {};
+    for (const s of items) {
+      const st = s.reviewStatus || "pending";
+      counts[st] = (counts[st] || 0) + 1;
+    }
+    return [
+      { value: FILTER_ALL, label: t("mcpTools.review.status.all"), count: items.length },
+      { value: "pending", label: t("mcpTools.review.status.pending"), count: counts.pending || 0 },
+      { value: "approved", label: t("mcpTools.review.status.approved"), count: counts.approved || 0 },
+      { value: "rejected", label: t("mcpTools.review.status.rejected"), count: counts.rejected || 0 },
+    ];
+  }, [browser.services, t]);
 
   const filteredServices = useMemo(() => {
-    return filterByDeploymentType(browser.services, deploymentType);
-  }, [browser.services, deploymentType]);
+    if (statusFilter === FILTER_ALL) return browser.services;
+    return browser.services.filter((s) => (s.reviewStatus || "pending") === statusFilter);
+  }, [browser.services, statusFilter]);
 
   const handleReview = async (
     service: CommunityMcpCard,
@@ -906,16 +944,6 @@ function ReviewCenterView({
     <div className="space-y-4">
       <McpToolsSearchFilterBar
         search={browser.filters.search}
-        deploymentType={deploymentType}
-        status={browser.filters.status}
-        statusOptions={[
-          { value: FILTER_ALL, label: t("mcpTools.review.status.all") },
-          { value: "pending", label: t("mcpTools.review.status.pending") },
-          { value: "approved", label: t("mcpTools.review.status.approved") },
-          { value: "rejected", label: t("mcpTools.review.status.rejected") },
-          { value: "offline", label: t("mcpTools.review.status.offline") },
-        ]}
-        categoryStats={categoryStats}
         actions={
           <>
             <span className="flex h-10 items-center text-xs text-slate-400">
@@ -927,8 +955,9 @@ function ReviewCenterView({
           </>
         }
         onSearchChange={(value) => browser.updateFilter("search", value)}
-        onDeploymentTypeChange={setDeploymentType}
-        onStatusChange={(value) => browser.updateFilter("status", value)}
+        filterTabs={statusTabs}
+        activeFilterTab={statusFilter}
+        onFilterTabChange={(value) => setStatusFilter(value)}
       />
 
       {browser.loading ? (
@@ -940,18 +969,41 @@ function ReviewCenterView({
           <Empty description={t("mcpTools.review.emptyTitle")} />
         </PlaceholderBox>
       ) : (
-        <ResponsiveCardGrid>
-          {filteredServices.map((service, index) => (
-            <ReviewMcpCard
-              key={`${service.communityId || service.name}-${index}`}
-              service={service}
-              reviewing={reviewingId === service.communityId}
-              onSelect={() => onSelect(service)}
-              onApprove={() => handleReview(service, "approve")}
-              onReject={() => handleReview(service, "reject")}
-            />
-          ))}
-        </ResponsiveCardGrid>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/80">
+                <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("mcpTools.review.table.mcpService")}
+                </th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("mcpTools.review.table.deploymentType")}
+                </th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("mcpTools.review.table.submitter")}
+                </th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("mcpTools.review.table.status")}
+                </th>
+                <th className="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("mcpTools.review.table.actions")}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredServices.map((service) => (
+                <ReviewTableRow
+                  key={service.communityId || service.name}
+                  service={service}
+                  reviewing={reviewingId === service.communityId}
+                  onSelect={() => onSelect(service)}
+                  onApprove={() => handleReview(service, "approve")}
+                  onReject={() => handleReview(service, "reject")}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <McpToolsPagination
@@ -967,7 +1019,7 @@ function ReviewCenterView({
   );
 }
 
-function ReviewMcpCard({
+function ReviewTableRow({
   service,
   reviewing,
   onSelect,
@@ -986,91 +1038,139 @@ function ReviewMcpCard({
   const reviewStatus = service.reviewStatus || "pending";
   const reviewType = service.reviewType || "initial_listing";
   const isPending = reviewStatus === "pending";
+  const author =
+    service.authorDisplayName || service.authorName || "-";
+  const submitDate = formatRegistryDate(service.createdAt || "");
+
+  const statusBadge = (() => {
+    if (reviewStatus === "approved") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">
+          <CheckCircle className="h-3 w-3" />
+          {t("mcpTools.review.status.approved")}
+        </span>
+      );
+    }
+    if (reviewStatus === "rejected") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
+          <XCircle className="h-3 w-3" />
+          {t("mcpTools.review.status.rejected")}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+        <Clock className="h-3 w-3" />
+        {t("mcpTools.review.status.pending")}
+      </span>
+    );
+  })();
 
   return (
-    <div className="flex min-h-[260px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="line-clamp-1 text-lg font-semibold text-slate-900" title={service.name}>
-            {service.name}
-          </h3>
-          <p className="mt-1 text-xs text-slate-500">
-            {t("mcpTools.review.submitter", {
-              name: service.authorDisplayName || service.authorName || "-",
-            })}
-          </p>
+    <tr className="group transition hover:bg-slate-50/60">
+      {/* MCP Service */}
+      <td className="px-5 py-4">
+        <div className="flex items-center gap-3">
+          <TransportIcon
+            transportType={service.transportType}
+            deploymentType={deploymentType}
+            label={deploymentLabel}
+            seed={service.name}
+            className="!h-9 !w-9 rounded-lg"
+          />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-900">
+              {service.name}
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-xs">
+              {reviewType === "version_update" ? (
+                <>
+                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                    {t("mcpTools.review.type.version_update")}
+                  </span>
+                  <span className="text-slate-500">
+                    {service.previousVersion
+                      ? `${service.previousVersion} → ${service.version || ""}`
+                      : service.version || ""}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                    {t("mcpTools.review.type.initial_listing")}
+                  </span>
+                  <span className="text-slate-500">
+                    v{service.version || ""}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <Tag color={getReviewStatusColor(reviewStatus)} className="m-0 rounded-full">
-            {t(`mcpTools.review.status.${reviewStatus}`)}
-          </Tag>
-          <Tag color={getReviewTypeColor(reviewType)} className="m-0 rounded-full">
-            {t(`mcpTools.review.type.${reviewType}`)}
-          </Tag>
-        </div>
-      </div>
+      </td>
 
-      <p className="mt-4 line-clamp-2 min-h-[44px] text-sm leading-6 text-slate-600" title={service.description}>
-        {service.description || t("mcpTools.detail.noDescription")}
-      </p>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Tag color="blue" className="m-0 rounded-full">
+      {/* Deployment Type */}
+      <td className="px-5 py-4">
+        <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600">
           {deploymentLabel}
-        </Tag>
-        {service.tags?.slice(0, 3).map((tag) => (
-          <Tag key={`${service.communityId || service.name}-${tag}`} className="m-0 rounded-full bg-slate-50">
-            {tag}
-          </Tag>
-        ))}
-        {(service.tags?.length || 0) > 3 ? (
-          <Tag className="m-0 rounded-full bg-slate-50">
-            +{(service.tags?.length || 0) - 3}
-          </Tag>
-        ) : null}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
-        <span>{formatRegistryVersion(service.version || "")}</span>
-        <span className="inline-flex items-center gap-1">
-          <Clock className="h-3.5 w-3.5 text-slate-400" />
-          {formatRegistryDate(service.updatedAt || service.createdAt || "")}
         </span>
-      </div>
+      </td>
 
-      <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
-        <Button onClick={onSelect}>{t("mcpTools.review.details")}</Button>
-        <Button
-          type="primary"
-          icon={<CheckCircle className="h-3.5 w-3.5" />}
-          loading={reviewing}
-          disabled={!isPending}
-          onClick={onApprove}
-        >
-          {t("mcpTools.review.approve")}
-        </Button>
-        <Button
-          danger
-          icon={<XCircle className="h-3.5 w-3.5" />}
-          loading={reviewing}
-          disabled={!isPending}
-          onClick={onReject}
-        >
-          {t("mcpTools.review.reject")}
-        </Button>
-      </div>
-    </div>
+      {/* Submitter */}
+      <td className="px-5 py-4">
+        <div className="text-sm text-slate-600">{author}</div>
+        <div className="mt-0.5 text-xs text-slate-400">{submitDate}</div>
+      </td>
+
+      {/* Status */}
+      <td className="px-5 py-4">{statusBadge}</td>
+
+      {/* Actions */}
+      <td className="px-5 py-4 text-right">
+        {isPending ? (
+          <div className="inline-flex items-center gap-2">
+            <Button
+              size="small"
+              className="text-xs"
+              icon={<Eye className="h-3.5 w-3.5" />}
+              onClick={onSelect}
+            >
+              {t("mcpTools.review.details")}
+            </Button>
+            <Button
+              className="!border-green-600 !bg-green-600 text-white hover:!border-green-700 hover:!bg-green-700 !text-white"
+              size="small"
+              icon={<CheckCircle className="h-3.5 w-3.5" />}
+              loading={reviewing}
+              onClick={onApprove}
+            >
+              {t("mcpTools.review.approve")}
+            </Button>
+            <Button
+              danger
+              size="small"
+              className="text-xs"
+              icon={<XCircle className="h-3.5 w-3.5" />}
+              loading={reviewing}
+              onClick={onReject}
+            >
+              {t("mcpTools.review.reject")}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="small"
+            className="text-xs"
+            icon={<Eye className="h-3.5 w-3.5" />}
+            onClick={onSelect}
+          >
+            {t("mcpTools.review.details")}
+          </Button>
+        )}
+      </td>
+    </tr>
   );
-}
-
-function getReviewStatusColor(status: string) {
-  if (status === "approved") return "green";
-  if (status === "rejected") return "red";
-  return "gold";
-}
-
-function getReviewTypeColor(reviewType: string) {
-  return reviewType === "version_update" ? "purple" : "blue";
 }
 
 function ResponsiveCardGrid({ children }: { children: React.ReactNode }) {

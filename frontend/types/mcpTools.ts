@@ -145,6 +145,7 @@ export interface CommunityMcpCard {
   deploymentType?: McpDeploymentType;
   reviewStatus?: "pending" | "approved" | "rejected" | "offline";
   reviewType?: "initial_listing" | "version_update";
+  previousVersion?: string;
 }
 
 export interface McpServiceItem {

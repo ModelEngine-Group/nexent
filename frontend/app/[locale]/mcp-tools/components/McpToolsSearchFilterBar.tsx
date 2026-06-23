@@ -12,17 +12,27 @@ interface McpCategoryStat {
   count: number;
 }
 
+interface FilterTab {
+  value: string;
+  label: string;
+  count: number;
+}
+
 interface McpToolsSearchFilterBarProps {
   search: string;
-  deploymentType: DeploymentFilter;
+  deploymentType?: DeploymentFilter;
   searchPlaceholder?: string;
   status?: string;
   statusOptions?: Array<{ value: string; label: string }>;
   categoryStats?: McpCategoryStat[];
   actions?: ReactNode;
   onSearchChange: (value: string) => void;
-  onDeploymentTypeChange: (value: DeploymentFilter) => void;
+  onDeploymentTypeChange?: (value: DeploymentFilter) => void;
   onStatusChange?: (value: string) => void;
+  /** Generic filter tabs replace categoryStats when provided */
+  filterTabs?: FilterTab[];
+  activeFilterTab?: string;
+  onFilterTabChange?: (value: string) => void;
 }
 
 export default function McpToolsSearchFilterBar({
@@ -36,8 +46,33 @@ export default function McpToolsSearchFilterBar({
   onSearchChange,
   onDeploymentTypeChange,
   onStatusChange,
+  filterTabs,
+  activeFilterTab,
+  onFilterTabChange,
 }: McpToolsSearchFilterBarProps) {
   const { t } = useTranslation("common");
+
+  const renderTab = (
+    item: { value: string; label: string; count: number },
+    selected: boolean,
+    onClick: () => void
+  ) => (
+    <button
+      key={item.value}
+      type="button"
+      onClick={onClick}
+      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition ${
+        selected
+          ? "border-blue-500 bg-blue-500 font-medium text-white shadow-sm"
+          : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+      }`}
+    >
+      <span>{item.label}</span>
+      <span className={`rounded-full px-1.5 text-[11px] ${selected ? "bg-white/20 text-white" : "bg-white text-slate-500"}`}>
+        {item.count}
+      </span>
+    </button>
+  );
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
@@ -63,28 +98,17 @@ export default function McpToolsSearchFilterBar({
         </div>
         {actions ? <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div> : null}
       </div>
-      {categoryStats?.length ? (
+      {filterTabs?.length ? (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-          {categoryStats.map((item) => {
-            const selected = deploymentType === item.value;
-            return (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => onDeploymentTypeChange(item.value)}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition ${
-                  selected
-                    ? "border-blue-500 bg-blue-500 font-medium text-white shadow-sm"
-                    : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                }`}
-              >
-                <span>{item.label}</span>
-                <span className={`rounded-full px-1.5 text-[11px] ${selected ? "bg-white/20 text-white" : "bg-white text-slate-500"}`}>
-                  {item.count}
-                </span>
-              </button>
-            );
-          })}
+          {filterTabs.map((item) =>
+            renderTab(item, activeFilterTab === item.value, () => onFilterTabChange?.(item.value))
+          )}
+        </div>
+      ) : categoryStats?.length && onDeploymentTypeChange ? (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+          {categoryStats.map((item) =>
+            renderTab(item, deploymentType === item.value, () => onDeploymentTypeChange(item.value))
+          )}
         </div>
       ) : null}
     </div>
