@@ -15,6 +15,7 @@ import {
   Puzzle,
   Building2,
   Zap,
+  Inbox,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -54,22 +55,100 @@ interface ProcessedRoute extends RouteConfig {
  * All available routes with their metadata
  */
 const ROUTE_CONFIG: RouteConfig[] = [
-  { path: "/", Icon: Home, labelKey: "sidebar.homePage", order: 0, parentKey: null },
-  { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 1, parentKey: null },
+  {
+    path: "/",
+    Icon: Home,
+    labelKey: "sidebar.homePage",
+    order: 0,
+    parentKey: null,
+  },
+  {
+    path: "/chat",
+    Icon: Bot,
+    labelKey: "sidebar.startChat",
+    order: 1,
+    parentKey: null,
+  },
   // Agent Development submenu
-  { path: "/agent-dev", Icon: Code, labelKey: "sidebar.agentDev", order: 2, parentKey: null },
-  { path: "/models", Icon: Settings, labelKey: "sidebar.modelConfig", order: 3, parentKey: "/agent-dev" },
-  { path: "/knowledges", Icon: BookOpen, labelKey: "sidebar.knowledgeBaseConfig", order: 4, parentKey: "/agent-dev" },
-  { path: "/agents", Icon: Bot, labelKey: "sidebar.agentConfig", order: 5, parentKey: "/agent-dev" },
-  { path: "/memory", Icon: Database, labelKey: "sidebar.memoryConfig", order: 6, parentKey: "/agent-dev" },
+  {
+    path: "/agent-dev",
+    Icon: Code,
+    labelKey: "sidebar.agentDev",
+    order: 2,
+    parentKey: null,
+  },
+  {
+    path: "/models",
+    Icon: Settings,
+    labelKey: "sidebar.modelConfig",
+    order: 3,
+    parentKey: "/agent-dev",
+  },
+  {
+    path: "/knowledges",
+    Icon: BookOpen,
+    labelKey: "sidebar.knowledgeBaseConfig",
+    order: 4,
+    parentKey: "/agent-dev",
+  },
+  {
+    path: "/agents",
+    Icon: Bot,
+    labelKey: "sidebar.agentConfig",
+    order: 5,
+    parentKey: "/agent-dev",
+  },
+  {
+    path: "/memory",
+    Icon: Database,
+    labelKey: "sidebar.memoryConfig",
+    order: 6,
+    parentKey: "/agent-dev",
+  },
   // Resource Space submenu
-  { path: "/resource-space", Icon: Globe, labelKey: "sidebar.resourceSpace", order: 7, parentKey: null },
-  { path: "/agent-space", Icon: Bot, labelKey: "sidebar.agentSpace", order: 8, parentKey: "/resource-space" },
-  { path: "/mcp-space", Icon: Puzzle, labelKey: "sidebar.mcpSpace", order: 9, parentKey: "/resource-space" },
-  { path: "/skill-space", Icon: Zap, labelKey: "sidebar.skillSpace", order: 10, parentKey: "/resource-space" },
+  {
+    path: "/resource-space",
+    Icon: Globe,
+    labelKey: "sidebar.resourceSpace",
+    order: 7,
+    parentKey: null,
+  },
+  {
+    path: "/agent-repository",
+    Icon: Bot,
+    labelKey: "sidebar.agentSpace",
+    order: 8,
+    parentKey: "/resource-space",
+  },
+  {
+    path: "/mcp-space",
+    Icon: Puzzle,
+    labelKey: "sidebar.mcpSpace",
+    order: 9,
+    parentKey: "/resource-space",
+  },
+  {
+    path: "/skill-space",
+    Icon: Zap,
+    labelKey: "sidebar.skillSpace",
+    order: 10,
+    parentKey: "/resource-space",
+  },
   // Management menus
-  { path: "/resource-manage", Icon: Building2, labelKey: "sidebar.resourceManage", order: 11, parentKey: null },
-  { path: "/owner-manage", Icon: Building2, labelKey: "sidebar.ownerManage", order: 12, parentKey: null },
+  {
+    path: "/resource-manage",
+    Icon: Building2,
+    labelKey: "sidebar.resourceManage",
+    order: 11,
+    parentKey: null,
+  },
+  {
+    path: "/owner-manage",
+    Icon: Building2,
+    labelKey: "sidebar.ownerManage",
+    order: 12,
+    parentKey: null,
+  },
 ];
 
 /**

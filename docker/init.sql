@@ -1097,7 +1097,9 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (216, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'READ'),
 (217, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'UPDATE'),
 (218, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'DELETE'),
-(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ');
+(219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ'),
+(220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(221, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/asset-owner-resources');
 
 -- SU Menus (root level)
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
@@ -1118,7 +1120,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1109, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
 (1110, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
-(1111, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1111, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-repository', '/resource-space'),
 (1112, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
 (1113, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
@@ -1135,7 +1137,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1208, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
 (1209, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
-(1210, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1210, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-repository', '/resource-space'),
 (1211, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
 (1212, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
@@ -1159,7 +1161,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1408, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
 (1409, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
-(1410, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1410, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-repository', '/resource-space'),
 (1411, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
 (1412, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
@@ -1175,7 +1177,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1507, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
 (1508, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev');
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
-(1509, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1509, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-repository', '/resource-space'),
 (1510, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
 (1511, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
@@ -1966,3 +1968,97 @@ COMMENT ON TABLE nexent.user_cas_session_t IS 'Server-side session records for C
 COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for revocation checks';
 COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
 COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';
+
+-- ag_agent_repository_t: Agent marketplace repository for frozen shareable agent snapshots
+CREATE SEQUENCE IF NOT EXISTS nexent.ag_agent_repository_t_agent_repository_id_seq;
+
+CREATE TABLE IF NOT EXISTS nexent.ag_agent_repository_t (
+    agent_repository_id BIGINT NOT NULL DEFAULT nextval('nexent.ag_agent_repository_t_agent_repository_id_seq'),
+    publisher_tenant_id VARCHAR(100) NOT NULL,
+    publisher_user_id VARCHAR(100) NOT NULL,
+    agent_id INTEGER NOT NULL,
+    version_no INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    display_name VARCHAR(100),
+    description TEXT,
+    author VARCHAR(100),
+    submitted_by VARCHAR(100),
+    category_id INTEGER,
+    tags TEXT[],
+    tool_count INTEGER,
+    icon VARCHAR(100),
+    downloads INTEGER DEFAULT 0,
+    version_name VARCHAR(100),
+    agent_info_json JSONB NOT NULL,
+    status VARCHAR(30) DEFAULT 'not_shared',
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    CONSTRAINT ag_agent_repository_t_pkey PRIMARY KEY (agent_repository_id)
+);
+
+ALTER SEQUENCE nexent.ag_agent_repository_t_agent_repository_id_seq
+    OWNED BY nexent.ag_agent_repository_t.agent_repository_id;
+
+ALTER TABLE nexent.ag_agent_repository_t OWNER TO root;
+
+COMMENT ON TABLE nexent.ag_agent_repository_t IS 'Agent marketplace repository for frozen shareable agent snapshots';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_repository_id IS 'Agent repository listing ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.publisher_tenant_id IS 'Publisher tenant ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.publisher_user_id IS 'Publisher user ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_id IS 'Root agent ID from ag_tenant_agent_t; unique per version_no when active (delete_flag = N)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.version_no IS 'Published version number frozen at share time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.name IS 'Root agent programmatic name for display and search';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.display_name IS 'Root agent display name';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.description IS 'Root agent description';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.author IS 'Agent author';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.submitted_by IS 'Submitter email when listing enters pending_review';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.category_id IS 'Optional marketplace category ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.tags IS 'Marketplace tags';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.tool_count IS 'Total tool count across all agents in the bundle (display only)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.version_name IS 'Repository entry version name for display (from ag_tenant_agent_version_t)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.icon IS 'Marketplace card icon (emoji or URL)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.downloads IS 'Marketplace download/copy count for card display';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_info_json IS 'Frozen ExportAndImportDataFormat snapshot with optional skills';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.status IS 'Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.updated_by IS 'Updater ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_repository_agent_version_active
+    ON nexent.ag_agent_repository_t (agent_id, version_no)
+    WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_publisher_delete
+    ON nexent.ag_agent_repository_t (publisher_tenant_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_status_delete
+    ON nexent.ag_agent_repository_t (status, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_name_delete
+    ON nexent.ag_agent_repository_t (name, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_tags_gin
+    ON nexent.ag_agent_repository_t USING GIN (tags);
+
+CREATE OR REPLACE FUNCTION update_ag_agent_repository_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_ag_agent_repository_update_time() IS 'Auto-update update_time for ag_agent_repository_t';
+
+DROP TRIGGER IF EXISTS update_ag_agent_repository_update_time_trigger ON nexent.ag_agent_repository_t;
+CREATE TRIGGER update_ag_agent_repository_update_time_trigger
+BEFORE UPDATE ON nexent.ag_agent_repository_t
+FOR EACH ROW
+EXECUTE FUNCTION update_ag_agent_repository_update_time();
+
+COMMENT ON TRIGGER update_ag_agent_repository_update_time_trigger ON nexent.ag_agent_repository_t IS 'Trigger to maintain update_time';
