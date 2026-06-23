@@ -188,6 +188,7 @@ deployment_init_defaults() {
   DEPLOYMENT_LOADED_SCHEMA_VERSION=""
   DEPLOYMENT_LOADED_APP_VERSION=""
   DEPLOYMENT_CONFIG_FILE_LOADED="false"
+  DEPLOYMENT_CONFIG_VALUES_LOADED="false"
   DEPLOYMENT_DOCKER_PORTS=""
   unset DEPLOYMENT_COMPONENTS_EXPLICIT DEPLOYMENT_PORT_POLICY_EXPLICIT DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT
   unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
@@ -254,6 +255,7 @@ deployment_load_config_file() {
 
   local in_components="false"
   local components=""
+  local loaded_config_value="false"
   local line key value item
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
@@ -279,28 +281,46 @@ deployment_load_config_file() {
       value="${value%\"}"
       value="${value#\"}"
       case "$key" in
-        portPolicy) DEPLOYMENT_PORT_POLICY="$value" ;;
+        portPolicy)
+          DEPLOYMENT_PORT_POLICY="$value"
+          loaded_config_value="true"
+          ;;
         schemaVersion)
           [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_SCHEMA_VERSION="$value"
+          loaded_config_value="true"
           ;;
-        imageSource) DEPLOYMENT_IMAGE_SOURCE="$value" ;;
-        registryProfile) DEPLOYMENT_REGISTRY_PROFILE="$value" ;;
+        imageSource)
+          DEPLOYMENT_IMAGE_SOURCE="$value"
+          loaded_config_value="true"
+          ;;
+        registryProfile)
+          DEPLOYMENT_REGISTRY_PROFILE="$value"
+          loaded_config_value="true"
+          ;;
         appVersion)
           DEPLOYMENT_APP_VERSION="$value"
           [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_APP_VERSION="$value"
+          loaded_config_value="true"
           ;;
-        monitoringProvider) DEPLOYMENT_MONITORING_PROVIDER="$value" ;;
+        monitoringProvider)
+          DEPLOYMENT_MONITORING_PROVIDER="$value"
+          loaded_config_value="true"
+          ;;
       esac
     fi
   done < "$config_file"
 
-  [ -n "$components" ] && DEPLOYMENT_COMPONENTS="$components"
+  if [ -n "$components" ]; then
+    DEPLOYMENT_COMPONENTS="$components"
+    loaded_config_value="true"
+  fi
+  [ "$loaded_config_value" = "true" ] && DEPLOYMENT_CONFIG_VALUES_LOADED="true"
   [ "$load_mode" = "apply" ] && DEPLOYMENT_CONFIG_FILE_LOADED="true"
   return 0
 }
 
 deployment_apply_legacy_inputs() {
-  if [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ]; then
+  if [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then
     case "${DEPLOYMENT_VERSION:-}" in
       speed)
         deployment_warn "DEPLOYMENT_VERSION=speed is deprecated; use --components infrastructure,application."
@@ -313,23 +333,25 @@ deployment_apply_legacy_inputs() {
     esac
   fi
 
-  case "${DEPLOYMENT_MODE:-}" in
-    development)
-      deployment_warn "DEPLOYMENT_MODE=development is deprecated; use --port-policy development."
-      [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="development"
-      ;;
-    production)
-      deployment_warn "DEPLOYMENT_MODE=production is deprecated; use --port-policy production."
-      [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="production"
-      ;;
-    infrastructure)
-      deployment_warn "DEPLOYMENT_MODE=infrastructure is deprecated; use --components infrastructure."
-      [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && DEPLOYMENT_COMPONENTS="infrastructure"
-      [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="development"
-      ;;
-  esac
+  if [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then
+    case "${DEPLOYMENT_MODE:-}" in
+      development)
+        deployment_warn "DEPLOYMENT_MODE=development is deprecated; use --port-policy development."
+        [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="development"
+        ;;
+      production)
+        deployment_warn "DEPLOYMENT_MODE=production is deprecated; use --port-policy production."
+        [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="production"
+        ;;
+      infrastructure)
+        deployment_warn "DEPLOYMENT_MODE=infrastructure is deprecated; use --components infrastructure."
+        [ -z "${DEPLOYMENT_COMPONENTS_EXPLICIT:-}" ] && DEPLOYMENT_COMPONENTS="infrastructure"
+        [ -z "${DEPLOYMENT_PORT_POLICY_EXPLICIT:-}" ] && DEPLOYMENT_PORT_POLICY="development"
+        ;;
+    esac
+  fi
 
-  if [ -n "${IS_MAINLAND:-}" ] && [ -z "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ]; then
+  if [ -n "${IS_MAINLAND:-}" ] && [ -z "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_VALUES_LOADED" != "true" ]; then
     if [[ "$IS_MAINLAND" =~ ^[Yy]$ ]]; then
       deployment_warn "--is-mainland Y is deprecated; use --image-source mainland."
       DEPLOYMENT_IMAGE_SOURCE="mainland"

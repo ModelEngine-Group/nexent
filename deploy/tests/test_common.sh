@@ -104,17 +104,29 @@ deployment_apply_image_source
 assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be applied"
 assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
 
+DEPLOYMENT_VERSION="speed"
+DEPLOYMENT_MODE="production"
+IS_MAINLAND="Y"
+deployment_prepare_config --local-config "$FULL_CONFIG" --use-local-config --app-version latest
+assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "use local config should keep saved data-process when legacy env exists"
+assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "use local config should select data-process docker service"
+assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "use local config should keep saved port policy over legacy mode"
+assert_eq "local-latest" "$DEPLOYMENT_IMAGE_SOURCE" "use local config should keep saved image source over legacy mainland flag"
+unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
+
 LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
 deployment_render_helm_values "$LOCAL_HELM_VALUES"
 assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
 assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
 assert_contains "$(sed -n '140,180p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
 
+DEPLOYMENT_VERSION="speed"
 deployment_prepare_config --local-config "$FULL_CONFIG" --reconfigure --image-source general --app-version latest
 assert_eq "false" "$DEPLOYMENT_CONFIG_FILE_LOADED" "reconfigure should use local config as defaults without skipping configuration"
 assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "reconfigure defaults should include saved components"
 assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "reconfigure defaults should include saved port policy"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit image source should override reconfigure defaults"
+unset DEPLOYMENT_VERSION
 
 HELM_VALUES="$TMP_DIR/generated-values.yaml"
 deployment_render_helm_values "$HELM_VALUES"
