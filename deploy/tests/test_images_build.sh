@@ -41,6 +41,11 @@ assert_contains "$output" "nexent/nexent-web:latest" "image list should build we
 assert_contains "$output" "nexent/nexent-mcp:latest" "image list should build mcp image with latest tag"
 assert_contains "$output" "nexent/nexent-data-process:latest" "image list should build data-process image with latest tag"
 assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "terminal image should not be built when terminal image is absent"
+assert_not_contains "$output" "--platform" "default build should use local architecture"
+
+output="$(bash "$BUILD_SCRIPT" --main --version latest --platform linux/amd64 --dry-run)"
+assert_contains "$output" "--platform linux/amd64" "explicit platform should be forwarded"
+assert_contains "$output" "nexent/nexent:latest" "explicit platform build should still build selected image"
 
 output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --dry-run)"
 assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "terminal option should build terminal image with selected version"
@@ -64,8 +69,8 @@ fi
 assert_contains "$(cat /tmp/nexent-image-build-invalid.log)" "Unsupported image: unknown" "unknown image should explain the error"
 
 output="$(
-  printf 'main,web,mcp,data-process\n2\n1\n1\n1\n' | \
-    bash "$BUILD_SCRIPT" --interactive
+  printf 'main,web,mcp,data-process\n1\n1\n' | \
+    bash "$BUILD_SCRIPT" --interactive --dry-run
 )"
 assert_contains "$output" "Nexent image build configuration" "interactive mode should show configuration prompt"
 assert_contains "$output" "nexent/nexent:latest" "interactive mode should accept latest version selection"
@@ -73,5 +78,16 @@ assert_contains "$output" "nexent/nexent-web:latest" "interactive image selectio
 assert_contains "$output" "nexent/nexent-mcp:latest" "interactive image selection should include mcp image"
 assert_contains "$output" "nexent/nexent-data-process:latest" "interactive image selection should include data-process image"
 assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactive image selection should exclude unselected terminal image"
+assert_not_contains "$output" "--platform" "interactive mode should use local architecture by default"
+
+output="$(
+  printf '\n\n1\n' | \
+    bash "$BUILD_SCRIPT" --interactive --dry-run
+)"
+assert_contains "$output" "nexent/nexent:latest" "interactive default image selection should include main image"
+assert_contains "$output" "nexent/nexent-web:latest" "interactive default image selection should include web image"
+assert_not_contains "$output" "nexent/nexent-mcp:latest" "interactive default image selection should not include mcp image"
+assert_not_contains "$output" "nexent/nexent-data-process:latest" "interactive default image selection should not include data-process image"
+assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactive default image selection should not include terminal image"
 
 echo "All image build tests passed."

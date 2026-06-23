@@ -16,7 +16,7 @@ source "$DEPLOYMENT_COMMON"
 IMAGE="all"
 IMAGES=""
 COMPONENTS=""
-PLATFORM="linux/amd64"
+PLATFORM=""
 VERSION="$(deployment_read_version)"
 REGISTRY="general"
 VARIANT="full"
@@ -46,14 +46,14 @@ Options:
   --terminal                 Build nexent/nexent-ubuntu-terminal
   --docs                     Build nexent/nexent-docs
   --components LIST          Compatibility mapping from deployment components to images.
-  --platform linux/amd64|linux/arm64
+  --platform linux/amd64|linux/arm64|linux/amd64,linux/arm64
   --version VERSION          Image tag, for example v2.2.1 or latest. Defaults to root VERSION.
   --registry general|mainland
   --variant full|slim        data-process image variant
   --push
   --load
   --dry-run
-  --interactive              Prompt for images, version, registry, platform, and output mode.
+  --interactive              Prompt for images, version, and registry.
 USAGE
 }
 
@@ -142,7 +142,7 @@ image_tui_multiselect() {
     "OpenSSH terminal tool image"
     "VitePress documentation site"
   )
-  local selected=(1 1 1 1 1 1)
+  local selected=(1 1 0 0 0 0)
   local cursor=0
   local i key key_tail selection
 
@@ -224,23 +224,19 @@ run_interactive_configuration() {
     else
       echo "Images:"
       echo "  main, web, data-process, mcp, terminal, docs"
-      IMAGES="$(prompt_choice "Enter images (default: all): " "all")"
+      IMAGES="$(prompt_choice "Enter images (default: main,web): " "main,web")"
     fi
   fi
 
   echo "Image version:"
-  echo "  1) Root VERSION ($root_version)"
-  echo "  2) latest"
-  echo "  3) Custom"
+  echo "  1) latest"
+  echo "  2) Root VERSION ($root_version)"
   local version_choice
-  version_choice="$(prompt_choice "Choose version [1/2/3] (default: 1): " "1")"
+  version_choice="$(prompt_choice "Choose version [1/2] (default: 1): " "1")"
   case "$version_choice" in
-    2|latest) VERSION="latest" ;;
-    3|custom|Custom)
-      VERSION="$(prompt_choice "Enter image version: " "$root_version")"
-      ;;
-    1|"") VERSION="$root_version" ;;
-    *) VERSION="$version_choice" ;;
+    1|latest|"") VERSION="latest" ;;
+    2|root|version|VERSION) VERSION="$root_version" ;;
+    *) echo "Unsupported version choice: $version_choice" >&2; exit 1 ;;
   esac
 
   echo ""
@@ -255,40 +251,6 @@ run_interactive_configuration() {
     *) REGISTRY="$registry_choice" ;;
   esac
 
-  echo ""
-  echo "Target platform:"
-  echo "  1) linux/amd64"
-  echo "  2) linux/arm64"
-  echo "  3) linux/amd64,linux/arm64"
-  echo "  4) Custom"
-  local platform_choice
-  platform_choice="$(prompt_choice "Choose platform [1/2/3/4] (default: 1): " "1")"
-  case "$platform_choice" in
-    2) PLATFORM="linux/arm64" ;;
-    3) PLATFORM="linux/amd64,linux/arm64" ;;
-    4|custom|Custom) PLATFORM="$(prompt_choice "Enter platform value: " "$PLATFORM")" ;;
-    1|"") PLATFORM="linux/amd64" ;;
-    *) PLATFORM="$platform_choice" ;;
-  esac
-
-  echo ""
-  echo "Output mode:"
-  echo "  1) dry-run (print buildx commands only)"
-  echo "  2) build only"
-  echo "  3) load into local Docker"
-  echo "  4) push to registry"
-  local output_choice
-  output_choice="$(prompt_choice "Choose output mode [1/2/3/4] (default: 1): " "1")"
-  PUSH=false
-  LOAD=false
-  DRY_RUN=false
-  case "$output_choice" in
-    2|build) ;;
-    3|load) LOAD=true ;;
-    4|push) PUSH=true ;;
-    1|dry-run|dryrun|"") DRY_RUN=true ;;
-    *) echo "Unsupported output mode: $output_choice" >&2; exit 1 ;;
-  esac
 }
 
 if [ "$INTERACTIVE" = true ]; then
@@ -328,7 +290,11 @@ build_one() {
   local dockerfile="$2"
   shift 2
   local tag="$REPO_PREFIX/$name:$VERSION"
-  local cmd=(docker buildx build --platform "$PLATFORM" -t "$tag" -f "$dockerfile")
+  local cmd=(docker buildx build)
+  if [ -n "$PLATFORM" ]; then
+    cmd+=(--platform "$PLATFORM")
+  fi
+  cmd+=(-t "$tag" -f "$dockerfile")
   if [ "$PUSH" = true ]; then
     cmd+=(--push)
   elif [ "$LOAD" = true ]; then

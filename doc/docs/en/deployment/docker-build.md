@@ -26,7 +26,9 @@ bash deploy/images/build.sh \
 bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
 ```
 
-When run in a terminal without arguments, `deploy/images/build.sh` prompts for images, image version (`VERSION`, `latest`, or custom), registry, platform, and output mode. Use `--interactive` to force the same prompts.
+When run in a terminal without arguments, `deploy/images/build.sh` prompts for images, image version (`latest` or root `VERSION`), and registry. The interactive defaults are images `main,web` and version `latest`. Use `--interactive` to force the same prompts.
+
+`--platform` is command-line only. Omit it to build for the local architecture.
 
 Image options:
 - `--main` builds `nexent`

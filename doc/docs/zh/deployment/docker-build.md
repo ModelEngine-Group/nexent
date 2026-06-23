@@ -30,7 +30,9 @@ bash deploy/images/build.sh \
 bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
 ```
 
-在终端无参数运行 `deploy/images/build.sh` 时，会依次选择镜像、镜像版本（根 `VERSION`、`latest` 或自定义）、镜像源、平台和输出方式。也可以用 `--interactive` 强制进入同样的选择流程。
+在终端无参数运行 `deploy/images/build.sh` 时，会依次选择镜像、镜像版本（`latest` 或根 `VERSION`）和镜像源。交互式默认选择 `main,web` 和 `latest`。也可以用 `--interactive` 强制进入同样的选择流程。
+
+`--platform` 仅支持命令行传入。不传时不会添加 `--platform` 参数，默认按本地架构构建。
 
 镜像选项：
 - `--main` 构建 `nexent`
