@@ -6,7 +6,6 @@ MIGRATION_DIR="${NEXENT_SQL_MIGRATION_DIR:-/opt/nexent/sql/migrations}"
 INIT_SQL_FILE="${NEXENT_SQL_INIT_FILE:-/opt/nexent/sql/init.sql}"
 MIGRATION_TABLE="${NEXENT_SQL_MIGRATION_TABLE:-nexent.schema_migrations}"
 LOCK_KEY="${NEXENT_SQL_MIGRATION_LOCK_KEY:-nexent_sql_migrations}"
-REQUIRED_BASE_OBJECTS="${NEXENT_SQL_REQUIRED_BASE_OBJECTS:-nexent.model_record_t nexent.knowledge_record_t nexent.ag_tenant_agent_t nexent.conversation_record_t nexent.conversation_message_t nexent.ag_tool_info_t}"
 
 POSTGRES_HOST="${POSTGRES_HOST:-nexent-postgresql}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
@@ -70,7 +69,7 @@ split_migration_table() {
     MIGRATION_SCHEMA="public"
   fi
   SQL_SEARCH_PATH="\"$MIGRATION_SCHEMA\", public"
-  if [ "$MIGRATION_SCHEMA" != "nexent" ] && printf '%s\n' "$REQUIRED_BASE_OBJECTS" | grep -Eq '(^|[[:space:]])nexent\.'; then
+  if [ "$MIGRATION_SCHEMA" != "nexent" ]; then
     SQL_SEARCH_PATH="\"nexent\", $SQL_SEARCH_PATH"
   fi
 }
@@ -235,26 +234,6 @@ collect_manifest() {
   fi
 }
 
-base_object_condition() {
-  local desired="$1"
-  local condition=""
-  local object
-  for object in $REQUIRED_BASE_OBJECTS; do
-    if [ -n "$condition" ]; then
-      condition="$condition AND "
-    fi
-    if [ "$desired" = "present" ]; then
-      condition="${condition}to_regclass('$(escape_sql_literal "$object")') IS NOT NULL"
-    else
-      condition="${condition}to_regclass('$(escape_sql_literal "$object")') IS NULL"
-    fi
-  done
-  if [ -z "$condition" ]; then
-    condition="true"
-  fi
-  printf "%s" "$condition"
-}
-
 append_migration_table_sql() {
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
 CREATE SCHEMA IF NOT EXISTS "$MIGRATION_SCHEMA";
@@ -298,7 +277,7 @@ SQL
 }
 
 append_init_sql() {
-  local init_checksum init_file_escaped app_version_escaped present_condition absent_condition
+  local init_checksum init_file_escaped app_version_escaped
   if [ ! -f "$INIT_SQL_FILE" ]; then
     cat >> "$MIGRATION_PLAN_FILE" <<SQL
 DO \$\$
@@ -313,53 +292,18 @@ SQL
   init_checksum="$(sha256_file "$INIT_SQL_FILE")"
   init_file_escaped="$(escape_sql_literal "$INIT_SQL_FILE")"
   app_version_escaped="$(escape_sql_literal "$APP_VERSION_VALUE")"
-  present_condition="$(base_object_condition present)"
-  absent_condition="$(base_object_condition absent)"
 
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
-\echo [sql-migrations] check __init.sql
-DO \$\$
-DECLARE existing_checksum text;
-BEGIN
-  SELECT checksum INTO existing_checksum
-  FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
-  WHERE migration_id = '__init.sql';
-
-  IF existing_checksum IS NOT NULL AND existing_checksum <> '$(escape_sql_literal "$init_checksum")' THEN
-    RAISE EXCEPTION 'checksum changed for already executed migration %', '__init.sql';
-  END IF;
-END
-\$\$;
-SELECT CASE WHEN EXISTS (
-  SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
-  WHERE migration_id = '__init.sql'
-) THEN 'true' ELSE 'false' END AS init_recorded \gset
-SELECT CASE WHEN $present_condition THEN 'true' ELSE 'false' END AS base_objects_present \gset
-SELECT CASE WHEN $absent_condition THEN 'true' ELSE 'false' END AS base_objects_absent \gset
-\if :init_recorded
-\echo [sql-migrations] skip __init.sql
-\else
-\if :base_objects_absent
 \echo [sql-migrations] apply __init.sql
 \i '$init_file_escaped'
 INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
 VALUES ('__init.sql', '$(escape_sql_literal "$init_checksum")', 'applied', '$app_version_escaped', '$init_file_escaped')
-ON CONFLICT (migration_id) DO NOTHING;
-\else
-\if :base_objects_present
-\echo [sql-migrations] baseline __init.sql
-INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
-VALUES ('__init.sql', '$(escape_sql_literal "$init_checksum")', 'baselined', '$app_version_escaped', '$init_file_escaped')
-ON CONFLICT (migration_id) DO NOTHING;
-\else
-DO \$\$
-BEGIN
-  RAISE EXCEPTION 'cannot baseline init SQL: required base objects partially exist. Required objects: %', '$(escape_sql_literal "$REQUIRED_BASE_OBJECTS")';
-END
-\$\$;
-\endif
-\endif
-\endif
+ON CONFLICT (migration_id) DO UPDATE SET
+  checksum = EXCLUDED.checksum,
+  status = EXCLUDED.status,
+  executed_at = now(),
+  app_version = EXCLUDED.app_version,
+  source_file = EXCLUDED.source_file;
 SQL
 }
 
@@ -480,7 +424,7 @@ run_wait_mode() {
   fi
 
   values="$(expected_values_sql)"
-  query="WITH expected(migration_id, checksum) AS (VALUES $values), joined AS (SELECT e.migration_id, e.checksum AS expected_checksum, m.checksum AS actual_checksum, m.status FROM expected e LEFT JOIN \"$MIGRATION_SCHEMA\".\"$MIGRATION_TABLE_NAME\" m ON m.migration_id = e.migration_id) SELECT CASE WHEN EXISTS (SELECT 1 FROM joined WHERE actual_checksum IS NOT NULL AND actual_checksum <> expected_checksum) THEN 'checksum_mismatch' WHEN (SELECT count(*) FROM joined WHERE actual_checksum = expected_checksum AND status IN ('applied', 'baselined')) = (SELECT count(*) FROM expected) THEN 'ready' ELSE 'waiting' END;"
+  query="WITH expected(migration_id, checksum) AS (VALUES $values), joined AS (SELECT e.migration_id, e.checksum AS expected_checksum, m.checksum AS actual_checksum, m.status FROM expected e LEFT JOIN \"$MIGRATION_SCHEMA\".\"$MIGRATION_TABLE_NAME\" m ON m.migration_id = e.migration_id) SELECT CASE WHEN EXISTS (SELECT 1 FROM joined WHERE migration_id <> '__init.sql' AND actual_checksum IS NOT NULL AND actual_checksum <> expected_checksum) THEN 'checksum_mismatch' WHEN (SELECT count(*) FROM joined WHERE actual_checksum = expected_checksum AND status IN ('applied', 'baselined')) = (SELECT count(*) FROM expected) THEN 'ready' ELSE 'waiting' END;"
 
   ensure_migration_table
 

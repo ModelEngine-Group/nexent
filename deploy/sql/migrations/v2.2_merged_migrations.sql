@@ -228,18 +228,8 @@ SET search_path TO nexent;
 BEGIN;
 
 -- Add custom_headers column if it doesn't exist
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'nexent'
-        AND table_name = 'mcp_record_t'
-        AND column_name = 'custom_headers'
-    ) THEN
-        ALTER TABLE nexent.mcp_record_t
-        ADD COLUMN custom_headers JSON DEFAULT NULL;
-    END IF;
-END $$;
+ALTER TABLE nexent.mcp_record_t
+ADD COLUMN IF NOT EXISTS custom_headers JSON DEFAULT NULL;
 
 -- Add comment to the column
 COMMENT ON COLUMN nexent.mcp_record_t.custom_headers IS 'Custom HTTP headers as JSON object for MCP server requests';
@@ -463,4 +453,3 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_version_no IS
     'Pinned version of selected_agent_id. NULL = use child current published version at runtime (legacy/draft).';
 
 COMMIT;
-

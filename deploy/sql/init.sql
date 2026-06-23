@@ -4,7 +4,7 @@ CREATE SCHEMA IF NOT EXISTS nexent;
 -- 2. Switch to the Schema (subsequent operations default to this Schema)
 SET search_path TO nexent;
 
-CREATE TABLE "conversation_message_t" (
+CREATE TABLE IF NOT EXISTS "conversation_message_t" (
   "message_id" SERIAL,
   "conversation_id" int4,
   "message_index" int4,
@@ -33,7 +33,7 @@ COMMENT ON COLUMN "conversation_message_t"."created_by" IS 'Creator ID, audit fi
 COMMENT ON COLUMN "conversation_message_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON TABLE "conversation_message_t" IS 'Carries specific response message content in conversations';
 
-CREATE TABLE "conversation_message_unit_t" (
+CREATE TABLE IF NOT EXISTS "conversation_message_unit_t" (
   "unit_id" SERIAL,
   "message_id" int4,
   "conversation_id" int4,
@@ -60,7 +60,7 @@ COMMENT ON COLUMN "conversation_message_unit_t"."updated_by" IS 'Last updater ID
 COMMENT ON COLUMN "conversation_message_unit_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "conversation_message_unit_t" IS 'Carries agent output content in each message';
 
-CREATE TABLE "conversation_record_t" (
+CREATE TABLE IF NOT EXISTS "conversation_record_t" (
   "conversation_id" SERIAL,
   "conversation_title" varchar(100) COLLATE "pg_catalog"."default",
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
@@ -79,7 +79,7 @@ COMMENT ON COLUMN "conversation_record_t"."updated_by" IS 'Last updater ID, audi
 COMMENT ON COLUMN "conversation_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "conversation_record_t" IS 'Overall information of Q&A conversations';
 
-CREATE TABLE "conversation_source_image_t" (
+CREATE TABLE IF NOT EXISTS "conversation_source_image_t" (
   "image_id" SERIAL,
   "conversation_id" int4,
   "message_id" int4,
@@ -108,7 +108,7 @@ COMMENT ON COLUMN "conversation_source_image_t"."created_by" IS 'Creator ID, aud
 COMMENT ON COLUMN "conversation_source_image_t"."updated_by" IS 'Last updater ID, audit field';
 COMMENT ON TABLE "conversation_source_image_t" IS 'Carries search image source information for conversation messages';
 
-CREATE TABLE "conversation_source_search_t" (
+CREATE TABLE IF NOT EXISTS "conversation_source_search_t" (
   "search_id" SERIAL,
   "unit_id" int4,
   "message_id" int4,
@@ -153,7 +153,7 @@ COMMENT ON COLUMN "conversation_source_search_t"."updated_by" IS 'Last updater I
 COMMENT ON COLUMN "conversation_source_search_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "conversation_source_search_t" IS 'Carries search text source information referenced in conversation response messages';
 
-CREATE TABLE "model_record_t" (
+CREATE TABLE IF NOT EXISTS "model_record_t" (
   "model_id" SERIAL,
   "model_repo" varchar(100) COLLATE "pg_catalog"."default",
   "model_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
@@ -191,10 +191,20 @@ COMMENT ON COLUMN "model_record_t"."updated_by" IS 'Last updater ID, audit field
 COMMENT ON COLUMN "model_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "model_record_t" IS 'List of models defined by users in the configuration page';
 
-INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable');
-INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status") VALUES ('', 'volcano_stt', 'OpenAI-API-Compatible', 'stt', '', '', 0, 0, 'volcano_stt', 'unavailable');
+INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status")
+SELECT '', 'volcano_tts', 'OpenAI-API-Compatible', 'tts', '', '', 0, 0, 'volcano_tts', 'unavailable'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "nexent"."model_record_t"
+  WHERE "model_name" = 'volcano_tts' AND "model_type" = 'tts'
+);
+INSERT INTO "nexent"."model_record_t" ("model_repo", "model_name", "model_factory", "model_type", "api_key", "base_url", "max_tokens", "used_token", "display_name", "connect_status")
+SELECT '', 'volcano_stt', 'OpenAI-API-Compatible', 'stt', '', '', 0, 0, 'volcano_stt', 'unavailable'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "nexent"."model_record_t"
+  WHERE "model_name" = 'volcano_stt' AND "model_type" = 'stt'
+);
 
-CREATE TABLE "knowledge_record_t" (
+CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "knowledge_id" SERIAL,
   "index_name" varchar(100) COLLATE "pg_catalog"."default",
   "knowledge_describe" varchar(300) COLLATE "pg_catalog"."default",
@@ -247,6 +257,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_ag_tool_info_update_time_trigger ON nexent.ag_tool_info_t;
 CREATE TRIGGER update_ag_tool_info_update_time_trigger
 BEFORE UPDATE ON nexent.ag_tool_info_t
 FOR EACH ROW
@@ -303,6 +314,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_ag_tenant_agent_update_time_trigger ON nexent.ag_tenant_agent_t;
 CREATE TRIGGER update_ag_tenant_agent_update_time_trigger
 BEFORE UPDATE ON nexent.ag_tenant_agent_t
 FOR EACH ROW
@@ -372,6 +384,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION update_ag_user_agent_update_time() IS 'Function to update the update_time column when a record in ag_user_agent_t is updated';
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_ag_user_agent_update_time_trigger ON nexent.ag_user_agent_t;
 CREATE TRIGGER update_ag_user_agent_update_time_trigger
 BEFORE UPDATE ON nexent.ag_user_agent_t
 FOR EACH ROW
@@ -423,6 +436,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION update_ag_tool_instance_update_time() IS 'Function to update the update_time column when a record in ag_tool_instance_t is updated';
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_ag_tool_instance_update_time_trigger ON nexent.ag_tool_instance_t;
 CREATE TRIGGER update_ag_tool_instance_update_time_trigger
 BEFORE UPDATE ON nexent.ag_tool_instance_t
 FOR EACH ROW

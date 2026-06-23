@@ -149,6 +149,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_ag_outer_api_tools_update_time_trigger ON nexent.ag_outer_api_tools;
 CREATE TRIGGER update_ag_outer_api_tools_update_time_trigger
 BEFORE UPDATE ON nexent.ag_outer_api_tools
 FOR EACH ROW
@@ -714,10 +715,19 @@ DROP SEQUENCE IF EXISTS nexent.ag_outer_api_tools_id_seq;
 -- =============================================================================
 
 -- Add foreign key constraint: task_id references ag_a2a_task_t(id) with CASCADE delete
-ALTER TABLE nexent.ag_a2a_message_t
-    ADD CONSTRAINT ag_a2a_message_t_task_id_fk
-    FOREIGN KEY (task_id)
-    REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ag_a2a_message_t_task_id_fk'
+          AND conrelid = 'nexent.ag_a2a_message_t'::regclass
+    ) THEN
+        ALTER TABLE nexent.ag_a2a_message_t
+            ADD CONSTRAINT ag_a2a_message_t_task_id_fk
+            FOREIGN KEY (task_id)
+            REFERENCES nexent.ag_a2a_task_t(id) ON DELETE CASCADE;
+    END IF;
+END $$;
 
 -- nexent-migration-source: v2.0.2_0425_add_is_a2a_to_ag_tenant_agent_version_t.sql
 -- nexent-migration-checksum: 017977bb962a4612381fa0a0a1b14ae1c1a2a93d59a96f08f30ea667eee9b2c1
@@ -808,6 +818,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_user_oauth_account_t_update_time_trigger ON nexent.user_oauth_account_t;
 CREATE TRIGGER update_user_oauth_account_t_update_time_trigger
 BEFORE UPDATE ON nexent.user_oauth_account_t
 FOR EACH ROW
@@ -887,4 +898,3 @@ ADD COLUMN IF NOT EXISTS last_doc_update_time TIMESTAMP;
 COMMENT ON COLUMN nexent.knowledge_record_t.summary_frequency IS 'Auto-summary frequency: 1h, 3h, 6h, 1d, 1w, or NULL (disabled)';
 COMMENT ON COLUMN nexent.knowledge_record_t.last_summary_time IS 'Timestamp of last summary generation';
 COMMENT ON COLUMN nexent.knowledge_record_t.last_doc_update_time IS 'Timestamp of last document add/delete operation, used for auto-summary optimization to skip unnecessary summary regeneration';
-

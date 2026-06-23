@@ -2,30 +2,31 @@ BEGIN;
   -- Create pg_net extension
   CREATE EXTENSION IF NOT EXISTS pg_net SCHEMA extensions;
   -- Create supabase_functions schema
-  CREATE SCHEMA supabase_functions AUTHORIZATION supabase_admin;
+  CREATE SCHEMA IF NOT EXISTS supabase_functions AUTHORIZATION supabase_admin;
   GRANT USAGE ON SCHEMA supabase_functions TO postgres, anon, authenticated, service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON FUNCTIONS TO postgres, anon, authenticated, service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON SEQUENCES TO postgres, anon, authenticated, service_role;
   -- supabase_functions.migrations definition
-  CREATE TABLE supabase_functions.migrations (
+  CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
     version text PRIMARY KEY,
     inserted_at timestamptz NOT NULL DEFAULT NOW()
   );
   -- Initial supabase_functions migration
-  INSERT INTO supabase_functions.migrations (version) VALUES ('initial');
+  INSERT INTO supabase_functions.migrations (version) VALUES ('initial')
+  ON CONFLICT (version) DO NOTHING;
   -- supabase_functions.hooks definition
-  CREATE TABLE supabase_functions.hooks (
+  CREATE TABLE IF NOT EXISTS supabase_functions.hooks (
     id bigserial PRIMARY KEY,
     hook_table_id integer NOT NULL,
     hook_name text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT NOW(),
     request_id bigint
   );
-  CREATE INDEX supabase_functions_hooks_request_id_idx ON supabase_functions.hooks USING btree (request_id);
-  CREATE INDEX supabase_functions_hooks_h_table_id_h_name_idx ON supabase_functions.hooks USING btree (hook_table_id, hook_name);
+  CREATE INDEX IF NOT EXISTS supabase_functions_hooks_request_id_idx ON supabase_functions.hooks USING btree (request_id);
+  CREATE INDEX IF NOT EXISTS supabase_functions_hooks_h_table_id_h_name_idx ON supabase_functions.hooks USING btree (hook_table_id, hook_name);
   COMMENT ON TABLE supabase_functions.hooks IS 'Supabase Functions Hooks: Audit trail for triggered hooks.';
-  CREATE FUNCTION supabase_functions.http_request()
+  CREATE OR REPLACE FUNCTION supabase_functions.http_request()
     RETURNS trigger
     LANGUAGE plpgsql
     AS $function$
@@ -200,7 +201,8 @@ BEGIN;
     END IF;
   END
   $$;
-  INSERT INTO supabase_functions.migrations (version) VALUES ('20210809183423_update_grants');
+  INSERT INTO supabase_functions.migrations (version) VALUES ('20210809183423_update_grants')
+  ON CONFLICT (version) DO NOTHING;
   ALTER function supabase_functions.http_request() SECURITY DEFINER;
   ALTER function supabase_functions.http_request() SET search_path = supabase_functions;
   REVOKE ALL ON FUNCTION supabase_functions.http_request() FROM PUBLIC;

@@ -1136,13 +1136,13 @@ ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS current_version_no INTEGER NULL;
 
 -- 步骤5：修改主键
-ALTER TABLE nexent.ag_tenant_agent_t DROP CONSTRAINT ag_tenant_agent_t_pkey;
+ALTER TABLE nexent.ag_tenant_agent_t DROP CONSTRAINT IF EXISTS ag_tenant_agent_t_pkey;
 ALTER TABLE nexent.ag_tenant_agent_t ADD CONSTRAINT ag_tenant_agent_t_pkey PRIMARY KEY (agent_id, version_no);
 
-ALTER TABLE nexent.ag_tool_instance_t DROP CONSTRAINT ag_tool_instance_t_pkey;
+ALTER TABLE nexent.ag_tool_instance_t DROP CONSTRAINT IF EXISTS ag_tool_instance_t_pkey;
 ALTER TABLE nexent.ag_tool_instance_t ADD CONSTRAINT ag_tool_instance_t_pkey PRIMARY KEY (tool_instance_id, version_no);
 
-ALTER TABLE nexent.ag_agent_relation_t DROP CONSTRAINT ag_agent_relation_t_pkey;
+ALTER TABLE nexent.ag_agent_relation_t DROP CONSTRAINT IF EXISTS ag_agent_relation_t_pkey;
 ALTER TABLE nexent.ag_agent_relation_t ADD CONSTRAINT ag_agent_relation_t_pkey PRIMARY KEY (relation_id, version_no);
 
 -- 步骤6：新增agent版本管理表
@@ -1380,6 +1380,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
 (187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE')
+ON CONFLICT (role_permission_id) DO NOTHING;
 
 -- nexent-migration-source: v1.8.1_0306_add_user_token_info.sql
 -- nexent-migration-checksum: 032bdaf05034b90867f1de707852143898a25f02c86fd6a7e8955bbedf615f81
@@ -1460,4 +1461,3 @@ DROP TABLE IF EXISTS nexent.partner_mapping_id_t CASCADE;
 
 -- Drop the associated sequence if it exists
 DROP SEQUENCE IF EXISTS nexent.partner_mapping_id_t_id_seq;
-

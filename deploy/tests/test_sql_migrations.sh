@@ -106,11 +106,16 @@ assert_file_contains "$PLAN_FILE" "CREATE TEMP TABLE _nexent_migration_probe_res
 if grep -Fq "ON COMMIT DROP" "$PLAN_FILE"; then
   fail "probe temp table should not be dropped on transaction commit"
 fi
-assert_file_contains "$PLAN_FILE" "SELECT CASE WHEN to_regclass('nexent.model_record_t') IS NOT NULL" "plan should check required base objects"
-assert_file_contains "$PLAN_FILE" "\\i '$INIT_SQL_FILE'" "plan should apply init SQL for an empty database"
+assert_file_contains "$PLAN_FILE" "\\i '$INIT_SQL_FILE'" "plan should always apply init SQL"
 assert_file_contains "$PLAN_FILE" "VALUES ('__init.sql'" "plan should record init SQL"
 assert_file_contains "$PLAN_FILE" "'applied', 'v-test'" "plan should record applied status and app version"
-assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] baseline __init.sql" "plan should support init baseline mode"
+assert_file_contains "$PLAN_FILE" "ON CONFLICT (migration_id) DO UPDATE SET" "plan should update init migration record after idempotent init SQL"
+if grep -Fq "base_objects_" "$PLAN_FILE"; then
+  fail "plan should not use required base object checks for init SQL"
+fi
+if grep -Fq "baseline __init.sql" "$PLAN_FILE"; then
+  fail "plan should not baseline init SQL"
+fi
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] probe v1_test.sql" "plan should probe bundle source migrations"
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] baseline v1_test.sql" "plan should baseline probed migrations"
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] apply v1_test.sql" "plan should apply unprobed-current migrations"
@@ -140,6 +145,7 @@ assert_file_contains "$WAIT_QUERY_FILE" "v1_test.sql" "wait query should include
 assert_file_contains "$WAIT_QUERY_FILE" "v1_second.sql" "wait query should include all bundle sources"
 assert_file_contains "$WAIT_QUERY_FILE" "v2_test.sql" "wait query should include standalone migration target"
 assert_file_contains "$WAIT_QUERY_FILE" "checksum_mismatch" "wait query should fail fast on checksum mismatch"
+assert_file_contains "$WAIT_QUERY_FILE" "migration_id <> '__init.sql'" "wait query should allow init SQL checksum to be updated by migrator"
 assert_file_contains "$WAIT_QUERY_FILE" "status IN ('applied', 'baselined')" "wait query should accept applied and baselined records"
 
 SOURCE_COUNT="$(awk '/^-- nexent-migration-source: / {count++} END {print count + 0}' "$DEPLOY_ROOT"/sql/migrations/*.sql)"
