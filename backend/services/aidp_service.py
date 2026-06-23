@@ -58,8 +58,8 @@ def fetch_aidp_knowledge_bases_impl(
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
-            timeout=20.0,
-            verify_ssl=True,
+            timeout=60.0,
+            verify_ssl=False,
         )
         response = client.get(list_url, headers=headers)
         response.raise_for_status()
