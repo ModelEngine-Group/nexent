@@ -157,7 +157,7 @@ export const ModelEditDialog = ({
   const supportsCapacityFields =
     !isEmbeddingModel && !isRerankModel && !isVoiceModel;
   const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
+    ? validateCapacityForm(form, [])
     : null;
 
   const canSuggestCapacity = () =>
@@ -209,7 +209,8 @@ export const ModelEditDialog = ({
   const isFormValid = () => {
     if (
       supportsCapacityFields &&
-      validateCapacityForm(form, ["contextWindowTokens", "maxOutputTokens"])
+      // context_window/max_output not required; only data-shape checks gate Save.
+      validateCapacityForm(form, [])
     ) {
       return false;
     }
@@ -630,7 +631,8 @@ export const ModelEditDialog = ({
               validationError={capacityValidationError}
               capacitySource={model.capacitySource}
               capabilityProfileVersion={model.capabilityProfileVersion}
-              requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+              // context_window/max_output no longer required; empty input
+              // lands DEFAULT_* via buildCapacityPayload at save time.
               suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
               suggestionLoading={checkingCapacitySuggestion}
               onUseSuggestion={() =>
@@ -905,11 +907,12 @@ export const ProviderConfigEditDialog = ({
   // input. Per the W1/W2 plan, never surface legacy max_tokens for LLM/VLM
   // regardless of the hideCapacityFields flag.
   const needsLegacyMaxTokens = isRerankModel || isVoiceModel;
-  // In bulk mode the panel is optional ("fill to override; leave empty to
-  // keep each row's current value"), so no required-field markers and the
-  // user can leave both empty to skip the capacity bulk-apply entirely.
-  const capacityRequiredFields: Array<keyof ModelCapacityFormState> =
-    supportsCapacityFields ? ["contextWindowTokens", "maxOutputTokens"] : [];
+  // Neither mode marks any field required:
+  // - per-row mode (supportsCapacityFields): context_window/max_output are
+  //   optional and get DEFAULT_* substituted at save by buildCapacityPayload
+  // - bulk-apply mode (supportsBulkCapacity): optional broadcast -- "fill
+  //   to override; leave empty to keep each row's current value"
+  const capacityRequiredFields: Array<keyof ModelCapacityFormState> = [];
   const capacityValidationError =
     supportsCapacityFields || supportsBulkCapacity
       ? validateCapacityForm(capacityForm, capacityRequiredFields)
@@ -974,12 +977,18 @@ export const ProviderConfigEditDialog = ({
             }
           : {}),
         // Both per-model and bulk-apply modes write capacity via
-        // buildCapacityPayload. In bulk mode this returns {} when all
-        // capacity fields are empty (hasCapacityValues check), so an
-        // apiKey-only edit doesn't accidentally null out per-model values.
-        ...(supportsCapacityFields || supportsBulkCapacity
+        // buildCapacityPayload. Per-model (supportsCapacityFields) opts
+        // into default substitution: empty context_window/max_output land
+        // DEFAULT_CONTEXT_WINDOW_TOKENS / DEFAULT_MAX_OUTPUT_TOKENS at the
+        // wire. Bulk-apply (supportsBulkCapacity) passes applyDefaults=false
+        // so empty fields stay omitted ("don't broadcast this value"), and
+        // an apiKey-only bulk edit doesn't accidentally null out per-row
+        // capacity by writing 32K/4K across N rows.
+        ...(supportsCapacityFields
           ? buildCapacityPayload(capacityForm)
-          : {}),
+          : supportsBulkCapacity
+            ? buildCapacityPayload(capacityForm, { applyDefaults: false })
+            : {}),
       });
       onClose();
     } finally {
@@ -1015,7 +1024,7 @@ export const ProviderConfigEditDialog = ({
             validationError={capacityValidationError}
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
-            requiredFields={["contextWindowTokens", "maxOutputTokens"]}
+            // context_window/max_output optional; DEFAULT_* substitute at save.
             showDeprecatedMaxTokensWarning={
               Boolean(initialMaxTokens) &&
               !initialCapacity?.maxOutputTokens &&
@@ -1041,6 +1050,10 @@ export const ProviderConfigEditDialog = ({
               onChange={handleCapacityChange}
               validationError={capacityValidationError}
               formMode="add"
+              // Bulk-apply broadcast: empty input means "do not broadcast";
+              // showing DEFAULT_* placeholders here would mislead operators
+              // into thinking empty would land 32K/4K on every selected row.
+              applyDefaultsOnEmpty={false}
             />
           </div>
         )}
