@@ -77,7 +77,11 @@ _OPERATOR_OVERRIDE_FIELDS = (
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
 # Keyed by model_id; cleared only on process restart.
+# Guarded by a lock because the check-then-add window is not atomic on its
+# own: two threads can both pass the `in` check before either calls `add`,
+# leading to duplicate WARNING lines defeating the per-process dedup.
 _CAPACITY_WARNING_EMITTED: set = set()
+_CAPACITY_WARNING_LOCK = threading.Lock()
 
 
 def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
@@ -227,9 +231,13 @@ def _warn_missing_capacity_once(
         model_info.get("model_id") if isinstance(model_info, dict) else None
     )
     dedup_key = db_model_id if db_model_id is not None else f"{provider}/{model_id_str}"
-    if dedup_key in _CAPACITY_WARNING_EMITTED:
-        return
-    _CAPACITY_WARNING_EMITTED.add(dedup_key)
+    # Test-and-set inside the lock so concurrent first-time callers don't
+    # both make it past the membership check. Logging happens outside the
+    # lock to avoid serialising I/O across all warning paths.
+    with _CAPACITY_WARNING_LOCK:
+        if dedup_key in _CAPACITY_WARNING_EMITTED:
+            return
+        _CAPACITY_WARNING_EMITTED.add(dedup_key)
 
     reason = (
         f"resolver error: {detail}"
@@ -586,7 +594,7 @@ async def create_agent_config(
     allow_memory_search: bool = True,
     version_no: int = 0,
     override_model_id: int | None = None,
-request_requested_output_tokens: int | None = None,
+    request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
