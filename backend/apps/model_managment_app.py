@@ -114,9 +114,6 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
     except ValueError as exc:
         logger.debug("Capacity suggestion unavailable for connectivity request: %s", exc)
         return None
-    except Exception as exc:
-        logger.debug("Capacity suggestion failed during connectivity request: %s", exc)
-        return None
 
 
 @router.post("/create")
@@ -175,6 +172,8 @@ async def suggest_model_capacity(
     except ValueError as e:
         logging.error(f"Invalid capacity suggestion request: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to suggest model capacity: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -194,6 +193,8 @@ async def get_model_capacity_coverage(authorization: Optional[str] = Header(None
             "message": "Successfully retrieved model capacity coverage",
             "data": jsonable_encoder(result),
         })
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to get model capacity coverage: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

@@ -182,9 +182,14 @@ def _resolve_input_budget(
     """
     if not isinstance(model_info, dict):
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
-    provider_raw = model_info.get("model_factory") or ""
+    provider_raw = model_info.get("model_factory")
     provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
     model_id = model_info.get("model_name") or ""
+    provider_missing_detail = None
+    if not provider:
+        provider_missing_detail = (
+            "model_factory/provider is missing; capacity catalog matching is disabled"
+        )
     try:
         snapshot = resolve_capacity(
             model_id=model_id,
@@ -206,7 +211,9 @@ def _resolve_input_budget(
             snapshot,
         )
     except ProviderCapabilityUnknown:
-        _warn_missing_capacity_once(model_info, provider, model_id)
+        _warn_missing_capacity_once(
+            model_info, provider, model_id, detail=provider_missing_detail,
+        )
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
     except ResolverError as exc:
         _warn_missing_capacity_once(
