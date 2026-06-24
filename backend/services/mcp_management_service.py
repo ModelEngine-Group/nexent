@@ -11,21 +11,28 @@ from consts.exceptions import (
     McpValidationError,
     UnauthorizedError,
 )
-from database.community_mcp_db import (
-    create_mcp_community_record,
-    delete_mcp_community_record_by_id,
-    get_mcp_community_record_by_id_and_tenant,
-    get_mcp_community_records,
-    get_mcp_community_tag_stats,
-    list_mcp_community_records_by_tenant_and_user,
-    list_mcp_community_review_records,
-    update_mcp_community_record_by_id,
-    update_mcp_community_review_status,
+from database.market_mcp_db import (
+    create_mcp_market_record,
+    delete_mcp_market_record_by_id,
+    get_mcp_market_record_by_id,
+    get_mcp_market_records,
+    get_mcp_market_tag_stats,
+    list_mcp_market_records_by_tenant_and_user,
+    update_mcp_market_record_version,
+)
+from database.market_review_db import (
+    create_mcp_market_review,
+    get_mcp_market_review_by_id,
+    list_mcp_market_review_records,
+    list_mcp_market_review_records_by_market_id,
+    list_mcp_market_review_records_by_tenant_and_user,
+    update_mcp_market_review_market_id,
+    update_mcp_market_review_status,
 )
 from database.remote_mcp_db import (
-    clear_mcp_record_community_id,
+    clear_mcp_record_market_id,
     get_mcp_record_by_id_and_tenant,
-    update_mcp_record_community_id_by_id,
+    update_mcp_record_market_id_by_id,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 
@@ -53,7 +60,10 @@ def _get_mcp_review_admin_scope(user_id: str, tenant_id: str) -> str | None:
 
 def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "communityId": row.get("community_id"),
+        "communityId": row.get("market_id") or row.get("community_id"),
+        "marketId": row.get("market_id"),
+        "reviewId": row.get("review_id"),
+        "sourceMcpId": row.get("source_mcp_id"),
         "name": row.get("mcp_name"),
         "version": row.get("version"),
         "description": row.get("description"),
@@ -66,9 +76,10 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "configJson": row.get("config_json") if isinstance(row.get("config_json"), dict) else None,
         "registryJson": row.get("registry_json") if isinstance(row.get("registry_json"), dict) else None,
         "tags": row.get("tags") or [],
-        "reviewStatus": row.get("review_status") or MCP_REVIEW_PENDING,
+        "reviewStatus": row.get("review_status") if "review_status" in row else MCP_REVIEW_APPROVED,
         "reviewType": row.get("review_type") or MCP_REVIEW_TYPE_INITIAL_LISTING,
-        "previousVersion": (row.get("registry_json") or {}).get("_previousVersion") if isinstance(row.get("registry_json"), dict) else None,
+        "previousVersion": row.get("previous_version"),
+        "pendingVersion": row.get("version") if row.get("review_status") == MCP_REVIEW_PENDING else None,
     }
 
 
@@ -96,7 +107,7 @@ async def list_community_mcp_services(
     Returns:
         Dictionary with count, nextCursor, and items
     """
-    db_result = get_mcp_community_records(
+    db_result = get_mcp_market_records(
         search=search,
         tag=tag,
         transport_type=transport_type,
@@ -122,7 +133,7 @@ def list_community_mcp_tag_stats() -> List[Dict[str, Any]]:
     Returns:
         List of tag statistics
     """
-    return get_mcp_community_tag_stats()
+    return get_mcp_market_tag_stats()
 
 
 async def publish_community_mcp_service(
@@ -137,29 +148,12 @@ async def publish_community_mcp_service(
     mcp_server: str | None = None,
     config_json: Dict[str, Any] | None = None,
 ) -> int:
-    """Publish a local MCP service to the community.
+    """Submit an initial listing review for a local MCP service.
 
-    Optional ``name`` / ``description`` / ``version`` / ``tags`` / ``mcp_server`` /
-    ``config_json`` override the values copied from the local MCP row when creating
-    the community record. Omit an optional field (``None``) to keep the local MCP
-    value for that field.
+    Creates a review record (not a market record). The market record is created
+    only when an admin approves the review.
 
-    Args:
-        tenant_id: Tenant ID
-        user_id: User ID
-        mcp_id: MCP record ID to publish
-        name: Optional community display name override
-        description: Optional description override
-        version: Optional version override
-        tags: Optional tags override
-        mcp_server: Optional remote MCP URL override
-        config_json: Optional container config override
-
-    Returns:
-        Community record ID
-
-    Raises:
-        McpNotFoundError: If MCP record is not found
+    Returns the review_id.
     """
     source_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not source_record:
@@ -179,12 +173,12 @@ async def publish_community_mcp_service(
         config_json if isinstance(config_json, dict) else source_config_json
     )
 
-    # Remote MCP table may omit transport_type; community list still needs it for filters.
     community_transport_type = "container" if final_config_json is not None else "url"
 
-    community_id = create_mcp_community_record(
+    review_id = create_mcp_market_review(
         mcp_data={
             "mcp_name": final_name,
+            "source_mcp_id": mcp_id,
             "mcp_server": final_mcp_server,
             "version": final_version,
             "registry_json": source_registry_json,
@@ -198,20 +192,14 @@ async def publish_community_mcp_service(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    update_mcp_record_community_id_by_id(
-        mcp_id=mcp_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        community_id=community_id,
-    )
-    return community_id
+    return review_id
 
 
 async def update_community_mcp_service(
     *,
     tenant_id: str,
     user_id: str,
-    community_id: int,
+    market_id: int,
     name: str | None,
     description: str | None,
     tags: List[str] | None,
@@ -221,32 +209,33 @@ async def update_community_mcp_service(
     config_json: Dict[str, Any] | None = None,
     transport_type: str | None = None,
 ) -> None:
-    """Update a community MCP service.
+    """Submit a version update review for a published market MCP.
+
+    Creates a review record with review_type='version_update'. The market record
+    is NOT modified until an admin approves the review.
 
     Args:
         tenant_id: Tenant ID
         user_id: User ID
-        community_id: Community record ID
+        market_id: Market record ID
         name: New MCP service name
         description: MCP service description
         tags: MCP tags
-        version: MCP version
+        version: New version being submitted
         registry_json: Registry metadata JSON
         mcp_server: MCP server URL
         config_json: Container MCP configuration JSON
         transport_type: Transport type
 
     Raises:
-        McpNotFoundError: If community MCP record is not found
+        McpNotFoundError: If market MCP record is not found
     """
-    current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=tenant_id)
+    current = get_mcp_market_record_by_id(market_id=market_id)
     if not current:
-        raise McpNotFoundError("Community MCP record not found")
+        raise McpNotFoundError("Market MCP record not found")
 
     existing_config_json = current.get("config_json") if isinstance(current.get("config_json"), dict) else None
     next_registry_json = registry_json if isinstance(registry_json, dict) else (current.get("registry_json") or {})
-    if isinstance(next_registry_json, dict) and version and current.get("version") and version != current.get("version"):
-        next_registry_json = {**next_registry_json, "_previousVersion": current.get("version")}
     next_config_json = config_json if isinstance(config_json, dict) else existing_config_json
     next_transport_type = transport_type
     if next_transport_type is None and isinstance(config_json, dict):
@@ -254,20 +243,23 @@ async def update_community_mcp_service(
     if next_transport_type is None and mcp_server is not None:
         next_transport_type = "url"
 
-    update_mcp_community_record_by_id(
-        community_id=community_id,
+    create_mcp_market_review(
+        mcp_data={
+            "market_id": market_id,
+            "mcp_name": name,
+            "mcp_server": mcp_server,
+            "version": version,
+            "registry_json": next_registry_json,
+            "transport_type": next_transport_type,
+            "config_json": next_config_json,
+            "review_status": MCP_REVIEW_PENDING,
+            "review_type": MCP_REVIEW_TYPE_VERSION_UPDATE,
+            "previous_version": current.get("version"),
+            "tags": tags,
+            "description": description,
+        },
         tenant_id=tenant_id,
         user_id=user_id,
-        name=name,
-        description=description,
-        tags=tags,
-        version=version,
-        registry_json=next_registry_json,
-        config_json=next_config_json,
-        mcp_server=mcp_server,
-        transport_type=next_transport_type,
-        review_status=MCP_REVIEW_PENDING,
-        review_type=MCP_REVIEW_TYPE_VERSION_UPDATE,
     )
 
 
@@ -283,7 +275,7 @@ async def list_community_mcp_review_services(
     limit: int = 30,
 ) -> Dict[str, Any]:
     review_tenant_id = _get_mcp_review_admin_scope(user_id, tenant_id)
-    db_result = list_mcp_community_review_records(
+    db_result = list_mcp_market_review_records(
         tenant_id=review_tenant_id,
         status=status,
         search=search,
@@ -303,14 +295,65 @@ async def approve_community_mcp_service(
     *,
     tenant_id: str,
     user_id: str,
-    community_id: int,
+    review_id: int,
 ) -> None:
+    """Approve a review submission.
+
+    For initial_listing: creates a market record and links the review to it.
+    For version_update: updates the existing market record's version/registry_json.
+    """
     review_tenant_id = _get_mcp_review_admin_scope(user_id, tenant_id)
-    current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=review_tenant_id)
+    current = get_mcp_market_review_by_id(review_id=review_id, tenant_id=review_tenant_id)
     if not current:
-        raise McpNotFoundError("Community MCP record not found")
-    update_mcp_community_review_status(
-        community_id=community_id,
+        raise McpNotFoundError("Review record not found")
+
+    review_type = current.get("review_type") or MCP_REVIEW_TYPE_INITIAL_LISTING
+
+    if review_type == MCP_REVIEW_TYPE_INITIAL_LISTING:
+        # Promote to market: create a market record from the review data
+        market_id = create_mcp_market_record(
+            mcp_data={
+                "mcp_name": current.get("mcp_name"),
+                "mcp_server": current.get("mcp_server"),
+                "version": current.get("version"),
+                "registry_json": current.get("registry_json"),
+                "transport_type": current.get("transport_type"),
+                "config_json": current.get("config_json"),
+                "tags": current.get("tags"),
+                "description": current.get("description"),
+            },
+            tenant_id=current.get("tenant_id"),
+            user_id=current.get("user_id"),
+        )
+        # Link the review to the market record
+        update_mcp_market_review_market_id(
+            review_id=review_id,
+            market_id=market_id,
+            user_id=user_id,
+        )
+        source_mcp_id = current.get("source_mcp_id")
+        if source_mcp_id is not None:
+            update_mcp_record_market_id_by_id(
+                mcp_id=source_mcp_id,
+                tenant_id=current.get("tenant_id"),
+                user_id=current.get("user_id"),
+                market_id=market_id,
+            )
+    else:
+        # Version update: update the existing market record
+        market_id = current.get("market_id")
+        if market_id is None:
+            raise McpNotFoundError("Market record not found for version update")
+        update_mcp_market_record_version(
+            market_id=market_id,
+            version=current.get("version"),
+            registry_json=current.get("registry_json"),
+            user_id=user_id,
+        )
+
+    # Mark review as approved
+    update_mcp_market_review_status(
+        review_id=review_id,
         tenant_id=review_tenant_id,
         user_id=user_id,
         review_status=MCP_REVIEW_APPROVED,
@@ -321,14 +364,14 @@ async def reject_community_mcp_service(
     *,
     tenant_id: str,
     user_id: str,
-    community_id: int,
+    review_id: int,
 ) -> None:
     review_tenant_id = _get_mcp_review_admin_scope(user_id, tenant_id)
-    current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=review_tenant_id)
+    current = get_mcp_market_review_by_id(review_id=review_id, tenant_id=review_tenant_id)
     if not current:
-        raise McpNotFoundError("Community MCP record not found")
-    update_mcp_community_review_status(
-        community_id=community_id,
+        raise McpNotFoundError("Review record not found")
+    update_mcp_market_review_status(
+        review_id=review_id,
         tenant_id=review_tenant_id,
         user_id=user_id,
         review_status=MCP_REVIEW_REJECTED,
@@ -339,30 +382,39 @@ async def delete_community_mcp_service(
     *,
     tenant_id: str,
     user_id: str,
-    community_id: int,
+    market_id: int,
 ) -> None:
-    """Delete a community MCP service.
+    """Delete a market MCP service and all its associated reviews.
 
     Args:
         tenant_id: Tenant ID
         user_id: User ID
-        community_id: Community record ID
+        market_id: Market record ID
 
     Raises:
-        McpNotFoundError: If community MCP record is not found
+        McpNotFoundError: If market MCP record is not found
     """
-    current = get_mcp_community_record_by_id_and_tenant(community_id=community_id, tenant_id=tenant_id)
+    current = get_mcp_market_record_by_id(market_id=market_id)
     if not current:
-        raise McpNotFoundError("Community MCP record not found")
-    delete_mcp_community_record_by_id(
-        community_id=community_id,
-        tenant_id=tenant_id,
+        raise McpNotFoundError("Market MCP record not found")
+    # Soft-delete the market record
+    delete_mcp_market_record_by_id(
+        market_id=market_id,
         user_id=user_id,
     )
-    clear_mcp_record_community_id(
+    # Soft-delete all associated reviews
+    for review in list_mcp_market_review_records_by_market_id(market_id=market_id):
+        update_mcp_market_review_status(
+            review_id=review.get("review_id"),
+            tenant_id=None,
+            user_id=user_id,
+            review_status=MCP_REVIEW_REJECTED,
+        )
+    # Clear FK references from local MCP records
+    clear_mcp_record_market_id(
         tenant_id=tenant_id,
         user_id=user_id,
-        community_id=community_id,
+        market_id=market_id,
     )
 
 
@@ -380,11 +432,30 @@ async def list_my_community_mcp_services(
     Returns:
         Dictionary with count and items
     """
-    rows = list_mcp_community_records_by_tenant_and_user(
+    market_rows = list_mcp_market_records_by_tenant_and_user(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    items = [_to_community_card(row) for row in rows]
+    review_rows = list_mcp_market_review_records_by_tenant_and_user(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        include_approved=True,
+    )
+    source_mcp_id_by_market_id = {
+        row.get("market_id"): row.get("source_mcp_id")
+        for row in review_rows
+        if row.get("review_status") == MCP_REVIEW_APPROVED
+        and row.get("market_id") is not None
+        and row.get("source_mcp_id") is not None
+    }
+    enriched_market_rows = [
+        {**row, "source_mcp_id": source_mcp_id_by_market_id.get(row.get("market_id"))}
+        for row in market_rows
+    ]
+    active_review_rows = [
+        row for row in review_rows if row.get("review_status") != MCP_REVIEW_APPROVED
+    ]
+    items = [_to_community_card(row) for row in [*active_review_rows, *enriched_market_rows]]
     return {
         "count": len(items),
         "items": items,

@@ -126,7 +126,7 @@ async def add_mcp_service_endpoint(
             container_config=payload.container_config,
             registry_json=payload.registry_json,
             version=payload.version,
-            community_id=payload.community_id,
+            market_id=payload.market_id,
             enabled=payload.enabled if payload.enabled is not None else False,
         )
 
@@ -174,7 +174,7 @@ async def add_container_mcp_service_endpoint(
             authorization_token=payload.authorization_token,
             registry_json=payload.registry_json,
             version=payload.version,
-            community_id=payload.community_id,
+            market_id=payload.market_id,
             port=payload.port,
             mcp_config=payload.mcp_config,
         )
@@ -248,7 +248,7 @@ async def update_mcp_service_endpoint(
             config_json=payload.config_json,
             tags=payload.tags,
             version=payload.version,
-            community_id=payload.community_id,
+            market_id=payload.market_id,
         )
 
         return JSONResponse(

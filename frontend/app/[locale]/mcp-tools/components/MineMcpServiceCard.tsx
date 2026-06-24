@@ -1,5 +1,5 @@
 import { Button, Dropdown, Tag, type MenuProps } from "antd";
-import { ArrowDownFromLine, CheckCircle, Circle, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, User } from "lucide-react";
+import { ArrowDownFromLine, CheckCircle, Circle, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, Upload, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -34,6 +34,7 @@ interface MineMcpServiceCardProps {
     onlineService: CommunityMcpCard
   ) => void;
   onDelete: (item: MineMcpCardItem) => void;
+  onViewReviewProgress?: (item: MineMcpCardItem, onlineService?: CommunityMcpCard) => void;
 }
 
 export default function MineMcpServiceCard({
@@ -49,6 +50,7 @@ export default function MineMcpServiceCard({
   onSubmitVersionUpdate,
   onUnpublishOnline,
   onDelete,
+  onViewReviewProgress,
 }: MineMcpServiceCardProps) {
   const { t } = useTranslation("common");
   const service = item.service;
@@ -70,36 +72,73 @@ export default function MineMcpServiceCard({
   );
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
-  const actionItems: MenuProps["items"] = [
-    {
-      key: "submit-version-update",
-      label: t("mcpTools.mine.submitVersionUpdate"),
-      icon: <RefreshCw className="h-3.5 w-3.5" />,
-      disabled: publishing,
-      onClick: () => onSubmitVersionUpdate(item, onlineService),
-    },
-    ...(isInRepository
-      ? [
-          {
-            key: "unpublish-online-version" as const,
-            label: t("mcpTools.mine.unpublishOnlineVersion"),
-            icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
-            danger: true,
-            disabled: unpublishing,
-            onClick: () => {
-              if (onlineService) onUnpublishOnline(item, onlineService);
-            },
-          },
-        ]
-      : []),
-    {
+
+  const isOwned = item.kind === "community" || localService?.permission === "EDIT";
+
+  const actionItems: MenuProps["items"] = (() => {
+    if (!isOwned) {
+      return [
+        {
+          key: "delete",
+          label: t("mcpTools.mine.delete"),
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          danger: true,
+          onClick: () => onDelete(item),
+        },
+      ];
+    }
+
+    const items: MenuProps["items"] = [];
+
+    if (reviewStatus === "pending") {
+      items.push({
+        key: "view-review-progress",
+        label: t("mcpTools.mine.viewReviewProgress"),
+        icon: <Clock className="h-3.5 w-3.5" />,
+        onClick: () => onViewReviewProgress?.(item, onlineService),
+      });
+    } else if (reviewStatus === "approved") {
+      items.push({
+        key: "submit-version-update",
+        label: t("mcpTools.mine.submitVersionUpdate"),
+        icon: <RefreshCw className="h-3.5 w-3.5" />,
+        disabled: publishing,
+        onClick: () => onSubmitVersionUpdate(item, onlineService),
+      });
+    } else {
+      // never submitted, rejected, or offline → apply for listing
+      items.push({
+        key: "apply-for-listing",
+        label: t("mcpTools.mine.applyForListing"),
+        icon: <Upload className="h-3.5 w-3.5" />,
+        disabled: publishing,
+        onClick: () => onSubmitVersionUpdate(item, onlineService),
+      });
+    }
+
+    if (isInRepository) {
+      items.push({
+        key: "unpublish-online-version",
+        label: t("mcpTools.mine.unpublishOnlineVersion"),
+        icon: <ArrowDownFromLine className="h-3.5 w-3.5" />,
+        danger: true,
+        disabled: unpublishing,
+        onClick: () => {
+          if (onlineService) onUnpublishOnline(item, onlineService);
+        },
+      });
+    }
+
+    items.push({
       key: "delete",
       label: t("mcpTools.mine.delete"),
       icon: <Trash2 className="h-3.5 w-3.5" />,
       danger: true,
       onClick: () => onDelete(item),
-    },
-  ];
+    });
+
+    return items;
+  })();
 
   return (
     <div className="group flex min-h-[292px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">

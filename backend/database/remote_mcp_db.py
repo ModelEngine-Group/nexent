@@ -19,7 +19,7 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     """
     allowed_fields = {
         'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
-        'authorization_token', 'custom_headers', 'source', 'version', 'community_id',
+        'authorization_token', 'custom_headers', 'source', 'version', 'market_id',
         'registry_json', 'config_json', 'enabled', 'tags', 'description'
     }
 
@@ -139,7 +139,7 @@ def update_mcp_record_manage_fields_by_id(
     custom_headers: Dict[str, Any] | None,
     config_json: Dict[str, Any] | None,
     version: str | None,
-    community_id: int | None,
+    market_id: int | None,
 ) -> None:
     with get_db_session() as session:
         session.query(McpRecord).filter(
@@ -157,39 +157,39 @@ def update_mcp_record_manage_fields_by_id(
                 "custom_headers": custom_headers,
                 "config_json": config_json,
                 "version": version,
-                "community_id": community_id,
+                "market_id": market_id,
                 "updated_by": user_id,
             }
         )
 
 
-def update_mcp_record_community_id_by_id(
+def update_mcp_record_market_id_by_id(
     *,
     mcp_id: int,
     tenant_id: str,
     user_id: str,
-    community_id: int | None,
+    market_id: int | None,
 ) -> None:
     with get_db_session() as session:
         session.query(McpRecord).filter(
             McpRecord.mcp_id == mcp_id,
             McpRecord.tenant_id == tenant_id,
             McpRecord.delete_flag != 'Y'
-        ).update({"community_id": community_id, "updated_by": user_id})
+        ).update({"market_id": market_id, "updated_by": user_id})
 
 
-def clear_mcp_record_community_id(
+def clear_mcp_record_market_id(
     *,
     tenant_id: str,
     user_id: str,
-    community_id: int,
+    market_id: int,
 ) -> None:
     with get_db_session() as session:
         session.query(McpRecord).filter(
             McpRecord.tenant_id == tenant_id,
-            McpRecord.community_id == community_id,
+            McpRecord.market_id == market_id,
             McpRecord.delete_flag != 'Y'
-        ).update({"community_id": None, "updated_by": user_id})
+        ).update({"market_id": None, "updated_by": user_id})
 
 
 def update_mcp_record_enabled_by_id(

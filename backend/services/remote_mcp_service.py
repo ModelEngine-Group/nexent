@@ -234,7 +234,7 @@ async def add_mcp_service(
     container_config: dict | None,
     registry_json: dict | None,
     version: str | None = None,
-    community_id: int | None = None,
+    market_id: int | None = None,
     enabled: bool = False,
     container_id: str | None = None,
     container_port: int | None = None,
@@ -254,7 +254,7 @@ async def add_mcp_service(
         container_config: Container configuration
         registry_json: Registry metadata JSON
         version: MCP version
-        community_id: Linked community record ID
+        market_id: Linked market record ID
         enabled: Whether the MCP is enabled
         container_id: Docker container ID
         container_port: Container port
@@ -286,7 +286,7 @@ async def add_mcp_service(
             "source": source,
             "registry_json": registry_json,
             "version": version,
-            "community_id": community_id,
+            "market_id": market_id,
             "enabled": enabled,
             "tags": tags,
             "description": description,
@@ -308,7 +308,7 @@ async def add_container_mcp_service(
     authorization_token: str | None,
     registry_json: dict | None,
     version: str | None,
-    community_id: int | None,
+    market_id: int | None,
     port: int,
     mcp_config: MCPConfigRequest,
 ) -> dict:
@@ -396,7 +396,7 @@ async def add_container_mcp_service(
             container_config=container_config,
             registry_json=registry_json,
             version=version,
-            community_id=community_id,
+            market_id=market_id,
             enabled=True,
             container_id=container_info.get("container_id"),
             container_port=container_info.get("host_port"),
@@ -473,7 +473,7 @@ def update_mcp_service(
     config_json: dict | None,
     tags: list | None,
     version: str | None,
-    community_id: int | None,
+    market_id: int | None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -489,7 +489,7 @@ def update_mcp_service(
         config_json: MCP configuration JSON
         tags: MCP tags
         version: MCP version
-        community_id: Linked community record ID
+        market_id: Linked market record ID
 
     Raises:
         McpNotFoundError: If MCP record is not found
@@ -502,7 +502,7 @@ def update_mcp_service(
     next_config_json = config_json if config_json is not None else current_config_json
 
     next_version = version if version is not None else current_record.get("version")
-    next_community_id = community_id if community_id is not None else current_record.get("community_id")
+    next_market_id = market_id if market_id is not None else current_record.get("market_id")
 
     update_mcp_record_manage_fields_by_id(
         mcp_id=mcp_id,
@@ -517,7 +517,7 @@ def update_mcp_service(
         config_json=next_config_json,
         tags=tags,
         version=next_version,
-        community_id=next_community_id,
+        market_id=next_market_id,
     )
 
 
@@ -830,8 +830,8 @@ async def get_remote_mcp_server_list(
             "registry_json": record.get("registry_json"),
             "config_json": record.get("config_json"),
             "version": record.get("version"),
-            "community_id": record.get("community_id"),
-            "is_listed_in_repository": record.get("community_id") is not None,
+            "market_id": record.get("market_id"),
+            "is_listed_in_repository": record.get("market_id") is not None,
             "container_status": container_status,
         }
         if is_need_auth:

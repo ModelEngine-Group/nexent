@@ -88,7 +88,7 @@ export function useMcpCommunityBrowser(enabled: boolean) {
   });
 
   const services: CommunityMcpCard[] = useMemo(
-    () => (query.data?.items ?? []).filter((item) => item.reviewStatus === "approved"),
+    () => query.data?.items ?? [],
     [query.data?.items]
   );
   const nextCursor = query.data?.nextCursor ?? null;

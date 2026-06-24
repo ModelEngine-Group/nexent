@@ -202,7 +202,7 @@ async def approve_community_mcp_service_api(
         await approve_community_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            community_id=payload.community_id,
+            review_id=payload.review_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -233,7 +233,7 @@ async def reject_community_mcp_service_api(
         await reject_community_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            community_id=payload.community_id,
+            review_id=payload.review_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
@@ -261,7 +261,7 @@ async def publish_community_mcp_service_api(
     """
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
-        community_id = await publish_community_mcp_service(
+        review_id = await publish_community_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=payload.mcp_id,
@@ -274,7 +274,7 @@ async def publish_community_mcp_service_api(
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success", "data": {"community_id": community_id}},
+            content={"status": "success", "data": {"review_id": review_id}},
         )
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
@@ -309,7 +309,7 @@ async def update_community_mcp_service_api(
         await update_community_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            community_id=payload.community_id,
+            market_id=payload.market_id,
             name=payload.name,
             description=payload.description,
             tags=payload.tags,
@@ -344,19 +344,19 @@ async def update_community_mcp_service_api(
 
 @router.delete("/community/delete")
 async def delete_community_mcp_service_api(
-    community_id: int = Query(gt=0),
+    market_id: int = Query(gt=0),
     authorization: Optional[str] = Header(None),
     http_request: Request = None,
 ):
     """
-    Delete a community MCP service.
+    Delete a market MCP service.
     """
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
         await delete_community_mcp_service(
             tenant_id=tenant_id,
             user_id=user_id,
-            community_id=community_id,
+            market_id=market_id,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,

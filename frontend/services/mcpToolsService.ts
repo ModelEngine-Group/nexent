@@ -47,7 +47,7 @@ type AddContainerMcpToolPayload = {
   authorization_token?: string;
   registry_json?: Record<string, unknown>;
   version?: string;
-  community_id?: number;
+  market_id?: number;
   port: number;
   mcp_config: McpContainerConfigPayload;
 };
@@ -302,8 +302,9 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       containerStatus: s.container_status as McpContainerStatus,
       authorizationToken: s.authorization_token,
       customHeaders: s.custom_headers ?? undefined,
-      communityId: s.community_id ?? undefined,
+      communityId: s.market_id ?? undefined,
       isListedInRepository: s.is_listed_in_repository ?? undefined,
+      permission: s.permission ?? undefined,
     } as McpServiceItem;
   });
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
@@ -412,13 +413,13 @@ const buildCommunityMcpListUrl = (
   return queryString ? `${endpoint}?${queryString}` : endpoint;
 };
 
-export const approveCommunityMcpTool = async (communityId: number) => {
+export const approveCommunityMcpTool = async (reviewId: number) => {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.mcpTools.communityReviewApprove,
       {
         method: "POST",
-        body: JSON.stringify({ community_id: communityId }),
+        body: JSON.stringify({ review_id: reviewId }),
       }
     );
     const data = await parseJson<ApiEnvelope>(response);
@@ -432,13 +433,13 @@ export const approveCommunityMcpTool = async (communityId: number) => {
   }
 };
 
-export const rejectCommunityMcpTool = async (communityId: number) => {
+export const rejectCommunityMcpTool = async (reviewId: number) => {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.mcpTools.communityReviewReject,
       {
         method: "POST",
-        body: JSON.stringify({ community_id: communityId }),
+        body: JSON.stringify({ review_id: reviewId }),
       }
     );
     const data = await parseJson<ApiEnvelope>(response);
@@ -475,12 +476,12 @@ export const publishCommunityMcpTool = async (
       }
     );
     const data =
-      await parseJson<ApiEnvelope<{ community_id: number }>>(response);
+      await parseJson<ApiEnvelope<{ review_id: number }>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to publish community mcp");
     }
     return { success: true, data: data.data } as McpToolsApiResult<{
-      community_id: number;
+      review_id: number;
     }>;
   } catch (error) {
     log.error("publishCommunityMcpTool failed", error);
@@ -509,7 +510,7 @@ export const listMyCommunityMcpTools = async () => {
 };
 
 export const updateCommunityMcpTool = async (payload: {
-  community_id: number;
+  market_id: number;
   name?: string;
   description?: string;
   tags?: string[];
@@ -538,10 +539,10 @@ export const updateCommunityMcpTool = async (payload: {
   }
 };
 
-export const deleteCommunityMcpTool = async (communityId: number) => {
+export const deleteCommunityMcpTool = async (marketId: number) => {
   try {
     const response = await fetchWithAuth(
-      `${API_ENDPOINTS.mcpTools.communityDelete}?community_id=${encodeURIComponent(String(communityId))}`,
+      `${API_ENDPOINTS.mcpTools.communityDelete}?market_id=${encodeURIComponent(String(marketId))}`,
       {
         method: "DELETE",
       }

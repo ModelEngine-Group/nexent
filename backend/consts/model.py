@@ -1196,7 +1196,7 @@ class AddMcpServiceRequest(BaseModel):
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     version: Optional[str] = Field(None, description="MCP version")
-    community_id: Optional[int] = Field(None, gt=0, description="Linked community record ID")
+    market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")
 
     @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
@@ -1216,7 +1216,7 @@ class AddContainerMcpServiceRequest(BaseModel):
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
     version: Optional[str] = Field(None, description="MCP version")
-    community_id: Optional[int] = Field(None, gt=0, description="Linked community record ID")
+    market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     port: int = Field(..., ge=1, le=65535, description="Host port for the container")
     mcp_config: MCPConfigRequest = Field(..., description="MCP server configuration")
 
@@ -1239,7 +1239,7 @@ class UpdateMcpServiceRequest(BaseModel):
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON")
     version: Optional[str] = Field(None, description="MCP version")
-    community_id: Optional[int] = Field(None, gt=0, description="Linked community record ID")
+    market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
 
     @field_validator("name", "server_url", "description", "authorization_token", "version", mode="before")
     @classmethod
@@ -1337,7 +1337,7 @@ class CommunityReviewListRequest(CommunityListRequest):
 
 class CommunityReviewActionRequest(BaseModel):
     """Request model for approving or rejecting an MCP community submission"""
-    community_id: int = Field(..., gt=0, description="Community record ID")
+    review_id: int = Field(..., gt=0, description="Review record ID")
 
 
 class CommunityPublishRequest(BaseModel):
@@ -1362,7 +1362,7 @@ class CommunityPublishRequest(BaseModel):
 
 class CommunityUpdateRequest(BaseModel):
     """Request model for updating community MCP service"""
-    community_id: int = Field(..., gt=0, description="Community record ID")
+    market_id: int = Field(..., gt=0, description="Market record ID")
     name: Optional[str] = Field(default=None, min_length=1, description="New MCP service name")
     description: Optional[str] = Field(None, description="MCP service description")
     tags: List[str] = Field(default_factory=list, description="MCP tags")

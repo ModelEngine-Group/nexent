@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, ConfigProvider, Empty, Segmented, Spin, Tag } from "antd";
+import { App, Button, ConfigProvider, Empty, Modal, Segmented, Spin, Steps, Tag, type StepsProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import {
@@ -43,6 +43,7 @@ import {
 import {
   filterByDeploymentType,
   formatRegistryDate,
+  formatRegistryVersion,
   getDeploymentTypeLabelKey,
   matchesNameOrTag,
   paginateItems,
@@ -558,6 +559,10 @@ function MineView({
   const [page, setPage] = useState(1);
   const [publishingKey, setPublishingKey] = useState<string | null>(null);
   const [unpublishingKey, setUnpublishingKey] = useState<string | null>(null);
+  const [reviewProgressItem, setReviewProgressItem] = useState<{
+    item: MineMcpCardItem;
+    onlineService?: CommunityMcpCard;
+  } | null>(null);
 
   const tagStats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -585,11 +590,10 @@ function MineView({
     return services;
   }, [myPublished.items]);
 
-  const onlineServiceByName = useMemo(() => {
-    const services = new Map<string, CommunityMcpCard>();
-    for (const service of myPublished.items) {
-      if (service.name)
-        services.set(service.name.trim().toLowerCase(), service);
+  const onlineServiceBySourceMcpId = useMemo(() => {
+    const services = new Map<number, CommunityMcpCard>();
+    for (const item of myPublished.items) {
+      if (item.sourceMcpId != null) services.set(item.sourceMcpId, item);
     }
     return services;
   }, [myPublished.items]);
@@ -643,20 +647,20 @@ function MineView({
     try {
       if (item.kind === "community") {
         const service = item.service;
-        if (!service.communityId) return;
+        if (!service.marketId && !service.communityId) return;
         await updateCommunityMcpTool({
-          community_id: service.communityId,
+          market_id: service.marketId || service.communityId!,
           name: service.name.trim(),
           description: (service.description || "").trim(),
           version: (service.version || "").trim(),
           tags: service.tags || [],
           registry_json: service.registryJson,
         });
-      } else if (onlineService?.communityId) {
+      } else if (onlineService?.marketId || onlineService?.communityId) {
         const service = item.service;
         const configJson = toMcpContainerConfigPayload(service.configJson);
         await updateCommunityMcpTool({
-          community_id: onlineService.communityId,
+          market_id: onlineService.marketId || onlineService.communityId!,
           name: service.name.trim(),
           description: (service.description || "").trim(),
           version: (service.version || "").trim(),
@@ -781,7 +785,7 @@ function MineView({
                 ? resolveOnlineService(
                     item.service,
                     onlineServiceByCommunityId,
-                    onlineServiceByName
+                    onlineServiceBySourceMcpId
                   )
                 : item.service;
             return (
@@ -803,6 +807,9 @@ function MineView({
                 onSubmitVersionUpdate={handleSubmitVersionUpdate}
                 onUnpublishOnline={handleUnpublishOnline}
                 onDelete={handleDelete}
+                onViewReviewProgress={(item, os) =>
+                  setReviewProgressItem({ item, onlineService: os })
+                }
               />
             );
           })}
@@ -816,7 +823,92 @@ function MineView({
         total={filteredItems.length}
         onChange={setPage}
       />
+
+      <ReviewProgressModal
+        item={reviewProgressItem}
+        onClose={() => setReviewProgressItem(null)}
+        t={t}
+      />
     </div>
+  );
+}
+
+function ReviewProgressModal({
+  item,
+  onClose,
+  t,
+}: {
+  item: { item: MineMcpCardItem; onlineService?: CommunityMcpCard } | null;
+  onClose: () => void;
+  t: (key: string) => string;
+}) {
+  if (!item) return null;
+
+  const { item: cardItem, onlineService } = item;
+  const service = cardItem.service;
+  const communityRecord = cardItem.kind === "community" ? cardItem.service : onlineService;
+  const reviewStatus = communityRecord?.reviewStatus || "pending";
+  const currentVersion = formatRegistryVersion(service.version || "");
+  const pendingVersion = formatRegistryVersion(
+    communityRecord?.pendingVersion || ""
+  );
+
+  const isRejected = reviewStatus === "rejected";
+  const isApproved = reviewStatus === "approved";
+
+  const steps: StepsProps["items"] = [
+    { title: t("mcpTools.mine.reviewProgressStepSubmitted"), status: "finish" },
+    {
+      title: isApproved
+        ? t("mcpTools.mine.reviewProgressStepApproved")
+        : isRejected
+          ? t("mcpTools.mine.reviewProgressStepRejected")
+          : t("mcpTools.mine.reviewProgressStepReviewing"),
+      status: isApproved ? "finish" : isRejected ? "error" : "process",
+    },
+  ];
+
+  return (
+    <Modal
+      open
+      centered
+      width={520}
+      footer={null}
+      onCancel={onClose}
+      closable
+    >
+      <div className="py-4">
+        <h3 className="text-lg font-bold text-slate-900">
+          {t("mcpTools.mine.reviewProgressTitle")}
+        </h3>
+
+        <div className="mt-4 space-y-2 text-sm text-slate-600">
+          <p>
+            <span className="font-medium text-slate-700">
+              {t("mcpTools.mine.reviewProgressService")}:
+            </span>{" "}
+            {service.name}
+          </p>
+          <p>
+            <span className="font-medium text-slate-700">
+              {t("mcpTools.mine.reviewProgressVersion")}:
+            </span>{" "}
+            {currentVersion}
+            {pendingVersion && pendingVersion !== "-" && currentVersion !== pendingVersion
+              ? ` → ${pendingVersion}`
+              : ""}
+          </p>
+        </div>
+
+        <div className="mt-6">
+          <Steps
+            direction="vertical"
+            status={isRejected ? "error" : isApproved ? "finish" : "process"}
+            items={steps}
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -825,14 +917,19 @@ function getDeduplicatedMineItems(
   publishedServices: CommunityMcpCard[]
 ): MineMcpCardItem[] {
   const linkedCommunityIds = new Set<number>();
+  const linkedSourceMcpIds = new Set<number>();
   const localNames = new Set<string>();
 
   for (const service of localServices) {
     if (service.communityId) linkedCommunityIds.add(service.communityId);
+    linkedSourceMcpIds.add(service.mcpId);
     localNames.add(normalizeMcpName(service.name));
   }
 
   const visiblePublishedServices = publishedServices.filter((service) => {
+    if (service.sourceMcpId != null && linkedSourceMcpIds.has(service.sourceMcpId)) {
+      return false;
+    }
     if (service.communityId && linkedCommunityIds.has(service.communityId)) {
       return false;
     }
@@ -873,13 +970,17 @@ function toMcpContainerConfigPayload(
 function resolveOnlineService(
   service: McpServiceItem,
   serviceByCommunityId: Map<number, CommunityMcpCard>,
-  serviceByName: Map<string, CommunityMcpCard>
+  serviceBySourceMcpId: Map<number, CommunityMcpCard>
 ): CommunityMcpCard | undefined {
+  const reviewService = serviceBySourceMcpId.get(service.mcpId);
+  if (reviewService) return reviewService;
   if (service.communityId) {
-    const matchedService = serviceByCommunityId.get(service.communityId);
-    if (matchedService) return matchedService;
+    const marketService = serviceByCommunityId.get(service.communityId);
+    if (marketService?.sourceMcpId == null || marketService.sourceMcpId === service.mcpId) {
+      return marketService;
+    }
   }
-  return serviceByName.get(service.name.trim().toLowerCase());
+  return undefined;
 }
 
 function ReviewCenterView({
@@ -922,14 +1023,14 @@ function ReviewCenterView({
     service: CommunityMcpCard,
     action: "approve" | "reject"
   ) => {
-    if (!service.communityId) return;
-    setReviewingId(service.communityId);
+    if (!service.reviewId) return;
+    setReviewingId(service.reviewId);
     try {
       if (action === "approve") {
-        await approveCommunityMcpTool(service.communityId);
+        await approveCommunityMcpTool(service.reviewId);
         message.success(t("mcpTools.review.approveSuccess"));
       } else {
-        await rejectCommunityMcpTool(service.communityId);
+        await rejectCommunityMcpTool(service.reviewId);
         message.success(t("mcpTools.review.rejectSuccess"));
       }
       await onReviewed();
@@ -993,9 +1094,9 @@ function ReviewCenterView({
             <tbody className="divide-y divide-slate-100">
               {filteredServices.map((service) => (
                 <ReviewTableRow
-                  key={service.communityId || service.name}
+                  key={service.reviewId || service.communityId || service.name}
                   service={service}
-                  reviewing={reviewingId === service.communityId}
+                  reviewing={reviewingId === service.reviewId}
                   onSelect={() => onSelect(service)}
                   onApprove={() => handleReview(service, "approve")}
                   onReject={() => handleReview(service, "reject")}

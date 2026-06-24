@@ -124,6 +124,9 @@ export interface RegistryQuickAddOption {
 
 export interface CommunityMcpCard {
   communityId?: number;
+  marketId?: number;
+  reviewId?: number;
+  sourceMcpId?: number;
   name: string;
   version?: string;
   description: string;
@@ -146,6 +149,7 @@ export interface CommunityMcpCard {
   reviewStatus?: "pending" | "approved" | "rejected" | "offline";
   reviewType?: "initial_listing" | "version_update";
   previousVersion?: string;
+  pendingVersion?: string;
 }
 
 export interface McpServiceItem {
@@ -170,9 +174,11 @@ export interface McpServiceItem {
   customHeaders?: Record<string, string>;
   isListedInRepository?: boolean;
   communityId?: number;
+  marketId?: number;
   deploymentType?: McpDeploymentType;
   reviewStatus?: "pending" | "approved" | "rejected" | "offline";
   reviewType?: "initial_listing" | "version_update";
+  permission?: "EDIT" | "READ_ONLY";
 }
 
 export interface McpTagStat {

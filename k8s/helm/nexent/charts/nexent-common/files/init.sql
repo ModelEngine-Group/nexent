@@ -614,7 +614,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     custom_headers JSON DEFAULT NULL,
     source VARCHAR(30),
     version VARCHAR(50),
-    community_id INTEGER,
+    market_id INTEGER,
     registry_json JSONB,
     config_json JSON,
     enabled BOOLEAN DEFAULT TRUE,
@@ -648,7 +648,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.updated_by IS 'Last updater ID, audit fiel
 COMMENT ON COLUMN nexent.mcp_record_t.delete_flag IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
 COMMENT ON COLUMN nexent.mcp_record_t.source IS 'Source type: local/mcp_registry/community';
 COMMENT ON COLUMN nexent.mcp_record_t.version IS 'MCP version';
-COMMENT ON COLUMN nexent.mcp_record_t.community_id IS 'Published community record ID';
+COMMENT ON COLUMN nexent.mcp_record_t.market_id IS 'Published market record ID (FK to mcp_market_record_t)';
 COMMENT ON COLUMN nexent.mcp_record_t.registry_json IS 'Full MCP registry server.json snapshot';
 COMMENT ON COLUMN nexent.mcp_record_t.config_json IS 'MCP config data';
 COMMENT ON COLUMN nexent.mcp_record_t.enabled IS 'Enabled';
@@ -690,8 +690,8 @@ CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tenant_server
 CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tags_gin
     ON nexent.mcp_record_t USING GIN (tags);
 
-CREATE INDEX IF NOT EXISTS idx_mcp_record_t_community_id
-    ON nexent.mcp_record_t (community_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_record_t_market_id
+    ON nexent.mcp_record_t (market_id, delete_flag);
 
 -- Create user tenant relationship table
 CREATE TABLE IF NOT EXISTS nexent.user_tenant_t (
@@ -1885,6 +1885,166 @@ FOR EACH ROW
 EXECUTE FUNCTION update_mcp_community_record_update_time();
 
 COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp_community_record_t IS 'Trigger to maintain update_time';
+
+-- ---------------------------------------------------------------------------
+-- mcp_market_record_t: Approved MCP market records (Repository tab)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS nexent.mcp_market_record_t (
+    market_id SERIAL PRIMARY KEY NOT NULL,
+    tenant_id VARCHAR(100),
+    user_id VARCHAR(100),
+    mcp_name VARCHAR(100) NOT NULL,
+    mcp_server VARCHAR(500),
+    source VARCHAR(30) DEFAULT 'community',
+    version VARCHAR(50),
+    registry_json JSONB,
+    transport_type VARCHAR(30),
+    config_json JSON,
+    tags TEXT[],
+    description TEXT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.mcp_market_record_t OWNER TO root;
+
+COMMENT ON TABLE nexent.mcp_market_record_t IS 'Approved MCP market records — always visible in the Repository tab';
+COMMENT ON COLUMN nexent.mcp_market_record_t.market_id IS 'Market record ID, unique primary key';
+COMMENT ON COLUMN nexent.mcp_market_record_t.tenant_id IS 'Publisher tenant ID';
+COMMENT ON COLUMN nexent.mcp_market_record_t.user_id IS 'Publisher user ID';
+COMMENT ON COLUMN nexent.mcp_market_record_t.mcp_name IS 'MCP name';
+COMMENT ON COLUMN nexent.mcp_market_record_t.mcp_server IS 'MCP server URL';
+COMMENT ON COLUMN nexent.mcp_market_record_t.source IS 'Source type, fixed to community for this table';
+COMMENT ON COLUMN nexent.mcp_market_record_t.version IS 'Current approved MCP version';
+COMMENT ON COLUMN nexent.mcp_market_record_t.registry_json IS 'Full MCP server metadata JSON for discovery and quick import';
+COMMENT ON COLUMN nexent.mcp_market_record_t.transport_type IS 'Transport type: url/container';
+COMMENT ON COLUMN nexent.mcp_market_record_t.config_json IS 'Public-shareable MCP configuration JSON';
+COMMENT ON COLUMN nexent.mcp_market_record_t.tags IS 'Tags';
+COMMENT ON COLUMN nexent.mcp_market_record_t.description IS 'Description';
+COMMENT ON COLUMN nexent.mcp_market_record_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.mcp_market_record_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.mcp_market_record_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.mcp_market_record_t.updated_by IS 'Updater ID';
+COMMENT ON COLUMN nexent.mcp_market_record_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_market_tenant_delete
+    ON nexent.mcp_market_record_t (tenant_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_market_name_delete
+    ON nexent.mcp_market_record_t (mcp_name, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_market_transport_delete
+    ON nexent.mcp_market_record_t (transport_type, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_market_user_delete
+    ON nexent.mcp_market_record_t (user_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_market_tags_gin
+    ON nexent.mcp_market_record_t USING GIN (tags);
+
+CREATE OR REPLACE FUNCTION update_mcp_market_record_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_mcp_market_record_update_time() IS 'Auto-update update_time for mcp_market_record_t';
+
+DROP TRIGGER IF EXISTS update_mcp_market_record_update_time_trigger ON nexent.mcp_market_record_t;
+CREATE TRIGGER update_mcp_market_record_update_time_trigger
+BEFORE UPDATE ON nexent.mcp_market_record_t
+FOR EACH ROW
+EXECUTE FUNCTION update_mcp_market_record_update_time();
+
+COMMENT ON TRIGGER update_mcp_market_record_update_time_trigger ON nexent.mcp_market_record_t IS 'Trigger to maintain update_time';
+
+-- ---------------------------------------------------------------------------
+-- mcp_market_review_t: Review submissions (Review Center tab)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS nexent.mcp_market_review_t (
+    review_id SERIAL PRIMARY KEY NOT NULL,
+    market_id INTEGER REFERENCES nexent.mcp_market_record_t(market_id),
+    source_mcp_id INTEGER,
+    tenant_id VARCHAR(100),
+    user_id VARCHAR(100),
+    mcp_name VARCHAR(100) NOT NULL,
+    mcp_server VARCHAR(500),
+    source VARCHAR(30) DEFAULT 'community',
+    version VARCHAR(50),
+    registry_json JSONB,
+    transport_type VARCHAR(30),
+    config_json JSON,
+    review_status VARCHAR(30) DEFAULT 'pending',
+    review_type VARCHAR(30) DEFAULT 'initial_listing',
+    previous_version VARCHAR(50),
+    tags TEXT[],
+    description TEXT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.mcp_market_review_t OWNER TO root;
+
+COMMENT ON TABLE nexent.mcp_market_review_t IS 'MCP market review submissions — one row per initial listing or version update';
+COMMENT ON COLUMN nexent.mcp_market_review_t.review_id IS 'Review record ID, unique primary key';
+COMMENT ON COLUMN nexent.mcp_market_review_t.market_id IS 'FK to mcp_market_record_t(market_id), NULL for unapproved initial listings';
+COMMENT ON COLUMN nexent.mcp_market_review_t.source_mcp_id IS 'Local MCP record ID that created this review';
+COMMENT ON COLUMN nexent.mcp_market_review_t.tenant_id IS 'Submitter tenant ID';
+COMMENT ON COLUMN nexent.mcp_market_review_t.user_id IS 'Submitter user ID';
+COMMENT ON COLUMN nexent.mcp_market_review_t.mcp_name IS 'MCP name at submission time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.mcp_server IS 'MCP server URL at submission time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.source IS 'Source type, fixed to community for this table';
+COMMENT ON COLUMN nexent.mcp_market_review_t.version IS 'Version submitted for review';
+COMMENT ON COLUMN nexent.mcp_market_review_t.registry_json IS 'Snapshot of MCP metadata at submission time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.transport_type IS 'Transport type: url/container';
+COMMENT ON COLUMN nexent.mcp_market_review_t.config_json IS 'Snapshot of MCP config at submission time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.review_status IS 'Review status: pending/approved/rejected';
+COMMENT ON COLUMN nexent.mcp_market_review_t.review_type IS 'Review submission type: initial_listing/version_update';
+COMMENT ON COLUMN nexent.mcp_market_review_t.previous_version IS 'Previous approved version (only for version_update)';
+COMMENT ON COLUMN nexent.mcp_market_review_t.tags IS 'Tags at submission time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.description IS 'Description at submission time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.mcp_market_review_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.mcp_market_review_t.updated_by IS 'Updater ID';
+COMMENT ON COLUMN nexent.mcp_market_review_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_review_market_delete
+    ON nexent.mcp_market_review_t (market_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_review_source_mcp_delete
+    ON nexent.mcp_market_review_t (source_mcp_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_review_tenant_delete
+    ON nexent.mcp_market_review_t (tenant_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_review_status_delete
+    ON nexent.mcp_market_review_t (review_status, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_review_tenant_status_delete
+    ON nexent.mcp_market_review_t (tenant_id, review_status, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_review_user_delete
+    ON nexent.mcp_market_review_t (user_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_mcp_review_name_delete
+    ON nexent.mcp_market_review_t (mcp_name, delete_flag);
+
+CREATE OR REPLACE FUNCTION update_mcp_market_review_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_mcp_market_review_update_time() IS 'Auto-update update_time for mcp_market_review_t';
+
+DROP TRIGGER IF EXISTS update_mcp_market_review_update_time_trigger ON nexent.mcp_market_review_t;
+CREATE TRIGGER update_mcp_market_review_update_time_trigger
+BEFORE UPDATE ON nexent.mcp_market_review_t
+FOR EACH ROW
+EXECUTE FUNCTION update_mcp_market_review_update_time();
+
+COMMENT ON TRIGGER update_mcp_market_review_update_time_trigger ON nexent.mcp_market_review_t IS 'Trigger to maintain update_time';
 
 CREATE TABLE IF NOT EXISTS nexent.user_cas_session_t (
     cas_session_id SERIAL PRIMARY KEY,

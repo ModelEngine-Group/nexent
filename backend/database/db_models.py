@@ -507,7 +507,7 @@ class McpRecord(TableBase):
     source = Column(
         String(30), doc="Source type: local/mcp_registry/community")
     version = Column(String(50), doc="MCP version")
-    community_id = Column(Integer, doc="Published community record ID")
+    market_id = Column(Integer, doc="Published market record ID (FK to mcp_market_record_t)")
     registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
     config_json = Column(JSON, doc="MCP config data")
     enabled = Column(Boolean, default=True, doc="Enabled")
@@ -544,6 +544,63 @@ class McpCommunityRecord(TableBase):
         String(30), default="initial_listing", doc="Review submission type: initial_listing/version_update")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+
+
+class McpMarketRecord(TableBase):
+    """Approved MCP market records (Repository tab) — never disappears during reviews."""
+
+    __tablename__ = "mcp_market_record_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    market_id = Column(
+        Integer,
+        Sequence("mcp_market_record_t_market_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Market record ID, unique primary key",
+    )
+    tenant_id = Column(String(100), doc="Publisher tenant ID")
+    user_id = Column(String(100), doc="Publisher user ID")
+    mcp_name = Column(String(100), doc="MCP name")
+    mcp_server = Column(String(500), doc="MCP server URL")
+    source = Column(String(30), doc="Source type, fixed to community")
+    version = Column(String(50), doc="Current approved MCP version")
+    registry_json = Column(JSONB, doc="Full MCP metadata JSON")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
+    tags = Column(ARRAY(Text), doc="Tags")
+    description = Column(Text, doc="Description")
+
+
+class McpMarketReview(TableBase):
+    """MCP market review submissions — one row per initial listing or version update."""
+
+    __tablename__ = "mcp_market_review_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    review_id = Column(
+        Integer,
+        Sequence("mcp_market_review_t_review_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Review record ID, unique primary key",
+    )
+    market_id = Column(Integer, doc="FK to mcp_market_record_t(market_id), NULL for unapproved initial listings")
+    source_mcp_id = Column(Integer, doc="Local MCP record ID that created this review")
+    tenant_id = Column(String(100), doc="Submitter tenant ID")
+    user_id = Column(String(100), doc="Submitter user ID")
+    mcp_name = Column(String(100), doc="MCP name at submission time")
+    mcp_server = Column(String(500), doc="MCP server URL at submission time")
+    source = Column(String(30), doc="Source type, fixed to community")
+    version = Column(String(50), doc="Version submitted for review")
+    registry_json = Column(JSONB, doc="Snapshot of MCP metadata at submission time")
+    transport_type = Column(String(30), doc="Transport type: http/sse/container")
+    config_json = Column(JSON, doc="Snapshot of MCP config at submission time")
+    review_status = Column(String(30), default="pending", doc="Review status: pending/approved/rejected")
+    review_type = Column(String(30), default="initial_listing", doc="Review submission type: initial_listing/version_update")
+    previous_version = Column(String(50), doc="Previous approved version (only for version_update)")
+    tags = Column(ARRAY(Text), doc="Tags at submission time")
+    description = Column(Text, doc="Description at submission time")
 
 
 class UserTenant(TableBase):

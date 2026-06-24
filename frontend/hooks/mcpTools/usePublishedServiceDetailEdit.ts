@@ -76,7 +76,7 @@ export function usePublishedServiceDetailEdit(
     setTagSaving(true);
     try {
       await updateCommunityMcpTool({
-        community_id: currentDraft.communityId,
+        market_id: currentDraft.communityId,
         name: currentDraft.name.trim(),
         description: currentDraft.description.trim(),
         version: currentDraft.version.trim(),
@@ -127,7 +127,7 @@ export function usePublishedServiceDetailEdit(
     setSaving(true);
     try {
       await updateCommunityMcpTool({
-        community_id: currentDraft.communityId,
+        market_id: currentDraft.communityId,
         name: currentDraft.name.trim(),
         description: currentDraft.description.trim(),
         version: currentDraft.version.trim(),
