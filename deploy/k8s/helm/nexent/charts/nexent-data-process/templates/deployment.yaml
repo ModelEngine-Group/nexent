@@ -1,3 +1,6 @@
+{{- $global := default dict .Values.global -}}
+{{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,6 +52,9 @@ spec:
               value: {{ .Values.config.pythonPath | quote }}
             - name: skip_proxy
               value: {{ .Values.config.skipProxy | quote }}
+          volumeMounts:
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
           resources:
             requests:
               memory: {{ .Values.resources.dataProcess.requests.memory }}
@@ -56,3 +62,7 @@ spec:
             limits:
               memory: {{ .Values.resources.dataProcess.limits.memory }}
               cpu: {{ .Values.resources.dataProcess.limits.cpu }}
+      volumes:
+        - name: nexent-workspace
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

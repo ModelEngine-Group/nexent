@@ -207,6 +207,8 @@ maybe_delete_namespace_after_uninstall() {
 
 local_volume_paths() {
   printf '%s\n' \
+    "/var/lib/nexent" \
+    "/var/lib/nexent-data/skills" \
     "/var/lib/nexent-data/nexent-elasticsearch" \
     "/var/lib/nexent-data/nexent-postgresql" \
     "/var/lib/nexent-data/nexent-redis" \
@@ -231,7 +233,7 @@ resolve_delete_local_data() {
   [ -t 0 ] || return 1
 
   echo ""
-  echo "Delete local PV data under /var/lib/nexent-data?"
+  echo "Delete local PV data under /var/lib/nexent and /var/lib/nexent-data?"
   local answer
   read -r -p "Delete local volume data? [y/N]: " answer
   answer="$(sanitize_input "$answer")"
@@ -244,7 +246,7 @@ delete_local_volume_data() {
   local path
   while IFS= read -r path; do
     case "$path" in
-      /var/lib/nexent-data/nexent-*)
+      /var/lib/nexent|/var/lib/nexent-data/skills|/var/lib/nexent-data/nexent-*)
         if [ -e "$path" ]; then
           echo "Removing $path"
           rm -rf -- "$path"

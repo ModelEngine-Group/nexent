@@ -22,7 +22,6 @@ persistence:
   accessModes:
     - ReadWriteOnce
   localPath: "/var/lib/nexent-data/nexent-supabase-db"
-  localNodeName: ""
   existingClaim: ""
 
 config:

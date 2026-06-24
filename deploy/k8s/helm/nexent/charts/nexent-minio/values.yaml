@@ -22,7 +22,6 @@ persistence:
   accessModes:
     - ReadWriteOnce
   localPath: "/var/lib/nexent-data/nexent-minio"
-  localNodeName: ""
   existingClaim: ""
 
 service:

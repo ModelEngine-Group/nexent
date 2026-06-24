@@ -1,3 +1,6 @@
+{{- $global := default dict .Values.global -}}
+{{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -44,6 +47,9 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          volumeMounts:
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
           resources:
             requests:
               memory: {{ .Values.resources.backend.requests.memory }}
@@ -64,3 +70,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3
+      volumes:
+        - name: nexent-workspace
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

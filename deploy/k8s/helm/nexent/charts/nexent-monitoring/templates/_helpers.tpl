@@ -54,7 +54,6 @@
 {{- $mode := default "local" $root.Values.persistence.mode -}}
 {{- $storageClassName := default "" $root.Values.persistence.storageClassName -}}
 {{- $localPath := default "/var/lib/nexent-data" $root.Values.persistence.localPath -}}
-{{- $localNodeName := default "" $root.Values.persistence.localNodeName -}}
 {{- $accessModes := default (list "ReadWriteOnce") $root.Values.persistence.accessModes -}}
 {{- if and $root.Values.enabled $root.Values.persistence.enabled -}}
 {{- if eq $mode "local" }}
@@ -71,18 +70,9 @@ spec:
   accessModes:
 {{ toYaml $accessModes | indent 4 }}
   persistentVolumeReclaimPolicy: Retain
-  local:
+  hostPath:
     path: {{ printf "%s/%s" $localPath $name | quote }}
-  {{- if $localNodeName }}
-  nodeAffinity:
-    required:
-      nodeSelectorTerms:
-        - matchExpressions:
-            - key: kubernetes.io/hostname
-              operator: In
-              values:
-                - {{ $localNodeName | quote }}
-  {{- end }}
+    type: DirectoryOrCreate
 ---
 {{- end }}
 {{- if ne $mode "existing" }}

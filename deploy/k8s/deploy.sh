@@ -103,7 +103,7 @@ while [[ $# -gt 0 ]]; do
       PERSISTENCE_MODE="$2"
       shift 2
       ;;
-    --storage-class)
+    --storage-class|--storageclass|--storage-class-name|--sc)
       STORAGE_CLASS_NAME="$2"
       shift 2
       ;;
@@ -178,22 +178,6 @@ apply_deployment_common_config() {
     deployment_print_summary k8s
 }
 
-detect_local_node_name() {
-  if [ -n "$LOCAL_NODE_NAME" ]; then
-    return 0
-  fi
-  if [ "$PERSISTENCE_MODE" != "local" ]; then
-    return 0
-  fi
-  if command -v kubectl >/dev/null 2>&1; then
-    LOCAL_NODE_NAME="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-  fi
-  if [ -z "$LOCAL_NODE_NAME" ]; then
-    echo "Error: --persistence-mode local requires a Kubernetes node name for local PV nodeAffinity."
-    echo "Provide --local-node-name <node> or ensure kubectl can read the target cluster nodes."
-    exit 1
-  fi
-}
 
 persistence_existing_claim() {
   local component="$1"
@@ -219,7 +203,6 @@ render_one_persistence_values() {
     printf '    accessModes:\n'
     printf '      - ReadWriteOnce\n'
     printf '    localPath: "%s/%s"\n' "$LOCAL_PATH" "$component"
-    printf '    localNodeName: "%s"\n' "$LOCAL_NODE_NAME"
     printf '    existingClaim: "%s"\n' "$(persistence_existing_claim "$component")"
     printf '  storage:\n'
     printf '    size: "%s"\n' "$size"
@@ -241,8 +224,31 @@ render_monitoring_persistence_values() {
     printf '    accessModes:\n'
     printf '      - ReadWriteOnce\n'
     printf '    localPath: "%s"\n' "$LOCAL_PATH"
-    printf '    localNodeName: "%s"\n' "$LOCAL_NODE_NAME"
     printf '    existingClaimPrefix: "%s"\n' "$EXISTING_CLAIM_PREFIX"
+  } >> "$output_file"
+}
+
+render_shared_storage_persistence_values() {
+  local output_file="$1"
+  local storage_class="$STORAGE_CLASS_NAME"
+  [ -n "$storage_class" ] || storage_class="nexent-local"
+  [ "$PERSISTENCE_MODE" = "dynamic" ] && [ "$STORAGE_CLASS_NAME" = "" ] && storage_class=""
+
+  {
+    printf 'global:\n'
+    printf '  sharedStorage:\n'
+    printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
+    printf '    storageClassName: "%s"\n' "$storage_class"
+    printf '    accessModes:\n'
+    printf '      - ReadWriteOnce\n'
+    printf '    workspace:\n'
+    printf '      size: "10Gi"\n'
+    printf '      localPath: "/var/lib/nexent"\n'
+    printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-workspace")"
+    printf '    skills:\n'
+    printf '      size: "5Gi"\n'
+    printf '      localPath: "%s/skills"\n' "$LOCAL_PATH"
+    printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-skills")"
   } >> "$output_file"
 }
 
@@ -257,11 +263,11 @@ render_persistence_values() {
       ;;
   esac
 
-  detect_local_node_name
   {
     echo "# Generated persistence overrides"
   } > "$output_file"
 
+  render_shared_storage_persistence_values "$output_file"
   render_one_persistence_values "$output_file" "nexent-elasticsearch" "nexent-elasticsearch" "20Gi"
   render_one_persistence_values "$output_file" "nexent-postgresql" "nexent-postgresql" "10Gi"
   render_one_persistence_values "$output_file" "nexent-redis" "nexent-redis" "5Gi"
@@ -350,7 +356,7 @@ render_k8s_runtime_config_values() {
     printf '      diskWatermarkFloodStage: %s\n' "$(yaml_quote "$(env_or_default ES_DISK_WATERMARK_FLOOD_STAGE "95%")")"
     printf '    skipProxy: %s\n' "$(yaml_quote "$(env_or_default skip_proxy "true")")"
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
-    printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent/skills")")"
+    printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
     printf '    marketBackend: %s\n' "$(yaml_quote "$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
@@ -956,7 +962,7 @@ apply() {
 
     # Step 6: Clean up stale PVs
     echo "Checking for stale PersistentVolumes..."
-    for pv in nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
+    for pv in nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
         pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
         if [ "$pv_status" = "Released" ]; then
             echo "  Cleaning up stale PV: $pv"
@@ -1103,9 +1109,9 @@ print_usage() {
     echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
-    echo "  --storage-class NAME       StorageClass for PVCs"
+    echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"
-    echo "  --local-node-name NAME     Node name for local PV nodeAffinity"
+    echo "  --local-node-name NAME     Deprecated; local mode uses hostPath and does not require nodeAffinity"
     echo "  --existing-claim-prefix P  Existing PVC prefix, rendered as P-<component>"
     echo "  --wait-timeout SECONDS    Kubernetes deployment wait timeout (default: 600)"
     echo "  --rotate-secrets           Force rotation of deployment secrets"

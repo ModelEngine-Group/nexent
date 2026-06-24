@@ -2,6 +2,19 @@
 global:
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
+  sharedStorage:
+    mode: "local"
+    storageClassName: "nexent-local"
+    accessModes:
+      - ReadWriteOnce
+    workspace:
+      size: "10Gi"
+      localPath: "/var/lib/nexent"
+      existingClaim: "nexent-workspace"
+    skills:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/skills"
+      existingClaim: "nexent-skills"
   deploymentVersion: "speed"
   deploymentComponents:
     infrastructure: true

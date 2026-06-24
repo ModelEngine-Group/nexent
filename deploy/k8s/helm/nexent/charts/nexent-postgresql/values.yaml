@@ -22,7 +22,6 @@ persistence:
   accessModes:
     - ReadWriteOnce
   localPath: "/var/lib/nexent-data/nexent-postgresql"
-  localNodeName: ""
   existingClaim: ""
 
 config:
