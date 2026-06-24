@@ -106,6 +106,57 @@ for _mod, _mock in _nexent_sub_stubs.items():
 import pytest
 
 
+class _MockTool:
+    name = "tool1"
+    description = "Test tool"
+    inputs = "{}"
+    output_type = "str"
+    source = "local"
+
+
+class _MockManagedAgent:
+    name = "agent1"
+    description = "Test agent"
+
+
+class _MockExternalAgent:
+    agent_id = "ext-1"
+    name = "External"
+    description = "External agent"
+
+
+def _base_kwargs(**overrides):
+    base = dict(
+        duty="Help users.",
+        app_name="Test",
+        app_description="Desc",
+        user_id="u1",
+    )
+    base.update(overrides)
+    return base
+
+
+def _full_kwargs(**overrides):
+    base = dict(
+        duty="Help users.",
+        constraint="Be helpful.",
+        few_shots="Q: hi? A: Hello!",
+        app_name="Test",
+        app_description="Desc",
+        user_id="u1",
+        is_manager=True,
+        tools={"tool1": _MockTool()},
+        skills=[{"name": "s1", "description": "d1"}],
+        managed_agents={"agent1": _MockManagedAgent()},
+        external_a2a_agents={"ext-1": _MockExternalAgent()},
+        memory_list=[{"memory": "test", "score": 0.9, "memory_level": "user"}],
+        knowledge_base_summary="KB text",
+        kb_ids=["kb-1"],
+    )
+    base.update(overrides)
+    return base
+
+
 class TestBuilderReturnTypes:
     def test_build_skeleton_header_returns_system_prompt(self):
         from backend.utils.context_utils import build_skeleton_header_component
@@ -114,7 +165,6 @@ class TestBuilderReturnTypes:
         comp = build_skeleton_header_component(
             app_name="Test",
             app_description="Desc",
-            time_str="2026-01-01",
             user_id="u1",
         )
         assert isinstance(comp, SystemPromptComponent)
@@ -302,14 +352,11 @@ class TestBuildContextComponentsAssembly:
         from backend.utils.context_utils import build_context_components
 
         components = build_context_components(
-            duty="Help users.",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            include_knowledge_base=True,
-            knowledge_base_summary="KB text",
-            kb_ids=["kb-1"],
+            **_base_kwargs(
+                include_knowledge_base=True,
+                knowledge_base_summary="KB text",
+                kb_ids=["kb-1"],
+            ),
         )
         types = [c.component_type for c in components]
         assert "knowledge_base" in types
@@ -318,14 +365,11 @@ class TestBuildContextComponentsAssembly:
         from backend.utils.context_utils import build_context_components
 
         components = build_context_components(
-            duty="Help users.",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            include_knowledge_base=False,
-            knowledge_base_summary="KB text",
-            kb_ids=["kb-1"],
+            **_base_kwargs(
+                include_knowledge_base=False,
+                knowledge_base_summary="KB text",
+                kb_ids=["kb-1"],
+            ),
         )
         types = [c.component_type for c in components]
         assert "knowledge_base" not in types
@@ -334,14 +378,11 @@ class TestBuildContextComponentsAssembly:
         from backend.utils.context_utils import build_context_components
 
         components = build_context_components(
-            duty="Help users.",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            include_knowledge_base=True,
-            knowledge_base_summary="",
-            kb_ids=["kb-1"],
+            **_base_kwargs(
+                include_knowledge_base=True,
+                knowledge_base_summary="",
+                kb_ids=["kb-1"],
+            ),
         )
         types = [c.component_type for c in components]
         assert "knowledge_base" not in types
@@ -350,12 +391,7 @@ class TestBuildContextComponentsAssembly:
         from backend.utils.context_utils import build_context_components
 
         components = build_context_components(
-            duty="Help users.",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            skills=[{"name": "s1", "description": "d1"}],
+            **_base_kwargs(skills=[{"name": "s1", "description": "d1"}]),
         )
         skills_components = [c for c in components if c.component_type == "skills"]
         assert len(skills_components) >= 1
@@ -370,39 +406,7 @@ class TestBuildContextComponentsAssembly:
     def test_all_component_types_present_with_full_inputs(self):
         from backend.utils.context_utils import build_context_components
 
-        class MockTool:
-            name = "tool1"
-            description = "Test tool"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-
-        class MockManagedAgent:
-            name = "agent1"
-            description = "Test agent"
-
-        class MockExternalAgent:
-            agent_id = "ext-1"
-            name = "External"
-            description = "External agent"
-
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi? A: Hello!",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            is_manager=True,
-            tools={"tool1": MockTool()},
-            skills=[{"name": "s1", "description": "d1"}],
-            managed_agents={"agent1": MockManagedAgent()},
-            external_a2a_agents={"ext-1": MockExternalAgent()},
-            memory_list=[{"memory": "test", "score": 0.9, "memory_level": "user"}],
-            knowledge_base_summary="KB text",
-            kb_ids=["kb-1"],
-        )
+        components = build_context_components(**_full_kwargs())
         types = [c.component_type for c in components]
         assert "system_prompt" in types
         assert "memory" in types
@@ -414,39 +418,7 @@ class TestBuildContextComponentsAssembly:
     def test_component_order_preserved(self):
         from backend.utils.context_utils import build_context_components
 
-        class MockTool:
-            name = "tool1"
-            description = "Test tool"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-
-        class MockManagedAgent:
-            name = "agent1"
-            description = "Test agent"
-
-        class MockExternalAgent:
-            agent_id = "ext-1"
-            name = "External"
-            description = "External agent"
-
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi? A: Hello!",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            is_manager=True,
-            tools={"tool1": MockTool()},
-            skills=[{"name": "s1", "description": "d1"}],
-            managed_agents={"agent1": MockManagedAgent()},
-            external_a2a_agents={"ext-1": MockExternalAgent()},
-            memory_list=[{"memory": "test", "score": 0.9, "memory_level": "user"}],
-            knowledge_base_summary="KB text",
-            kb_ids=["kb-1"],
-        )
+        components = build_context_components(**_full_kwargs())
         types = [c.component_type for c in components]
         expected_order = [
             "system_prompt",
@@ -471,13 +443,10 @@ class TestBuildContextComponentsAssembly:
         from nexent.core.agents.agent_model import KnowledgeBaseComponent
 
         components = build_context_components(
-            duty="Help users.",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            kb_ids=["kb-1", "kb-2"],
-            knowledge_base_summary="text",
+            **_base_kwargs(
+                kb_ids=["kb-1", "kb-2"],
+                knowledge_base_summary="text",
+            ),
         )
         kb_components = [
             c for c in components if isinstance(c, KnowledgeBaseComponent)
@@ -530,39 +499,7 @@ class TestFullPromptAssembly:
     def test_full_assembly_produces_system_messages(self):
         from backend.utils.context_utils import build_context_components
 
-        class MockTool:
-            name = "tool1"
-            description = "Test tool"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-
-        class MockManagedAgent:
-            name = "agent1"
-            description = "Test agent"
-
-        class MockExternalAgent:
-            agent_id = "ext-1"
-            name = "External"
-            description = "External agent"
-
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi? A: Hello!",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            is_manager=True,
-            tools={"tool1": MockTool()},
-            skills=[{"name": "s1", "description": "d1"}],
-            managed_agents={"agent1": MockManagedAgent()},
-            external_a2a_agents={"ext-1": MockExternalAgent()},
-            memory_list=[{"memory": "test", "score": 0.9, "memory_level": "user"}],
-            knowledge_base_summary="KB text",
-            kb_ids=["kb-1"],
-        )
+        components = build_context_components(**_full_kwargs())
         all_messages = []
         for comp in components:
             all_messages.extend(comp.to_messages())
@@ -574,16 +511,11 @@ class TestFullPromptAssembly:
     def test_full_assembly_contains_key_sections(self):
         from backend.utils.context_utils import build_context_components
 
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi? A: Hello!",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            is_manager=True,
-        )
+        kw = _full_kwargs()
+        for k in ("tools", "skills", "managed_agents", "external_a2a_agents",
+                   "memory_list", "knowledge_base_summary", "kb_ids"):
+            kw.pop(k, None)
+        components = build_context_components(**kw)
         all_messages = []
         for comp in components:
             all_messages.extend(comp.to_messages())
@@ -597,17 +529,11 @@ class TestFullPromptAssembly:
     def test_english_language_produces_english_content(self):
         from backend.utils.context_utils import build_context_components
 
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi? A: Hello!",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            is_manager=True,
-            language="en",
-        )
+        kw = _full_kwargs(language="en")
+        for k in ("tools", "skills", "managed_agents", "external_a2a_agents",
+                   "memory_list", "knowledge_base_summary", "kb_ids"):
+            kw.pop(k, None)
+        components = build_context_components(**kw)
         all_messages = []
         for comp in components:
             all_messages.extend(comp.to_messages())
@@ -619,39 +545,7 @@ class TestFullPromptAssembly:
     def test_component_count_matches_expected(self):
         from backend.utils.context_utils import build_context_components
 
-        class MockTool:
-            name = "tool1"
-            description = "Test tool"
-            inputs = "{}"
-            output_type = "str"
-            source = "local"
-
-        class MockManagedAgent:
-            name = "agent1"
-            description = "Test agent"
-
-        class MockExternalAgent:
-            agent_id = "ext-1"
-            name = "External"
-            description = "External agent"
-
-        components = build_context_components(
-            duty="Help users.",
-            constraint="Be helpful.",
-            few_shots="Q: hi? A: Hello!",
-            app_name="Test",
-            app_description="Desc",
-            time_str="2026-01-01",
-            user_id="u1",
-            is_manager=True,
-            tools={"tool1": MockTool()},
-            skills=[{"name": "s1", "description": "d1"}],
-            managed_agents={"agent1": MockManagedAgent()},
-            external_a2a_agents={"ext-1": MockExternalAgent()},
-            memory_list=[{"memory": "test", "score": 0.9, "memory_level": "user"}],
-            knowledge_base_summary="KB text",
-            kb_ids=["kb-1"],
-        )
+        components = build_context_components(**_full_kwargs())
         assert len(components) == 14
 
 
