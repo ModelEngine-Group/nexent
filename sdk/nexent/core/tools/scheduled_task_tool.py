@@ -180,13 +180,15 @@ class ScheduledTaskTool(Tool):
         lists ('1,3,5').
 
         Returns dict mapping each field name to a frozenset of allowed
-        integer values, or None if the expression is invalid.
+        integer values, plus boolean ``day_of_month_restricted`` /
+        ``day_of_week_restricted`` flags used for OR-semantics between the
+        two day fields. Returns None if the expression is invalid.
         """
         parts = expression.strip().split()
         if len(parts) != 5:
             return None
 
-        # (field_value, min, max) for each of the 5 cron fields
+        # (field_name, raw_field, lo, hi) for each of the 5 cron fields
         field_bounds = [
             ("minute", parts[0], 0, 59),
             ("hour", parts[1], 0, 23),
@@ -200,6 +202,12 @@ class ScheduledTaskTool(Tool):
                 result[name] = _expand_cron_field(field, lo, hi)
             except ValueError:
                 return None
+
+        # Standard cron: when BOTH day-of-month and day-of-week are
+        # restricted (non-'*'), they combine with OR semantics. A field is
+        # "restricted" when it was not a bare '*'.
+        result["day_of_month_restricted"] = parts[2].strip() != "*"
+        result["day_of_week_restricted"] = parts[4].strip() != "*"
         return result
 
     @staticmethod
@@ -210,11 +218,31 @@ class ScheduledTaskTool(Tool):
         candidate timestamp to the next matching value, instead of iterating
         minute-by-minute. Caps the search at 366 days to guarantee
         termination for impossible expressions.
+
+        Day-of-month and day-of-week follow standard cron OR semantics: when
+        both fields are restricted, a day matches if it satisfies either
+        field; when only one is restricted, that field must match (the
+        unrestricted '*' field always matches).
         """
         allowed_month = cron_parts["month"]
         allowed_dom = cron_parts["day_of_month"]
+        allowed_dow = cron_parts["day_of_week"]
         allowed_hour = cron_parts["hour"]
         allowed_minute = cron_parts["minute"]
+        dom_restricted = cron_parts.get("day_of_month_restricted", True)
+        dow_restricted = cron_parts.get("day_of_week_restricted", True)
+
+        # Python's weekday(): Monday=0 .. Sunday=6. Cron's day_of_week:
+        # Sunday=0(==7), Monday=1 .. Saturday=6.
+        def cron_dow(dt: datetime) -> int:
+            return (dt.weekday() + 1) % 7
+
+        def day_matches(dt: datetime) -> bool:
+            dom_ok = (dt.day in allowed_dom) if dom_restricted else True
+            dow_ok = (cron_dow(dt) in allowed_dow) if dow_restricted else True
+            if dom_restricted and dow_restricted:
+                return dom_ok or dow_ok  # OR semantics
+            return dom_ok and dow_ok
 
         # Start from the next minute after from_timestamp
         candidate = from_timestamp.replace(second=0, microsecond=0) + timedelta(minutes=1)
@@ -228,7 +256,7 @@ class ScheduledTaskTool(Tool):
                 candidate = candidate.replace(year=next_year, month=next_month, day=1, hour=0, minute=0)
                 continue
 
-            if candidate.day not in allowed_dom:
+            if not day_matches(candidate):
                 # Advance to the next day at 00:00
                 candidate = (candidate + timedelta(days=1)).replace(hour=0, minute=0)
                 continue

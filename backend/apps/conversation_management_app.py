@@ -291,9 +291,18 @@ async def batch_check_new_messages_endpoint(request: BatchMessageCheckRequest, a
     try:
         results = {}
         for check in request.checks[:50]:  # Cap at 50 to avoid abuse
-            results[str(check.conversation_id)] = get_new_messages_service(
-                check.conversation_id, user_id, check.since_index
-            )
+            # Isolate each conversation so one failure doesn't fail the
+            # whole batch; record an error marker instead.
+            try:
+                results[str(check.conversation_id)] = get_new_messages_service(
+                    check.conversation_id, user_id, check.since_index
+                )
+            except Exception as e:
+                logging.error(
+                    f"Failed to check new messages for conversation "
+                    f"{check.conversation_id}: {str(e)}"
+                )
+                results[str(check.conversation_id)] = {"error": "check_failed"}
         return JSONResponse(status_code=HTTPStatus.OK, content={"results": results})
     except Exception as e:
         logging.error(f"Failed to batch check new messages: {str(e)}")

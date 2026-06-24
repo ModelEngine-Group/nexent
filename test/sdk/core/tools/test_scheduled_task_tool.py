@@ -185,3 +185,59 @@ def test_next_fire_already_past_today_hour_jumps_to_tomorrow():
     parts = ScheduledTaskTool._parse_cron("0 7 * * *")
     nxt = ScheduledTaskTool._compute_next_fire(parts, BASE)
     assert nxt.replace(tzinfo=None) == datetime(2026, 6, 25, 7, 0)
+
+
+# ---------------------------------------------------------------------------
+# Standard cron OR semantics between day-of-month and day-of-week
+# When both are restricted, a day matches if it satisfies EITHER field.
+# ---------------------------------------------------------------------------
+
+def test_or_semantics_both_restricted_matches_weekday():
+    # "0 9 15 * 1": 9am on the 15th OR any Monday.
+    # BASE is 2026-06-24 (Wed). Next Monday is 2026-06-29.
+    # Day 15 is also restricted, but under OR semantics a Monday matches.
+    parts = ScheduledTaskTool._parse_cron("0 9 15 * 1")
+    nxt = ScheduledTaskTool._compute_next_fire(parts, BASE)
+    assert nxt.replace(tzinfo=None) == datetime(2026, 6, 29, 9, 0)
+
+
+def test_or_semantics_both_restricted_matches_dom_closer():
+    # "0 9 26 * 1": 9am on the 26th OR any Monday.
+    # 2026-06-26 is a Friday and matches day-of-month; next Monday is 06-29.
+    # OR semantics → the earlier match (the 26th) wins.
+    parts = ScheduledTaskTool._parse_cron("0 9 26 * 1")
+    nxt = ScheduledTaskTool._compute_next_fire(parts, BASE)
+    assert nxt.replace(tzinfo=None) == datetime(2026, 6, 26, 9, 0)
+
+
+def test_or_semantics_only_dom_restricted_is_and():
+    # "0 9 29 * *": 9am on the 29th, day-of-week unrestricted.
+    # Only day-of-month is restricted, so it must be the 29th (no OR fallback).
+    # 2026-06-29 happens to be a Monday, but that's irrelevant here.
+    parts = ScheduledTaskTool._parse_cron("0 9 29 * *")
+    nxt = ScheduledTaskTool._compute_next_fire(parts, BASE)
+    assert nxt.replace(tzinfo=None) == datetime(2026, 6, 29, 9, 0)
+
+
+def test_or_semantics_only_dow_restricted():
+    # "0 9 * * 1": 9am every Monday, day-of-month unrestricted.
+    # Next Monday after 2026-06-24 (Wed) is 2026-06-29.
+    parts = ScheduledTaskTool._parse_cron("0 9 * * 1")
+    nxt = ScheduledTaskTool._compute_next_fire(parts, BASE)
+    assert nxt.replace(tzinfo=None) == datetime(2026, 6, 29, 9, 0)
+
+
+def test_parse_records_day_restriction_flags():
+    # day-of-month and day-of-week restriction flags must reflect '*'
+    both_restricted = ScheduledTaskTool._parse_cron("0 9 15 * 1")
+    assert both_restricted["day_of_month_restricted"] is True
+    assert both_restricted["day_of_week_restricted"] is True
+
+    dom_only = ScheduledTaskTool._parse_cron("0 9 15 * *")
+    assert dom_only["day_of_month_restricted"] is True
+    assert dom_only["day_of_week_restricted"] is False
+
+    dow_only = ScheduledTaskTool._parse_cron("0 9 * * 1")
+    assert dow_only["day_of_month_restricted"] is False
+    assert dow_only["day_of_week_restricted"] is True
+
