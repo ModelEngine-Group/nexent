@@ -131,7 +131,7 @@ class MockAgent:
         self.prompt_template_name = None
         self.group_ids = None
         self.is_new = True
-        self.enable_context_manager = False
+        self.enable_context_manager = True
         self.verification_config = None
         self.greeting_message = None
         self.example_questions = None

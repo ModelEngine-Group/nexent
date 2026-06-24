@@ -29,6 +29,7 @@ class TestNexentAgentComponentRegistration:
     @pytest.fixture
     def agent_config_with_components(self):
         ctx_config = ContextManagerConfig(
+            enabled=True,
             token_threshold=1000,
             strategy=STRATEGY_TOKEN_BUDGET,
             component_budgets={"tools": 200, "skills": 100},
@@ -53,7 +54,7 @@ class TestNexentAgentComponentRegistration:
         agent.context_manager = None
         
         ctx_config = getattr(agent_config_with_components, 'context_manager_config', None)
-        if ctx_config:
+        if ctx_config and ctx_config.enabled:
             from sdk.nexent.core.agents.agent_context import ContextManager
             agent.context_manager = ContextManager(
                 config=ctx_config,
@@ -81,6 +82,26 @@ class TestNexentAgentComponentRegistration:
         agent.context_manager = None
         
         assert ctx_config is None
+        assert agent.context_manager is None
+
+    def test_no_context_manager_when_config_disabled(self):
+        ctx_config = ContextManagerConfig(enabled=False, token_threshold=1000)
+        agent_config = AgentConfig(
+            name="test_agent",
+            description="Test agent",
+            model_name="test-model",
+            tools=[],
+            context_manager_config=ctx_config,
+        )
+        
+        agent = MagicMock()
+        agent.context_manager = None
+        
+        config = getattr(agent_config, 'context_manager_config', None)
+        if config and config.enabled:
+            from sdk.nexent.core.agents.agent_context import ContextManager
+            agent.context_manager = ContextManager(config=config, max_steps=10)
+        
         assert agent.context_manager is None
 
     def test_components_registered_in_order(self, mock_context_manager, agent_config_with_components):
@@ -197,3 +218,63 @@ class TestBackwardCompatibility:
         
         assert config.strategy == STRATEGY_TOKEN_BUDGET
         assert "system_prompt" in config.component_budgets
+
+
+class TestConversationLevelCMComponentSurvival:
+    """Tests verifying components survive conversation-level CM overwrite."""
+
+    def test_replace_components_after_overwrite(self):
+        from sdk.nexent.core.agents.agent_context import ContextManager
+
+        conversation_cm = ContextManager(
+            config=ContextManagerConfig(enabled=True, token_threshold=1000),
+            max_steps=10,
+        )
+        assert conversation_cm.get_registered_components() == []
+
+        components = [
+            ToolsComponent(content="Tool descriptions", token_estimate=50),
+            SystemPromptComponent(content="System prompt", token_estimate=100),
+        ]
+
+        conversation_cm.replace_components(components)
+
+        registered = conversation_cm.get_registered_components()
+        assert len(registered) == 2
+        assert registered[0].component_type == "tools"
+        assert registered[1].component_type == "system_prompt"
+
+    def test_replace_components_clears_stale(self):
+        from sdk.nexent.core.agents.agent_context import ContextManager
+
+        conversation_cm = ContextManager(
+            config=ContextManagerConfig(enabled=True, token_threshold=1000),
+            max_steps=10,
+        )
+        conversation_cm.register_component(
+            ToolsComponent(content="stale tools", token_estimate=50)
+        )
+        assert len(conversation_cm.get_registered_components()) == 1
+
+        new_components = [
+            SystemPromptComponent(content="fresh prompt", token_estimate=100),
+        ]
+        conversation_cm.replace_components(new_components)
+
+        registered = conversation_cm.get_registered_components()
+        assert len(registered) == 1
+        assert registered[0].component_type == "system_prompt"
+
+    def test_replace_components_with_empty_list(self):
+        from sdk.nexent.core.agents.agent_context import ContextManager
+
+        conversation_cm = ContextManager(
+            config=ContextManagerConfig(enabled=True, token_threshold=1000),
+            max_steps=10,
+        )
+        conversation_cm.register_component(
+            ToolsComponent(content="tools", token_estimate=50)
+        )
+
+        conversation_cm.replace_components([])
+        assert conversation_cm.get_registered_components() == []
