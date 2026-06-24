@@ -244,7 +244,7 @@ def test_create_agent_repository_listing_api_rejects_asset_owner(mocker, mock_au
 
 
 def test_create_agent_repository_listing_api_exception(mocker, mock_auth_header):
-    """Test create_agent_repository_listing_api with general exception."""
+    """Test create_agent_repository_listing_api propagates unknown exceptions."""
     mock_get_user_id = mocker.patch(
         "apps.agent_repository_app.get_current_user_id"
     )
@@ -256,13 +256,11 @@ def test_create_agent_repository_listing_api_exception(mocker, mock_auth_header)
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_create_listing.side_effect = Exception("Database error")
 
-    response = client.post(
-        "/repository/agent/123/versions/1",
-        headers=mock_auth_header,
-    )
-
-    assert response.status_code == 500
-    assert "Create agent repository listing error." in response.json()["detail"]
+    with pytest.raises(Exception, match="Database error"):
+        client.post(
+            "/repository/agent/123/versions/1",
+            headers=mock_auth_header,
+        )
 
 
 def test_update_agent_repository_status_api_success(mocker, mock_auth_header):

@@ -1,4 +1,3 @@
-import logging
 from http import HTTPStatus
 from typing import Optional
 
@@ -18,7 +17,6 @@ from services.agent_repository_service import (
 from utils.auth_utils import get_current_user_id
 
 agent_repository_router = APIRouter(prefix="/repository/agent")
-logger = logging.getLogger("agent_repository_app")
 
 
 @agent_repository_router.get("")
@@ -54,12 +52,6 @@ async def list_agent_repository_listings_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.error(f"List agent repository listings error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="List agent repository listings error.",
-        )
 
 
 @agent_repository_router.get("/mine")
@@ -83,12 +75,6 @@ async def list_my_editable_agents_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.error(f"List my editable agents error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="List my editable agents error.",
-        )
 
 
 @agent_repository_router.get("/{agent_repository_id}")
@@ -105,12 +91,6 @@ async def get_agent_repository_listing_detail_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
-    except Exception as e:
-        logger.error(f"Get agent repository listing detail error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Get agent repository listing detail error.",
-        )
 
 
 @agent_repository_router.patch("/{agent_repository_id}/status")
@@ -140,12 +120,6 @@ async def update_agent_repository_status_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.error(f"Update agent repository status error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Update agent repository status error.",
-        )
 
 
 @agent_repository_router.post("/{agent_id}/versions/{version_no}")
@@ -171,12 +145,6 @@ async def create_agent_repository_listing_api(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.error(f"Create agent repository listing error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Create agent repository listing error.",
-        )
 
 
 @agent_repository_router.post("/{agent_repository_id}/import")
@@ -203,9 +171,3 @@ async def import_agent_from_repository_api(
         )
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
-    except Exception as e:
-        logger.error(f"Import agent from repository error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Import agent from repository error.",
-        )
