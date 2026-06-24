@@ -7,13 +7,13 @@ import {
   Empty,
   Input,
   Modal,
-  Pagination,
   Space,
   Spin,
   Tag,
   Typography,
   message,
 } from "antd";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
@@ -47,56 +47,36 @@ export default function AidpKnowledgeSelectorModal({
 }: AidpKnowledgeSelectorModalProps) {
   const { t } = useTranslation("common");
 
-  // Accumulate loaded items across all pages; replace when serverUrl/apiKey changes
-  const [allLoadedItems, setAllLoadedItems] = useState<AidpKnowledgeBaseItem[]>([]);
-  // Local selection state so toggling checkboxes does not auto-close the modal
-  const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [total, setTotal] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageItems, setPageItems] = useState<AidpKnowledgeBaseItem[]>([]);
+  const [nextLink, setNextLink] = useState<string | null>(null);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
 
-  // Persist display names for selected IDs even when they scroll off the loaded page
   const nameMap = useRef<Map<string, string>>(new Map());
-  // Keep a ref to latest selectedDatasetIds to avoid stale closures in loadPage
-  const selectedDatasetIdsRef = useRef<string[]>(selectedDatasetIds);
-  useEffect(() => {
-    selectedDatasetIdsRef.current = selectedDatasetIds;
-  }, [selectedDatasetIds]);
-  // Keep refs to latest credentials so loadPage can read them without
-  // recreating the callback on every credential change.
-  const serverUrlRef = useRef(serverUrl);
-  const apiKeyRef = useRef(apiKey);
-  useEffect(() => {
-    serverUrlRef.current = serverUrl;
-  }, [serverUrl]);
-  useEffect(() => {
-    apiKeyRef.current = apiKey;
-  }, [apiKey]);
+  const prevKeyword = useRef("");
 
   // ------------------------------------------------------------------
   // Reset all state when modal opens
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
-    setAllLoadedItems([]);
-    setTempSelectedIds(selectedDatasetIds);
-    setPage(1);
-    setPageSize(DEFAULT_PAGE_SIZE);
-    setTotal(0);
+    setCurrentPage(1);
+    setPageItems([]);
+    setNextLink(null);
     setKeyword("");
+    setTempSelectedIds(selectedDatasetIds);
     nameMap.current = new Map();
+    prevKeyword.current = "";
   }, [isOpen]);
 
   // ------------------------------------------------------------------
   // Keep display names in sync with the parent's selectedDatasetIds
-  // Handles: external removal (tool config panel deletes a KB → uncheck in modal)
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
     const ids = new Set(selectedDatasetIds.map(String));
-    // Prune nameMap of IDs that are no longer selected
     for (const id of nameMap.current.keys()) {
       if (!ids.has(id)) {
         nameMap.current.delete(id);
@@ -105,121 +85,86 @@ export default function AidpKnowledgeSelectorModal({
   }, [isOpen, selectedDatasetIds]);
 
   // ------------------------------------------------------------------
-  // Load a single page from the API
+  // Fetch a single page (page 1 on open/credentials change; next/prev on nav)
   // ------------------------------------------------------------------
   const loadPage = useCallback(
-    async (nextPage: number, nextPageSize: number) => {
-      // Read latest credentials from refs to keep this callback's identity stable
-      const currentServerUrl = serverUrlRef.current;
-      const currentApiKey = apiKeyRef.current;
-      if (!currentServerUrl || !currentApiKey) {
-        setAllLoadedItems([]);
-        setTotal(0);
+    async (pageNum: number, nextUrl: string | null = null) => {
+      if (!serverUrl || !apiKey) {
+        setPageItems([]);
+        setNextLink(null);
         return;
       }
 
       setLoading(true);
       try {
         const result = await knowledgeBaseService.getAidpKnowledgeBases(
-          currentServerUrl,
-          currentApiKey,
-          nextPage,
-          nextPageSize
+          serverUrl,
+          apiKey,
+          pageNum,
+          DEFAULT_PAGE_SIZE
         );
 
-        const items = result.value || [];
-        const newTotal = result.total_count ?? items.length;
+        const items: AidpKnowledgeBaseItem[] = result.value || [];
 
-        // Read selectedDatasetIds from a ref to avoid dependency changes triggering re-fetch
-        const currentSelectedIds = selectedDatasetIdsRef.current;
-
-        if (nextPage === 1) {
-          // Fresh load — replace the accumulated list
-          setAllLoadedItems(items);
-          // Always rebuild nameMap for this page's items with their names
-          // This ensures we have display names even for non-selected items
-          const nextNameMap = new Map<string, string>();
-          for (const item of items) {
-            const id = String(item.kds_id);
-            const name = item.kds_name || id;
-            // Keep previously stored name for still-selected IDs to avoid flicker
-            const storedName = nameMap.current.get(id);
-            nextNameMap.set(id, storedName ?? name);
-          }
-          nameMap.current = nextNameMap;
+        if (nextUrl) {
+          setNextLink(result.next_link ?? null);
         } else {
-          // Append page N > 1
-          setAllLoadedItems((prev) => [...prev, ...items]);
-          for (const item of items) {
-            const id = String(item.kds_id);
-            const name = item.kds_name || id;
-            if (currentSelectedIds.includes(id) && !nameMap.current.has(id)) {
-              nameMap.current.set(id, name);
-            }
+          setNextLink(result.next_link ?? null);
+        }
+
+        for (const item of items) {
+          const id = String(item.kds_id);
+          if (!nameMap.current.has(id)) {
+            nameMap.current.set(id, item.kds_name || id);
           }
         }
 
-        setTotal(newTotal);
+        setPageItems(items);
+        setCurrentPage(pageNum);
       } catch (error) {
         log.error("Failed to load AIDP knowledge bases:", error);
         message.error(t("toolConfig.aidp.selector.loadFailed"));
-        if (nextPage === 1) {
-          setAllLoadedItems([]);
-          setTotal(0);
-        }
+        setPageItems([]);
+        setNextLink(null);
       } finally {
         setLoading(false);
       }
     },
-    [t]
+    [serverUrl, apiKey, t]
   );
 
   // ------------------------------------------------------------------
-  // Trigger load when modal opens OR credentials change
-  // ------------------------------------------------------------------
-  const triggerLoad = useCallback(() => {
-    setPage(1);
-    // Read latest selectedDatasetIds from ref to avoid stale closure
-    loadPage(1, pageSize).catch(() => {
-      // Error already surfaced via message.error in loadPage.
-    });
-  }, [pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!isOpen) return;
-    // Touch selectedDatasetIdsRef to ensure latest value is read inside loadPage
-    selectedDatasetIdsRef.current;
-    triggerLoad();
-  }, [isOpen, serverUrl, apiKey, selectedDatasetIds, triggerLoad]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ------------------------------------------------------------------
-  // Reload on page / pageSize change
+  // Load first page when modal opens or credentials change
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
-    loadPage(page, pageSize).catch(() => {
-      // Error already surfaced via message.error in loadPage.
-    });
-  }, [page, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+    loadPage(1);
+  }, [isOpen, serverUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
-  // Client-side keyword filter applied to the accumulated list
+  // Keyword filter (client-side on current page)
   // ------------------------------------------------------------------
   const filteredItems = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
-    if (!kw) return allLoadedItems;
-    return allLoadedItems.filter((item) => {
+    if (!kw) return pageItems;
+    return pageItems.filter((item) => {
       const n = String(item.kds_name || "").toLowerCase();
       const i = String(item.kds_id || "").toLowerCase();
       const d = String(item.description || "").toLowerCase();
       return n.includes(kw) || i.includes(kw) || d.includes(kw);
     });
-  }, [allLoadedItems, keyword]);
+  }, [pageItems, keyword]);
 
   // ------------------------------------------------------------------
-  // Selected IDs — always derived from the parent's prop (source of truth)
+  // Sync / Reload current page
   // ------------------------------------------------------------------
+  const handleSync = () => {
+    loadPage(currentPage);
+  };
 
+  // ------------------------------------------------------------------
+  // Toggle selection
+  // ------------------------------------------------------------------
   const handleToggle = (item: AidpKnowledgeBaseItem, checked: boolean) => {
     const id = String(item.kds_id);
     if (checked) {
@@ -242,7 +187,9 @@ export default function AidpKnowledgeSelectorModal({
     setTempSelectedIds((prev) => prev.filter((sid) => sid !== id));
   };
 
-  const displayNames = tempSelectedIds.map((id) => nameMap.current.get(id) || id);
+  const displayNames = tempSelectedIds.map(
+    (id) => nameMap.current.get(id) || id
+  );
 
   const renderRow = (item: AidpKnowledgeBaseItem) => {
     const id = String(item.kds_id);
@@ -251,25 +198,29 @@ export default function AidpKnowledgeSelectorModal({
       !checked && tempSelectedIds.length >= maxSelect;
     return (
       <div key={id} className="px-4 py-3">
-        <div className="flex w-full items-start justify-between gap-4">
+        <div className="flex w-full items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0 flex-1">
-            <div className="mb-1 flex items-center gap-2">
+            <div className="mb-1 flex items-start gap-2">
               <Checkbox
+                id={`aidp-kb-${id}`}
                 checked={checked}
                 disabled={disableUnchecked}
-                onChange={(e) =>
-                  handleToggle(item, e.target.checked)
-                }
+                onChange={(e) => handleToggle(item, e.target.checked)}
+                className="shrink-0 mt-0.5"
+              />
+              <Tag className="shrink-0">{id}</Tag>
+              <label
+                htmlFor={`aidp-kb-${id}`}
+                className="cursor-pointer break-all leading-5 min-w-0"
               >
                 {item.kds_name || id}
-              </Checkbox>
-              <Tag>{id}</Tag>
+              </label>
             </div>
             {item.description && (
-              <Text type="secondary">{item.description}</Text>
+              <Text type="secondary" className="break-words">{item.description}</Text>
             )}
           </div>
-          <Space size={8}>
+          <Space size={8} className="shrink-0">
             <Tag>
               {t(
                 "toolConfig.aidp.selector.documentCount",
@@ -287,24 +238,20 @@ export default function AidpKnowledgeSelectorModal({
     );
   };
 
-  const renderListContent = (
-    isLoading: boolean,
-    items: AidpKnowledgeBaseItem[],
-    visibleItems: AidpKnowledgeBaseItem[]
-  ) => {
-    if (isLoading && items.length === 0) {
+  const renderListContent = () => {
+    if (loading && pageItems.length === 0) {
       return (
         <div className="flex justify-center py-12">
           <Spin />
         </div>
       );
     }
-    if (visibleItems.length === 0) {
+    if (filteredItems.length === 0) {
       return <Empty description={t("toolConfig.aidp.selector.empty")} />;
     }
     return (
       <div className="divide-y divide-gray-100 rounded-md border border-gray-200 bg-white">
-        {visibleItems.map(renderRow)}
+        {filteredItems.map(renderRow)}
       </div>
     );
   };
@@ -328,7 +275,9 @@ export default function AidpKnowledgeSelectorModal({
       <Space orientation="vertical" size={12} style={{ width: "100%" }}>
         <Input
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
+          onChange={(e) => {
+            setKeyword(e.target.value);
+          }}
           placeholder={t("toolConfig.aidp.selector.searchPlaceholder")}
         />
 
@@ -339,14 +288,7 @@ export default function AidpKnowledgeSelectorModal({
               max: maxSelect,
             })}
           </Text>
-          <Button
-            onClick={() => {
-              setPage(1);
-              loadPage(1, pageSize).catch(() => {
-                // Error already surfaced via message.error in loadPage.
-              });
-            }}
-          >
+          <Button onClick={handleSync}>
             {t("knowledgeBase.button.sync")}
           </Button>
         </div>
@@ -369,20 +311,25 @@ export default function AidpKnowledgeSelectorModal({
         )}
 
         <div style={{ minHeight: 420 }}>
-          {renderListContent(loading, allLoadedItems, filteredItems)}
+          {renderListContent()}
         </div>
 
-        <div className="flex justify-end">
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            showSizeChanger
-            onChange={(nextPage, nextPageSize) => {
-              setPage(nextPage);
-              setPageSize(nextPageSize);
-            }}
-          />
+        <div className="flex items-center justify-center gap-4">
+          <Button
+            icon={<LeftOutlined />}
+            disabled={currentPage === 1 || loading}
+            onClick={() => loadPage(currentPage - 1)}
+          >
+            {t("filePreview.pdf.previousPage")}
+          </Button>
+          <Text type="secondary">{currentPage}</Text>
+          <Button
+            icon={<RightOutlined />}
+            disabled={!nextLink || loading}
+            onClick={() => loadPage(currentPage + 1)}
+          >
+            {t("filePreview.pdf.nextPage")}
+          </Button>
         </div>
       </Space>
     </Modal>
