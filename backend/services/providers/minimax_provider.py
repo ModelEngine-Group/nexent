@@ -31,11 +31,13 @@ class MiniMaxModelProvider(AbstractModelProvider):
         try:
             target_model_type: str = provider_config["model_type"]
             model_api_key: str = provider_config["api_key"]
+            # Default SSL verification to True; can be disabled via provider config.
+            ssl_verify: bool = provider_config.get("ssl_verify", True)
 
             headers = {"Authorization": f"Bearer {model_api_key}"}
             url = MINIMAX_GET_URL
 
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=ssl_verify, timeout=15.0) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 all_models: List[Dict] = response.json().get("data", [])

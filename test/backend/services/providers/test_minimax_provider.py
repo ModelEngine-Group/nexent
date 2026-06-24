@@ -679,3 +679,70 @@ class TestMiniMaxModelProvider:
 
         # ID should be preserved as-is (not lowercased)
         assert result[0]["id"] == "MiniMax-M2.7"
+
+    @pytest.mark.asyncio
+    async def test_get_models_ssl_verify_defaults_to_true(self, mocker: MockFixture):
+        """Test that ssl_verify defaults to True and timeout is configured."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mock_async_client = mocker.patch(
+            "backend.services.providers.minimax_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.minimax_provider.MINIMAX_GET_URL",
+            "https://api.minimax.io/v1/models"
+        )
+
+        provider = MiniMaxModelProvider()
+        # No ssl_verify in config -> should default to True
+        await provider.get_models({"model_type": "llm", "api_key": "test"})
+
+        call_kwargs = mock_async_client.call_args.kwargs
+        assert call_kwargs.get("verify") is True
+        assert call_kwargs.get("timeout") == 15.0
+
+    @pytest.mark.asyncio
+    async def test_get_models_ssl_verify_can_be_disabled(self, mocker: MockFixture):
+        """Test that ssl_verify can be disabled via provider config."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mock_async_client = mocker.patch(
+            "backend.services.providers.minimax_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+        mocker.patch(
+            "backend.services.providers.minimax_provider.MINIMAX_GET_URL",
+            "https://api.minimax.io/v1/models"
+        )
+
+        provider = MiniMaxModelProvider()
+        # Explicit ssl_verify=False (e.g., for self-signed cert environments)
+        await provider.get_models({
+            "model_type": "llm",
+            "api_key": "test",
+            "ssl_verify": False,
+        })
+
+        call_kwargs = mock_async_client.call_args.kwargs
+        assert call_kwargs.get("verify") is False
