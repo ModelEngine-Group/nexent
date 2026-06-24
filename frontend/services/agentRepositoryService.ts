@@ -12,8 +12,6 @@ import type {
   AgentRepositoryListingListParams,
   AgentRepositoryListingListResponse,
   AgentRepositoryListingStatus,
-  AgentRepositoryOptionField,
-  AgentRepositoryOptionResultMap,
   MyEditableAgentListParams,
   MyEditableAgentListResponse,
 } from "@/types/agentRepository";
@@ -37,31 +35,6 @@ export async function fetchAgentRepositoryListings(
     return response.json();
   } catch (error) {
     log.error("Error fetching agent repository listings:", error);
-    throw error;
-  }
-}
-
-export async function fetchAgentRepositoryOptions<
-  F extends AgentRepositoryOptionField,
->(field: F): Promise<AgentRepositoryOptionResultMap[F]> {
-  try {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.agentRepository.options(field),
-      {
-        method: "GET",
-        headers: getAuthHeaders(),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch agent repository options: ${response.statusText}`
-      );
-    }
-
-    return response.json();
-  } catch (error) {
-    log.error("Error fetching agent repository options:", error);
     throw error;
   }
 }
@@ -177,7 +150,6 @@ export async function updateAgentRepositoryStatus(
 
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
-  fetchAgentRepositoryOptions,
   fetchAgentRepositoryListingDetail,
   fetchMyEditableAgents,
   createAgentRepositoryListing,

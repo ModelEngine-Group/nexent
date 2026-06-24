@@ -19,13 +19,17 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import {
-  useAgentRepositoryOptions,
   useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
   useMyEditableAgents,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { AGENT_REPOSITORY_CATEGORIES } from "@/const/agentRepository";
 import type { AgentRepositoryCategoryItem, AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
+import {
+  getAgentRepositoryCategoryLabel,
+  getAgentRepositoryTagSearchText,
+} from "@/lib/agentRepositoryLabels";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import { MineAgentsView } from "./components/MineAgentsView";
@@ -57,14 +61,17 @@ export default function AgentRepositoryPage() {
   const isReviewTab = tab === AgentRepositoryTab.REVIEW;
   const isMineTab = tab === AgentRepositoryTab.MINE;
 
-  const { data: categories = [] } = useAgentRepositoryOptions(
-    "categories",
-    isRepositoryTab || isReviewTab
-  );
+  const categories = AGENT_REPOSITORY_CATEGORIES;
 
   const categoryNameById = useMemo(
-    () => new Map(categories.map((item) => [item.id, item.name])),
-    [categories]
+    () =>
+      new Map(
+        categories.map((item) => [
+          item.id,
+          getAgentRepositoryCategoryLabel(item, t),
+        ])
+      ),
+    [categories, t]
   );
 
   const listingParams = {
@@ -127,7 +134,7 @@ export default function AgentRepositoryPage() {
         const author = (item.author || "").toLowerCase();
         const description = (item.description || "").toLowerCase();
         const tags = (item.tags || [])
-          .map((tag) => tag.toLowerCase())
+          .map((tag) => getAgentRepositoryTagSearchText(tag, t))
           .join(" ");
         return (
           title.includes(normalizedQuery) ||
@@ -364,7 +371,8 @@ function RepositoryView({
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             }`}
           >
-            {category.name}
+            {categoryNameById.get(category.id) ??
+              getAgentRepositoryCategoryLabel(category, t)}
           </button>
         ))}
       </div>
@@ -392,18 +400,19 @@ function RepositoryView({
           description={t("agentRepository.page.empty")}
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {listings.map((listing) => (
-            <AgentRepositoryCard
-              key={listing.agent_repository_id}
-              listing={listing}
-              categoryName={
-                listing.category_id != null
-                  ? categoryNameById.get(listing.category_id)
-                  : undefined
-              }
-              onDetailClick={onDetailClick}
-            />
+            <div key={listing.agent_repository_id} className="h-full">
+              <AgentRepositoryCard
+                listing={listing}
+                categoryName={
+                  listing.category_id != null
+                    ? categoryNameById.get(listing.category_id)
+                    : undefined
+                }
+                onDetailClick={onDetailClick}
+              />
+            </div>
           ))}
         </div>
       )}

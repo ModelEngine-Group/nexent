@@ -6,16 +6,12 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
-from consts.model import (
-    AgentRepositoryListingCreateRequest,
-    AgentRepositoryOptionField,
-)
+from consts.model import AgentRepositoryListingCreateRequest
 from services.agent_repository_service import (
     create_agent_repository_listing_impl,
     get_agent_repository_listing_detail_impl,
     import_agent_from_repository_impl,
     list_agent_repository_listings_impl,
-    list_agent_repository_options_impl,
     list_my_editable_agents_impl,
     update_agent_repository_status_impl,
 )
@@ -63,33 +59,6 @@ async def list_agent_repository_listings_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="List agent repository listings error.",
-        )
-
-
-@agent_repository_router.get("/options")
-async def list_agent_repository_options_api(
-    field: AgentRepositoryOptionField = Query(
-        ...,
-        description="Option group to return: categories / icons / tags",
-    ),
-    authorization: str = Header(None),
-):
-    """List hardcoded marketplace listing presets for one option group."""
-    try:
-        get_current_user_id(authorization)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content=list_agent_repository_options_impl(field.value),
-        )
-    except UnauthorizedError as e:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.error(f"List agent repository options error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="List agent repository options error.",
         )
 
 

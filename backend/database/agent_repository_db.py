@@ -242,68 +242,6 @@ def list_agent_repository_summaries(
         ]
 
 
-def query_agent_repository_list(
-    *,
-    page: int = 1,
-    page_size: int = 20,
-    search: Optional[str] = None,
-    tag: Optional[str] = None,
-    category_id: Optional[int] = None,
-    status: Optional[str] = STATUS_SHARED,
-    publisher_tenant_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Query repository listings with offset pagination."""
-    page = max(page, 1)
-    page_size = max(min(page_size, 100), 1)
-    offset = (page - 1) * page_size
-
-    with get_db_session() as session:
-        query = session.query(AgentRepository).filter(
-            AgentRepository.delete_flag != "Y",
-        )
-
-        if status:
-            query = query.filter(AgentRepository.status == status)
-        if publisher_tenant_id:
-            query = query.filter(
-                AgentRepository.publisher_tenant_id == publisher_tenant_id
-            )
-        if category_id is not None:
-            query = query.filter(AgentRepository.category_id == category_id)
-        if tag:
-            query = query.filter(AgentRepository.tags.any(tag))
-        if search:
-            keyword = f"%{search}%"
-            query = query.filter(
-                or_(
-                    AgentRepository.name.ilike(keyword),
-                    AgentRepository.display_name.ilike(keyword),
-                    AgentRepository.description.ilike(keyword),
-                    AgentRepository.author.ilike(keyword),
-                    func.array_to_string(AgentRepository.tags, ",").ilike(keyword),
-                )
-            )
-
-        total = query.count()
-        rows = (
-            query.order_by(AgentRepository.agent_repository_id.desc())
-            .offset(offset)
-            .limit(page_size)
-            .all()
-        )
-
-        total_pages = math.ceil(total / page_size) if total else 0
-        return {
-            "items": [as_dict(row) for row in rows],
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total": total,
-                "total_pages": total_pages,
-            },
-        }
-
-
 def update_agent_repository_by_id(
     *,
     repository_id: int,

@@ -237,36 +237,6 @@ def test_list_repository_listings_rejects_invalid_status_with_agent_id():
     mock_list.assert_not_called()
 
 
-def test_list_agent_repository_options_impl_returns_categories():
-    result = ars.list_agent_repository_options_impl("categories")
-
-    assert len(result) == 7
-    assert result[0] == {"id": 1, "name": "写作助手"}
-    assert result[-1] == {"id": 0, "name": "其它"}
-    assert [item["id"] for item in result] == [1, 2, 3, 4, 5, 6, 0]
-
-
-def test_list_agent_repository_options_impl_returns_icons():
-    result = ars.list_agent_repository_options_impl("icons")
-
-    assert result[0] == "🤖"
-    assert "📊" in result
-    assert len(result) == 10
-
-
-def test_list_agent_repository_options_impl_returns_tags():
-    result = ars.list_agent_repository_options_impl("tags")
-
-    assert "营销" in result
-    assert "代码审查" in result
-    assert "数据" in result
-
-
-def test_list_agent_repository_options_impl_rejects_unknown_field():
-    with pytest.raises(ValueError, match="Unsupported option field"):
-        ars.list_agent_repository_options_impl("unknown")
-
-
 def test_normalize_listing_tags_trims_dedupes_and_limits():
     assert ars._normalize_listing_tags([" 营销 ", "营销", "数据"]) == ["营销", "数据"]
 
@@ -277,7 +247,7 @@ def test_normalize_listing_tags_trims_dedupes_and_limits():
         ars._normalize_listing_tags(["a", "b", "c", "d", "e", "f"])
 
 
-def test_validate_card_fields_requires_supported_values():
+def test_validate_card_fields_requires_structural_values():
     base = {
         "agent_id": 1,
         "version_no": 1,
@@ -298,13 +268,20 @@ def test_validate_card_fields_requires_supported_values():
     with pytest.raises(ValueError, match="tags is required"):
         ars._validate_create_payload({**base, "icon": "🤖", "category_id": 1})
 
-    with pytest.raises(ValueError, match="supported marketplace icon"):
+    with pytest.raises(ValueError, match="non-empty string"):
         ars._validate_create_payload({
             **base,
-            "icon": "invalid",
+            "icon": "   ",
             "category_id": 1,
-            "tags": ["营销"],
+            "tags": ["marketing"],
         })
+
+    ars._validate_create_payload({
+        **base,
+        "icon": "🤖",
+        "category_id": 99,
+        "tags": ["marketing"],
+    })
 
 
 def _editable_agent_record(

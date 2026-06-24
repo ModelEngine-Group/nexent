@@ -641,14 +641,8 @@ class AgentRepositoryListingCreateRequest(BaseModel):
 class AgentRepositoryCategoryItem(BaseModel):
     """Marketplace category option for agent repository filtering."""
     id: int
+    key: str
     name: str
-
-
-class AgentRepositoryOptionField(str, Enum):
-    """Selectable option groups for agent repository listing presets."""
-    CATEGORIES = "categories"
-    ICONS = "icons"
-    TAGS = "tags"
 
 
 class AgentRepositoryListingDetailResponse(BaseModel):

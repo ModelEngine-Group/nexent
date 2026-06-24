@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_agent_repository_t (
     tool_count INTEGER,
     version_label VARCHAR(100),
     agent_info_json JSONB NOT NULL,
-    status VARCHAR(30) DEFAULT 'NOT_SHARED',
+    status VARCHAR(30) DEFAULT 'not_shared',
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -52,7 +52,7 @@ COMMENT ON COLUMN nexent.ag_agent_repository_t.tags IS 'Marketplace tags';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.tool_count IS 'Total tool count across all agents in the bundle (display only)';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.version_label IS 'Repository entry version label for display (e.g. v1.0)';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_info_json IS 'Frozen ExportAndImportDataFormat snapshot with optional skills';
-COMMENT ON COLUMN nexent.ag_agent_repository_t.status IS 'Listing status: NOT_SHARED (未共享) / PENDING_REVIEW (待审核) / REJECTED (审核驳回) / SHARED (已共享)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.status IS 'Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.created_by IS 'Creator ID';

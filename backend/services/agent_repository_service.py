@@ -65,32 +65,9 @@ _REPOSITORY_STATUS_PRIORITY: Dict[str, int] = {
     STATUS_NOT_SHARED: 1,
 }
 
-_AGENT_REPOSITORY_CATEGORIES: List[Dict[str, Any]] = [
-    {"id": 1, "name": "写作助手"},
-    {"id": 2, "name": "编程开发"},
-    {"id": 3, "name": "数据分析"},
-    {"id": 4, "name": "客户服务"},
-    {"id": 5, "name": "效率工具"},
-    {"id": 6, "name": "创意设计"},
-    {"id": 0, "name": "其它"},
-]
-
-_AGENT_REPOSITORY_ICONS: List[str] = [
-    "🤖", "✍️", "🔍", "📊", "💬", "📝", "🎨", "⚡", "🔧", "📚",
-]
-
-_AGENT_REPOSITORY_TAGS: List[str] = [
-    "营销", "文案", "内容创作", "代码审查", "质量", "DevOps",
-    "数据", "可视化", "BI", "客服", "工单", "自动化",
-    "会议", "纪要", "效率", "设计", "配色", "灵感", "表格", "办公",
-]
-
-_VALID_REPOSITORY_CATEGORY_IDS: FrozenSet[int] = frozenset(
-    category["id"] for category in _AGENT_REPOSITORY_CATEGORIES
-)
-_VALID_REPOSITORY_ICONS: FrozenSet[str] = frozenset(_AGENT_REPOSITORY_ICONS)
 _MAX_LISTING_TAGS = 5
 _MAX_LISTING_TAG_LENGTH = 20
+_MAX_LISTING_ICON_LENGTH = 32
 
 _UPDATE_SNAPSHOT_FIELDS = (
     "display_name",
@@ -184,18 +161,6 @@ def list_agent_repository_listings_impl(
     return {"items": [_to_summary_item(record) for record in records]}
 
 
-def list_agent_repository_options_impl(field: str) -> List[Any]:
-    """Return hardcoded marketplace listing option presets for one field."""
-    options_by_field = {
-        "categories": list(_AGENT_REPOSITORY_CATEGORIES),
-        "icons": list(_AGENT_REPOSITORY_ICONS),
-        "tags": list(_AGENT_REPOSITORY_TAGS),
-    }
-    if field not in options_by_field:
-        raise ValueError(f"Unsupported option field: {field}")
-    return options_by_field[field]
-
-
 def _normalize_listing_tags(tags: Any) -> List[str]:
     """Trim, deduplicate, and validate marketplace listing tags."""
     if not isinstance(tags, list):
@@ -228,12 +193,16 @@ def _normalize_listing_tags(tags: Any) -> List[str]:
 def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
     """Validate marketplace card fields required for listing submission."""
     icon = repository_data.get("icon")
-    if not icon or not isinstance(icon, str) or icon not in _VALID_REPOSITORY_ICONS:
-        raise ValueError("icon is required and must be a supported marketplace icon")
+    if not icon or not isinstance(icon, str) or not icon.strip():
+        raise ValueError("icon is required and must be a non-empty string")
+    if len(icon.strip()) > _MAX_LISTING_ICON_LENGTH:
+        raise ValueError(
+            f"icon must be at most {_MAX_LISTING_ICON_LENGTH} characters"
+        )
 
     category_id = repository_data.get("category_id")
-    if category_id is None or category_id not in _VALID_REPOSITORY_CATEGORY_IDS:
-        raise ValueError("category_id is required and must be a supported category")
+    if category_id is None or not isinstance(category_id, int):
+        raise ValueError("category_id is required and must be an integer")
 
     tags = repository_data.get("tags")
     if tags is None:

@@ -3,7 +3,6 @@
 import os
 import sys
 import types
-from enum import Enum
 from typing import List, Optional
 from unittest.mock import AsyncMock, MagicMock
 
@@ -30,14 +29,7 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     tool_count: Optional[int] = Field(None, ge=0)
 
 
-class _AgentRepositoryOptionField(str, Enum):
-    CATEGORIES = "categories"
-    ICONS = "icons"
-    TAGS = "tags"
-
-
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
-consts_model.AgentRepositoryOptionField = _AgentRepositoryOptionField
 sys.modules["consts.model"] = consts_model
 
 from apps.agent_repository_app import agent_repository_router
@@ -350,82 +342,6 @@ def test_update_agent_repository_status_api_bad_request(mocker, mock_auth_header
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid status transition"
-
-
-def test_list_agent_repository_options_api_returns_categories(mocker, mock_auth_header):
-    """Test options API returns category list when field is categories."""
-    mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
-    )
-    mock_list_options = mocker.patch(
-        "apps.agent_repository_app.list_agent_repository_options_impl",
-    )
-
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-    mock_list_options.return_value = [
-        {"id": 1, "name": "写作助手"},
-        {"id": 1000, "name": "其它"},
-    ]
-
-    response = client.get(
-        "/repository/agent/options?field=categories",
-        headers=mock_auth_header,
-    )
-
-    assert response.status_code == 200
-    assert response.json() == [
-        {"id": 1, "name": "写作助手"},
-        {"id": 1000, "name": "其它"},
-    ]
-    mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
-    mock_list_options.assert_called_once_with("categories")
-
-
-def test_list_agent_repository_options_api_returns_icons(mocker, mock_auth_header):
-    """Test options API returns icon list when field is icons."""
-    mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
-    )
-    mock_list_options = mocker.patch(
-        "apps.agent_repository_app.list_agent_repository_options_impl",
-    )
-
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-    mock_list_options.return_value = ["🤖", "📊"]
-
-    response = client.get(
-        "/repository/agent/options?field=icons",
-        headers=mock_auth_header,
-    )
-
-    assert response.status_code == 200
-    assert response.json() == ["🤖", "📊"]
-    mock_list_options.assert_called_once_with("icons")
-
-
-def test_list_agent_repository_options_api_requires_field(mock_auth_header):
-    """Test options API requires field query parameter."""
-    response = client.get("/repository/agent/options", headers=mock_auth_header)
-
-    assert response.status_code == 422
-
-
-def test_list_agent_repository_options_api_unauthorized(mocker, mock_auth_header):
-    """Test options API maps UnauthorizedError to 401."""
-    from consts.exceptions import UnauthorizedError
-
-    mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
-    )
-    mock_get_user_id.side_effect = UnauthorizedError("Not authorized")
-
-    response = client.get(
-        "/repository/agent/options?field=categories",
-        headers=mock_auth_header,
-    )
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Not authorized"
 
 
 def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_auth_header):

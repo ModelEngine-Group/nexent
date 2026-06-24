@@ -4,12 +4,10 @@ import type {
   AgentRepositoryListingListParams,
   AgentRepositoryListingCreatePayload,
   AgentRepositoryListingStatus,
-  AgentRepositoryOptionField,
   MineOwnershipFilter,
 } from "@/types/agentRepository";
 
 const QUERY_KEY = "agentRepositoryListings";
-const OPTIONS_QUERY_KEY = "agentRepositoryOptions";
 const DETAIL_QUERY_KEY = "agentRepositoryListingDetail";
 const MY_EDITABLE_AGENTS_QUERY_KEY = "myEditableAgents";
 
@@ -21,18 +19,6 @@ export function useAgentRepositoryListings(
     queryKey: [QUERY_KEY, params],
     queryFn: () => agentRepositoryService.fetchAgentRepositoryListings(params),
     staleTime: 60_000,
-    enabled,
-  });
-}
-
-export function useAgentRepositoryOptions<F extends AgentRepositoryOptionField>(
-  field: F,
-  enabled = true
-) {
-  return useQuery({
-    queryKey: [OPTIONS_QUERY_KEY, field],
-    queryFn: () => agentRepositoryService.fetchAgentRepositoryOptions(field),
-    staleTime: 300_000,
     enabled,
   });
 }

@@ -4,7 +4,6 @@ import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type {
   AgentRepositoryListingListParams,
-  AgentRepositoryOptionField,
   MyEditableAgentListParams,
 } from "@/types/agentRepository";
 import type { MarketAgentListParams } from "@/types/market";
@@ -381,8 +380,6 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },
-    options: (field: AgentRepositoryOptionField) =>
-      `${API_BASE_URL}/repository/agent/options?field=${field}`,
     mineAgents: (params?: MyEditableAgentListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.ownership) {

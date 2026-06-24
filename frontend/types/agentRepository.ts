@@ -38,16 +38,10 @@ export interface AgentRepositoryListingListParams {
 
 export interface AgentRepositoryCategoryItem {
   id: number;
-  name: string;
+  key: string;
+  /** Legacy fallback when resolving labels from old API payloads. */
+  name?: string;
 }
-
-export type AgentRepositoryOptionField = "categories" | "icons" | "tags";
-
-export type AgentRepositoryOptionResultMap = {
-  categories: AgentRepositoryCategoryItem[];
-  icons: string[];
-  tags: string[];
-};
 
 export interface AgentRepositoryListingDetail {
   agent_repository_id: number;
