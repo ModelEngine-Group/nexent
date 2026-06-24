@@ -85,18 +85,6 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    -- silicon/deepseek-ai/DeepSeek-V4-Flash
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = 1000000,
-           max_output_tokens = 384000,
-           default_output_reserve_tokens = 8192
-     WHERE LOWER(model_factory) = 'silicon'
-       AND model_name = 'deepseek-ai/DeepSeek-V4-Flash'
-       AND delete_flag = 'N'
-       AND context_window_tokens IS NULL;
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
     -- silicon/Qwen/Qwen3.6-27B
     UPDATE nexent.model_record_t
        SET context_window_tokens = 262144,
