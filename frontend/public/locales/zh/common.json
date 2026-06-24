@@ -817,8 +817,6 @@
   "model.dialog.capacity.maxOutputTokens.tooltip": "模型或供应商支持的输出上限。",
   "model.dialog.capacity.defaultOutputReserveTokens": "输出预留Token数",
   "model.dialog.capacity.defaultOutputReserveTokens.tooltip": "构造请求输入前默认预留的输出额度。",
-  "model.dialog.capacity.tokenizerFamily": "Tokenizer类型",
-  "model.dialog.capacity.tokenizerFamily.tooltip": "此模型使用的Token计数策略。",
   "model.dialog.capacity.error.positiveInteger": "容量数字字段必须为空或正整数。",
   "model.dialog.capacity.error.outputExceedsWindow": "最大输出Token数不能超过上下文窗口。",
   "model.dialog.capacity.error.inputExceedsWindow": "最大输入Token数不能超过上下文窗口（超出部分会被自动忽略，请直接调整数值）。",

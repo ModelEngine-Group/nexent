@@ -1,4 +1,4 @@
-import { Alert, AutoComplete, Button, Input, Tag, Tooltip } from "antd";
+import { Alert, Button, Input, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { CapacitySuggestion } from "@/types/modelConfig";
@@ -36,13 +36,6 @@ interface ModelCapacityFieldsProps {
   formMode?: ModelCapacityFormMode;
   /** Field names that should render a red asterisk and be enforced by validation. */
   requiredFields?: Array<keyof ModelCapacityFormState>;
-  /**
-   * Hide the tokenizer_family input. Used by provider-level "modify config"
-   * bulk-apply mode where one value would be forced onto N models with
-   * different tokenizer families -- almost always wrong, so we drop the
-   * field rather than encourage misuse.
-   */
-  hideTokenizer?: boolean;
   suggestion?: CapacitySuggestion | null;
   onUseSuggestion?: () => void;
   suggestionLoading?: boolean;
@@ -55,14 +48,6 @@ interface ModelCapacityFieldsProps {
    */
   legacyMaxTokensCandidate?: number;
 }
-
-const TOKENIZER_FAMILY_OPTIONS = [
-  "o200k_base",
-  "qwen",
-  "chatglm",
-  "deepseek",
-  "moonshot",
-];
 
 const SOURCE_COLORS: Record<string, string> = {
   operator: "blue",
@@ -217,7 +202,6 @@ export const ModelCapacityFields = ({
   showDeprecatedMaxTokensWarning,
   formMode = "edit",
   requiredFields = [],
-  hideTokenizer = false,
   suggestion,
   onUseSuggestion,
   suggestionLoading = false,
@@ -407,30 +391,13 @@ export const ModelCapacityFields = ({
         )}
       </div>
 
-      {!hideTokenizer && (
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            <Tooltip title={t("model.dialog.capacity.tokenizerFamily.tooltip")}>
-              <span>{t("model.dialog.capacity.tokenizerFamily")}</span>
-            </Tooltip>
-            {requiredSet.has("tokenizerFamily") && (
-              <span className="text-red-500 ml-1">*</span>
-            )}
-          </label>
-          <AutoComplete
-            allowClear
-            value={value.tokenizerFamily}
-            onChange={(nextValue) =>
-              onChange("tokenizerFamily", nextValue || "")
-            }
-            options={TOKENIZER_FAMILY_OPTIONS.map((item) => ({
-              label: item,
-              value: item,
-            }))}
-            style={{ width: "100%" }}
-          />
-        </div>
-      )}
+      {/* tokenizer_family input intentionally not rendered: the field is
+          recorded silently (auto-filled by W11 catalog suggestion or
+          preserved from existing DB rows) and consumed only by the
+          tokenizer_registry — operators never need to type it. Removing the
+          input on all four surfaces (add/edit single/batch) avoids forcing
+          a choice that has no current runtime effect (the registry has no
+          adapters registered yet, so all families resolve to estimated). */}
 
       {validationError && (
         <Alert type="error" showIcon message={t(validationError)} />

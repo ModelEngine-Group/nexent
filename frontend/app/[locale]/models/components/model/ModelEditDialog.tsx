@@ -898,9 +898,8 @@ export const ProviderConfigEditDialog = ({
   const supportsCapacityFields = !hideCapacityFields && isLlmOrVlm;
   // Provider-level "bulk apply" capacity panel: shown when the dialog is
   // editing shared provider settings (the "修改配置" button). Renders the
-  // same ModelCapacityFields panel with Tokenizer hidden -- bulk-applying
-  // a single tokenizer family across N models is almost always wrong, but
-  // context_window / max_output / etc. are reasonable defaults to broadcast.
+  // same ModelCapacityFields panel; context_window / max_output / etc. are
+  // reasonable defaults to broadcast across N models.
   const supportsBulkCapacity = hideCapacityFields && isLlmOrVlm;
   // Only rerank and voice models legitimately need the deprecated max_tokens
   // input. Per the W1/W2 plan, never surface legacy max_tokens for LLM/VLM
@@ -1042,7 +1041,6 @@ export const ProviderConfigEditDialog = ({
               onChange={handleCapacityChange}
               validationError={capacityValidationError}
               formMode="add"
-              hideTokenizer
             />
           </div>
         )}

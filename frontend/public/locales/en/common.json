@@ -846,8 +846,6 @@
   "model.dialog.capacity.maxOutputTokens.tooltip": "Provider-supported completion output cap.",
   "model.dialog.capacity.defaultOutputReserveTokens": "Output Reserve",
   "model.dialog.capacity.defaultOutputReserveTokens.tooltip": "Default output allowance reserved before constructing request input.",
-  "model.dialog.capacity.tokenizerFamily": "Tokenizer Family",
-  "model.dialog.capacity.tokenizerFamily.tooltip": "Token counting strategy used for this model.",
   "model.dialog.capacity.error.positiveInteger": "Capacity numeric fields must be positive integers or empty.",
   "model.dialog.capacity.error.outputExceedsWindow": "Max output tokens cannot exceed the context window.",
   "model.dialog.capacity.error.inputExceedsWindow": "Max input tokens cannot exceed the context window (any excess is silently clipped, so please adjust the value directly).",
