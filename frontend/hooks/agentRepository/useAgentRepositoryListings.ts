@@ -2,12 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import agentRepositoryService from "@/services/agentRepositoryService";
 import type {
   AgentRepositoryListingListParams,
+  AgentRepositoryListingCreatePayload,
   AgentRepositoryListingStatus,
+  AgentRepositoryOptionField,
   MineOwnershipFilter,
 } from "@/types/agentRepository";
 
 const QUERY_KEY = "agentRepositoryListings";
-const CATEGORIES_QUERY_KEY = "agentRepositoryCategories";
+const OPTIONS_QUERY_KEY = "agentRepositoryOptions";
 const DETAIL_QUERY_KEY = "agentRepositoryListingDetail";
 const MY_EDITABLE_AGENTS_QUERY_KEY = "myEditableAgents";
 
@@ -23,10 +25,13 @@ export function useAgentRepositoryListings(
   });
 }
 
-export function useAgentRepositoryCategories(enabled = true) {
+export function useAgentRepositoryOptions<F extends AgentRepositoryOptionField>(
+  field: F,
+  enabled = true
+) {
   return useQuery({
-    queryKey: [CATEGORIES_QUERY_KEY],
-    queryFn: () => agentRepositoryService.fetchAgentRepositoryCategories(),
+    queryKey: [OPTIONS_QUERY_KEY, field],
+    queryFn: () => agentRepositoryService.fetchAgentRepositoryOptions(field),
     staleTime: 300_000,
     enabled,
   });
@@ -88,11 +93,17 @@ export function useCreateAgentRepositoryListing() {
     mutationFn: ({
       agentId,
       versionNo,
+      payload,
     }: {
       agentId: number;
       versionNo: number;
+      payload: AgentRepositoryListingCreatePayload;
     }) =>
-      agentRepositoryService.createAgentRepositoryListing(agentId, versionNo),
+      agentRepositoryService.createAgentRepositoryListing(
+        agentId,
+        versionNo,
+        payload
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: [MY_EDITABLE_AGENTS_QUERY_KEY] });

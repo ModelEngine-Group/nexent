@@ -7,14 +7,23 @@ import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
 interface AgentRepositoryCardProps {
   listing: AgentRepositoryListingItem;
+  categoryName?: string | null;
   onDetailClick?: (listing: AgentRepositoryListingItem) => void;
 }
 
-export function AgentRepositoryCard({ listing, onDetailClick }: AgentRepositoryCardProps) {
+export function AgentRepositoryCard({
+  listing,
+  categoryName,
+  onDetailClick,
+}: AgentRepositoryCardProps) {
   const { t } = useTranslation("common");
 
   const title =
     listing.display_name?.trim() || listing.name?.trim() || t("agentRepository.card.untitled");
+  const author = listing.author?.trim();
+  const category =
+    categoryName?.trim() || t("agentRepository.review.unknownCategory");
+  const subtitle = author ? `${author} · ${category}` : category;
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
   const toolCount = listing.tool_count ?? 0;
   const versionText = listing.version_label;
@@ -37,11 +46,9 @@ export function AgentRepositoryCard({ listing, onDetailClick }: AgentRepositoryC
             <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
               {title}
             </h3>
-            {listing.author ? (
-              <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                {listing.author}
-              </p>
-            ) : null}
+            <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+              {subtitle}
+            </p>
           </div>
         </div>
 

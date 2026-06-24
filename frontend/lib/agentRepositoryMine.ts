@@ -84,6 +84,12 @@ export function isCancelableRepositoryStatus(
   return status === "pending_review" || status === "rejected";
 }
 
+export function isTakeDownableRepositoryStatus(
+  status: MyAgentRepositoryInfoItem["status"]
+): boolean {
+  return status === "shared";
+}
+
 export function getMineCardMenuActions(
   agent: MyEditableAgentItem
 ): MineCardMenuAction[] {

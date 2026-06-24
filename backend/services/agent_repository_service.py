@@ -75,6 +75,23 @@ _AGENT_REPOSITORY_CATEGORIES: List[Dict[str, Any]] = [
     {"id": 0, "name": "其它"},
 ]
 
+_AGENT_REPOSITORY_ICONS: List[str] = [
+    "🤖", "✍️", "🔍", "📊", "💬", "📝", "🎨", "⚡", "🔧", "📚",
+]
+
+_AGENT_REPOSITORY_TAGS: List[str] = [
+    "营销", "文案", "内容创作", "代码审查", "质量", "DevOps",
+    "数据", "可视化", "BI", "客服", "工单", "自动化",
+    "会议", "纪要", "效率", "设计", "配色", "灵感", "表格", "办公",
+]
+
+_VALID_REPOSITORY_CATEGORY_IDS: FrozenSet[int] = frozenset(
+    category["id"] for category in _AGENT_REPOSITORY_CATEGORIES
+)
+_VALID_REPOSITORY_ICONS: FrozenSet[str] = frozenset(_AGENT_REPOSITORY_ICONS)
+_MAX_LISTING_TAGS = 5
+_MAX_LISTING_TAG_LENGTH = 20
+
 _UPDATE_SNAPSHOT_FIELDS = (
     "display_name",
     "description",
@@ -167,9 +184,61 @@ def list_agent_repository_listings_impl(
     return {"items": [_to_summary_item(record) for record in records]}
 
 
-def list_agent_repository_categories_impl() -> List[Dict[str, Any]]:
-    """Return hardcoded marketplace category options for repository filtering."""
-    return list(_AGENT_REPOSITORY_CATEGORIES)
+def list_agent_repository_options_impl(field: str) -> List[Any]:
+    """Return hardcoded marketplace listing option presets for one field."""
+    options_by_field = {
+        "categories": list(_AGENT_REPOSITORY_CATEGORIES),
+        "icons": list(_AGENT_REPOSITORY_ICONS),
+        "tags": list(_AGENT_REPOSITORY_TAGS),
+    }
+    if field not in options_by_field:
+        raise ValueError(f"Unsupported option field: {field}")
+    return options_by_field[field]
+
+
+def _normalize_listing_tags(tags: Any) -> List[str]:
+    """Trim, deduplicate, and validate marketplace listing tags."""
+    if not isinstance(tags, list):
+        raise ValueError("tags must be a list of strings")
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        if not isinstance(raw_tag, str):
+            raise ValueError("tags must be a list of strings")
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        if len(tag) > _MAX_LISTING_TAG_LENGTH:
+            raise ValueError(
+                f"Each tag must be at most {_MAX_LISTING_TAG_LENGTH} characters"
+            )
+        if tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+
+    if not normalized:
+        raise ValueError("tags must contain at least one non-empty tag")
+    if len(normalized) > _MAX_LISTING_TAGS:
+        raise ValueError(f"tags must contain at most {_MAX_LISTING_TAGS} items")
+    return normalized
+
+
+def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
+    """Validate marketplace card fields required for listing submission."""
+    icon = repository_data.get("icon")
+    if not icon or not isinstance(icon, str) or icon not in _VALID_REPOSITORY_ICONS:
+        raise ValueError("icon is required and must be a supported marketplace icon")
+
+    category_id = repository_data.get("category_id")
+    if category_id is None or category_id not in _VALID_REPOSITORY_CATEGORY_IDS:
+        raise ValueError("category_id is required and must be a supported category")
+
+    tags = repository_data.get("tags")
+    if tags is None:
+        raise ValueError("tags is required for marketplace listing submission")
+    repository_data["tags"] = _normalize_listing_tags(tags)
 
 
 _MY_AGENT_REPOSITORY_STATUSES = frozenset({
@@ -558,6 +627,8 @@ def _validate_create_payload(repository_data: Dict[str, Any]) -> None:
         if key not in agent_info_json:
             raise ValueError(f"agent_info_json must contain '{key}'")
 
+    _validate_card_fields(repository_data)
+
 
 async def _build_agent_info_json(
     agent_id: int,
@@ -623,9 +694,11 @@ async def _build_repository_data_from_agent(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "tags", "category_id", "tool_count"):
+        for key in ("icon", "downloads", "category_id", "tool_count"):
             if key in card_fields and card_fields[key] is not None:
                 repository_data[key] = card_fields[key]
+        if "tags" in card_fields and card_fields["tags"] is not None:
+            repository_data["tags"] = _normalize_listing_tags(card_fields["tags"])
 
     return repository_data
 

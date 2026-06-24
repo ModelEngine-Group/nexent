@@ -11,14 +11,17 @@ import {
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
   isCancelableRepositoryStatus,
+  isTakeDownableRepositoryStatus,
   pickReviewDisplayRepositoryInfo,
 } from "@/lib/agentRepositoryMine";
 import type {
+  AgentRepositoryListingCreatePayload,
   MineOwnershipFilter,
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
   MyEditableAgentOwnershipCounts,
 } from "@/types/agentRepository";
+import { MineApplyListingModal } from "./MineApplyListingModal";
 import { MineReviewStatusModal } from "./MineReviewStatusModal";
 import { MyAgentCard } from "./MyAgentCard";
 
@@ -64,6 +67,9 @@ export function MineAgentsView({
     "review" | "reviewUpdate"
   >("review");
   const [applyingAgentId, setApplyingAgentId] = useState<number | null>(null);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [applyModalAgent, setApplyModalAgent] =
+    useState<MyEditableAgentItem | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
@@ -90,23 +96,47 @@ export function MineAgentsView({
     setReviewModalInfo(null);
   };
 
-  const handleApplyListing = async (agent: MyEditableAgentItem) => {
+  const handleApplyListing = (agent: MyEditableAgentItem) => {
     const versionNo = agent.current_version_no ?? 0;
     if (versionNo <= 0) {
       return;
     }
+    setApplyModalAgent(agent);
+    setApplyModalOpen(true);
+  };
 
-    setApplyingAgentId(agent.agent_id);
+  const closeApplyModal = () => {
+    setApplyModalOpen(false);
+    setApplyModalAgent(null);
+  };
+
+  const handleSubmitApplyListing = async (
+    payload: AgentRepositoryListingCreatePayload
+  ) => {
+    if (!applyModalAgent) {
+      return;
+    }
+
+    const versionNo = applyModalAgent.current_version_no ?? 0;
+    if (versionNo <= 0) {
+      return;
+    }
+
+    setApplyingAgentId(applyModalAgent.agent_id);
     try {
       await createListingMutation.mutateAsync({
-        agentId: agent.agent_id,
+        agentId: applyModalAgent.agent_id,
         versionNo,
+        payload,
       });
       message.success(
         t("agentRepository.mine.applySuccess", {
-          name: agent.name?.trim() || t("agentRepository.card.untitled"),
+          name:
+            applyModalAgent.name?.trim() ||
+            t("agentRepository.card.untitled"),
         })
       );
+      closeApplyModal();
     } catch {
       message.error(t("agentRepository.mine.applyError"));
     } finally {
@@ -130,20 +160,38 @@ export function MineAgentsView({
     setReviewModalOpen(true);
   };
 
-  const handleCancelApply = async () => {
-    if (!reviewModalInfo || !isCancelableRepositoryStatus(reviewModalInfo.status)) {
+  const handleSetNotShared = async () => {
+    if (!reviewModalInfo) {
       return;
     }
+
+    const canUpdate =
+      isCancelableRepositoryStatus(reviewModalInfo.status) ||
+      isTakeDownableRepositoryStatus(reviewModalInfo.status);
+    if (!canUpdate) {
+      return;
+    }
+
+    const wasShared = reviewModalInfo.status === "shared";
 
     try {
       await updateStatusMutation.mutateAsync({
         agentRepositoryId: reviewModalInfo.agent_repository_id,
         status: "not_shared",
       });
-      message.success(t("agentRepository.mine.cancelApplySuccess"));
+      message.success(
+        wasShared
+          ? t("agentRepository.mine.takeDownSuccess")
+          : t("agentRepository.mine.cancelApplySuccess")
+      );
       closeReviewModal();
     } catch {
-      message.error(t("agentRepository.mine.cancelApplyError"));
+      message.error(
+        wasShared
+          ? t("agentRepository.mine.takeDownError")
+          : t("agentRepository.mine.cancelApplyError")
+      );
+      throw new Error("Update repository status failed");
     }
   };
 
@@ -236,14 +284,22 @@ export function MineAgentsView({
         </div>
       )}
 
+      <MineApplyListingModal
+        open={applyModalOpen}
+        agent={applyModalAgent}
+        isSubmitting={createListingMutation.isPending}
+        onClose={closeApplyModal}
+        onSubmit={handleSubmitApplyListing}
+      />
+
       <MineReviewStatusModal
         open={reviewModalOpen}
         agent={reviewModalAgent}
         repositoryInfo={reviewModalInfo}
         mode={reviewModalMode}
-        isCancelling={updateStatusMutation.isPending}
+        isUpdatingStatus={updateStatusMutation.isPending}
         onClose={closeReviewModal}
-        onCancelApply={handleCancelApply}
+        onSetNotShared={handleSetNotShared}
       />
     </div>
   );

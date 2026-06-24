@@ -1,12 +1,13 @@
 "use client";
 
 import { Button, Modal } from "antd";
-import { CheckCircle2, Clock, Store, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, PackageX, Store, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   formatMineDate,
   formatRepositoryVersionLabel,
   isCancelableRepositoryStatus,
+  isTakeDownableRepositoryStatus,
 } from "@/lib/agentRepositoryMine";
 import type {
   MyAgentRepositoryInfoItem,
@@ -18,9 +19,9 @@ interface MineReviewStatusModalProps {
   agent: MyEditableAgentItem | null;
   repositoryInfo: MyAgentRepositoryInfoItem | null;
   mode: "review" | "reviewUpdate";
-  isCancelling?: boolean;
+  isUpdatingStatus?: boolean;
   onClose: () => void;
-  onCancelApply: () => void;
+  onSetNotShared: () => Promise<void>;
 }
 
 export function MineReviewStatusModal({
@@ -28,9 +29,9 @@ export function MineReviewStatusModal({
   agent,
   repositoryInfo,
   mode,
-  isCancelling = false,
+  isUpdatingStatus = false,
   onClose,
-  onCancelApply,
+  onSetNotShared,
 }: MineReviewStatusModalProps) {
   const { t } = useTranslation("common");
 
@@ -42,6 +43,7 @@ export function MineReviewStatusModal({
   const isPending = repositoryInfo.status === "pending_review";
   const isRejected = repositoryInfo.status === "rejected";
   const canCancelApply = isCancelableRepositoryStatus(repositoryInfo.status);
+  const canTakeDown = isTakeDownableRepositoryStatus(repositoryInfo.status);
   const versionLabel = formatRepositoryVersionLabel(repositoryInfo);
   const submittedAt = formatMineDate(repositoryInfo.create_time);
 
@@ -78,21 +80,71 @@ export function MineReviewStatusModal({
       ? t("agentRepository.mine.reviewModal.reviewUpdateTitle")
       : t("agentRepository.mine.reviewModal.title");
 
+  const confirmCancelApply = () => {
+    Modal.confirm({
+      title: t("agentRepository.mine.reviewModal.confirmCancelApplyTitle"),
+      content: t("agentRepository.mine.reviewModal.confirmCancelApplyContent", {
+        name: title,
+      }),
+      okText: t("agentRepository.mine.reviewModal.cancelApply"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await onSetNotShared();
+        } catch {
+          throw new Error("Cancel listing request failed");
+        }
+      },
+    });
+  };
+
+  const confirmTakeDown = () => {
+    Modal.confirm({
+      title: t("agentRepository.mine.reviewModal.confirmTakeDownTitle"),
+      content: t("agentRepository.mine.reviewModal.confirmTakeDownContent", {
+        name: title,
+      }),
+      okText: t("agentRepository.mine.reviewModal.takeDown"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await onSetNotShared();
+        } catch {
+          throw new Error("Take down failed");
+        }
+      },
+    });
+  };
+
   return (
     <Modal
       open={open}
       onCancel={onClose}
       footer={
         <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={onClose}>{t("common.close")}</Button>
+          <Button onClick={onClose} disabled={isUpdatingStatus}>
+            {t("common.close")}
+          </Button>
           {canCancelApply ? (
             <Button
               danger
-              loading={isCancelling}
+              loading={isUpdatingStatus}
               icon={<XCircle className="size-4" aria-hidden />}
-              onClick={onCancelApply}
+              onClick={confirmCancelApply}
             >
               {t("agentRepository.mine.reviewModal.cancelApply")}
+            </Button>
+          ) : null}
+          {canTakeDown ? (
+            <Button
+              danger
+              loading={isUpdatingStatus}
+              icon={<PackageX className="size-4" aria-hidden />}
+              onClick={confirmTakeDown}
+            >
+              {t("agentRepository.mine.reviewModal.takeDown")}
             </Button>
           ) : null}
         </div>

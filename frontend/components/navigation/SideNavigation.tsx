@@ -114,7 +114,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: null,
   },
   {
-    path: "/agent-repository",
+    path: "/agent-space",
     Icon: Bot,
     labelKey: "sidebar.agentSpace",
     order: 8,

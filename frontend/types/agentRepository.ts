@@ -41,6 +41,14 @@ export interface AgentRepositoryCategoryItem {
   name: string;
 }
 
+export type AgentRepositoryOptionField = "categories" | "icons" | "tags";
+
+export type AgentRepositoryOptionResultMap = {
+  categories: AgentRepositoryCategoryItem[];
+  icons: string[];
+  tags: string[];
+};
+
 export interface AgentRepositoryListingDetail {
   agent_repository_id: number;
   agent_id?: number | null;
@@ -94,4 +102,16 @@ export interface MyEditableAgentListParams {
 export interface MyEditableAgentListResponse {
   items: MyEditableAgentItem[];
   counts: MyEditableAgentOwnershipCounts;
+}
+
+export interface AgentRepositoryListingCreatePayload {
+  icon: string;
+  category_id: number;
+  tags: string[];
+}
+
+export interface AgentRepositoryListingCreatePayload {
+  icon: string;
+  category_id: number;
+  tags: string[];
 }

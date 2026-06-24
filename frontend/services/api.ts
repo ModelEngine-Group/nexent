@@ -2,7 +2,11 @@ import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
-import type { AgentRepositoryListingListParams, MyEditableAgentListParams } from "@/types/agentRepository";
+import type {
+  AgentRepositoryListingListParams,
+  AgentRepositoryOptionField,
+  MyEditableAgentListParams,
+} from "@/types/agentRepository";
 import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
@@ -377,7 +381,8 @@ export const API_ENDPOINTS = {
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },
-    categories: `${API_BASE_URL}/repository/agent/categories`,
+    options: (field: AgentRepositoryOptionField) =>
+      `${API_BASE_URL}/repository/agent/options?field=${field}`,
     mineAgents: (params?: MyEditableAgentListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.ownership) {

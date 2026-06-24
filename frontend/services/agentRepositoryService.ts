@@ -6,12 +6,14 @@ import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 import type {
-  AgentRepositoryCategoryItem,
+  AgentRepositoryListingCreatePayload,
   AgentRepositoryListingDetail,
   AgentRepositoryListingItem,
   AgentRepositoryListingListParams,
   AgentRepositoryListingListResponse,
   AgentRepositoryListingStatus,
+  AgentRepositoryOptionField,
+  AgentRepositoryOptionResultMap,
   MyEditableAgentListParams,
   MyEditableAgentListResponse,
 } from "@/types/agentRepository";
@@ -39,12 +41,12 @@ export async function fetchAgentRepositoryListings(
   }
 }
 
-export async function fetchAgentRepositoryCategories(): Promise<
-  AgentRepositoryCategoryItem[]
-> {
+export async function fetchAgentRepositoryOptions<
+  F extends AgentRepositoryOptionField,
+>(field: F): Promise<AgentRepositoryOptionResultMap[F]> {
   try {
     const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.agentRepository.categories,
+      API_ENDPOINTS.agentRepository.options(field),
       {
         method: "GET",
         headers: getAuthHeaders(),
@@ -53,13 +55,13 @@ export async function fetchAgentRepositoryCategories(): Promise<
 
     if (!response.ok) {
       throw new Error(
-        `Failed to fetch agent repository categories: ${response.statusText}`
+        `Failed to fetch agent repository options: ${response.statusText}`
       );
     }
 
     return response.json();
   } catch (error) {
-    log.error("Error fetching agent repository categories:", error);
+    log.error("Error fetching agent repository options:", error);
     throw error;
   }
 }
@@ -114,7 +116,8 @@ export async function fetchMyEditableAgents(
 
 export async function createAgentRepositoryListing(
   agentId: number,
-  versionNo: number
+  versionNo: number,
+  payload: AgentRepositoryListingCreatePayload
 ): Promise<AgentRepositoryListingDetail> {
   try {
     const response = await fetchWithErrorHandling(
@@ -125,7 +128,7 @@ export async function createAgentRepositoryListing(
           ...getAuthHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify(payload),
       }
     );
 
@@ -174,7 +177,7 @@ export async function updateAgentRepositoryStatus(
 
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
-  fetchAgentRepositoryCategories,
+  fetchAgentRepositoryOptions,
   fetchAgentRepositoryListingDetail,
   fetchMyEditableAgents,
   createAgentRepositoryListing,

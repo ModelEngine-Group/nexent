@@ -644,6 +644,13 @@ class AgentRepositoryCategoryItem(BaseModel):
     name: str
 
 
+class AgentRepositoryOptionField(str, Enum):
+    """Selectable option groups for agent repository listing presets."""
+    CATEGORIES = "categories"
+    ICONS = "icons"
+    TAGS = "tags"
+
+
 class AgentRepositoryListingDetailResponse(BaseModel):
     """Detailed marketplace listing payload for repository detail view."""
     agent_repository_id: int

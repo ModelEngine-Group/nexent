@@ -237,13 +237,74 @@ def test_list_repository_listings_rejects_invalid_status_with_agent_id():
     mock_list.assert_not_called()
 
 
-def test_list_agent_repository_categories_impl_returns_hardcoded_categories():
-    result = ars.list_agent_repository_categories_impl()
+def test_list_agent_repository_options_impl_returns_categories():
+    result = ars.list_agent_repository_options_impl("categories")
 
     assert len(result) == 7
     assert result[0] == {"id": 1, "name": "写作助手"}
     assert result[-1] == {"id": 0, "name": "其它"}
     assert [item["id"] for item in result] == [1, 2, 3, 4, 5, 6, 0]
+
+
+def test_list_agent_repository_options_impl_returns_icons():
+    result = ars.list_agent_repository_options_impl("icons")
+
+    assert result[0] == "🤖"
+    assert "📊" in result
+    assert len(result) == 10
+
+
+def test_list_agent_repository_options_impl_returns_tags():
+    result = ars.list_agent_repository_options_impl("tags")
+
+    assert "营销" in result
+    assert "代码审查" in result
+    assert "数据" in result
+
+
+def test_list_agent_repository_options_impl_rejects_unknown_field():
+    with pytest.raises(ValueError, match="Unsupported option field"):
+        ars.list_agent_repository_options_impl("unknown")
+
+
+def test_normalize_listing_tags_trims_dedupes_and_limits():
+    assert ars._normalize_listing_tags([" 营销 ", "营销", "数据"]) == ["营销", "数据"]
+
+    with pytest.raises(ValueError, match="at least one"):
+        ars._normalize_listing_tags([" ", ""])
+
+    with pytest.raises(ValueError, match="at most 5"):
+        ars._normalize_listing_tags(["a", "b", "c", "d", "e", "f"])
+
+
+def test_validate_card_fields_requires_supported_values():
+    base = {
+        "agent_id": 1,
+        "version_no": 1,
+        "name": "agent_one",
+        "agent_info_json": {
+            "agent_id": 1,
+            "agent_info": {"1": {"agent_id": 1}},
+            "mcp_info": [],
+        },
+    }
+
+    with pytest.raises(ValueError, match="icon is required"):
+        ars._validate_create_payload(base)
+
+    with pytest.raises(ValueError, match="category_id is required"):
+        ars._validate_create_payload({**base, "icon": "🤖"})
+
+    with pytest.raises(ValueError, match="tags is required"):
+        ars._validate_create_payload({**base, "icon": "🤖", "category_id": 1})
+
+    with pytest.raises(ValueError, match="supported marketplace icon"):
+        ars._validate_create_payload({
+            **base,
+            "icon": "invalid",
+            "category_id": 1,
+            "tags": ["营销"],
+        })
 
 
 def _editable_agent_record(
@@ -765,6 +826,43 @@ def test_resolve_submitter_email_uses_user_tenant_email():
 
 
 @pytest.mark.asyncio
+async def test_build_repository_data_from_agent_merges_card_fields():
+    card_fields = {
+        "icon": "📊",
+        "category_id": 3,
+        "tags": [" 数据 ", "数据", "自定义标签"],
+        "downloads": 10,
+    }
+    with patch.object(
+        ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
+    ), patch.object(
+        ars, "_validate_create_listing_permission"
+    ), patch.object(
+        ars, "_build_agent_info_json", new_callable=AsyncMock, return_value={
+            "agent_id": 1,
+            "agent_info": {"1": {"agent_id": 1}},
+            "mcp_info": [],
+        }
+    ), patch.object(
+        ars, "search_version_by_version_no", return_value={"version_name": "v1"}
+    ), patch.object(
+        ars, "_resolve_submitter_email", return_value="submitter@example.com"
+    ):
+        repository_data = await ars._build_repository_data_from_agent(
+            agent_id=1,
+            tenant_id="tenant_a",
+            user_id="user_a",
+            version_no=1,
+            card_fields=card_fields,
+        )
+
+    assert repository_data["icon"] == "📊"
+    assert repository_data["category_id"] == 3
+    assert repository_data["tags"] == ["数据", "自定义标签"]
+    assert repository_data["downloads"] == 10
+
+
+@pytest.mark.asyncio
 async def test_build_repository_data_from_agent_sets_submitted_by():
     with patch.object(
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
@@ -817,6 +915,9 @@ async def test_create_agent_repository_listing_impl_success():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
+            "icon": "🤖",
+            "category_id": 1,
+            "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
         mock_insert.return_value = 42
@@ -872,6 +973,9 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
+            "icon": "🤖",
+            "category_id": 1,
+            "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = {"agent_repository_id": 42}
         mock_update.return_value = 1
@@ -901,6 +1005,9 @@ async def test_create_agent_repository_listing_impl_updates_existing():
         publisher_tenant_id="tenant_a",
         user_id="user_a",
         updates={
+            "category_id": 1,
+            "tags": ["营销"],
+            "icon": "🤖",
             "version_no": 2,
             "agent_info_json": agent_info_json,
             "status": "pending_review",
@@ -936,6 +1043,9 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
+            "icon": "🤖",
+            "category_id": 1,
+            "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
         mock_insert.return_value = 42
@@ -1066,18 +1176,21 @@ async def test_create_listing_impl_rejects_unauthorized_before_export():
 
 
 def test_validate_create_payload_requires_agent_info_json():
+    base = {
+        "agent_id": 1,
+        "version_no": 1,
+        "name": "agent_one",
+        "icon": "🤖",
+        "category_id": 1,
+        "tags": ["营销"],
+    }
+
     with pytest.raises(ValueError, match="agent_info_json"):
-        ars._validate_create_payload({
-            "agent_id": 1,
-            "version_no": 1,
-            "name": "agent_one",
-        })
+        ars._validate_create_payload(base)
 
     with pytest.raises(ValueError, match="agent_info_json must contain"):
         ars._validate_create_payload({
-            "agent_id": 1,
-            "version_no": 1,
-            "name": "agent_one",
+            **base,
             "agent_info_json": {"agent_id": 1},
         })
 
