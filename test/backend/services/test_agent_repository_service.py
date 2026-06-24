@@ -33,6 +33,7 @@ _agent_repo_db_mock.VALID_OWNERSHIP_FILTERS = frozenset({
     "others",
 })
 _agent_repo_db_mock.get_agent_repository_by_id = MagicMock()
+_agent_repo_db_mock.get_agent_repository_by_id_and_publisher = MagicMock()
 _agent_repo_db_mock.get_agent_repository_by_agent_id = MagicMock()
 _agent_repo_db_mock.insert_agent_repository_record = MagicMock()
 _agent_repo_db_mock.update_agent_repository_by_id = MagicMock()
@@ -134,17 +135,20 @@ def _pending_review_reset_calls(
     *,
     agent_repository_id: int = 1,
     agent_id: int = 10,
+    publisher_tenant_id: str = "tenant_a",
 ) -> list:
     return [
         call(
             agent_repository_id=agent_repository_id,
             agent_id=agent_id,
             status="pending_review",
+            publisher_tenant_id=publisher_tenant_id,
         ),
         call(
             agent_repository_id=agent_repository_id,
             agent_id=agent_id,
             status="rejected",
+            publisher_tenant_id=publisher_tenant_id,
         ),
     ]
 
@@ -169,7 +173,7 @@ def test_list_repository_listings_deduplicates_by_agent_id_by_default():
     ]
 
     with patch.object(ars, "list_agent_repository_summaries", return_value=records):
-        result = ars.list_agent_repository_listings_impl()
+        result = ars.list_agent_repository_listings_impl("tenant_a")
 
     assert [item["agent_repository_id"] for item in result["items"]] == [90, 80]
     assert result["items"][0]["status"] == "shared"
@@ -184,6 +188,7 @@ def test_list_repository_listings_can_skip_agent_id_deduplication():
 
     with patch.object(ars, "list_agent_repository_summaries", return_value=records):
         result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
             deduplicate_by_agent_id=False,
         )
 
@@ -205,7 +210,7 @@ def test_list_repository_listings_uses_newest_repository_for_status_tie():
     ]
 
     with patch.object(ars, "list_agent_repository_summaries", return_value=records):
-        result = ars.list_agent_repository_listings_impl()
+        result = ars.list_agent_repository_listings_impl("tenant_a")
 
     assert [item["agent_repository_id"] for item in result["items"]] == [11]
 
@@ -217,12 +222,18 @@ def test_list_repository_listings_passes_agent_id_to_db():
         return_value=[_repository_record(agent_repository_id=1, agent_id=123)],
     ) as mock_list:
         result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
             status="shared",
             agent_id=123,
             deduplicate_by_agent_id=False,
         )
 
-    mock_list.assert_called_once_with(status="shared", agent_id=123, category_id=None)
+    mock_list.assert_called_once_with(
+        publisher_tenant_id="tenant_a",
+        status="shared",
+        agent_id=123,
+        category_id=None,
+    )
     assert [item["agent_repository_id"] for item in result["items"]] == [1]
 
 
@@ -230,6 +241,7 @@ def test_list_repository_listings_rejects_invalid_status_with_agent_id():
     with patch.object(ars, "list_agent_repository_summaries") as mock_list:
         with pytest.raises(ValueError, match="Invalid status"):
             ars.list_agent_repository_listings_impl(
+                "tenant_a",
                 status="invalid",
                 agent_id=123,
             )
@@ -415,7 +427,7 @@ def test_list_my_editable_agents_impl_rejects_invalid_ownership():
 @pytest.fixture
 def mock_status_update_deps():
     with patch.object(ars, "get_user_tenant_by_user_id") as mock_get_role, patch.object(
-        ars, "get_agent_repository_by_id"
+        ars, "get_agent_repository_by_id_and_publisher"
     ) as mock_get_by_id, patch.object(
         ars, "update_agent_repository_status_by_id"
     ) as mock_update_status, patch.object(
@@ -435,6 +447,7 @@ def test_reset_repository_peer_statuses_pending_review_also_clears_rejected():
             agent_repository_id=1,
             agent_id=10,
             status="pending_review",
+            publisher_tenant_id="tenant_a",
         )
 
     mock_reset.assert_has_calls(_pending_review_reset_calls())
@@ -446,12 +459,14 @@ def test_reset_repository_peer_statuses_non_pending_single_reset():
             agent_repository_id=1,
             agent_id=10,
             status="shared",
+            publisher_tenant_id="tenant_a",
         )
 
     mock_reset.assert_called_once_with(
         agent_repository_id=1,
         agent_id=10,
         status="shared",
+        publisher_tenant_id="tenant_a",
     )
 
 
@@ -466,7 +481,7 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
         agent_repository_id=1,
         status="shared",
         user_id="su_user",
-        tenant_id="any_tenant",
+        tenant_id="tenant_a",
     )
 
     assert result["status"] == "shared"
@@ -474,6 +489,7 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
         repository_id=1,
         status="shared",
         user_id="su_user",
+        filter_publisher_tenant_id="tenant_a",
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
@@ -482,6 +498,7 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
         agent_repository_id=1,
         agent_id=10,
         status="shared",
+        publisher_tenant_id="tenant_a",
     )
 
 
@@ -496,7 +513,7 @@ def test_update_status_su_pending_review_to_rejected(mock_status_update_deps):
         agent_repository_id=1,
         status="rejected",
         user_id="su_user",
-        tenant_id="any_tenant",
+        tenant_id="tenant_a",
     )
 
     assert result["status"] == "rejected"
@@ -513,7 +530,7 @@ def test_update_status_su_shared_to_not_shared(mock_status_update_deps):
         agent_repository_id=1,
         status="not_shared",
         user_id="su_user",
-        tenant_id="any_tenant",
+        tenant_id="tenant_a",
     )
 
     assert result["status"] == "not_shared"
@@ -529,7 +546,7 @@ def test_update_status_su_invalid_transition(mock_status_update_deps):
             agent_repository_id=1,
             status="shared",
             user_id="su_user",
-            tenant_id="any_tenant",
+            tenant_id="tenant_a",
         )
 
 
@@ -570,6 +587,7 @@ def test_update_status_admin_not_shared_to_pending_review(mock_status_update_dep
         repository_id=1,
         status="pending_review",
         user_id="admin_user",
+        filter_publisher_tenant_id="tenant_a",
         publisher_tenant_id="tenant_a",
         publisher_user_id="admin_user",
         submitted_by="admin@example.com",
@@ -597,6 +615,7 @@ def test_update_status_admin_rejected_to_pending_review(mock_status_update_deps)
         repository_id=1,
         status="pending_review",
         user_id="admin_user",
+        filter_publisher_tenant_id="tenant_a",
         publisher_tenant_id="tenant_a",
         publisher_user_id="admin_user",
         submitted_by="admin@example.com",
@@ -626,6 +645,7 @@ def test_update_status_admin_pending_review_to_shared(mock_status_update_deps):
         repository_id=1,
         status="shared",
         user_id="admin_user",
+        filter_publisher_tenant_id="tenant_a",
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
@@ -688,6 +708,7 @@ def test_update_status_admin_pending_review_to_not_shared(mock_status_update_dep
         repository_id=1,
         status="not_shared",
         user_id="admin_user",
+        filter_publisher_tenant_id="tenant_a",
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
@@ -764,6 +785,7 @@ def test_update_status_same_status_noop(mock_status_update_deps):
         repository_id=1,
         status="shared",
         user_id="any_user",
+        filter_publisher_tenant_id="tenant_a",
         publisher_tenant_id=None,
         publisher_user_id=None,
         submitted_by=None,
@@ -772,6 +794,7 @@ def test_update_status_same_status_noop(mock_status_update_deps):
         agent_repository_id=1,
         agent_id=10,
         status="shared",
+        publisher_tenant_id="tenant_a",
     )
 
 
@@ -788,9 +811,47 @@ def test_list_repository_listings_includes_submitted_by():
     ]
 
     with patch.object(ars, "list_agent_repository_summaries", return_value=records):
-        result = ars.list_agent_repository_listings_impl(status="pending_review")
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
+            status="pending_review",
+        )
 
     assert result["items"][0]["submitted_by"] == "reviewer@example.com"
+
+
+def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
+    record = {
+        **_repository_record(agent_repository_id=42),
+        "agent_info_json": {
+            "agent_id": 10,
+            "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
+            "mcp_info": [],
+        },
+        "icon": "🤖",
+        "version_name": "v1",
+        "downloads": 0,
+        "create_time": None,
+    }
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id_and_publisher",
+        return_value=record,
+    ) as mock_get:
+        result = ars.get_agent_repository_listing_detail_impl(42, "tenant_a")
+
+    mock_get.assert_called_once_with(42, "tenant_a")
+    assert result["agent_repository_id"] == 42
+
+
+def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id_and_publisher",
+        return_value=None,
+    ):
+        with pytest.raises(ValueError, match="Repository listing not found"):
+            ars.get_agent_repository_listing_detail_impl(42, "tenant_a")
 
 
 def test_resolve_submitter_email_uses_user_tenant_email():
@@ -882,7 +943,7 @@ async def test_create_agent_repository_listing_impl_success():
     ) as mock_get_by_agent_id, patch.object(
         ars, "insert_agent_repository_record"
     ) as mock_insert, patch.object(
-        ars, "get_agent_repository_by_id"
+        ars, "get_agent_repository_by_id_and_publisher"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -919,7 +980,11 @@ async def test_create_agent_repository_listing_impl_success():
     assert result["agent_info_json"] == agent_info_json
     assert result["is_updated"] is False
     mock_insert.assert_called_once()
-    mock_get_by_agent_id.assert_called_once_with(1, 1)
+    mock_get_by_agent_id.assert_called_once_with(
+        1,
+        1,
+        publisher_tenant_id="tenant_a",
+    )
     mock_reset_status.assert_has_calls(
         _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
     )
@@ -940,7 +1005,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
     ) as mock_get_by_agent_id, patch.object(
         ars, "update_agent_repository_by_id"
     ) as mock_update, patch.object(
-        ars, "get_agent_repository_by_id"
+        ars, "get_agent_repository_by_id_and_publisher"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -975,7 +1040,11 @@ async def test_create_agent_repository_listing_impl_updates_existing():
 
     assert result["agent_repository_id"] == 42
     assert result["is_updated"] is True
-    mock_get_by_agent_id.assert_called_once_with(1, 2)
+    mock_get_by_agent_id.assert_called_once_with(
+        1,
+        2,
+        publisher_tenant_id="tenant_a",
+    )
     mock_update.assert_called_once()
     mock_update.assert_called_with(
         repository_id=42,
@@ -1010,7 +1079,7 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
     ) as mock_get_by_agent_id, patch.object(
         ars, "insert_agent_repository_record"
     ) as mock_insert, patch.object(
-        ars, "get_agent_repository_by_id"
+        ars, "get_agent_repository_by_id_and_publisher"
     ) as mock_get_by_id, patch.object(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
@@ -1046,7 +1115,11 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
     assert result["agent_repository_id"] == 42
     assert result["version_no"] == 0
     mock_build_data.assert_awaited_once_with(1, "tenant_a", "user_a", 0, card_fields=None)
-    mock_get_by_agent_id.assert_called_once_with(1, 0)
+    mock_get_by_agent_id.assert_called_once_with(
+        1,
+        0,
+        publisher_tenant_id="tenant_a",
+    )
     mock_reset_status.assert_has_calls(
         _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
     )

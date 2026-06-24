@@ -113,6 +113,8 @@ def get_agent_repository_by_id_and_publisher(
 def get_agent_repository_by_agent_id(
     agent_id: int,
     version_no: Optional[int] = None,
+    *,
+    publisher_tenant_id: Optional[str] = None,
 ) -> Optional[dict]:
     """Fetch an active repository listing by root agent_id and optional version."""
     with get_db_session() as session:
@@ -120,6 +122,10 @@ def get_agent_repository_by_agent_id(
             AgentRepository.agent_id == agent_id,
             AgentRepository.delete_flag != "Y",
         )
+        if publisher_tenant_id is not None:
+            query = query.filter(
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
+            )
         if version_no is not None:
             query = query.filter(
                 AgentRepository.version_no == version_no
@@ -147,7 +153,10 @@ def upsert_agent_repository_record(
     if agent_id is None:
         raise ValueError("agent_id is required for repository upsert")
 
-    existing = get_agent_repository_by_agent_id(int(agent_id))
+    existing = get_agent_repository_by_agent_id(
+        int(agent_id),
+        publisher_tenant_id=publisher_tenant_id,
+    )
     if not existing:
         repository_id = insert_agent_repository_record(
             repository_data=repository_data,
@@ -189,12 +198,13 @@ def upsert_agent_repository_record(
 
 
 def list_agent_repository_summaries(
+    publisher_tenant_id: str,
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
     category_id: Optional[int] = None,
 ) -> List[dict]:
-    """List all active repository summaries without heavy JSON blobs."""
+    """List active repository summaries for a publisher tenant without heavy JSON blobs."""
     with get_db_session() as session:
         query = session.query(
             AgentRepository.agent_repository_id,
@@ -213,6 +223,7 @@ def list_agent_repository_summaries(
             AgentRepository.downloads,
         ).filter(
             AgentRepository.delete_flag != "Y",
+            AgentRepository.publisher_tenant_id == publisher_tenant_id,
         )
         if status:
             query = query.filter(AgentRepository.status == status)
@@ -293,6 +304,7 @@ def update_agent_repository_status_by_id(
     repository_id: int,
     status: str,
     user_id: str,
+    filter_publisher_tenant_id: Optional[str] = None,
     publisher_tenant_id: Optional[str] = None,
     publisher_user_id: Optional[str] = None,
     submitted_by: Optional[str] = None,
@@ -310,12 +322,17 @@ def update_agent_repository_status_by_id(
         update_values["submitted_by"] = submitted_by
 
     with get_db_session() as session:
+        where_clauses = [
+            AgentRepository.agent_repository_id == repository_id,
+            AgentRepository.delete_flag != "Y",
+        ]
+        if filter_publisher_tenant_id is not None:
+            where_clauses.append(
+                AgentRepository.publisher_tenant_id == filter_publisher_tenant_id
+            )
         result = session.execute(
             update(AgentRepository)
-            .where(
-                AgentRepository.agent_repository_id == repository_id,
-                AgentRepository.delete_flag != "Y",
-            )
+            .where(*where_clauses)
             .values(**update_values)
         )
         return int(result.rowcount or 0)
@@ -326,6 +343,7 @@ def reset_agent_repository_status(
     agent_repository_id: int,
     agent_id: int,
     status: str,
+    publisher_tenant_id: str,
 ) -> int:
     """Set other active listings with the same agent and status to not_shared."""
     with get_db_session() as session:
@@ -335,6 +353,7 @@ def reset_agent_repository_status(
                 AgentRepository.agent_id == agent_id,
                 AgentRepository.status == status,
                 AgentRepository.agent_repository_id != agent_repository_id,
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
                 AgentRepository.delete_flag != "Y",
             )
             .values(status=STATUS_NOT_SHARED)

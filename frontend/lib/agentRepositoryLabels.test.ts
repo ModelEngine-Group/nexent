@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { TFunction } from "i18next";
 import {
   getAgentRepositoryCategoryLabel,
   getAgentRepositoryTagLabel,
   getAgentRepositoryTagSearchText,
 } from "./agentRepositoryLabels";
 
-const t = vi.fn((key: string) => {
+const t = ((key: string) => {
   const translations: Record<string, string> = {
     "agentRepository.category.writingAssistant": "Writing Assistant",
     "agentRepository.category.other": "Other",
@@ -14,7 +16,7 @@ const t = vi.fn((key: string) => {
     "agentRepository.review.unknownCategory": "Uncategorized",
   };
   return translations[key] ?? key;
-});
+}) as TFunction;
 
 describe("agentRepositoryLabels", () => {
   it("localizes category by stable key", () => {
@@ -22,24 +24,24 @@ describe("agentRepositoryLabels", () => {
       { id: 1, key: "writing_assistant", name: "写作助手" },
       t
     );
-    expect(label).toBe("Writing Assistant");
+    assert.equal(label, "Writing Assistant");
   });
 
   it("localizes preset tag keys", () => {
-    expect(getAgentRepositoryTagLabel("marketing", t)).toBe("Marketing");
+    assert.equal(getAgentRepositoryTagLabel("marketing", t), "Marketing");
   });
 
   it("localizes legacy Chinese tag values", () => {
-    expect(getAgentRepositoryTagLabel("代码审查", t)).toBe("Code Review");
+    assert.equal(getAgentRepositoryTagLabel("代码审查", t), "Code Review");
   });
 
   it("returns custom tags unchanged", () => {
-    expect(getAgentRepositoryTagLabel("my-custom-tag", t)).toBe("my-custom-tag");
+    assert.equal(getAgentRepositoryTagLabel("my-custom-tag", t), "my-custom-tag");
   });
 
   it("includes localized text in tag search text", () => {
     const searchText = getAgentRepositoryTagSearchText("marketing", t);
-    expect(searchText).toContain("marketing");
-    expect(searchText).toContain("Marketing");
+    assert.match(searchText, /marketing/);
+    assert.match(searchText, /Marketing/);
   });
 });

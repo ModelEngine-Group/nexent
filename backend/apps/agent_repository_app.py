@@ -35,13 +35,14 @@ async def list_agent_repository_listings_api(
 ):
     """List all marketplace repository listings with optional status filter."""
     try:
-        get_current_user_id(authorization)
+        _, tenant_id = get_current_user_id(authorization)
         should_deduplicate = (
             agent_id is None
             if deduplicate_by_agent_id is None
             else deduplicate_by_agent_id
         )
         result = list_agent_repository_listings_impl(
+            tenant_id,
             status=status,
             agent_id=agent_id,
             deduplicate_by_agent_id=should_deduplicate,
@@ -84,8 +85,11 @@ async def get_agent_repository_listing_detail_api(
 ):
     """Get detailed marketplace repository listing by primary key."""
     try:
-        get_current_user_id(authorization)
-        result = get_agent_repository_listing_detail_impl(agent_repository_id)
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_agent_repository_listing_detail_impl(
+            agent_repository_id,
+            tenant_id,
+        )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -154,8 +158,10 @@ async def import_agent_from_repository_api(
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     try:
+        _, tenant_id = get_current_user_id(authorization)
         await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
+            tenant_id=tenant_id,
             authorization=authorization,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={})

@@ -64,6 +64,7 @@ def test_list_agent_repository_listings_api_defaults_dedupe_without_agent_id(
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     mock_list.assert_called_once_with(
+        "test_tenant_id",
         status=None,
         agent_id=None,
         deduplicate_by_agent_id=True,
@@ -93,6 +94,7 @@ def test_list_agent_repository_listings_api_disables_dedupe_for_agent_id(
 
     assert response.status_code == 200
     mock_list.assert_called_once_with(
+        "test_tenant_id",
         status=None,
         agent_id=123,
         deduplicate_by_agent_id=False,
@@ -122,6 +124,7 @@ def test_list_agent_repository_listings_api_passes_explicit_dedupe(
 
     assert response.status_code == 200
     mock_list.assert_called_once_with(
+        "test_tenant_id",
         status=None,
         agent_id=123,
         deduplicate_by_agent_id=True,
@@ -462,3 +465,56 @@ def test_list_my_editable_agents_api_bad_request(mocker, mock_auth_header):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid ownership filter: bad"
+
+
+def test_get_agent_repository_listing_detail_api_passes_tenant_id(
+    mocker,
+    mock_auth_header,
+):
+    """Test detail API forwards caller tenant_id to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_get_detail = mocker.patch(
+        "apps.agent_repository_app.get_agent_repository_listing_detail_impl",
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_get_detail.return_value = {
+        "agent_repository_id": 42,
+        "name": "agent_one",
+    }
+
+    response = client.get("/repository/agent/42", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    mock_get_detail.assert_called_once_with(42, "test_tenant_id")
+
+
+def test_import_agent_from_repository_api_passes_tenant_id(
+    mocker,
+    mock_auth_header,
+):
+    """Test import API forwards caller tenant_id to service."""
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_import = mocker.patch(
+        "apps.agent_repository_app.import_agent_from_repository_impl",
+        new_callable=AsyncMock,
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_import.return_value = {}
+
+    response = client.post(
+        "/repository/agent/42/import",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    mock_import.assert_awaited_once_with(
+        agent_repository_id=42,
+        tenant_id="test_tenant_id",
+        authorization=mock_auth_header["Authorization"],
+    )

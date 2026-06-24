@@ -15,7 +15,7 @@ from database.agent_repository_db import (
     VALID_REPOSITORY_STATUSES,
     count_editable_agents_by_ownership,
     get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
+    get_agent_repository_by_id_and_publisher,
     insert_agent_repository_record,
     list_agent_repository_by_agent_ids,
     list_agent_repository_summaries,
@@ -139,19 +139,21 @@ def _repository_summary_rank(record: Dict[str, Any]) -> Tuple[int, int]:
 
 
 def list_agent_repository_listings_impl(
+    tenant_id: str,
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
     deduplicate_by_agent_id: bool = True,
     category_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """List all repository listings with optional status filter."""
+    """List repository listings for the caller tenant with optional status filter."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
         raise ValueError(
             f"Invalid status '{status}'; must be one of: "
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
     records = list_agent_repository_summaries(
+        publisher_tenant_id=tenant_id,
         status=status,
         agent_id=agent_id,
         category_id=category_id,
@@ -222,18 +224,21 @@ def _reset_repository_peer_statuses(
     agent_repository_id: int,
     agent_id: int,
     status: str,
+    publisher_tenant_id: str,
 ) -> None:
     """Reset peer listings with the same status; also clear rejected when submitting."""
     reset_agent_repository_status(
         agent_repository_id=agent_repository_id,
         agent_id=agent_id,
         status=status,
+        publisher_tenant_id=publisher_tenant_id,
     )
     if status == STATUS_PENDING_REVIEW:
         reset_agent_repository_status(
             agent_repository_id=agent_repository_id,
             agent_id=agent_id,
             status=STATUS_REJECTED,
+            publisher_tenant_id=publisher_tenant_id,
         )
 
 
@@ -358,9 +363,13 @@ def _serialize_created_at(create_time: Any) -> Optional[str]:
 
 def get_agent_repository_listing_detail_impl(
     agent_repository_id: int,
+    tenant_id: str,
 ) -> Dict[str, Any]:
     """Load a repository listing and return a detail payload for the UI."""
-    record = get_agent_repository_by_id(agent_repository_id)
+    record = get_agent_repository_by_id_and_publisher(
+        agent_repository_id,
+        tenant_id,
+    )
     if not record:
         raise ValueError("Repository listing not found")
 
@@ -481,7 +490,10 @@ def update_agent_repository_status_impl(
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
 
-    record = get_agent_repository_by_id(agent_repository_id)
+    record = get_agent_repository_by_id_and_publisher(
+        agent_repository_id,
+        tenant_id,
+    )
     if not record:
         raise ValueError("Repository listing not found")
 
@@ -505,6 +517,7 @@ def update_agent_repository_status_impl(
         repository_id=agent_repository_id,
         status=status,
         user_id=user_id,
+        filter_publisher_tenant_id=tenant_id,
         publisher_tenant_id=(
             publisher_updates["publisher_tenant_id"]
             if publisher_updates
@@ -524,9 +537,13 @@ def update_agent_repository_status_impl(
         agent_repository_id=agent_repository_id,
         agent_id=record["agent_id"],
         status=status,
+        publisher_tenant_id=tenant_id,
     )
 
-    updated = get_agent_repository_by_id(agent_repository_id)
+    updated = get_agent_repository_by_id_and_publisher(
+        agent_repository_id,
+        tenant_id,
+    )
     if not updated:
         raise ValueError("Failed to load repository listing after update")
     return _to_summary_item(updated)
@@ -700,7 +717,11 @@ async def create_agent_repository_listing_impl(
     )
     _validate_create_payload(repository_data)
 
-    existing = get_agent_repository_by_agent_id(agent_id, version_no)
+    existing = get_agent_repository_by_agent_id(
+        agent_id,
+        version_no,
+        publisher_tenant_id=tenant_id,
+    )
     if not existing:
         repository_id = insert_agent_repository_record(
             repository_data=repository_data,
@@ -725,23 +746,31 @@ async def create_agent_repository_listing_impl(
             raise ValueError("Failed to update repository listing")
         is_updated = True
 
-    record = get_agent_repository_by_id(repository_id)
+    record = get_agent_repository_by_id_and_publisher(
+        repository_id,
+        tenant_id,
+    )
     if not record:
         raise ValueError("Failed to load repository listing after write")
     _reset_repository_peer_statuses(
         agent_repository_id=repository_id,
         agent_id=agent_id,
         status=repository_data["status"],
+        publisher_tenant_id=tenant_id,
     )
     return _to_detail_item(record, is_updated=is_updated)
 
 
 async def import_agent_from_repository_impl(
     agent_repository_id: int,
+    tenant_id: str,
     authorization: str,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
-    record = get_agent_repository_by_id(agent_repository_id)
+    record = get_agent_repository_by_id_and_publisher(
+        agent_repository_id,
+        tenant_id,
+    )
     if not record:
         raise ValueError("Repository listing not found")
 
