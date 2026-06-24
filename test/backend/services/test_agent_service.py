@@ -632,6 +632,10 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
     result = await get_creating_sub_agent_info_impl(authorization="Bearer token")
 
     # Assert
+    # W2 added `requested_output_tokens` to the response shape at
+    # agent_service.py:1112. The mocked `search_agent_info` payload does not
+    # include the key, so `agent_info.get("requested_output_tokens")` is None
+    # in the returned dict.
     expected_result = {
         "agent_id": 456,
         "name": "agent_name",
@@ -641,6 +645,7 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
         "model_name": "test_model",
         "model_id": None,
         "max_steps": 5,
+        "requested_output_tokens": None,
         "business_description": "Sub agent",
         "duty_prompt": "Sub duty prompt",
         "constraint_prompt": "Sub constraint prompt",
