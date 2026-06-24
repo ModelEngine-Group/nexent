@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    --hospital-red: #9b1c22;
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -56,6 +57,19 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+@font-face {
+  font-family: "HNSRMYY";
+  src: url("/fonts/hnsrmyy-title.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+.font-hospital-title {
+  font-family: "HNSRMYY", var(--font-hospital-title), "STKaiti", "KaiTi",
+    "华文行楷", serif;
 }
 
 @layer utilities {

@@ -53,6 +53,7 @@ const config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        "hospital-red": "var(--hospital-red)",
       },
       borderRadius: {
         lg: "var(--radius)",

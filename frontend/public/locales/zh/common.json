@@ -1,5 +1,5 @@
 {
-  "assistant.name": "Nexent",
+  "assistant.name": "省医智擎",
 
   "mainPage.layout.title": "Nexent | 智能问答",
   "mainPage.layout.titleTemplate": "%s | Nexent 智能问答",
@@ -144,8 +144,8 @@
 
   "page.contactUs": "联系我们",
   "page.aboutUs": "关于我们",
-  "page.title": "Nexent 智能体",
-  "page.subtitle": "一个提示词，无限种可能",
+  "page.title": "省医智擎",
+  "page.subtitle": "聚微智，成大医",
   "page.description": "无需编排，无需复杂拖拉拽，将数据、模型和工具整合到一个智能中心中。",
   "page.startChat": "开始问答",
   "page.quickConfig": "快速配置",
@@ -178,7 +178,7 @@
       "description": "基于多模态知识库、数据处理能力，提供多模态的智能体服务，支持文本、图像、音频等多种数据类型的输入输出。"
     }
   ],
-  "page.copyright": "Nexent © {{year}}",
+  "page.copyright": "省医智擎 © {{year}}",
   "page.termsOfUse": "使用条款",
   "page.loginPrompt.benefitsTitle": "✨ 登录后您将获得：",
   "page.loginPrompt.benefits": [
@@ -187,7 +187,8 @@
     "企业知识库完整访问权限",
     "更精准的问答体验"
   ],
-  "page.loginPrompt.title": "欢迎使用 Nexent",
+  "page.loginPrompt.title": "欢迎使用 省医智擎",
+  "page.loginPrompt.subtitle": "聚微智，成大医",
   "page.loginPrompt.register": "注册账户",
   "page.loginPrompt.login": "登录账户",
   "page.loginPrompt.intro": "请登录您的账户以访问此页面。",

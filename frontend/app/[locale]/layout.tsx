@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Ma_Shan_Zheng } from "next/font/google";
 import React, { ReactNode } from "react";
 import { RootProvider } from "@/components/providers/rootProvider";
 import { DeploymentProvider } from "@/components/providers/deploymentProvider";
@@ -15,6 +15,12 @@ import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
 const inter = Inter({ subsets: ["latin"] });
+const hospitalTitleFont = Ma_Shan_Zheng({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-hospital-title",
+  display: "swap",
+});
 
 export async function generateMetadata({
   params,
@@ -23,9 +29,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   // Simple metadata for now - can be enhanced later with i18n
   return {
-    title: "Nexent - AI Agent Platform",
+    title: "省医智擎 - AI 医疗助手平台",
     description:
-      "A powerful AI agent platform for intelligent conversations and automation",
+      "强大的 AI 医疗助手平台，提供智能对话和自动化服务",
     icons: {
       icon: "/favicon.png",
       shortcut: "/favicon.png",
@@ -45,7 +51,7 @@ export default async function RootLayout({
 
   return (
     <html lang="zh" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={`${inter.className} ${hospitalTitleFont.variable}`}>
         <NextThemesProvider
           attribute="class"
           defaultTheme="light"

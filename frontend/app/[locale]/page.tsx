@@ -17,6 +17,7 @@ import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { HospitalBrandMark } from "@/components/branding/HospitalBrandMark";
 
 /**
  * Homepage main content component
@@ -59,18 +60,17 @@ export default function Homepage() {
       {/* Hero area */}
       <section className="relative w-full p-4 flex flex-col items-center justify-center text-center flex-shrink-0">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
-        <motion.h2
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
+          className="mb-4 tracking-tight"
         >
-          {t("page.title")}
-          <span className="text-blue-600 dark:text-blue-500">
-            {" "}
-            {t("page.subtitle")}
-          </span>
-        </motion.h2>
+          <HospitalBrandMark
+            title={t("page.title")}
+            subtitle={t("page.subtitle")}
+          />
+        </motion.div>
         <motion.p
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}

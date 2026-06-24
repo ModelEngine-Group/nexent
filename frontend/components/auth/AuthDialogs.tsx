@@ -46,7 +46,7 @@ export function AuthDialogs() {
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <Image
-              src="/modelengine-logo.png"
+              src="/hnsrmyy_logo.png"
               alt="ModelEngine Logo"
               width={80}
               height={80}
@@ -61,9 +61,7 @@ export function AuthDialogs() {
 
           {/* Subtitle */}
           <p className="text-center text-gray-500 mb-8 mt-4 ml-10 mr-10 text-sm">
-            {t(
-              "A powerful AI agent platform for intelligent conversations and automation"
-            )}
+            {t("page.loginPrompt.subtitle")}
           </p>
 
           {/* Action buttons */}
@@ -97,17 +95,19 @@ export function AuthDialogs() {
             </Button>
           </div>
 
-          {/* GitHub support */}
-          <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
-            <GithubOutlined className="text-base" />
-            <a
-              href="https://github.com/ModelEngine-Group/nexent"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t("page.loginPrompt.githubSupport")}
-            </a>
-            <span></span>
+          {/* GitHub support - hidden via branding */}
+          <div className="hidden">
+            <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
+              <GithubOutlined className="text-base" />
+              <a
+                href="https://github.com/ModelEngine-Group/nexent"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("page.loginPrompt.githubSupport")}
+              </a>
+              <span></span>
+            </div>
           </div>
         </div>
       </Modal>

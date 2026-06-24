@@ -1,5 +1,5 @@
 {
-  "assistant.name": "Nexent",
+  "assistant.name": "Provincial Hospital Smart Engine",
 
   "mainPage.layout.title": "Nexent | AI Agents",
   "mainPage.layout.titleTemplate": "%s | Nexent AI Agents",
@@ -144,8 +144,8 @@
 
   "page.contactUs": "Contact Us",
   "page.aboutUs": "About Us",
-  "page.title": "Nexent",
-  "page.subtitle": "One prompt, infinite possibilities",
+  "page.title": "Provincial Hospital Smart Engine",
+  "page.subtitle": "Gathering wisdom from small beginnings to achieve great things in medicine",
   "page.description": "No orchestration, no complex drag-and-drop required. Integrate data, models, and tools into one intelligent hub.",
   "page.startChat": "Start Chatting",
   "page.quickConfig": "Quick Setup",
@@ -178,9 +178,10 @@
       "description": "Built on multimodal knowledge bases and advanced data processing capabilities, delivering next-gen AI agent services with native support for text, image, audio, and beyond."
     }
   ],
-  "page.copyright": "Nexent © {{year}}",
+  "page.copyright": "Provincial Hospital Smart Engine © {{year}}",
   "page.termsOfUse": "Terms of Use",
-  "page.loginPrompt.title": "Login",
+  "page.loginPrompt.title": "Welcome to Provincial Hospital Smart Engine",
+  "page.loginPrompt.subtitle": "Gathering wisdom from small beginnings to achieve great things in medicine",
   "page.loginPrompt.register": "Register",
   "page.loginPrompt.login": "Login Now",
   "page.loginPrompt.header": "🚀 Ready to Go!",
