@@ -46,7 +46,7 @@ export function AuthDialogs() {
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <Image
-              src="/modelengine-logo.png"
+              src="/huaxi.png"
               alt="ModelEngine Logo"
               width={80}
               height={80}

@@ -1,5 +1,5 @@
 ﻿{
-  "assistant.name": "Nexent",
+  "assistant.name": "Intelligent Agent Center, West China Hospital, Sichuan University",
 
   "mainPage.layout.title": "Nexent | AI Agents",
   "mainPage.layout.titleTemplate": "%s | Nexent AI Agents",
@@ -148,7 +148,7 @@
 
   "page.contactUs": "Contact Us",
   "page.aboutUs": "About Us",
-  "page.title": "Nexent",
+  "page.title": "Intelligent Agent Center, West China Hospital, Sichuan University",
   "page.subtitle": "One prompt, infinite possibilities",
   "page.description": "No orchestration, no complex drag-and-drop required. Integrate data, models, and tools into one intelligent hub.",
   "page.startChat": "Start Chatting",
@@ -182,7 +182,7 @@
       "description": "Built on multimodal knowledge bases and advanced data processing capabilities, delivering next-gen AI agent services with native support for text, image, audio, and beyond."
     }
   ],
-  "page.copyright": "Nexent © {{year}}",
+  "page.copyright": "Intelligent Agent Center, West China Hospital, Sichuan University © {{year}}",
   "page.termsOfUse": "Terms of Use",
   "page.loginPrompt.title": "Login",
   "page.loginPrompt.register": "Register",
