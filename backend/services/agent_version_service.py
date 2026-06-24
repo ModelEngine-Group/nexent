@@ -44,8 +44,6 @@ def _remove_audit_fields_for_insert(data: dict) -> None:
     """
     data.pop('create_time', None)
     data.pop('update_time', None)
-    data.pop('created_by', None)
-    data.pop('updated_by', None)
     data.pop('delete_flag', None)
 
 
@@ -90,6 +88,7 @@ def publish_version_impl(
     agent_snapshot.pop('version_no', None)
     agent_snapshot.pop('current_version_no', None)
     agent_snapshot['version_no'] = new_version_no
+    agent_snapshot['updated_by'] = user_id
     _remove_audit_fields_for_insert(agent_snapshot)
 
     # Insert agent snapshot
@@ -100,6 +99,7 @@ def publish_version_impl(
         tool_snapshot = tool.copy()
         tool_snapshot.pop('version_no', None)
         tool_snapshot['version_no'] = new_version_no
+        tool_snapshot['updated_by'] = user_id
         _remove_audit_fields_for_insert(tool_snapshot)
         insert_tool_snapshot(tool_snapshot)
 
@@ -115,6 +115,7 @@ def publish_version_impl(
         rel_snapshot.pop('version_no', None)
         rel_snapshot['version_no'] = new_version_no
         rel_snapshot['selected_agent_version_no'] = child_version
+        rel_snapshot['updated_by'] = user_id
         _remove_audit_fields_for_insert(rel_snapshot)
         insert_relation_snapshot(rel_snapshot)
 
@@ -131,6 +132,7 @@ def publish_version_impl(
         skill_snapshot = skill.copy()
         skill_snapshot.pop('version_no', None)
         skill_snapshot['version_no'] = new_version_no
+        skill_snapshot['updated_by'] = user_id
         _remove_audit_fields_for_insert(skill_snapshot)
         insert_skill_snapshot(skill_snapshot)
 
