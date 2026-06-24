@@ -234,7 +234,7 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
     environment:
       <<: [*proxy-vars, *es-vars, *minio-vars]
-      NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_STARTUP_MODE: off
       DOCKER_ENVIRONMENT: "true"
       PYTHONPATH: "/opt/backend"
       skip_proxy: "true"
