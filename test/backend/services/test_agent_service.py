@@ -10082,6 +10082,15 @@ async def test_import_agent_by_agent_id_publish_version_error(
     # unless we set it explicitly.
     mock_agent_info.requested_output_tokens = None
 
+    # Configure the three patched mocks so the flow reaches the publish branch:
+    # - query_all_tools() must return an iterable (empty list -> no tool loop)
+    # - create_agent(...) must return a dict so `new_agent["agent_id"]` is an int
+    # - publish_version_impl(...) must raise so the under-test exception handler
+    #   at agent_service.py:1899-1901 actually fires
+    mock_query_tools.return_value = []
+    mock_create.return_value = {"agent_id": 100}
+    mock_publish.side_effect = Exception("Publish error")
+
     # Should not raise - exception is caught and logged
     result = await import_agent_by_agent_id(
         import_agent_info=mock_agent_info,
