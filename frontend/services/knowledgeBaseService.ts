@@ -442,6 +442,41 @@ class KnowledgeBaseService {
     }
   }
 
+  async getAidpKnowledgeBasesAll(
+    serverUrl: string,
+    apiKey: string
+  ): Promise<AidpKnowledgeBaseListResponse> {
+    try {
+      const url = new URL(API_ENDPOINTS.aidp.knowledgeBasesAll, globalThis.location.origin);
+      url.searchParams.set("server_url", serverUrl);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch all AIDP knowledge bases";
+        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      return {
+        value: Array.isArray(result.value) ? result.value : [],
+        total_count:
+          typeof result.total_count === "number" ? result.total_count : undefined,
+        next_link: typeof result.next_link === "string" ? result.next_link : null,
+      };
+    } catch (error) {
+      log.error("Failed to fetch all AIDP knowledge bases:", error);
+      throw error;
+    }
+  }
+
   async getAidpKnowledgeBases(
     serverUrl: string,
     apiKey: string,

@@ -1808,7 +1808,6 @@ class TestDocumentPathsAccessControl:
 
         assert len(filtered) == 1
         assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
-
     def test_filter_by_document_paths_unwraps_fieldinfo_default_factory(self, mock_vdb_core, mock_embedding_model):
         """Filter should tolerate a FieldInfo with default_factory."""
         try:
@@ -1862,5 +1861,3 @@ class TestDocumentPathsAccessControl:
 
         assert len(filtered) == 1
         assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
-
-

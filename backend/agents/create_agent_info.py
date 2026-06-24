@@ -578,6 +578,7 @@ async def create_agent_config(
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    model_info = None
     model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
@@ -586,6 +587,14 @@ async def create_agent_config(
             model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
+
+    logger.info(
+        "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
+        agent_id,
+        model_id_to_use,
+        model_info.get("display_name") if model_info else model_name,
+        model_info.get("model_name") if model_info else model_name,
+    )
 
     # Use agent-level setting for context management, default to False.
     # When ContextManager is disabled, do not attach context_components because
@@ -759,22 +768,25 @@ async def create_tool_config_list(
                 "rerank_model": rerank_model,
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
+            selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "llm_model": get_llm_model(tenant_id=tenant_id),
+                "llm_model": get_llm_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name == "AnalyzeImageTool":
+            selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
                 # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-                "vlm_model": get_vlm_model(tenant_id=tenant_id),
+                "vlm_model": get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
+            selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "vlm_model": get_video_understanding_model(tenant_id=tenant_id),
+                "vlm_model": get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }

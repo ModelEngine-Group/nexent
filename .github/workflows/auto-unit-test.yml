@@ -11,6 +11,14 @@ on:
         description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: false
         default: '["ubuntu-24.04-arm"]'
+      pytest_workers:
+        description: 'parallel test workers (auto=CPU count, 0=serial, N=fixed count)'
+        required: false
+        default: 'auto'
+      pytest_file_timeout:
+        description: 'per-file timeout in seconds (0=disabled)'
+        required: false
+        default: '300'
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
@@ -65,23 +73,25 @@ jobs:
           cd ..
 
       - name: Run all tests and collect coverage
+        env:
+          NEXENT_PYTEST_WORKERS: ${{ github.event.inputs.pytest_workers || 'auto' }}
+          NEXENT_PYTEST_FILE_TIMEOUT: ${{ github.event.inputs.pytest_file_timeout || '300' }}
         run: |
           source backend/.venv/bin/activate && python test/run_all_test.py
           TEST_EXIT_CODE=$?
 
           if [ -f "test/coverage.xml" ]; then
-            echo "✅ Coverage XML file generated successfully."
+            echo "Coverage XML file generated successfully."
           else
-            echo "❌ Coverage XML file not found."
+            echo "Coverage XML file not found."
             exit 1
           fi
 
-          # Check if tests actually passed
           if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "❌ Tests failed with exit code $TEST_EXIT_CODE"
+            echo "Tests failed with exit code $TEST_EXIT_CODE"
             exit $TEST_EXIT_CODE
           else
-            echo "✅ All tests passed successfully."
+            echo "All tests passed successfully."
           fi
 
       - name: Upload coverage to Codecov
