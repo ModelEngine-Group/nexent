@@ -483,16 +483,7 @@ function RepositoryView({
         search={browser.filters.search}
         deploymentType={deploymentType}
         categoryStats={categoryStats}
-        actions={
-          <>
-            <span className="flex h-10 items-center text-xs text-slate-400">
-              {t("mcpTools.page.resultCount", {
-                count: filteredServices.length,
-              })}
-            </span>
-            {actions}
-          </>
-        }
+        actions={actions}
         onSearchChange={(value) => browser.updateFilter("search", value)}
         onDeploymentTypeChange={setDeploymentType}
       />
@@ -756,14 +747,7 @@ function MineView({
         search={search}
         deploymentType={deploymentType}
         categoryStats={categoryStats}
-        actions={
-          <>
-            <span className="flex h-10 items-center text-xs text-slate-400">
-              {t("mcpTools.page.resultCount", { count: filteredItems.length })}
-            </span>
-            {actions}
-          </>
-        }
+        actions={actions}
         onSearchChange={setSearch}
         onDeploymentTypeChange={setDeploymentType}
       />
@@ -1045,16 +1029,7 @@ function ReviewCenterView({
     <div className="space-y-4">
       <McpToolsSearchFilterBar
         search={browser.filters.search}
-        actions={
-          <>
-            <span className="flex h-10 items-center text-xs text-slate-400">
-              {t("mcpTools.page.resultCount", {
-                count: filteredServices.length,
-              })}
-            </span>
-            {actions}
-          </>
-        }
+        actions={actions}
         onSearchChange={(value) => browser.updateFilter("search", value)}
         filterTabs={statusTabs}
         activeFilterTab={statusFilter}

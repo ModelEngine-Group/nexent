@@ -252,6 +252,7 @@ export interface LocalAddMcpDraft {
   containerConfigJson: string;
   containerPort?: number;
   tags: string[];
+  version?: string;
 }
 
 /**

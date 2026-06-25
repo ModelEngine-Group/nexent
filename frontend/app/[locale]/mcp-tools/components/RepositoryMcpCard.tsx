@@ -1,5 +1,5 @@
-import { Button, Tag } from "antd";
-import { Circle, Download, Eye, Star, Trash2, Wrench } from "lucide-react";
+import { Button, Dropdown, Tag, type MenuProps } from "antd";
+import { Circle, Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import {
@@ -36,31 +36,54 @@ export default function RepositoryMcpCard({
     t("mcpTools.repository.authorFallback", {
       name: service.communityId ? ` ${service.communityId}` : "",
     });
-  const rating = Number(service.rating || 0);
   const installCount = Number(service.installCount || 0);
   const toolCount = resolveToolCount(service);
 
+  const actionItems: MenuProps["items"] = [];
+  if (isAdmin) {
+    actionItems.push({
+      key: "offline",
+      label: t("mcpTools.repository.offline"),
+      icon: <Trash2 className="h-3.5 w-3.5" />,
+      danger: true,
+      onClick: () => onOffline(service),
+    });
+  }
+
   return (
     <div className="group flex min-h-[292px] flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
-      <div className="flex items-start gap-3">
-        <TransportIcon
-          transportType={service.transportType}
-          deploymentType={deploymentType}
-          label={deploymentLabel}
-          seed={service.name}
-          className="!h-10 !w-10 rounded-xl"
-        />
-        <div className="min-w-0">
-          <h3
-            className="line-clamp-1 text-lg font-semibold text-slate-900"
-            title={service.name}
-          >
-            {service.name}
-          </h3>
-          <p className="mt-1 text-xs text-slate-500">
-            {t("mcpTools.repository.source", { source: author })}
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <TransportIcon
+            transportType={service.transportType}
+            deploymentType={deploymentType}
+            label={deploymentLabel}
+            seed={service.name}
+            className="!h-10 !w-10 rounded-xl"
+          />
+          <div className="min-w-0">
+            <h3
+              className="line-clamp-1 text-lg font-semibold text-slate-900"
+              title={service.name}
+            >
+              {service.name}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {t("mcpTools.repository.source", { source: author })}
+            </p>
+          </div>
         </div>
+        {actionItems.length > 0 ? (
+          <Dropdown menu={{ items: actionItems }} trigger={["click"]} placement="bottomRight">
+            <Button
+              type="text"
+              size="small"
+              icon={<MoreHorizontal className="h-4 w-4" />}
+              aria-label={t("mcpTools.mine.moreActions")}
+              className="-mt-1 text-slate-500 hover:!text-slate-700"
+            />
+          </Dropdown>
+        ) : null}
       </div>
 
       <p
@@ -97,10 +120,6 @@ export default function RepositoryMcpCard({
         </span>
         <div className="ml-auto flex items-center gap-4">
           <span className="inline-flex items-center gap-1">
-            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-            {rating > 0 ? `${rating.toFixed(1)}/5` : t("mcpTools.repository.noRating")}
-          </span>
-          <span className="inline-flex items-center gap-1">
             <Download className="h-3.5 w-3.5 text-slate-400" />
             {installCount}
           </span>
@@ -125,17 +144,6 @@ export default function RepositoryMcpCard({
           {t("mcpTools.repository.details")}
         </Button>
       </div>
-
-      {isAdmin ? (
-        <Button
-          danger
-          icon={<Trash2 className="h-3.5 w-3.5" />}
-          onClick={() => onOffline(service)}
-          className="mt-2 w-full"
-        >
-          {t("mcpTools.repository.offline")}
-        </Button>
-      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Button, Modal, Tag } from "antd";
-import { Download, Star } from "lucide-react";
+import { Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   MCP_TOOLS_MODAL_WRAP_CLASS,
@@ -37,8 +37,6 @@ export default function RepositoryMcpDetailModal({
     t("mcpTools.repository.authorFallback", {
       name: service.communityId ? ` ${service.communityId}` : "",
     });
-  const rating = Number(service.rating || 0);
-  const installCount = Number(service.installCount || 0);
   const toolCount = resolveToolCount(service);
 
   return (
@@ -112,21 +110,6 @@ export default function RepositoryMcpDetailModal({
             <StatItem
               label={t("mcpTools.detail.tools")}
               value={t("mcpTools.repository.toolCount", { count: toolCount })}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-y-5 mt-5">
-            <StatItem
-              label={t("mcpTools.repository.rating")}
-              value={
-                <span className="inline-flex items-center gap-1">
-                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                  {rating > 0 ? `${rating.toFixed(1)}/5` : t("mcpTools.repository.noRating")}
-                </span>
-              }
-            />
-            <StatItem
-              label={t("mcpTools.repository.downloads")}
-              value={t("mcpTools.repository.installCount", { count: installCount })}
             />
           </div>
         </div>
