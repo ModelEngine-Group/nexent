@@ -328,6 +328,10 @@ class MockSafeInputBudgetCalculator:
         )
 
 
+class MockUncertaintyReserveBasisUnknown(Exception):
+    """Mock W2 exception raised when context_window_tokens is missing."""
+
+
 sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
     "nexent.core.models.capacity_resolver",
     ModelCapacitySnapshot=MockModelCapacitySnapshot,
@@ -339,6 +343,7 @@ sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
     "nexent.core.models.capacity_budget",
     RequestBudgetOverrides=MockRequestBudgetOverrides,
     SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
+    UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
 )
 
 # Create mock classes that might be imported

@@ -17,6 +17,7 @@ from nexent.core.models.capacity_resolver import (
 from nexent.core.models.capacity_budget import (
     RequestBudgetOverrides,
     SafeInputBudgetCalculator,
+    UncertaintyReserveBasisUnknown,
 )
 from nexent.memory.memory_service import search_memory_in_levels
 
@@ -148,13 +149,30 @@ def _resolve_safe_input_budget(
     output_reserve_source = (
         "agent" if agent_requested_output_tokens is not None else "model_default"
     )
-    snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
-        capacity_snapshot=capacity_snapshot,
-        reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
-        request_overrides=request_overrides,
-        requested_output_tokens=agent_requested_output_tokens,
-        output_reserve_source=output_reserve_source,
-    )
+    try:
+        snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
+            capacity_snapshot=capacity_snapshot,
+            reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
+            request_overrides=request_overrides,
+            requested_output_tokens=agent_requested_output_tokens,
+            output_reserve_source=output_reserve_source,
+        )
+    except UncertaintyReserveBasisUnknown as exc:
+        # W2 uncertainty reserve needs context_window_tokens as the 10% basis.
+        # Falls through here when a model row has max_input_tokens set but
+        # context_window_tokens is NULL — possible for rows imported before
+        # W11 V1 save-time defaults landed, or for rows written directly via
+        # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
+        # caller already handles (falls back to W1 input_budget).
+        logger.warning(
+            "W2 safe input budget unavailable (tenant_id=%s model=%s): %s - "
+            "falling back to W1 input_budget. Fill context_window_tokens on the "
+            "model record to enable W2 enforcement.",
+            tenant_id,
+            capacity_snapshot.model_name,
+            exc,
+        )
+        return None
     logger.info(
         "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
         "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
