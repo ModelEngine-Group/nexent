@@ -40,8 +40,12 @@ async function batchUpdateToolConfigs(
   for (const tool of currentTools) {
     const toolId = parseInt(tool.id);
     const isEnabled = true; // Selected tools are always enabled
+    // Only include params that have a defined value (not undefined or null)
+    // This ensures we don't save null values from form defaults or stale data
     const params = tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
-      acc[param.name] = param.value;
+      if (param.value !== undefined && param.value !== null) {
+        acc[param.name] = param.value;
+      }
       return acc;
     }, {} as Record<string, any>) || {};
 
@@ -192,13 +196,23 @@ export const useSaveGuard = () => {
         const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
         await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
 
-        // Common logic for both creation and update: refresh cache and update store
+        // Refresh cache
         await queryClient.invalidateQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
         await queryClient.refetchQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
+
+        // CRITICAL: Update store with the latest data from cache after saving tool configs
+        // This ensures that on subsequent saves, the tool initParams reflect the latest
+        // values that were saved (including any defaults merged by the backend)
+        const latestAgentData = queryClient.getQueryData(["agentInfo", finalAgentId]);
+        if (latestAgentData && typeof latestAgentData === 'object' && 'tools' in latestAgentData) {
+          const latestTools = (latestAgentData as any).tools || [];
+          // Update editedAgent with the latest tools from cache
+          useAgentConfigStore.getState().updateTools(latestTools);
+        }
 
         // Refresh skill instances after save
         await queryClient.invalidateQueries({
@@ -208,6 +222,8 @@ export const useSaveGuard = () => {
         // Also invalidate the agents list cache to ensure the list reflects any changes
         queryClient.invalidateQueries({ queryKey: ["agents"] });
 
+        // Mark as saved (this will sync editedAgent to baselineAgent)
+        useAgentConfigStore.getState().markAsSaved();
         return true;
       } else {
         message.error(result.message || t("businessLogic.config.error.saveFailed") );
