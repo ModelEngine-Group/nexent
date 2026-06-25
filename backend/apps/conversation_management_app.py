@@ -3,6 +3,7 @@ from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse
 
 from consts.exceptions import UnauthorizedError
@@ -266,7 +267,7 @@ async def check_new_messages_endpoint(conversation_id: int, since_index: int = 0
     try:
         result = get_new_messages_service(conversation_id, user_id, since_index)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except Exception as e:
+    except SQLAlchemyError as e:
         logging.error(f"Failed to check new messages: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -297,13 +298,15 @@ async def batch_check_new_messages_endpoint(request: BatchMessageCheckRequest, a
                 results[str(check.conversation_id)] = get_new_messages_service(
                     check.conversation_id, user_id, check.since_index
                 )
-            except Exception as e:
+            except SQLAlchemyError as e:
+                # Only swallow DB errors here so a single bad conversation
+                # doesn't fail the whole batch; other errors propagate.
                 logging.error(
                     f"Failed to check new messages for conversation "
                     f"{check.conversation_id}: {str(e)}"
                 )
                 results[str(check.conversation_id)] = {"error": "check_failed"}
         return JSONResponse(status_code=HTTPStatus.OK, content={"results": results})
-    except Exception as e:
+    except SQLAlchemyError as e:
         logging.error(f"Failed to batch check new messages: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

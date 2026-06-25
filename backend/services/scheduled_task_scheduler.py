@@ -6,6 +6,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
 
+from sqlalchemy.exc import SQLAlchemyError
+
 logger = logging.getLogger("scheduled_task_scheduler")
 
 
@@ -54,6 +56,8 @@ def _run_scheduled_task_from_db(task_dict: dict):
         ))
         logger.info(f"Scheduled task {task_uuid} executed successfully")
     except Exception as e:
+        # Intentionally broad: this runs in a worker thread and must not
+        # propagate (which would crash the worker). exc_info keeps the cause.
         logger.error(f"Failed to execute scheduled task {task_uuid}: {e}", exc_info=True)
 
 
@@ -210,10 +214,16 @@ def _run_and_reschedule(task_dict: dict):
             # oneshot tasks stay as 'fired'; just persist the fire count
             update_task_status(task_uuid, {"fire_count": new_fire_count})
     except Exception as e:
+        # Intentionally broad: this runs in a worker thread and a single task
+        # failure (DB error, model API error, etc.) must not crash the worker
+        # or affect sibling tasks. We log with exc_info so the real cause is
+        # never hidden, then mark the task as errored.
         logger.error(f"Failed to process task {task_uuid}: {e}", exc_info=True)
         try:
             update_task_status(task_uuid, {"status": "error"})
-        except Exception:
+        except SQLAlchemyError:
+            # Best-effort status update; if the DB is down there is nothing
+            # more we can do for this task.
             pass
 
 
@@ -251,6 +261,9 @@ class ScheduledTaskScheduler:
             try:
                 self._process_due_tasks()
             except Exception as e:
+                # Intentionally broad: the daemon loop must survive any single
+                # cycle failure, otherwise all scheduled tasks stop firing.
+                # exc_info preserves the real cause in the logs.
                 logger.error(f"Error in scheduler loop: {e}", exc_info=True)
             self._stop_event.wait(timeout=self._poll_interval)
 
@@ -282,13 +295,15 @@ class ScheduledTaskScheduler:
                     logger.error(f"Task {task_uuid} timed out after {self._TASK_TIMEOUT}s")
                     try:
                         update_task_status(task_uuid, {"status": "error"})
-                    except Exception:
+                    except SQLAlchemyError:
                         pass
                 except Exception as e:
+                    # Intentionally broad: a single task's error must not crash
+                    # the scheduler worker. exc_info preserves the real cause.
                     logger.error(f"Task {task_uuid} raised an error: {e}", exc_info=True)
                     try:
                         update_task_status(task_uuid, {"status": "error"})
-                    except Exception:
+                    except SQLAlchemyError:
                         pass
 
 
