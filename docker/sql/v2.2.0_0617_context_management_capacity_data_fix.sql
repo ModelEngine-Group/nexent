@@ -73,6 +73,18 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
+    -- dashscope/qwen3.7-max
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = 1000000,
+           max_output_tokens = 65536,
+           default_output_reserve_tokens = 8192
+     WHERE LOWER(model_factory) = 'dashscope'
+       AND model_name = 'qwen3.7-max'
+       AND delete_flag = 'N'
+       AND context_window_tokens IS NULL;
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
     -- dashscope/glm-5.1
     UPDATE nexent.model_record_t
        SET context_window_tokens = 200000,
@@ -104,6 +116,34 @@ BEGIN
            default_output_reserve_tokens = 8192
      WHERE LOWER(model_factory) = 'silicon'
        AND model_name = 'Pro/moonshotai/Kimi-K2.6'
+       AND delete_flag = 'N'
+       AND context_window_tokens IS NULL;
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    -- deepseek/deepseek-v4-flash
+    -- (deepseek-chat / deepseek-reasoner intentionally omitted: they alias to
+    -- v4-flash and are scheduled for deprecation at 2026-07-24, and pre-W1
+    -- deployments may have legacy max_tokens values for those names that
+    -- this backfill should not clobber.)
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = 1000000,
+           max_output_tokens = 384000,
+           default_output_reserve_tokens = 8192
+     WHERE LOWER(model_factory) = 'deepseek'
+       AND model_name = 'deepseek-v4-flash'
+       AND delete_flag = 'N'
+       AND context_window_tokens IS NULL;
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    -- deepseek/deepseek-v4-pro
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = 1000000,
+           max_output_tokens = 384000,
+           default_output_reserve_tokens = 8192
+     WHERE LOWER(model_factory) = 'deepseek'
+       AND model_name = 'deepseek-v4-pro'
        AND delete_flag = 'N'
        AND context_window_tokens IS NULL;
     GET DIAGNOSTICS v_updated = ROW_COUNT;
