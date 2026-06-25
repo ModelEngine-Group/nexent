@@ -8,7 +8,20 @@ from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.agent_context import ContextManagerConfig
+from nexent.core.models.capacity_resolver import (
+    ModelCapacitySnapshot,
+    ProviderCapabilityUnknown,
+    ResolverError,
+    resolve_capacity,
+)
+from nexent.core.models.capacity_budget import (
+    RequestBudgetOverrides,
+    SafeInputBudgetCalculator,
+    UncertaintyReserveBasisUnknown,
+)
 from nexent.memory.memory_service import search_memory_in_levels
+
+from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
@@ -42,6 +55,229 @@ from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+# Safe fallback for context-manager token_threshold when no capacity is known.
+# Used only when the resolver fails (uncataloged model with no operator-supplied
+# hard capacity). Sized to cover the typical 32K-context band shared by the
+# majority of production LLMs (GPT-3.5 16K, GLM-4 32K, Qwen2 32K, Llama 3
+# 32K, etc.). Larger windows benefit only by skipping a few extra
+# compressions; smaller ones surface as a clear provider token-overflow
+# error at request time rather than silent truncation. Will be removed
+# once enforcement phase requires snapshots end to end.
+_TOKEN_THRESHOLD_LEGACY_FALLBACK = 32768
+
+_OPERATOR_OVERRIDE_FIELDS = (
+    "context_window_tokens",
+    "max_input_tokens",
+    "max_output_tokens",
+    "default_output_reserve_tokens",
+    "tokenizer_family",
+)
+
+# Per-process dedup for the "model has no capacity configured" warning.
+# Without this, every agent run logs the same line, drowning real signal.
+# Keyed by model_id; cleared only on process restart.
+# Guarded by a lock because the check-then-add window is not atomic on its
+# own: two threads can both pass the `in` check before either calls `add`,
+# leading to duplicate WARNING lines defeating the per-process dedup.
+_CAPACITY_WARNING_EMITTED: set = set()
+_CAPACITY_WARNING_LOCK = threading.Lock()
+
+
+def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
+    """Extract the W1 operator-override fields from a model_record_t row."""
+    if not isinstance(model_info, dict):
+        return {}
+    overrides = {}
+    for field in _OPERATOR_OVERRIDE_FIELDS:
+        value = model_info.get(field)
+        if value is not None:
+            overrides[field] = value
+    return overrides
+
+
+def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
+    values = [value for value in field_sources.values() if value]
+    if not values:
+        return None
+    for preferred in ("operator", "profile", "provider_candidate", "legacy", "unknown"):
+        if preferred in values:
+            return preferred
+    return values[0]
+
+
+def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
+    data = snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
+    return {
+        "provider": data.get("provider"),
+        "model_name": data.get("model_name"),
+        "context_window_tokens": data.get("context_window_tokens"),
+        "default_output_reserve_tokens": data.get("default_output_reserve_tokens"),
+        "capability_profile_version": data.get("capability_profile_version"),
+        "capacity_source": _dominant_capacity_source(data.get("field_sources") or {}),
+        "requested_output_tokens": data.get("requested_output_tokens"),
+        "provider_input_limit_tokens": data.get("provider_input_limit_tokens"),
+        "tokenizer_family": data.get("tokenizer_family"),
+        "counting_mode": data.get("counting_mode"),
+        "unknown_capabilities": data.get("unknown_capabilities") or [],
+        "capacity_fingerprint": data.get("fingerprint"),
+    }
+
+
+def _safe_input_budget_for_monitoring(snapshot: Any) -> dict:
+    return snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
+
+
+def _resolve_safe_input_budget(
+    *,
+    capacity_snapshot: Optional[ModelCapacitySnapshot],
+    tenant_id: str,
+    agent_requested_output_tokens: Optional[int],
+    request_requested_output_tokens: Optional[int],
+) -> Optional[dict]:
+    """Resolve the W2 budget snapshot before context assembly begins."""
+    if capacity_snapshot is None:
+        return None
+
+    request_overrides = None
+    if request_requested_output_tokens is not None:
+        request_overrides = RequestBudgetOverrides(
+            requested_output_tokens=request_requested_output_tokens,
+        )
+
+    output_reserve_source = (
+        "agent" if agent_requested_output_tokens is not None else "model_default"
+    )
+    try:
+        snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
+            capacity_snapshot=capacity_snapshot,
+            reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
+            request_overrides=request_overrides,
+            requested_output_tokens=agent_requested_output_tokens,
+            output_reserve_source=output_reserve_source,
+        )
+    except UncertaintyReserveBasisUnknown as exc:
+        # W2 uncertainty reserve needs context_window_tokens as the 10% basis.
+        # Falls through here when a model row has max_input_tokens set but
+        # context_window_tokens is NULL — possible for rows imported before
+        # W11 V1 save-time defaults landed, or for rows written directly via
+        # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
+        # caller already handles (falls back to W1 input_budget).
+        logger.warning(
+            "W2 safe input budget unavailable (tenant_id=%s model=%s): %s - "
+            "falling back to W1 input_budget. Fill context_window_tokens on the "
+            "model record to enable W2 enforcement.",
+            tenant_id,
+            capacity_snapshot.model_name,
+            exc,
+        )
+        return None
+    logger.info(
+        "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
+        "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
+        tenant_id,
+        snapshot.model_name,
+        snapshot.requested_output_tokens,
+        snapshot.soft_input_budget_tokens,
+        snapshot.hard_input_budget_tokens,
+        snapshot.fingerprint,
+        list(snapshot.warnings),
+    )
+    return _safe_input_budget_for_monitoring(snapshot)
+
+
+def _resolve_input_budget(
+    model_info: Optional[dict],
+) -> tuple[int, Optional[dict], Optional[ModelCapacitySnapshot]]:
+    """Resolve the context-manager input budget for a model_record_t row.
+
+    Calls ModelCapacityResolver with the catalog + operator overrides. Returns
+    snapshot.provider_input_limit_tokens and monitoring fields on success.
+    Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
+    capacity is unknown — this is the migration-window behavior before all
+    model rows are backfilled.
+    """
+    if not isinstance(model_info, dict):
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+    provider_raw = model_info.get("model_factory")
+    provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
+    model_id = model_info.get("model_name") or ""
+    provider_missing_detail = None
+    if not provider:
+        provider_missing_detail = (
+            "model_factory/provider is missing; capacity catalog matching is disabled"
+        )
+    try:
+        snapshot = resolve_capacity(
+            model_id=model_id,
+            provider=provider,
+            operator_overrides=_operator_overrides_from_model_info(model_info),
+            capability_profiles=CAPABILITY_CATALOG,
+        )
+        logger.debug(
+            "Capacity resolved for (%s, %s): input_limit=%s source=%s profile=%s fingerprint=%s",
+            provider, model_id,
+            snapshot.provider_input_limit_tokens,
+            dict(snapshot.field_sources),
+            snapshot.capability_profile_version,
+            snapshot.fingerprint,
+        )
+        return (
+            snapshot.provider_input_limit_tokens,
+            _capacity_snapshot_for_monitoring(snapshot),
+            snapshot,
+        )
+    except ProviderCapabilityUnknown:
+        _warn_missing_capacity_once(
+            model_info, provider, model_id, detail=provider_missing_detail,
+        )
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+    except ResolverError as exc:
+        _warn_missing_capacity_once(
+            model_info, provider, model_id, detail=str(exc),
+        )
+        return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
+
+
+def _warn_missing_capacity_once(
+    model_info: Optional[dict],
+    provider: str,
+    model_id_str: str,
+    detail: Optional[str] = None,
+) -> None:
+    """Log one WARNING per process per model when capacity is not configured.
+
+    Plain-English message aimed at operators reading backend logs. Tells
+    them what is disabled, which model is affected, and how to fix it
+    through the existing UI.
+    """
+    db_model_id = (
+        model_info.get("model_id") if isinstance(model_info, dict) else None
+    )
+    dedup_key = db_model_id if db_model_id is not None else f"{provider}/{model_id_str}"
+    # Test-and-set inside the lock so concurrent first-time callers don't
+    # both make it past the membership check. Logging happens outside the
+    # lock to avoid serialising I/O across all warning paths.
+    with _CAPACITY_WARNING_LOCK:
+        if dedup_key in _CAPACITY_WARNING_EMITTED:
+            return
+        _CAPACITY_WARNING_EMITTED.add(dedup_key)
+
+    reason = (
+        f"resolver error: {detail}"
+        if detail
+        else "no context_window_tokens or max_output_tokens configured"
+    )
+    logger.warning(
+        "Output token cap and budget consistency check are not enforced for "
+        "model '%s' (model_id=%s, provider=%s) because %s. "
+        "To enable enforcement, open the Nexent model management UI, edit "
+        "this model, and fill in 'Context window tokens' and 'Max output "
+        "tokens'. Falling back to a default context threshold of %s tokens.",
+        model_id_str, db_model_id, provider, reason,
+        _TOKEN_THRESHOLD_LEGACY_FALLBACK,
+    )
 
 
 def _normalize_tool_params_request(tool_params: Optional[ToolParamsRequest | Dict[str, Any]]) -> ToolParamsRequest:
@@ -153,7 +389,7 @@ def _get_skills_for_template(
             for s in enabled_skills
         ]
     except Exception as e:
-        logger.warning(f"Failed to get skills for template: {e}")
+        logger.error(f"Failed to get skills for agent {agent_id} (tenant={tenant_id}, version={version_no}): {e}", exc_info=True)
         return []
 
 
@@ -336,7 +572,17 @@ async def create_model_config_list(tenant_id):
                         ssl_verify=record.get("ssl_verify", True),
                         model_factory=record.get("model_factory"),
                         timeout_seconds=record.get("timeout_seconds"),
-                        concurrency_limit=record.get("concurrency_limit")))
+                        concurrency_limit=record.get("concurrency_limit"),
+                        # W1 step 6: pass capacity columns through so SDK can
+                        # honor operator-configured values end to end.
+                        max_output_tokens=record.get("max_output_tokens"),
+                        max_tokens=record.get("max_tokens"),
+                        context_window_tokens=record.get("context_window_tokens"),
+                        max_input_tokens=record.get("max_input_tokens"),
+                        default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
+                        tokenizer_family=record.get("tokenizer_family"),
+                        capacity_source=record.get("capacity_source"),
+                        capability_profile_version=record.get("capability_profile_version")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -373,6 +619,7 @@ async def create_agent_config(
     allow_memory_search: bool = True,
     version_no: int = 0,
     override_model_id: int | None = None,
+    request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
@@ -531,6 +778,7 @@ async def create_agent_config(
 
     # Build knowledge base summary
     knowledge_base_summary = ""
+    kb_ids = []
     try:
         for tool in tool_list:
             if "KnowledgeBaseSearchTool" == tool.class_name:
@@ -545,6 +793,7 @@ async def create_agent_config(
                             message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
                             knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
+                            kb_ids.append(index_name)
                         except Exception as e:
                             logger.warning(
                                 f"Failed to get summary for knowledge base {index_name}: {e}")
@@ -579,14 +828,37 @@ async def create_agent_config(
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None
-    model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
         model_name = model_info["display_name"] if model_info is not None else "main_model"
-        if model_info is not None and model_info.get("max_tokens"):
-            model_max_tokens = model_info["max_tokens"]
+        # W1 step 6: derive input budget via ModelCapacityResolver instead of
+        # treating model_info["max_tokens"] (a deprecated output cap) as a
+        # context threshold. Falls back to a safe constant when capacity is
+        # unknown during the migration window.
+        input_budget, capacity_snapshot, resolved_capacity_snapshot = (
+            _resolve_input_budget(model_info)
+        )
     else:
         model_name = "main_model"
+        input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
+        capacity_snapshot = None
+        resolved_capacity_snapshot = None
+
+    requested_output_tokens = agent_info.get("requested_output_tokens")
+    safe_input_budget_snapshot = _resolve_safe_input_budget(
+        capacity_snapshot=resolved_capacity_snapshot,
+        tenant_id=tenant_id,
+        agent_requested_output_tokens=requested_output_tokens,
+        request_requested_output_tokens=request_requested_output_tokens,
+    )
+    if safe_input_budget_snapshot is not None:
+        soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
+        hard_input_budget_tokens = safe_input_budget_snapshot["hard_input_budget_tokens"]
+        context_token_threshold = soft_input_budget_tokens
+    else:
+        soft_input_budget_tokens = 0
+        hard_input_budget_tokens = 0
+        context_token_threshold = input_budget
 
     logger.info(
         "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
@@ -601,7 +873,7 @@ async def create_agent_config(
     # downstream runtime may prefer component-based prompt assembly over the
     # rendered system_prompt, causing the actual model input to diverge from the
     # template output.
-    enable_context_manager = agent_info.get("enable_context_manager", False)
+    enable_context_manager = agent_info.get("enable_context_manager", True)
     context_components = []
     if enable_context_manager:
         context_components = build_context_components(
@@ -620,10 +892,19 @@ async def create_agent_config(
             memory_list=memory_list,
             memory_search_query=last_user_query,
             knowledge_base_summary=knowledge_base_summary,
+            kb_ids=kb_ids,
+        )
+
+        logger.info(
+            f"Agent {agent_id} context assembly: "
+            f"skills_count={len(skills)}, "
+            f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
         )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,
-        token_threshold=model_max_tokens,
+        token_threshold=context_token_threshold,
+        soft_input_budget_tokens=soft_input_budget_tokens,
+        hard_input_budget_tokens=hard_input_budget_tokens,
     )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
@@ -636,12 +917,15 @@ async def create_agent_config(
         ),
         tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
         max_steps=agent_info.get("max_steps", 15),
+        requested_output_tokens=requested_output_tokens,
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_components=context_components,
+        capacity_snapshot=capacity_snapshot,
+        safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
     )
     return agent_config
@@ -1054,6 +1338,7 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
+    requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     # Determine which version_no to use based on is_debug flag
@@ -1086,6 +1371,8 @@ async def create_agent_run_info(
     }
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
+    if requested_output_tokens is not None:
+        create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
@@ -1141,6 +1428,12 @@ async def create_agent_run_info(
         agent_config=agent_config,
         mcp_host=mcp_host,
         history=converted_history,
-        stop_event=threading.Event()
+        stop_event=threading.Event(),
+        capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
+        safe_input_budget_snapshot=getattr(
+            agent_config,
+            "safe_input_budget_snapshot",
+            None,
+        ),
     )
     return agent_run_info

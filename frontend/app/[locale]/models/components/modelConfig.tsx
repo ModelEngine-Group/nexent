@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Card, Col, Row, Space, App } from "antd";
+import { Alert, Button, Card, Col, Row, Space, App } from "antd";
 import { Plus, ShieldCheck, RefreshCw, PenLine } from "lucide-react";
 
 import {
@@ -19,7 +19,7 @@ import {
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
-import { ModelOption, ModelType } from "@/types/modelConfig";
+import { CapacityCoverage, ModelOption, ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import { ModelListCard } from "./model/ModelListCard";
@@ -57,9 +57,18 @@ const getModelData = (t: any) => ({
   multimodal: {
     title: t("modelConfig.category.multimodal"),
     options: [
-      { id: MODEL_TYPES.VLM, name: t("modelConfig.option.imageUnderstandingModel") },
-      { id: MODEL_TYPES.VLM2, name: t("modelConfig.option.imageGenerationModel") },
-      { id: MODEL_TYPES.VLM3, name: t("modelConfig.option.videoUnderstandingModel") },
+      {
+        id: MODEL_TYPES.VLM,
+        name: t("modelConfig.option.imageUnderstandingModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM2,
+        name: t("modelConfig.option.imageGenerationModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM3,
+        name: t("modelConfig.option.videoUnderstandingModel"),
+      },
     ],
   },
   voice: {
@@ -112,6 +121,8 @@ export const ModelConfigSection = forwardRef<
     useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [capacityCoverage, setCapacityCoverage] =
+    useState<CapacityCoverage | null>(null);
 
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
@@ -250,10 +261,14 @@ export const ModelConfigSection = forwardRef<
     if (!modelConfig) return;
 
     try {
-      const allModels = await modelService.getAllModels();
+      const [allModels, coverage] = await Promise.all([
+        modelService.getAllModels(),
+        modelService.getCapacityCoverage(),
+      ]);
 
       // Update state with all models
       setModels(allModels);
+      setCapacityCoverage(coverage);
 
       // Load selected models from configuration and check if models still exist
       const llmMain = modelConfig.llm.displayName;
@@ -475,7 +490,14 @@ export const ModelConfigSection = forwardRef<
       const hasStt = !!modelConfig.stt.modelName;
 
       hasSelectedModels =
-        hasLlmMain || hasEmbedding || hasReranker || hasVlm || hasVlm2 || hasVlm3 || hasTts || hasStt;
+        hasLlmMain ||
+        hasEmbedding ||
+        hasReranker ||
+        hasVlm ||
+        hasVlm2 ||
+        hasVlm3 ||
+        hasTts ||
+        hasStt;
 
       if (hasSelectedModels) {
         currentSelectedModels.llm.main = modelConfig.llm.modelName;
@@ -485,8 +507,10 @@ export const ModelConfigSection = forwardRef<
           modelConfig.multiEmbedding.modelName || "";
         currentSelectedModels.reranker.reranker = modelConfig.rerank.modelName;
         currentSelectedModels.multimodal.vlm = modelConfig.vlm.modelName;
-        currentSelectedModels.multimodal.vlm2 = modelConfig.vlm2?.modelName || "";
-        currentSelectedModels.multimodal.vlm3 = modelConfig.vlm3?.modelName || "";
+        currentSelectedModels.multimodal.vlm2 =
+          modelConfig.vlm2?.modelName || "";
+        currentSelectedModels.multimodal.vlm3 =
+          modelConfig.vlm3?.modelName || "";
         currentSelectedModels.voice.tts = modelConfig.tts.modelName;
         currentSelectedModels.voice.stt = modelConfig.stt.modelName;
       } else {
@@ -636,7 +660,10 @@ export const ModelConfigSection = forwardRef<
     throttleTimerRef.current = setTimeout(async () => {
       try {
         // Use modelService to verify model
-        const isConnected = await modelService.verifyCustomModel(displayName, modelType);
+        const isConnected = await modelService.verifyCustomModel(
+          displayName,
+          modelType
+        );
 
         // Update model status
         updateModelStatus(
@@ -954,6 +981,27 @@ export const ModelConfigSection = forwardRef<
           </Row>
         </div>
 
+        {capacityCoverage && capacityCoverage.bareCount > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("modelConfig.capacityCoverage.warning", {
+              bareCount: capacityCoverage.bareCount,
+              total: capacityCoverage.totalLlmVlm,
+            })}
+            description={t("modelConfig.capacityCoverage.description", {
+              suggestionCount: capacityCoverage.bareModels.filter(
+                (model) => model.suggestionAvailable
+              ).length,
+            })}
+            action={
+              <Button size="small" onClick={() => setIsDeleteModalOpen(true)}>
+                {t("modelConfig.capacityCoverage.manage")}
+              </Button>
+            }
+          />
+        )}
+
         <div
           style={{
             width: "100%",
@@ -1089,6 +1137,7 @@ export const ModelConfigSection = forwardRef<
             return;
           }}
           models={models}
+          capacityCoverage={capacityCoverage}
         />
       </div>
     </>
