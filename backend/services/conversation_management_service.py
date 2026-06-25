@@ -8,6 +8,7 @@ from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, ConversationResponse, MessageRequest, MessageUnit
+from consts.exceptions import ConversationNotFoundError
 from database.conversation_db import (
     create_conversation,
     create_conversation_message,
@@ -18,16 +19,20 @@ from database.conversation_db import (
     get_conversation,
     get_conversation_history,
     get_conversation_list,
+    get_latest_assistant_message_id,
     get_message_id_by_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
     rename_conversation,
+    update_message_minio_files,
     update_message_opinion
 )
 from nexent.core.utils.observer import MessageObserver, ProcessType
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.models import OpenAIModel
+from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -122,7 +127,15 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                     # Parse image URL list
                     content_json = json.loads(unit_content)
                     if isinstance(content_json, dict) and 'images_url' in content_json:
+                        # Deduplicate image URLs before saving
+                        seen_urls = set()
+                        unique_urls = []
                         for image_url in content_json['images_url']:
+                            if image_url not in seen_urls:
+                                seen_urls.add(image_url)
+                                unique_urls.append(image_url)
+                        # Also deduplicate against any URLs already saved in this same message
+                        for image_url in unique_urls:
                             image_data = {'message_id': message_id, 'conversation_id': conversation_id,
                                           'image_url': image_url}
                             create_source_image(image_data)
@@ -200,7 +213,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.get("role") == MESSAGE_ROLE["USER"])
+        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2,
                                       role=MESSAGE_ROLE["USER"], message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
@@ -209,7 +222,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.get("role") == MESSAGE_ROLE["USER"])
+        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
     message_list = []
     for item in messages:
@@ -222,7 +235,7 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
             message_list.append(message)
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2 + 1,
-                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=request.minio_files)
+                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=None)
     save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
 
 
@@ -239,9 +252,14 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         str: Generated title
     """
     prompt_template = get_generate_title_prompt_template(language=language)
+    set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
     model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    display_name = model_config.get("display_name", "") if model_config else ""
+    set_monitoring_operation("title_generation", display_name=display_name or None)
+
+    timeout_seconds = model_config.get("timeout_seconds") if model_config else None
 
     # Create OpenAIModel instance
     llm = OpenAIModel(
@@ -251,7 +269,9 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         temperature=0.7,
         top_p=0.95,
         model_factory=model_config.get("model_factory", None),
-        ssl_verify=model_config.get("ssl_verify", True)
+        ssl_verify=model_config.get("ssl_verify", True),
+        timeout_seconds=timeout_seconds,
+        stream=False,
     )
 
     # Build messages - use new template variable 'question' instead of 'content'
@@ -287,7 +307,9 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     """
     success = rename_conversation(conversation_id, title, user_id)
     if not success:
-        raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or has been deleted"
+        )
     return success
 
 
@@ -362,6 +384,11 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         success = delete_conversation(conversation_id, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+
+        # Defensive cleanup: release the ContextManager associated with this conversation
+        # to avoid memory leaks in edge cases
+        agent_run_manager.clear_conversation_context_manager(conversation_id)
+
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
@@ -429,13 +456,15 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 search_by_message[message_id] = []
             search_by_message[message_id].append(search_item)
 
-        # Collect image content - grouped by message_id
+        # Collect image content - grouped by message_id, with URL deduplication
         image_by_message = {}
         for record in history_data['image_records']:
             message_id = record['message_id']
             if message_id not in image_by_message:
                 image_by_message[message_id] = []
-            image_by_message[message_id].append(record['image_url'])
+            # Only add if not already present (by URL)
+            if record['image_url'] not in image_by_message[message_id]:
+                image_by_message[message_id].append(record['image_url'])
 
         # Sort by message index and build final message list, including images and search content
         messages = []
@@ -494,6 +523,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'message_id': message_id,
                     'opinion_flag': msg['opinion_flag']
                 }
+
+                # Add minio_files field (if any, e.g., skill-generated attachments)
+                if 'minio_files' in msg and msg['minio_files']:
+                    message_item['minio_files'] = msg['minio_files']
 
             # Add image content (if any)
             if message_id in image_by_message:
@@ -687,3 +720,52 @@ async def get_message_id_by_index_impl(conversation_id: int, message_index: int)
     if message_id is None:
         raise Exception("Message not found.")
     return message_id
+
+
+def save_skill_files_to_conversation(
+    conversation_id: int,
+    skill_file_uploads: List[Dict[str, Any]],
+    user_id: str,
+) -> bool:
+    """
+    Append skill file upload records to the latest assistant message in a conversation.
+
+    This persists generated documents (e.g., DOCX, XLSX created by skills) to the
+    conversation history so they appear in subsequent GET /conversation/{id} calls.
+
+    Args:
+        conversation_id: Target conversation ID
+        skill_file_uploads: List of upload metadata dicts (e.g., from upload_fileobj)
+        user_id: User ID for ownership validation
+
+    Returns:
+        bool: True if files were saved, False if no assistant message was found
+    """
+    if not skill_file_uploads:
+        return False
+
+    try:
+        message_id = get_latest_assistant_message_id(conversation_id, user_id)
+        if message_id is None:
+            logging.warning(
+                "[skill-file] no assistant message found for conversation=%s, "
+                "cannot persist skill file uploads",
+                conversation_id,
+            )
+            return False
+
+        success = update_message_minio_files(message_id, skill_file_uploads)
+        if success:
+            logging.info(
+                "[skill-file] persisted %d file(s) to message_id=%s conversation=%s",
+                len(skill_file_uploads),
+                message_id,
+                conversation_id,
+            )
+        return success
+    except Exception as exc:
+        logging.exception(
+            "[skill-file] failed to persist skill file uploads for conversation=%s",
+            conversation_id,
+        )
+        return False

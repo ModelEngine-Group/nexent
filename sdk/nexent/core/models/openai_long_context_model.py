@@ -42,8 +42,10 @@ class OpenAILongContextModel(OpenAIModel):
         if self._tokenizer is None:
             try:
                 self._tokenizer = tiktoken.get_encoding("cl100k_base")
-            except ImportError:
-                # If there is no tiktoken, use simple character count estimation
+            except Exception as exc:
+                # If tiktoken is unavailable or cannot load its encoding cache,
+                # use simple character count estimation.
+                logger.warning(f"Failed to load tiktoken encoding, using estimation: {exc}")
                 self._tokenizer = None
         return self._tokenizer
     

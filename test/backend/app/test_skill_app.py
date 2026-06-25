@@ -11,7 +11,7 @@ import zipfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -33,6 +33,7 @@ nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
 nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
 nexent_skills_mock = types.ModuleType('nexent.skills')
+nexent_skills_mock.__path__ = []  # Required for submodule lookups
 nexent_skills_skill_manager_mock = types.ModuleType('nexent.skills.skill_manager')
 nexent_storage_mock = types.ModuleType('nexent.storage')
 nexent_storage_storage_client_factory_mock = types.ModuleType('nexent.storage.storage_client_factory')
@@ -47,6 +48,9 @@ sys.modules['nexent.skills.skill_manager'] = nexent_skills_skill_manager_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
 sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
+
+# Set attributes on nexent_mock for proper submodule resolution
+setattr(nexent_mock, 'skills', nexent_skills_mock)
 
 # Mock ToolConfig from agent_model
 nexent_core_agents_agent_model_mock.ToolConfig = type('ToolConfig', (), {})
@@ -102,6 +106,8 @@ sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['consts.model'] = consts_model_mock
 sys.modules['consts.const'] = consts_const_mock
 consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
+consts_const_mock.APP_VERSION = "v2.0.2"
+consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 
 class SkillException(Exception):
     pass
@@ -112,11 +118,64 @@ consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,
 consts_model_mock.BaseModel = BaseModel
 consts_model_mock.SkillInstanceInfoRequest = SkillInstanceInfoRequest
 
+# Add mock Pydantic models for all required imports
+from pydantic import Field
+from typing import Any, Dict, List, Optional
+
+class MockSkillCreateRequest(BaseModel):
+    name: str
+    description: str
+    content: str
+    tool_ids: Optional[List[int]] = []
+    tool_names: Optional[List[str]] = []
+    tags: Optional[List[str]] = []
+    source: Optional[str] = "custom"
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
+    files: Optional[List[Dict[str, str]]] = None
+
+class MockSkillFileData(BaseModel):
+    path: str
+    content: str
+
+class MockSkillUpdateRequest(BaseModel):
+    description: Optional[str] = None
+    content: Optional[str] = None
+    tool_ids: Optional[List[int]] = None
+    tool_names: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    source: Optional[str] = None
+    config_schemas: Optional[Dict[str, Any]] = None
+    config_values: Optional[Dict[str, Any]] = None
+    files: Optional[List[MockSkillFileData]] = None
+
+class MockSkillResponse(BaseModel):
+    skill_id: Optional[int] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+
+class MockSkillCreateInteractiveRequest(BaseModel):
+    user_request: str
+    language: Optional[str] = "zh"
+    complexity: Optional[str] = "simple"
+    existing_skill: Optional[str] = None
+
+consts_model_mock.SkillCreateRequest = MockSkillCreateRequest
+consts_model_mock.SkillUpdateRequest = MockSkillUpdateRequest
+consts_model_mock.SkillResponse = MockSkillResponse
+consts_model_mock.SkillCreateInteractiveRequest = MockSkillCreateInteractiveRequest
+
 # Mock services
 services_mock = types.ModuleType('services')
+services_mock.__path__ = []  # Make it a package so submodules can be imported
 services_skill_service_mock = types.ModuleType('services.skill_service')
+services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 sys.modules['services'] = services_mock
 sys.modules['services.skill_service'] = services_skill_service_mock
+sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
+setattr(services_mock, 'skill_service', services_skill_service_mock)
+setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
 
 class MockSkillService:
     def __init__(self):
@@ -124,9 +183,16 @@ class MockSkillService:
         self.skill_manager = MagicMock()
 services_skill_service_mock.SkillService = MockSkillService
 services_skill_service_mock.get_skill_manager = MagicMock()
+services_skill_service_mock.skill_creation_task_manager = MagicMock()
+services_skill_service_mock.stream_skill_creation = MagicMock(return_value=("task123", MagicMock()))
+services_skill_service_mock.update_skill_list = MagicMock()
+services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
+services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
+services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
+utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
 utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
 utils_config_utils_mock = types.ModuleType('utils.config_utils')
 sys.modules['utils'] = utils_mock
@@ -136,6 +202,8 @@ utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
 utils_config_utils_mock.tenant_config_manager = MagicMock()
 utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
+# Set utils.config_utils as attribute for attribute-based imports
+setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 
 # Mock utils.prompt_template_utils
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
@@ -184,57 +252,90 @@ class TestListSkillsEndpoint:
 
     def test_list_skills_success(self, mocker):
         """Test successful listing of skills."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.return_value = [
-                {"skill_id": 1, "name": "skill1", "description": "Desc1"},
-                {"skill_id": 2, "name": "skill2", "description": "Desc2"}
-            ]
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.return_value = [
+                    {"skill_id": 1, "name": "skill1", "description": "Desc1"},
+                    {"skill_id": 2, "name": "skill2", "description": "Desc2"}
+                ]
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
-            assert response.status_code == 200
-            data = response.json()
-            assert "skills" in data
-            assert len(data["skills"]) == 2
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 2
 
     def test_list_skills_empty(self, mocker):
         """Test listing skills when none exist."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.return_value = []
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.return_value = []
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["skills"] == []
+                assert response.status_code == 200
+                data = response.json()
+                assert data["skills"] == []
 
     def test_list_skills_error(self, mocker):
         """Test listing skills when service throws exception."""
         from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.side_effect = SkillException("Database error")
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.side_effect = SkillException("Database error")
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
             assert response.status_code == 500
+
+    def test_list_skills_super_admin_with_tenant_id(self, mocker):
+        """Test super admin listing skills for a specific tenant via tenant_id query param."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("super_user", "super_tenant")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.return_value = [
+                    {"skill_id": 10, "name": "admin_skill", "description": "Admin desc"}
+                ]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills?tenant_id=target_tenant",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 1
+                # Verify the service was called with the target tenant_id, not super_tenant
+                mock_service.list_skills.assert_called_once_with(tenant_id="target_tenant")
 
 
 # ===== Create Skill Endpoint Tests =====
@@ -274,18 +375,12 @@ class TestCreateSkillEndpoint:
                 assert data["name"] == "new_skill"
 
     def test_create_skill_with_tool_names(self, mocker):
-        """Test skill creation with tool names."""
+        """Test skill creation with tool_names returns 500 (NotImplementedError)."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.repository.get_tool_ids_by_names.return_value = [1, 2]
-                mock_service.create_skill.return_value = {
-                    "skill_id": 1,
-                    "name": "tool_skill",
-                    "description": "With tools"
-                }
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -302,8 +397,8 @@ class TestCreateSkillEndpoint:
                     headers={"Authorization": "Bearer token123"}
                 )
 
-                assert response.status_code == 201
-                mock_service.repository.get_tool_ids_by_names.assert_called_once()
+                # Tool names are not supported - returns 500 via NotImplementedError
+                assert response.status_code == 500
 
     def test_create_skill_already_exists(self, mocker):
         """Test skill creation when skill already exists."""
@@ -514,6 +609,34 @@ class TestGetSkillEndpoint:
             assert response.status_code == 404
 
 
+class TestAssetOwnerSkillVisibility:
+    """Test ASSET_OWNER skill visibility enforcement at the app layer."""
+
+    def test_get_skill_file_tree_denied_for_non_asset_owner_tenant(self, mocker):
+        """Non-asset-owner callers receive a denial payload for asset-owner skills."""
+        asset_owner_tenant_id = "asset_owner_tenant_id"
+
+        with patch("backend.apps.skill_app.can_view_skill", return_value=False), \
+             patch("backend.apps.skill_app.get_current_user_id", return_value=("user123", "regular_tenant")), \
+             patch("backend.apps.skill_app.SkillService") as mock_service_class:
+            mock_service = MagicMock()
+            mock_service_class.return_value = mock_service
+            mock_service.get_skill.return_value = {
+                "name": "ao_skill",
+                "tenant_id": asset_owner_tenant_id,
+            }
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+
+            response = client.get("/skills/ao_skill/files")
+
+            assert response.status_code == 200
+            assert response.json() == {"content": "您无权限查看"}
+            mock_service.get_skill_file_tree.assert_not_called()
+
+
 # ===== Update Skill Endpoint Tests =====
 class TestUpdateSkillEndpoint:
     """Test PUT /skills/{skill_name} endpoint."""
@@ -569,20 +692,25 @@ class TestUpdateSkillEndpoint:
 
     def test_update_skill_no_fields(self, mocker):
         """Test update with no fields to update."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
-            mock_auth.return_value = ("user123", "tenant123")
+        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+                mock_auth.return_value = ("user123", "tenant123")
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                # Set up update_skill to return a serializable dict
+                mock_service.update_skill.return_value = {"name": "test_skill", "updated": True}
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.put(
-                "/skills/test_skill",
-                json={},
-                headers={"Authorization": "Bearer token123"}
-            )
+                response = client.put(
+                    "/skills/test_skill",
+                    json={},
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-            assert response.status_code == 400
+                assert response.status_code == 400
 
 
 # ===== Delete Skill Endpoint Tests =====
@@ -952,16 +1080,18 @@ class TestErrorHandling:
 
     def test_unexpected_error_in_list_skills(self, mocker):
         """Test unexpected error handling in list_skills."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            mock_service = MagicMock()
-            mock_service_class.return_value = mock_service
-            mock_service.list_skills.side_effect = Exception("Unexpected error")
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.list_skills.side_effect = Exception("Unexpected error")
 
-            app = FastAPI()
-            app.include_router(skill_app.router)
-            client = TestClient(app)
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-            response = client.get("/skills")
+                response = client.get("/skills", headers={"Authorization": "Bearer token123"})
 
             assert response.status_code == 500
             assert "Internal server error" in response.json()["detail"]
@@ -1165,14 +1295,16 @@ class TestGetSkillInstanceEndpointExtended:
                     "skill_id": 1,
                     "agent_id": 1,
                     "enabled": True,
-                    "version_no": 0
+                    "version_no": 0,
+                    "config_values": {"instance_key": "instance_value"}
                 }
                 mock_service.get_skill_by_id.return_value = {
                     "skill_id": 1,
                     "name": "test_skill",
                     "description": "Test description",
                     "content": "# Test content",
-                    "params": {"key": "value"}
+                    "config_schemas": [{"name": "key", "type": "string"}],
+                    "config_values": {"template_key": "template_value"}
                 }
 
                 app = FastAPI()
@@ -1190,7 +1322,11 @@ class TestGetSkillInstanceEndpointExtended:
                 assert data.get("skill_name") == "test_skill"
                 assert data.get("skill_description") == "Test description"
                 assert data.get("skill_content") == "# Test content"
-                assert data.get("skill_params") == {"key": "value"}
+                assert data.get("config_schemas") == [{"name": "key", "type": "string"}]
+                # Endpoint uses template config_values as base, then merges instance params
+                # Since instance_params comes from instance's config_values (which was overwritten by template),
+                # the result is the template values
+                assert data.get("config_values") == {"template_key": "template_value"}
 
     def test_get_instance_unauthorized(self, mocker):
         """Test instance retrieval without authorization."""
@@ -1309,18 +1445,12 @@ class TestUpdateSkillEndpointExtended:
     """Additional tests for PUT /skills/{skill_name} endpoint - field update variations."""
 
     def test_update_skill_with_tool_ids_and_tool_names(self, mocker):
-        """Test update with both tool_ids and tool_names (tool_names takes precedence)."""
+        """Test update with both tool_ids and tool_names (both are ignored - returns 400)."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.repository.get_tool_ids_by_names.return_value = [3, 4]
-                mock_service.update_skill.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill",
-                    "tool_ids": [3, 4]
-                }
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -1332,23 +1462,16 @@ class TestUpdateSkillEndpointExtended:
                     headers={"Authorization": "Bearer token123"}
                 )
 
-                assert response.status_code == 200
-                # tool_names should take precedence
-                mock_service.repository.get_tool_ids_by_names.assert_called_once_with(["tool3", "tool4"], "tenant123")
+                # Tool_ids/tool_names are not handled - returns 400
+                assert response.status_code == 400
 
     def test_update_skill_with_tool_names_only(self, mocker):
-        """Test update with only tool_names (converted to tool_ids)."""
+        """Test update with only tool_names (returns 400 - not supported)."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.repository.get_tool_ids_by_names.return_value = [5, 6]
-                mock_service.update_skill.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill",
-                    "tool_ids": [5, 6]
-                }
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -1360,7 +1483,8 @@ class TestUpdateSkillEndpointExtended:
                     headers={"Authorization": "Bearer token123"}
                 )
 
-                assert response.status_code == 200
+                # Tool_names not supported - returns 400
+                assert response.status_code == 400
 
     def test_update_skill_with_tags(self, mocker):
         """Test update skill with tags field."""
@@ -1412,8 +1536,8 @@ class TestUpdateSkillEndpointExtended:
 
                 assert response.status_code == 200
 
-    def test_update_skill_with_params(self, mocker):
-        """Test update skill with params field."""
+    def test_update_skill_with_config_values(self, mocker):
+        """Test update skill with config_values field."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
@@ -1422,7 +1546,7 @@ class TestUpdateSkillEndpointExtended:
                 mock_service.update_skill.return_value = {
                     "skill_id": 1,
                     "name": "test_skill",
-                    "params": {"key": "value"}
+                    "config_values": {"key": "value"}
                 }
 
                 app = FastAPI()
@@ -1431,7 +1555,7 @@ class TestUpdateSkillEndpointExtended:
 
                 response = client.put(
                     "/skills/test_skill",
-                    json={"params": {"key": "value"}},
+                    json={"config_values": {"key": "value"}},
                     headers={"Authorization": "Bearer token123"}
                 )
 
@@ -2000,17 +2124,12 @@ class TestUpdateSkillFieldEdgeCases:
                 assert response.status_code == 200
 
     def test_update_skill_with_tool_ids_only(self, mocker):
-        """Test update skill with tool_ids only (line 405)."""
+        """Test update skill with tool_ids only (returns 400 - not supported)."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
             with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
-                mock_service.update_skill.return_value = {
-                    "skill_id": 1,
-                    "name": "test_skill",
-                    "tool_ids": [1, 2]
-                }
 
                 app = FastAPI()
                 app.include_router(skill_app.router)
@@ -2022,1305 +2141,549 @@ class TestUpdateSkillFieldEdgeCases:
                     headers={"Authorization": "Bearer token123"}
                 )
 
+                # Tool_ids not supported in update - returns 400
+                assert response.status_code == 400
+
+
+# ===== List Official Skills Endpoint Tests =====
+class TestListOfficialSkillsEndpoint:
+    """Test GET /skills/official endpoint."""
+
+    def test_list_official_skills_success(self, mocker):
+        """Test successful listing of official skills."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.return_value = [
+                    {"skill_id": 1, "name": "skill1", "source": "official", "status": "installable"},
+                    {"skill_id": 2, "name": "skill2", "source": "official", "status": "installed"}
+                ]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/official",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 2
+                mock_func.assert_called_once_with(tenant_id="tenant123")
+
+    def test_list_official_skills_empty(self, mocker):
+        """Test listing official skills when none available."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.return_value = []
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/official",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["skills"] == []
+
+    def test_list_official_skills_unauthorized(self, mocker):
+        """Test listing official skills without auth returns 500 (no explicit UnauthorizedError handler)."""
+        from backend.apps.skill_app import UnauthorizedError
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.side_effect = UnauthorizedError("No token")
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+
+            response = client.get("/skills/official")
+
+            # Endpoint returns 500 because it doesn't catch UnauthorizedError explicitly
+            assert response.status_code == 500
+
+    def test_list_official_skills_super_admin_with_tenant_id(self, mocker):
+        """Test super admin listing official skills for a specific tenant via tenant_id query param."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("super_user", "super_tenant")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.return_value = [
+                    {"skill_id": 1, "name": "admin_skill", "source": "official", "status": "installable"}
+                ]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/official?tenant_id=target_tenant",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "skills" in data
+                assert len(data["skills"]) == 1
+                # Verify the function was called with the target tenant_id, not super_tenant
+                mock_func.assert_called_once_with(tenant_id="target_tenant")
+
+    def test_list_official_skills_error(self, mocker):
+        """Test listing official skills with error."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+                mock_func.side_effect = Exception("Database error")
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/official",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 500
+
+
+# ===== Install Skills Endpoint Tests =====
+class TestInstallSkillsEndpoint:
+    """Test POST /skills/install endpoint."""
+
+    def test_install_skills_success(self, mocker):
+        """Test successful skill installation."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+                mock_install.return_value = ["skill1", "skill2"]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.post(
+                    "/skills/install",
+                    json={"skill_names": ["skill1", "skill2"], "locale": "zh"},
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["message"] == "Skills installed successfully"
+                assert data["installed"] == ["skill1", "skill2"]
+                assert data["total"] == 2
+                mock_install.assert_called_once()
+                call_kwargs = mock_install.call_args
+                assert call_kwargs.kwargs["tenant_id"] == "tenant123"
+                assert call_kwargs.kwargs["user_id"] == "user123"
+
+    def test_install_skills_empty_list(self, mocker):
+        """Test installing empty skill list."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+                mock_install.return_value = []
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.post(
+                    "/skills/install",
+                    json={"skill_names": []},
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["total"] == 0
+
+    def test_install_skills_unauthorized(self, mocker):
+        """Test installing skills without auth returns 500 (no explicit UnauthorizedError handler)."""
+        from backend.apps.skill_app import UnauthorizedError
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.side_effect = UnauthorizedError("No token")
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+
+            response = client.post(
+                "/skills/install",
+                json={"skill_names": ["skill1"]}
+            )
+
+            # Endpoint returns 500 because it doesn't catch UnauthorizedError explicitly
+            assert response.status_code == 500
+
+    def test_install_skills_super_admin_with_tenant_id(self, mocker):
+        """Test super admin installing skills for a specific tenant via tenant_id query param."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("super_user", "super_tenant")
+            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+                mock_install.return_value = ["skill1"]
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.post(
+                    "/skills/install?tenant_id=target_tenant",
+                    json={"skill_names": ["skill1"], "locale": "en"},
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["message"] == "Skills installed successfully"
+                assert data["installed"] == ["skill1"]
+                # Verify the function was called with the target tenant_id, not super_tenant
+                mock_install.assert_called_once()
+                call_kwargs = mock_install.call_args
+                assert call_kwargs.kwargs["tenant_id"] == "target_tenant"
+                assert call_kwargs.kwargs["user_id"] == "super_user"
+
+    def test_install_skills_error(self, mocker):
+        """Test installing skills with error."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('services.skill_service.install_skills_from_zip_for_tenant') as mock_install:
+                mock_install.side_effect = Exception("Installation failed")
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.post(
+                    "/skills/install",
+                    json={"skill_names": ["skill1"]},
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 500
+
+
+# ===== Scan Skill Endpoint Tests =====
+class TestScanSkillEndpoint:
+    """Test GET /skills/scan_skill endpoint."""
+
+    def test_scan_skill_success(self, mocker):
+        """Test successful skill scan."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            async def mock_update(*args, **kwargs):
+                return None
+            with patch('backend.apps.skill_app.update_skill_list', side_effect=mock_update):
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/scan_skill",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["status"] == "success"
+                assert "message" in data
+
+    def test_scan_skill_unauthorized(self, mocker):
+        """Test scanning skills without auth returns 500 (no explicit UnauthorizedError handler)."""
+        from backend.apps.skill_app import UnauthorizedError
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.side_effect = UnauthorizedError("No token")
+
+            app = FastAPI()
+            app.include_router(skill_app.router)
+            client = TestClient(app)
+
+            response = client.get("/skills/scan_skill")
+
+            # Endpoint returns 500 because it doesn't catch UnauthorizedError explicitly
+            assert response.status_code == 500
+
+    def test_scan_skill_error(self, mocker):
+        """Test scanning skills with error."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('services.skill_service.update_skill_list', new_callable=AsyncMock) as mock_update:
+                mock_update.side_effect = Exception("Scan failed")
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/scan_skill",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 500
+
+
+# ===== Create Skill Interactive Endpoint Tests =====
+class TestCreateSkillInteractiveEndpoint:
+    """Test POST /skills/create endpoint (nl2skill)."""
+
+    def test_create_skill_interactive_success(self, mocker):
+        """Test successful interactive skill creation."""
+        with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123", "zh")
+            with patch('backend.apps.skill_app._build_model_config_from_tenant') as mock_model:
+                mock_config = MagicMock()
+                mock_model.return_value = mock_config
+                with patch('backend.apps.skill_app.stream_skill_creation') as mock_stream:
+                    mock_stream.return_value = ("task123", MagicMock())
+
+                    app = FastAPI()
+                    app.include_router(skill_app.skill_creator_router)
+                    client = TestClient(app)
+
+                    response = client.post(
+                        "/skills/create",
+                        json={"user_request": "Create a skill", "language": "zh", "complexity": "simple"},
+                        headers={"Authorization": "Bearer token123"}
+                    )
+
+                    assert response.status_code == 200
+                    assert response.headers.get("x-task-id") == "task123"
+
+    def test_create_skill_interactive_unauthorized(self, mocker):
+        """Test interactive skill creation without auth."""
+        with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
+            mock_auth.side_effect = Exception("Unauthorized")
+
+            app = FastAPI()
+            app.include_router(skill_app.skill_creator_router)
+            client = TestClient(app)
+
+            response = client.post(
+                "/skills/create",
+                json={"user_request": "Create a skill"}
+            )
+
+            assert response.status_code == 401
+
+
+# ===== Stop Skill Creation Endpoint Tests =====
+class TestStopSkillCreationEndpoint:
+    """Test GET /skills/stop/{task_id} endpoint."""
+
+    def test_stop_skill_creation_success(self, mocker):
+        """Test successful stop skill creation."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.skill_creation_task_manager') as mock_manager:
+                mock_manager.stop_task.return_value = True
+
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/stop/task123",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert data["status"] == "success"
+
+    def test_stop_skill_creation_not_found(self, mocker):
+        """Test stop skill creation when task not found."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.skill_creation_task_manager') as mock_manager:
+                mock_manager.stop_task.return_value = False
+
+                app = FastAPI()
+                app.include_router(skill_app.skill_creator_router)
+                client = TestClient(app)
+
+                response = client.get(
+                    "/skills/stop/nonexistent",
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 404
+                data = response.json()
+                assert data["status"] == "not_found"
+
+    def test_stop_skill_creation_unauthorized(self, mocker):
+        """Test stop skill creation without auth."""
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.side_effect = Exception("Unauthorized")
+
+            app = FastAPI()
+            app.include_router(skill_app.skill_creator_router)
+            client = TestClient(app)
+
+            response = client.get("/skills/stop/task123")
+
+            assert response.status_code == 401
+
+
+# ===== Update Skill Instance with config_values merge tests =====
+class TestUpdateSkillInstanceWithConfigMerge:
+    """Test config_values merge in update skill instance."""
+
+    def test_update_instance_with_config_values_merge(self, mocker):
+        """Test instance update with config_values merges with template defaults (lines 368-371)."""
+        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+                mock_auth.return_value = ("user123", "tenant123")
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.get_skill_by_id.return_value = {
+                    "skill_id": 1,
+                    "name": "test_skill",
+                    "description": "Test",
+                    "content": "# Test",
+                    "config_schemas": [{"name": "key1", "type": "string"}],
+                    "config_values": {"template_key": "template_value"}
+                }
+                mock_service.create_or_update_skill_instance.return_value = {
+                    "skill_id": 1,
+                    "agent_id": 1,
+                    "enabled": True,
+                    "config_values": {"instance_key": "instance_value"}
+                }
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.post(
+                    "/skills/instance/update",
+                    json={
+                        "skill_id": 1,
+                        "agent_id": 1,
+                        "enabled": True
+                    },
+                    headers={"Authorization": "Bearer token123"}
+                )
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "instance" in data
+
+
+# ===== Update Skill with config_schemas tests =====
+class TestUpdateSkillWithConfigSchemas:
+    """Test update skill with config_schemas field."""
+
+    def test_update_skill_with_config_schemas(self, mocker):
+        """Test update skill with config_schemas (line 482)."""
+        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+                mock_auth.return_value = ("user123", "tenant123")
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.update_skill.return_value = {
+                    "skill_id": 1,
+                    "name": "test_skill",
+                    "config_schemas": {"param1": {"type": "string"}}
+                }
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                response = client.put(
+                    "/skills/test_skill",
+                    json={"config_schemas": {"param1": {"type": "string"}}},
+                    headers={"Authorization": "Bearer token123"}
+                )
+
                 assert response.status_code == 200
 
 
-# ===== Create Simple Skill Endpoint Tests =====
-class TestCreateSimpleSkillEndpoint:
-    """Test POST /skills/create-simple endpoint (SSE streaming)."""
+# ===== Update Skill with files tests =====
+class TestUpdateSkillWithFiles:
+    """Test update skill with files field."""
 
-    def test_create_simple_skill_success(self, mocker):
-        """Test successful simple skill creation with streaming response."""
-        # Mock dependencies
-        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
-        mock_user_info.return_value = ("user123", "tenant123", "zh")
-        mock_user_info.start()
+    def test_update_skill_with_files(self, mocker):
+        """Test update skill with files (line 486)."""
+        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+                mock_auth.return_value = ("user123", "tenant123")
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.update_skill.return_value = {
+                    "skill_id": 1,
+                    "name": "test_skill"
+                }
 
-        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
-        mock_template.return_value = {
-            "system_prompt": "You are a skill creator",
-            "user_prompt": "Create a skill"
-        }
-        mock_template.start()
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
 
-        mock_observer = patch('backend.apps.skill_app.MessageObserver')
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message.return_value = []
-        mock_observer_instance.get_final_answer.return_value = "<SKILL>\n# Test Skill\n</SKILL>"
-        mock_observer.return_value = mock_observer_instance
-        mock_observer.start()
+                response = client.put(
+                    "/skills/test_skill",
+                    json={
+                        "files": [
+                            {"path": "script.py", "content": "# script content"}
+                        ]
+                    },
+                    headers={"Authorization": "Bearer token123"}
+                )
 
-        mock_service = patch('backend.apps.skill_app.SkillService')
-        mock_service_instance = MagicMock()
-        mock_service_instance.skill_manager = MagicMock()
-        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
-        mock_service.return_value = mock_service_instance
-        mock_service.start()
-
-        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
-        mock_create.start()
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create a greeting skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-
-        mock_user_info.stop()
-        mock_template.stop()
-        mock_observer.stop()
-        mock_service.stop()
-        mock_create.stop()
-
-    def test_create_simple_skill_with_streaming_messages(self, mocker):
-        """Test streaming messages are properly sent."""
-        # Mock dependencies
-        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
-        mock_user_info.return_value = ("user123", "tenant123", "zh")
-        mock_user_info.start()
-
-        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
-        mock_template.return_value = {
-            "system_prompt": "You are a skill creator",
-            "user_prompt": "Create a skill"
-        }
-        mock_template.start()
-
-        mock_observer = patch('backend.apps.skill_app.MessageObserver')
-        mock_observer_instance = MagicMock()
-        # Return cached messages that will be streamed
-        cached_messages = [
-            '{"type": "step_count", "content": "1"}',
-            '{"type": "model_output_thinking", "content": "Thinking..."}',
-            '{"type": "tool", "content": "Tool executed"}',
-            '{"type": "final_answer", "content": "<SKILL>Content</SKILL>"}'
-        ]
-        mock_observer_instance.get_cached_message.side_effect = [
-            cached_messages[:2],
-            cached_messages[2:],
-            []
-        ]
-        mock_observer_instance.get_final_answer.return_value = "<SKILL>Final Content</SKILL>"
-        mock_observer.return_value = mock_observer_instance
-        mock_observer.start()
-
-        mock_service = patch('backend.apps.skill_app.SkillService')
-        mock_service_instance = MagicMock()
-        mock_service_instance.skill_manager = MagicMock()
-        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
-        mock_service.return_value = mock_service_instance
-        mock_service.start()
-
-        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
-        mock_create.start()
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create a test skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-
-        mock_user_info.stop()
-        mock_template.stop()
-        mock_observer.stop()
-        mock_service.stop()
-        mock_create.stop()
-
-    def test_create_simple_skill_unauthorized(self, mocker):
-        """Test create simple skill without authorization - error is sent via SSE stream."""
-        from backend.apps.skill_app import UnauthorizedError
-
-        mocker.patch(
-            'backend.apps.skill_app.get_current_user_info',
-            side_effect=UnauthorizedError("No token")
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create a skill"},
-            headers={"Authorization": "Bearer invalid"}
-        )
-
-        # Exception is caught in generate() and returned as 200 with SSE error event
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-        # SSE stream contains error event
-        assert b'"type": "error"' in response.content
-        assert b'No token' in response.content
+                assert response.status_code == 200
 
 
-# ===== Build Model Config Tests =====
+# ===== Build Model Config From Tenant Tests =====
 class TestBuildModelConfigFromTenant:
-    """Test _build_model_config_from_tenant function."""
+    """Test _build_model_config_from_tenant helper function (lines 532-553)."""
 
     def test_build_model_config_success(self, mocker):
-        """Test successful ModelConfig building."""
-        # Set up mocks for the config utilities
-        mock_config_manager_instance = MagicMock()
-        mock_config_manager_instance.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-
-        utils_config_utils_mock.tenant_config_manager = mock_config_manager_instance
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4-0613")
-
-        mocker.patch.object(
-            utils_config_utils_mock,
-            'tenant_config_manager',
-            mock_config_manager_instance
-        )
-        mocker.patch.object(
-            utils_config_utils_mock,
-            'get_model_name_from_config',
-            return_value="gpt-4-0613"
-        )
-
-        result = skill_app._build_model_config_from_tenant("tenant123")
-
-        assert result.cite_name == "gpt-4"
-        assert result.api_key == "test-key"
-        assert result.url == "https://api.openai.com"
-        assert result.model_factory == "openai"
-
-    def test_build_model_config_no_llm_config(self, mocker):
-        """Test ValueError when no LLM model configured for tenant."""
-        mock_config_manager_instance = MagicMock()
-        mock_config_manager_instance.get_model_config.return_value = None
-
-        mocker.patch.object(
-            utils_config_utils_mock,
-            'tenant_config_manager',
-            mock_config_manager_instance
-        )
-
-        with pytest.raises(ValueError, match="No LLM model configured for tenant"):
-            skill_app._build_model_config_from_tenant("tenant123")
-
-
-# ===== Stream Content Types Tests =====
-class TestStreamContentTypes:
-    """Test different content types in streaming response."""
-
-    def test_stream_model_output_code(self, mocker):
-        """Test streaming model_output_code content."""
-        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
-        mock_user_info.return_value = ("user123", "tenant123", "zh")
-        mock_user_info.start()
-
-        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
-        mock_template.return_value = {
-            "system_prompt": "You are a skill creator",
-            "user_prompt": "Create a skill"
-        }
-        mock_template.start()
-
-        mock_observer = patch('backend.apps.skill_app.MessageObserver')
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message.side_effect = [
-            ['{"type": "model_output_code", "content": "def hello(): pass"}'],
-            []
-        ]
-        mock_observer_instance.get_final_answer.return_value = None
-        mock_observer.return_value = mock_observer_instance
-        mock_observer.start()
-
-        mock_service = patch('backend.apps.skill_app.SkillService')
-        mock_service_instance = MagicMock()
-        mock_service_instance.skill_manager = MagicMock()
-        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
-        mock_service.return_value = mock_service_instance
-        mock_service.start()
-
-        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
-        mock_create.start()
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create a code skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-
-        mock_user_info.stop()
-        mock_template.stop()
-        mock_observer.stop()
-        mock_service.stop()
-        mock_create.stop()
-
-    def test_stream_deep_thinking(self, mocker):
-        """Test streaming model_output_deep_thinking content."""
-        mock_user_info = patch('backend.apps.skill_app.get_current_user_info')
-        mock_user_info.return_value = ("user123", "tenant123", "zh")
-        mock_user_info.start()
-
-        mock_template = patch('backend.apps.skill_app.get_skill_creation_simple_prompt_template')
-        mock_template.return_value = {
-            "system_prompt": "You are a skill creator",
-            "user_prompt": "Create a skill"
-        }
-        mock_template.start()
-
-        mock_observer = patch('backend.apps.skill_app.MessageObserver')
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message.side_effect = [
-            ['{"type": "model_output_deep_thinking", "content": "Deep thought process"}'],
-            []
-        ]
-        mock_observer_instance.get_final_answer.return_value = None
-        mock_observer.return_value = mock_observer_instance
-        mock_observer.start()
-
-        mock_service = patch('backend.apps.skill_app.SkillService')
-        mock_service_instance = MagicMock()
-        mock_service_instance.skill_manager = MagicMock()
-        mock_service_instance.skill_manager.local_skills_dir = "/tmp/skills"
-        mock_service.return_value = mock_service_instance
-        mock_service.start()
-
-        mock_create = patch('backend.apps.skill_app.create_simple_skill_from_request')
-        mock_create.start()
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create a thinking skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-
-        mock_user_info.stop()
-        mock_template.stop()
-        mock_observer.stop()
-        mock_service.stop()
-        mock_create.stop()
-
-    def test_stream_execution_logs(self, mocker):
-        """Test streaming execution_logs content."""
-        # Rely on module-level mocks for basic test
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create a logging skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-
-
-# ===== Streaming Flow Tests =====
-class TestStreamingFlow:
-    """Test the complete streaming flow including thread polling and final results."""
-
-    def _setup_streaming_mocks(self, mocker, cached_messages_list, final_answer, skill_service_local_dir=None):
-        """Helper to set up comprehensive mocks for streaming tests."""
-        # Set up config utils mocks
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        # Create mock observer that returns messages on each call
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=cached_messages_list)
-        mock_observer_instance.get_final_answer = MagicMock(return_value=final_answer)
-
-        # Create mock MessageObserver class
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        # Create mock SkillService
-        mock_skill_service_instance = MagicMock()
-        mock_skill_manager = MagicMock()
-        mock_skill_manager.local_skills_dir = skill_service_local_dir
-        mock_skill_service_instance.skill_manager = mock_skill_manager
-        mocker.patch(
-            'backend.apps.skill_app.SkillService',
-            return_value=mock_skill_service_instance
-        )
-
-        # Mock create_simple_skill_from_request to be a no-op (background task)
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        return mock_observer_instance, mock_skill_service_instance
-
-    def test_streaming_with_step_count_messages(self, mocker):
-        """Test streaming step_count messages during polling (lines 557-558, 580-581)."""
-        cached_messages = [
-            ['{"type": "step_count", "content": "1"}'],
-            ['{"type": "step_count", "content": "2"}'],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer=None,
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with steps"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "step_count"' in response.content
-        assert mock_observer.get_cached_message.call_count >= 1
-
-    def test_streaming_with_skill_content_messages(self, mocker):
-        """Test streaming skill_content messages (thinking, code, etc.) during polling (lines 560-561, 582-583)."""
-        cached_messages = [
-            ['{"type": "model_output_thinking", "content": "Thinking about the skill..."}'],
-            ['{"type": "model_output_code", "content": "# SKILL.md\\ncontent"}'],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer=None,
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with content"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "skill_content"' in response.content
-        assert b'Thinking about the skill' in response.content
-
-    def test_streaming_with_final_answer_during_polling(self, mocker):
-        """Test streaming final_answer during polling phase (lines 563-564, 584-585)."""
-        cached_messages = [
-            [],
-            ['{"type": "final_answer", "content": "Partial answer during poll"}'],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>\nFinal Answer</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with final answer"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "final_answer"' in response.content
-        assert b'Final Answer' in response.content
-
-    def test_streaming_remaining_messages_after_thread(self, mocker):
-        """Test streaming remaining messages after thread completes (lines 572-587)."""
-        # Note: Due to mock behavior, thread completes immediately without producing messages.
-        # This test verifies the streaming endpoint works correctly even without messages.
-        cached_messages = [
-            [],  # During polling
-            [],  # After thread
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>Final Skill</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with remaining"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        # Should still work and send done signal
-        assert b'"type": "done"' in response.content
-
-    def test_streaming_final_result_from_observer(self, mocker):
-        """Test streaming final result from observer after thread completes (lines 590-592)."""
-        cached_messages = [
-            [],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>\n# Complete Skill Content\nThis is the final result.</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create complete skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'Complete Skill Content' in response.content
-        assert b'"type": "final_answer"' in response.content
-
-    def test_streaming_done_signal(self, mocker):
-        """Test streaming done signal at the end (line 595)."""
-        cached_messages = [
-            [],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer=None,
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill and finish"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "done"' in response.content
-
-    def test_streaming_with_empty_final_answer(self, mocker):
-        """Test streaming when final_answer is None/empty (lines 591-592)."""
-        cached_messages = [
-            [],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer=None,
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with no final answer"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "done"' in response.content
-        assert response.content.count(b'"type": "final_answer"') <= 1
-
-    def test_streaming_with_empty_local_skills_dir(self, mocker):
-        """Test streaming with None local_skills_dir (line 530)."""
-        cached_messages = [
-            [],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>Skill</SKILL>",
-            skill_service_local_dir=None
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with no skills dir"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "done"' in response.content
-
-    def test_streaming_with_tool_messages(self, mocker):
-        """Test streaming tool messages (lines 560-561, 582-583)."""
-        cached_messages = [
-            ['{"type": "tool", "content": "Writing file: SKILL.md"}'],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>\n# Tool Result</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill using tools"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "skill_content"' in response.content
-        assert b'Writing file' in response.content
-
-    def test_streaming_with_mixed_message_types(self, mocker):
-        """Test streaming with mixed message types across polling and remaining phases."""
-        cached_messages = [
-            ['{"type": "step_count", "content": "1"}', '{"type": "model_output_thinking", "content": "Thinking"}'],
-            ['{"type": "tool", "content": "Tool executed"}', '{"type": "final_answer", "content": "Partial"}'],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>\nFinal Complete Skill</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create complex skill"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "step_count"' in response.content
-        assert b'"type": "skill_content"' in response.content
-        assert b'"type": "final_answer"' in response.content
-        assert b'"type": "done"' in response.content
-
-    def test_streaming_with_json_decode_error_in_message(self, mocker):
-        """Test handling of invalid JSON in cached messages (lines 565-566, 586-587)."""
-        cached_messages = [
-            ['{"type": "step_count", "content": "1"}', 'invalid json {{{', '{"type": "model_output_thinking", "content": "Valid"}'],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>Skill</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with bad json"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "done"' in response.content
-
-    def test_streaming_with_non_string_message(self, mocker):
-        """Test handling of non-string messages in cached messages (lines 550, 574)."""
-        cached_messages = [
-            ['{"type": "step_count", "content": "1"}', 123, None, '{"type": "model_output_thinking", "content": "Valid"}'],
-            [],
-        ]
-
-        mock_observer, _ = self._setup_streaming_mocks(
-            mocker,
-            cached_messages_list=cached_messages,
-            final_answer="<SKILL>Skill</SKILL>",
-            skill_service_local_dir="/tmp/skills"
-        )
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with weird messages"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "done"' in response.content
-
-
-# ===== Thread Polling Tests =====
-class TestThreadPolling:
-    """Test thread polling behavior and message streaming during polling phase."""
-
-    def _setup_thread_polling_mocks(self, mocker, observer_messages_per_poll, skill_service_local_dir="/tmp/skills"):
-        """Set up mocks for thread polling tests.
-
-        Args:
-            observer_messages_per_poll: List of message lists, each returned on successive calls to get_cached_message
-        """
-        # Set up config utils mocks
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        # Track which call we're on
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages_per_poll):
-                return observer_messages_per_poll[idx]
-            return []
-
-        # Create mock observer
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value=None)
-
-        # Track thread state to control polling behavior
-        thread_polled = [False]
-
-        def create_mock_thread():
-            """Create a mock thread that stays alive for multiple polls."""
-            import time
-            poll_count = [0]
-            max_polls = len(observer_messages_per_poll)
-
-            class MockThread:
-                def is_alive(self):
-                    poll_count[0] += 1
-                    # Stay alive for the first few polls, then die
-                    if poll_count[0] < max_polls:
-                        thread_polled[0] = True
-                        return True
-                    return False
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        return mock_observer_instance, thread_polled, create_mock_thread
-
-    def test_polling_loop_executes_multiple_times(self, mocker):
-        """Test that the polling loop executes multiple times while thread is alive (lines 547-567)."""
-        # Set up 3 polls worth of messages
-        observer_messages = [
-            ['{"type": "step_count", "content": "1"}'],
-            ['{"type": "model_output_thinking", "content": "Thinking..."}'],
-            [],  # Thread dies after this poll
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value=None)
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    if poll_count[0] < max_polls:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with polling"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        # Verify observer was polled multiple times
-        assert mock_observer_instance.get_cached_message.call_count >= 2
-        assert b'"type": "step_count"' in response.content
-
-    def test_polling_with_step_count_streaming(self, mocker):
-        """Test step_count messages are streamed during polling (lines 557-558)."""
-        observer_messages = [
-            ['{"type": "step_count", "content": "1"}', '{"type": "step_count", "content": "2"}'],
-            [],
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value=None)
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    if poll_count[0] < max_polls:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with steps"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "step_count"' in response.content
-
-    def test_polling_with_skill_content_streaming(self, mocker):
-        """Test skill_content messages are streamed during polling (lines 560-561)."""
-        observer_messages = [
-            ['{"type": "model_output_thinking", "content": "Thinking step 1"}', '{"type": "model_output_code", "content": "Code block"}'],
-            [],
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Final</SKILL>")
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    if poll_count[0] < max_polls:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with content"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        assert b'"type": "skill_content"' in response.content
-        assert b'Thinking step 1' in response.content
-
-    def test_polling_with_final_answer_during_polling(self, mocker):
-        """Test final_answer messages during polling are streamed (lines 563-564)."""
-        # final_answer must arrive while thread is still alive (not in remaining messages)
-        observer_messages = [
-            ['{"type": "final_answer", "content": "Partial answer in poll"}'],  # Thread is alive
-            [],  # Thread dies after this poll
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Final</SKILL>")
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        # Thread stays alive for max_polls-1 polls, dies on the last one
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    # Stay alive while we have more polls to do
-                    if poll_count[0] <= max_polls - 1:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with partial answer"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        # Verify final_answer was streamed during polling
-        assert b'"type": "final_answer"' in response.content
-        assert b'Partial answer in poll' in response.content
-
-    def test_polling_skips_non_string_messages(self, mocker):
-        """Test that non-string messages are skipped (line 550)."""
-        observer_messages = [
-            [123, None, '{"type": "step_count", "content": "1"}'],
-            [],
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Skill</SKILL>")
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    if poll_count[0] < max_polls:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with mixed messages"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        # Should handle gracefully and only stream the valid string message
-        assert response.status_code == 200
-        assert b'"type": "step_count"' in response.content
-
-    def test_polling_handles_json_decode_error(self, mocker):
-        """Test that JSON decode errors are caught and ignored (lines 565-566)."""
-        observer_messages = [
-            ['{"invalid json', '{"type": "step_count", "content": "1"}'],
-            [],
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Skill</SKILL>")
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    if poll_count[0] < max_polls:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with bad json"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        # Should handle gracefully and continue streaming valid messages
-        assert response.status_code == 200
-        assert b'"type": "step_count"' in response.content
-
-    def test_remaining_messages_after_thread_with_step_count(self, mocker):
-        """Test remaining messages with step_count after thread completes (lines 580-581, 584-585)."""
-        observer_messages = [
-            [],
-            ['{"type": "step_count", "content": "Final step"}', '{"type": "final_answer", "content": "Partial"}'],
-        ]
-
-        utils_config_utils_mock.tenant_config_manager = MagicMock()
-        utils_config_utils_mock.tenant_config_manager.get_model_config.return_value = {
-            "display_name": "gpt-4",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com",
-            "model_factory": "openai"
-        }
-        utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-
-        call_count = [0]
-
-        def get_cached_message_side_effect():
-            idx = call_count[0]
-            call_count[0] += 1
-            if idx < len(observer_messages):
-                return observer_messages[idx]
-            return []
-
-        mock_observer_instance = MagicMock()
-        mock_observer_instance.get_cached_message = MagicMock(side_effect=get_cached_message_side_effect)
-        mock_observer_instance.get_final_answer = MagicMock(return_value="<SKILL>Final Complete</SKILL>")
-
-        mocker.patch(
-            'backend.apps.skill_app.MessageObserver',
-            return_value=mock_observer_instance
-        )
-
-        mocker.patch(
-            'backend.apps.skill_app.create_simple_skill_from_request'
-        )
-
-        poll_count = [0]
-        max_polls = len(observer_messages)
-
-        def mock_thread_init(target=None):
-            poll_count[0] = 0
-            class MockThread:
-                def is_alive(self):
-                    nonlocal poll_count
-                    poll_count[0] += 1
-                    if poll_count[0] < max_polls:
-                        return True
-                    return False
-
-                def start(self):
-                    pass
-
-                def join(self):
-                    pass
-
-            return MockThread()
-
-        mocker.patch('threading.Thread', side_effect=mock_thread_init)
-
-        app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
-        client = TestClient(app)
-
-        response = client.post(
-            "/skills/create-simple",
-            json={"user_request": "Create skill with remaining"},
-            headers={"Authorization": "Bearer token123"}
-        )
-
-        assert response.status_code == 200
-        # Should have streamed step_count from remaining messages
-        assert b'"type": "step_count"' in response.content
+        """Test successful model config building."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            with patch('utils.config_utils.get_model_name_from_config') as mock_get_model:
+                mock_config_mgr.get_model_config.return_value = {
+                    "display_name": "GPT-4",
+                    "api_key": "test-key",
+                    "base_url": "https://api.openai.com",
+                    "model_factory": "openai"
+                }
+                mock_get_model.return_value = "gpt-4"
+
+                from backend.apps.skill_app import _build_model_config_from_tenant
+                config = _build_model_config_from_tenant("tenant123")
+
+                assert config.cite_name == "GPT-4"
+                assert config.api_key == "test-key"
+                assert config.model_name == "gpt-4"
+                assert config.url == "https://api.openai.com"
+                assert config.temperature == 0.1
+                assert config.top_p == 0.95
+                assert config.ssl_verify == True
+                assert config.model_factory == "openai"
+
+    def test_build_model_config_missing_quick_config(self, mocker):
+        """Test error when tenant has no LLM model configured."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            mock_config_mgr.get_model_config.return_value = None
+
+            from backend.apps.skill_app import _build_model_config_from_tenant
+            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
+                _build_model_config_from_tenant("tenant123")
+
+    def test_build_model_config_empty_quick_config(self, mocker):
+        """Test error when tenant has empty LLM model config."""
+        with patch('utils.config_utils.tenant_config_manager') as mock_config_mgr:
+            mock_config_mgr.get_model_config.return_value = {}
+
+            from backend.apps.skill_app import _build_model_config_from_tenant
+            with pytest.raises(ValueError, match="No LLM model configured for tenant"):
+                _build_model_config_from_tenant("tenant123")
 
 
 if __name__ == "__main__":

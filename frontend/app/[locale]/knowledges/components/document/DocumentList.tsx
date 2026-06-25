@@ -10,9 +10,16 @@ import { useTranslation } from "react-i18next";
 import { Input, Button, App, Select } from "antd";
 const { TextArea } = Input;
 import { InfoCircleFilled } from "@ant-design/icons";
-import { BookText, Pilcrow, PencilRuler, Eye, Glasses, CircleOff } from "lucide-react";
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
-import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import {
+  BookText,
+  Pilcrow,
+  PencilRuler,
+  Eye,
+  Glasses,
+  CircleOff,
+} from "lucide-react";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 
 import {
   UI_CONFIG,
@@ -21,6 +28,10 @@ import {
   LAYOUT,
   DOCUMENT_STATUS,
 } from "@/const/knowledgeBase";
+import {
+  SUMMARY_FREQUENCY_OPTIONS_API,
+  FrequencyOption,
+} from "@/const/scheduler";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
@@ -79,7 +90,15 @@ interface DocumentListProps {
   availableEmbeddingModels?: ModelOption[];
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
+  isMultimodal?: boolean;
+  onMultimodalChange?: (value: boolean) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
+  preserveSourceFile?: boolean;
+  onPreserveSourceFileChange?: (value: boolean) => void;
+
+  // Auto-summary frequency
+  summaryFrequency?: string | null;
+  onSummaryFrequencyChange?: (frequency: string | null) => void;
 
   // Upload related props
   isDragging?: boolean;
@@ -122,7 +141,15 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       availableEmbeddingModels,
       selectedEmbeddingModel,
       onEmbeddingModelChange,
+      isMultimodal = false,
+      onMultimodalChange,
       permission,
+      preserveSourceFile = true,
+      onPreserveSourceFileChange,
+
+      // Auto-summary frequency
+      summaryFrequency,
+      onSummaryFrequencyChange,
 
       // Upload related props
       isDragging = false,
@@ -233,11 +260,16 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [selectedModel, setSelectedModel] = useState<number>(0);
     const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
+    const [frequencyOptions, setFrequencyOptions] = useState<FrequencyOption[]>(
+      []
+    );
     const { t } = useTranslation();
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
+    const canToggleMultimodal =
+      isCreatingMode && typeof onMultimodalChange === "function";
 
     // Permission options with icons shown inside dropdown
     const permissionOptions = [
@@ -255,7 +287,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         label: (
           <span className="flex items-center gap-2">
             {getPermissionIcon("READ_ONLY")}
-            <span>{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</span>
+            <span>
+              {t("tenantResources.knowledgeBase.permission.READ_ONLY")}
+            </span>
           </span>
         ),
       },
@@ -303,6 +337,49 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     // Check if group select should be disabled (when permission is PRIVATE)
     const isGroupSelectDisabled = ingroupPermission === "PRIVATE";
+    const embeddingModelsForOptions = availableEmbeddingModels || [];
+    const availableEmbeddingModelKeys = new Set(
+      embeddingModelsForOptions
+        .filter((model) => model.connect_status === "available")
+        .map((model) => `${model.displayName}::${model.type}`)
+    );
+    const isEmbeddingModelSelectable = (model: ModelOption): boolean => {
+      if (model.connect_status === "available") return true;
+      if (model.type === "embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::multi_embedding`
+        );
+      }
+      if (model.type === "multi_embedding") {
+        return availableEmbeddingModelKeys.has(
+          `${model.displayName}::embedding`
+        );
+      }
+      return false;
+    };
+
+    // Load frequency options from backend API
+    useEffect(() => {
+      const loadFrequencyOptions = async () => {
+        if (showDetail && frequencyOptions.length === 0) {
+          try {
+            const response = await fetch(SUMMARY_FREQUENCY_OPTIONS_API);
+            const data = await response.json();
+            setFrequencyOptions(data.options || []);
+          } catch (error) {
+            log.error("Failed to load frequency options:", error);
+            // Fallback to default options if API fails
+            setFrequencyOptions([
+              {
+                value: "disabled",
+                label: t("knowledgeBase.tag.autoSummary.off"),
+              },
+            ]);
+          }
+        }
+      };
+      loadFrequencyOptions();
+    }, [showDetail, frequencyOptions.length, t]);
 
     // Load available models when showing detail
     useEffect(() => {
@@ -311,7 +388,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           setIsLoadingModels(true);
           try {
             const models = await modelService.getLLMModels();
-            setAvailableModels(models.filter(m => m.connect_status === "available"));
+            setAvailableModels(
+              models.filter((m) => m.connect_status === "available")
+            );
 
             // Determine initial selection order:
             // 1) Knowledge base's own configured model (server-side config)
@@ -476,10 +555,16 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         <div
           className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center ${titleBarHeightClass}`}
         >
-          <div className="flex items-center justify-between w-full" style={{ width: "100%" }}>
-            <div className="flex items-center" style={{width: "100%"}}>
+          <div
+            className="flex items-center justify-between w-full"
+            style={{ width: "100%" }}
+          >
+            <div className="flex items-center" style={{ width: "100%" }}>
               {isCreatingMode ? (
-                <div className="flex items-center flex-1" style={{ width: "100%" }}>
+                <div
+                  className="flex items-center flex-1"
+                  style={{ width: "100%" }}
+                >
                   <Input
                     value={knowledgeBaseName}
                     onChange={(e) =>
@@ -495,19 +580,54 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                     }
                   />
                   {/* Right-aligned container for dropdowns */}
-                  <div className="flex items-center ml-auto justify-end" style={{ gap: "12px", justifyContent: "flex-end", alignItems: "flex-end", width: "100%" }}>
+                  <div
+                    className="flex items-center ml-auto justify-end"
+                    style={{
+                      gap: "12px",
+                      justifyContent: "flex-end",
+                      alignItems: "flex-end",
+                      width: "100%",
+                    }}
+                  >
                     {/* Embedding model selection - first position in create mode */}
                     {isCreatingMode && onEmbeddingModelChange && (
                       <Select
                         value={selectedEmbeddingModel}
                         onChange={onEmbeddingModelChange}
-                        style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
-                        placeholder={t("knowledgeBase.create.embeddingModelPlaceholder") || "Select embedding model"}
-                        options={(availableEmbeddingModels || []).map((model) => ({
-                          value: model.displayName,
-                          label: model.displayName,
-                          disabled: model.connect_status === "unavailable",
-                        }))}
+                        style={{
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        placeholder={
+                          t("knowledgeBase.create.embeddingModelPlaceholder") ||
+                          "Select embedding model"
+                        }
+                        allowClear={false}
+                        options={[
+                          {
+                            label: t("modelConfig.option.embeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter((model) => model.type === "embedding")
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                          {
+                            label: t("modelConfig.option.multiEmbeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter(
+                                (model) => model.type === "multi_embedding"
+                              )
+                              .map((model) => ({
+                                value: `${model.displayName}::${model.type}`,
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                        ].filter((group) => group.options.length > 0)}
                       />
                     )}
                     {/* User groups multi-select */}
@@ -516,8 +636,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         mode="multiple"
                         value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
-                        style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
-                        placeholder={t("knowledgeBase.create.permission.groupPlaceholder")}
+                        style={{
+                          minWidth: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        placeholder={t(
+                          "knowledgeBase.create.permission.groupPlaceholder"
+                        )}
                         options={groupOptions}
                         maxTagCount={2}
                         allowClear
@@ -529,11 +655,39 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       <Select
                         value={ingroupPermission}
                         onChange={onIngroupPermissionChange}
-                        style={{ width: 160, justifyContent: "center", alignItems: "flex-end" }}
-                        placeholder={t("knowledgeBase.ingroup.permission.DEFAULT")}
+                        style={{
+                          width: 160,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        placeholder={t(
+                          "knowledgeBase.ingroup.permission.DEFAULT"
+                        )}
                         options={permissionOptions}
                       />
                     </Can>
+                    {onPreserveSourceFileChange && (
+                      <Select
+                        value={preserveSourceFile}
+                        onChange={onPreserveSourceFileChange}
+                        style={{
+                          width: 200,
+                          justifyContent: "center",
+                          alignItems: "flex-end",
+                        }}
+                        allowClear={false}
+                        options={[
+                          {
+                            value: true,
+                            label: t("knowledgeBase.create.preserveSourceFile"),
+                          },
+                          {
+                            value: false,
+                            label: t("knowledgeBase.tag.noPreserveSourceFile"),
+                          },
+                        ]}
+                      />
+                    )}
                   </div>
                 </div>
               ) : (
@@ -615,7 +769,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             <div className="flex h-full flex-col px-8">
               <DocumentChunk
                 knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId}
+                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
                 documents={documents}
                 getFileIcon={getFileIcon}
                 currentEmbeddingModel={currentModel}
@@ -649,12 +803,39 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       }))}
                     />
                   </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      {t("knowledgeBase.tag.autoSummary.label")}
+                    </span>
+                    <Select
+                      value={summaryFrequency || "disabled"}
+                      onChange={(value) => {
+                        const freq = value === "disabled" ? null : value;
+                        if (onSummaryFrequencyChange) {
+                          onSummaryFrequencyChange(freq);
+                        }
+                      }}
+                      disabled={isReadOnlyMode}
+                      style={{ width: 85 }}
+                      placeholder={t("knowledgeBase.tag.autoSummary.off")}
+                      options={frequencyOptions.map((opt) => ({
+                        value: opt.value,
+                        label:
+                          opt.value === "disabled"
+                            ? t("knowledgeBase.tag.autoSummary.off")
+                            : opt.label,
+                      }))}
+                    />
+                  </div>
                   <Button
                     type="default"
                     onClick={handleAutoSummary}
                     loading={isSummarizing}
                     disabled={
-                      !knowledgeBaseName || isSummarizing || !selectedModel || isReadOnlyMode
+                      !knowledgeBaseName ||
+                      isSummarizing ||
+                      !selectedModel ||
+                      isReadOnlyMode
                     }
                   >
                     {t("document.button.autoSummary")}
@@ -662,59 +843,59 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               </div>
               <div className="flex-1 min-h-0 mb-5 border border-gray-300 rounded-md overflow-auto">
-                  {isReadOnlyMode ? (
-                    <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                      <MarkdownRenderer content={summary} />
-                    </div>
-                  ) : isSummarizing ? (
-                    <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                      <MarkdownRenderer content={summary} />
-                    </div>
-                  ) : (
-                    <div
-                          className="w-full h-full cursor-text hover:bg-gray-50"
-                      onClick={() => {
-                        if (!isSummarizing) {
-                          setIsEditing(true);
-                        }
-                      }}
-                    >
-                      {isEditing ? (
-                        <TextArea
-                          value={summary}
-                          onChange={(e) => setSummary(e.target.value)}
-                          onBlur={() => setIsEditing(false)}
-                              className="w-full h-full border-0 resize-none focus:shadow-none"
-                          style={{
-                            height: '100%',
-                            padding: '20px',
-                            fontSize: '18px',
-                            lineHeight: '1.7',
-                            whiteSpace: 'pre-wrap',
-                          }}
-                          autoFocus
-                          placeholder={t("document.summary.placeholder")}
-                        />
-                      ) : (
-                              <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                                <MarkdownRenderer content={summary} />
-                              </div>
-                      )}
-                    </div>
-                  )}
+                {isReadOnlyMode ? (
+                  <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                    <MarkdownRenderer content={summary} />
+                  </div>
+                ) : isSummarizing ? (
+                  <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                    <MarkdownRenderer content={summary} />
+                  </div>
+                ) : (
+                  <div
+                    className="w-full h-full cursor-text hover:bg-gray-50"
+                    onClick={() => {
+                      if (!isSummarizing) {
+                        setIsEditing(true);
+                      }
+                    }}
+                  >
+                    {isEditing ? (
+                      <TextArea
+                        value={summary}
+                        onChange={(e) => setSummary(e.target.value)}
+                        onBlur={() => setIsEditing(false)}
+                        className="w-full h-full border-0 resize-none focus:shadow-none"
+                        style={{
+                          height: "100%",
+                          padding: "20px",
+                          fontSize: "18px",
+                          lineHeight: "1.7",
+                          whiteSpace: "pre-wrap",
+                        }}
+                        autoFocus
+                        placeholder={t("document.summary.placeholder")}
+                      />
+                    ) : (
+                      <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                        <MarkdownRenderer content={summary} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 justify-end">
-                  {!isReadOnlyMode && (
-                    <Button
-                      type="primary"
-                      size="large"
-                      onClick={handleSaveSummary}
-                      loading={isSaving}
-                      disabled={!summary || isSaving}
-                    >
-                      {t("common.save")}
-                    </Button>
-                  )}
+                {!isReadOnlyMode && (
+                  <Button
+                    type="primary"
+                    size="large"
+                    onClick={handleSaveSummary}
+                    loading={isSaving}
+                    disabled={!summary || isSaving}
+                  >
+                    {t("common.save")}
+                  </Button>
+                )}
                 <Button
                   size="large"
                   onClick={() => {
@@ -847,9 +1028,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           <div className="flex gap-2">
                             <button
                               onClick={() => {
-                                const objectName =  extractObjectNameFromUrl(doc.id) || undefined;
+                                const objectName =
+                                  extractObjectNameFromUrl(doc.id) || undefined;
                                 if (!objectName) {
-                                  message.warning(t("filePreview.previewFailed"));
+                                  message.warning(
+                                    t("filePreview.previewFailed")
+                                  );
                                   return;
                                 }
 
@@ -934,6 +1118,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             fileName={selectedFile.fileName}
             fileType={selectedFile.fileType}
             fileSize={selectedFile.fileSize}
+            previewContext="knowledgeBase"
             onClose={() => setSelectedFile(null)}
           />
         )}

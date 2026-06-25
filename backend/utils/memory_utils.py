@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, Any
 from urllib.parse import urlparse
 
@@ -7,6 +8,11 @@ from consts.const import MODEL_CONFIG_MAPPING
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 logger = logging.getLogger("memory_utils")
+
+
+def _sanitize_index_component(value: str) -> str:
+    """Convert arbitrary text into an Elasticsearch-safe index component."""
+    return re.sub(r"[^a-z0-9_.-]", "_", value.lower())
 
 
 def build_memory_config(tenant_id: str) -> Dict[str, Any]:
@@ -30,9 +36,8 @@ def build_memory_config(tenant_id: str) -> Dict[str, Any]:
     es_host = f"{parsed.scheme}://{parsed.hostname}"
     es_port = parsed.port
     # Normalize repo/name to avoid problematic characters in index names
-    safe_repo = embed_raw["model_repo"].lower().replace(
-        "/", "_") if embed_raw["model_repo"] else ""
-    safe_name = embed_raw["model_name"].lower().replace("/", "_")
+    safe_repo = _sanitize_index_component(embed_raw["model_repo"]) if embed_raw["model_repo"] else ""
+    safe_name = _sanitize_index_component(embed_raw["model_name"])
     index_name = (
         f"mem0_{safe_repo}_{safe_name}_{embed_raw['max_tokens']}"
         if embed_raw["model_repo"]
@@ -73,4 +78,4 @@ def build_memory_config(tenant_id: str) -> Dict[str, Any]:
         },
         "telemetry": {"enabled": False},
     }
-    return memory_config 
+    return memory_config

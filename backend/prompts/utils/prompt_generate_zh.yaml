@@ -42,7 +42,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   3.若未指定语言，请使用中文输出，语言表达要自然流畅。
 
   ### Agent的执行流程：
-  要解决任务，Agent必须通过一系列步骤向前规划，以'思考：'、'代码：'和'观察结果：'序列的循环进行：
+  要解决任务，Agent必须通过一系列步骤向前规划，以'思考：'和'代码：'序列循环进行。**注意：禁止在代码执行前输出'观察结果：'，观察结果只能由代码执行后产生。**
 
   1. 思考：
      - 确定需要使用哪些工具/助手获取信息或行动
@@ -54,9 +54,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
      - 根据格式规范正确调用工具/助手
      - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码
      - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。
-
-  3. 观察结果：
-     - 查看代码执行结果
+     - **重要**：代码执行后，系统会返回 "Observation:" 标记的内容（这是真实的执行结果）。请基于这些真实结果继续下一步思考，**不要在代码执行前自行编造观察结果**。
 
   在思考结束后，当Agent认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。
 
@@ -81,7 +79,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   knowledge_info = knowledge_base_search(query="东方明珠 介绍", index_names=["本地知识库1"， "本地知识库2"])
   print(knowledge_info)
   </code>
-  观察结果：未找到查询"东方明珠 介绍"的结果。检索结果难以支撑回答。
+  # 系统返回 Observation: 未找到相关结果
 
   思考：从本地知识库中没有找到相关信息，我需要使用web_search工具查询网络信息。
   代码：
@@ -89,7 +87,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   web_info = web_search(query="东方明珠 介绍")
   print(web_info)
   </code>
-  观察结果：东方明珠广播电视塔位于中国上海市浦东新区陆家嘴...
+  # 系统返回 Observation: 东方明珠广播电视塔位于中国上海市浦东新区陆家嘴，塔高468米，是中国著名的地标建筑之一...
 
   思考：我已经获得了有关信息，现在我将生成最终回答。
   东方明珠广播电视塔位于中国上海市浦东新区陆家嘴...
@@ -104,7 +102,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   itinerary_result = travel_planning_assistant(task="帮我规划明天从上海出发去北京的行程")
   print(itinerary_result)
   </code>
-  观察结果：明天从上海出发去北京的行程规划，包括交通、住宿、景点等。
+  # 系统返回 Observation: 行程规划已完成，包括：高铁G2，8:00出发，11:30到达北京南站；酒店预订于王府井附近；景点推荐：天安门、故宫、长城...
 
   思考：我已经获得了出行规划，现在我将生成最终回答。
   明天从上海出发去北京的行程规划，包括交通、住宿、景点等。
@@ -119,7 +117,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   weather_data = weather_api(city="北京")
   print(weather_data)
   </code>
-  观察结果：{"temperature": 25, "humidity": 60%, "condition": "晴天"}
+  # 系统返回 Observation: {"city": "北京", "temperature": 25, "humidity": 60, "condition": "晴天"}
 
   思考：现在我有天气数据了，让分析助手帮我分析这些数据。
   代码：
@@ -127,7 +125,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   analysis_result = data_analysis_assistant(task="分析今天的天气数据：温度25度，湿度60%，晴天")
   print(analysis_result)
   </code>
-  观察结果：今天天气适宜，温度适中，湿度正常，适合户外活动。
+  # 系统返回 Observation: 根据天气数据分析，今天天气适宜外出活动，温度适中（25℃），湿度正常（60%），晴天适合户外运动和旅游...
 
   思考：我已经获得了天气数据和分析结果，现在我将生成最终回答。
   根据天气数据分析，今天天气适宜，温度适中，湿度正常，适合户外活动。
@@ -155,7 +153,6 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
   </DISPLAY>
-  观察结果：快速排序的python代码。
 
   思考：我已经获得了快速排序的python代码，现在我将生成最终回答。
   快速排序的python代码如下：
@@ -246,6 +243,13 @@ USER_PROMPT: |-
   {{assistant_description}}
   {% else %}
   你没有可用的助手
+  {% endif %}
+
+  {% if knowledge_base_names %}
+  ### 知识库配置说明：
+  在生成 few-shot 示例时，如果使用 knowledge_base_search 工具，必须使用以下实际配置的知识库名称：
+  {{ knowledge_base_names | default('') }}
+  请将这些名称直接用于示例中，例如：knowledge_base_search(query="xxx", index_names=[{{ knowledge_base_names | default('') }}])
   {% endif %}
 
 

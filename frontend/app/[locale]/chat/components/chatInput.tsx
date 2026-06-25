@@ -15,9 +15,9 @@ import {
 } from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "antd";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Button, Tooltip } from "antd";
 import { Textarea } from "@/components/ui/textarea";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
@@ -26,192 +26,8 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
-
-// Image viewer component
-function ImageViewer({
-  src,
-  alt,
-  onClose,
-}: {
-  src: string;
-  alt: string;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation("common");
-  return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="relative max-w-[90%] max-h-[90%]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <img
-          src={src}
-          alt={alt}
-          className="max-w-full max-h-[90vh] object-contain"
-        />
-        <button
-          onClick={onClose}
-          className="absolute -top-4 -right-4 bg-white p-1 rounded-full shadow-md hover:bg-white transition-colors"
-          title={t("chatInput.close")}
-        >
-          <X
-            size={16}
-            className="text-gray-600 hover:text-red-500 transition-colors"
-          />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// File preview component
-function FileViewer({ file, onClose }: { file: File; onClose: () => void }) {
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const fileType = file.type;
-  const extension = getFileExtension(file.name);
-  const { t } = useTranslation("common");
-
-  // Read file content
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-
-    const readTextFile = () => {
-      const reader = new FileReader();
-
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setContent(event.target.result as string);
-          setLoading(false);
-        }
-      };
-
-      reader.onerror = () => {
-        setError(t("chatInput.cannotReadFileContent"));
-        setLoading(false);
-      };
-
-      reader.readAsText(file);
-    };
-
-    const readBinaryFile = () => {
-      const objectUrl = URL.createObjectURL(file);
-      setContent(objectUrl);
-      setLoading(false);
-
-      return () => {
-        URL.revokeObjectURL(objectUrl);
-      };
-    };
-
-    // Select the appropriate read method based on the file type
-    if (isTextFile(fileType, extension)) {
-      readTextFile();
-    } else {
-      return readBinaryFile();
-    }
-  }, [file, fileType, extension, t]);
-
-  // Determine if it is a text file
-  const isTextFile = (type: string, ext: string) => {
-    return chatConfig.textTypes.includes(type) || chatConfig.textExtensions.includes(ext);
-  };
-
-  // Render file content
-  const renderFileContent = () => {
-    if (loading) {
-      return (
-        <div className="text-center py-8">
-          {t("chatInput.loadingFileContent")}
-        </div>
-      );
-    }
-
-    if (error) {
-      return <div className="text-center py-8 text-red-500">{error}</div>;
-    }
-
-    if (content === null) {
-      return (
-        <div className="text-center py-8">
-          {t("chatInput.cannotPreviewFileType")}
-        </div>
-      );
-    }
-
-    if (fileType.startsWith("image/")) {
-      return (
-        <div className="flex justify-center">
-          <img
-            src={content}
-            alt={file.name}
-            className="max-w-full max-h-[70vh] object-contain"
-          />
-        </div>
-      );
-    }
-
-    if (fileType === "application/pdf" || extension === "pdf") {
-      return (
-        <iframe src={content} className="w-full h-[70vh]" title={file.name} />
-      );
-    }
-
-    // Display pure text files
-    if (isTextFile(fileType, extension)) {
-      return (
-        <div className="bg-gray-50 p-4 rounded-md overflow-auto h-[70vh] whitespace-pre-wrap font-mono text-sm">
-          {content}
-        </div>
-      );
-    }
-
-    // Files that cannot be previewed
-    return (
-      <div className="text-center py-16">
-        <div className="flex justify-center mb-4">{getFileIcon(file)}</div>
-        <p className="text-gray-600">
-          {t("chatInput.thisFileTypeCannotBePreviewed")}
-        </p>
-      </div>
-    );
-  };
-
-  return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="relative bg-white rounded-lg p-6 max-w-[90%] max-h-[90%] w-[800px]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-medium text-lg flex items-center gap-2">
-            {getFileIcon(file)}
-            <span className="truncate max-w-[600px]">{file.name}</span>
-          </h3>
-          <button
-            onClick={onClose}
-            className="bg-white p-1 rounded-full hover:bg-gray-100"
-            title={t("chatInput.close")}
-          >
-            <X size={16} className="text-gray-600 hover:text-red-500" />
-          </button>
-        </div>
-
-        <div className="border rounded-md">{renderFileContent()}</div>
-      </div>
-    </div>
-  );
-}
-
-
+import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
+import { TokenMetrics } from "@/types/chat";
 
 // Get file extension
 const getFileExtension = (filename: string): string => {
@@ -279,9 +95,23 @@ const getFileIcon = (file: File) => {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
+  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
+    return <FileTextFilled size={iconSize} color="#16a085" />;
+  }
+
+  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
+    return <FileTextFilled size={iconSize} color="#8e44ad" />;
+  }
+
   // Default file icon
   return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
 };
+
+const isSupportedMediaFile = (extension: string, fileType: string) =>
+  fileType.startsWith("audio/") ||
+  fileType.startsWith("video/") ||
+  chatConfig.audioExtensions.includes(extension) ||
+  chatConfig.videoExtensions.includes(extension);
 
 // File limit constants from config
 const MAX_FILE_COUNT = chatConfig.maxFileCount;
@@ -304,7 +134,10 @@ interface ChatInputProps {
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
+  latestMetrics?: TokenMetrics | null;
+  agentGreeting?: string | null;
+  agentExampleQuestions?: string[];
 }
 
 export function ChatInput({
@@ -323,6 +156,9 @@ export function ChatInput({
   onAttachmentsChange,
   selectedAgentId = null,
   onAgentSelect,
+  latestMetrics = null,
+  agentGreeting = null,
+  agentExampleQuestions = [],
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -331,11 +167,7 @@ export function ChatInput({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [viewingImage, setViewingImage] = useState<{
-    src: string;
-    alt: string;
-  } | null>(null);
-  const [viewingFile, setViewingFile] = useState<File | null>(null);
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dropAreaRef = useRef<HTMLDivElement>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -343,7 +175,7 @@ export function ChatInput({
   const { t } = useTranslation("common");
 
   // Use the configuration hook to get the application avatar
-  const { appConfig, getAppAvatarUrl } = useConfig();
+  const { appConfig, getAppAvatarUrl, modelConfig } = useConfig();
   const avatarUrl = getAppAvatarUrl(40); // Avatar size is 40 in initial mode
 
   // When the recording status changes, notify the parent component
@@ -592,6 +424,31 @@ export function ChatInput({
         ws.onopen = () => {
           setIsRecording(true);
           setRecordingStatus("recording");
+
+          // Send STT config to backend
+          const sttConfig: Record<string, string> = {
+            language: "zh",
+          };
+
+          // Check if using Volcano Engine STT
+          const isVolcSTT = modelConfig?.stt?.modelFactory === "volcengine";
+
+          if (isVolcSTT) {
+            // Volcano Engine STT requires modelFactory, modelAppid, and accessToken
+            sttConfig.model_factory = "volcengine";
+            sttConfig.model_appid = modelConfig?.stt?.modelAppid || "";
+            sttConfig.access_token = modelConfig?.stt?.accessToken || "";
+            sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+          } else {
+            // Ali/DashScope STT uses api_key and model name
+            sttConfig.api_key = modelConfig?.stt?.apiConfig?.apiKey || "sk-no-api-key";
+            sttConfig.model = modelConfig?.stt?.modelName || "qwen3-asr-flash-realtime";
+            sttConfig.base_url = modelConfig?.stt?.apiConfig?.modelUrl || "";
+          }
+
+          const configJson = JSON.stringify(sttConfig);
+          ws.send(configJson);
+
           try {
             mediaRecorder.start(250);
           } catch (error) {
@@ -606,16 +463,27 @@ export function ChatInput({
           try {
             const response = JSON.parse(event.data);
 
+            // Handle server ready signal
+            if (response.status === "ready") {
+              return;
+            }
+
+            // Handle transcription results - display all results for real-time feedback
             if (response.result && response.result.text) {
+              // Ali STT format with nested result
               onInputChange(response.result.text);
             } else if (response.text) {
+              // Direct text format (阿里/火山)
               onInputChange(response.text);
-            } else if (response.status === "ready") {
             } else if (response.error) {
               log.error("❌ STT service error:", response.error);
               setRecordingStatus("error");
               setIsRecording(false);
               cleanup();
+            } else if (response.vad === "started") {
+              // VAD detected speech start
+            } else if (response.vad === "stopped") {
+              // VAD detected speech stop
             }
           } catch (error) {
             log.error("⚠️ Failed to parse STT response:", error);
@@ -766,8 +634,9 @@ export function ChatInput({
         chatConfig.supportedTextExtensions.includes(extension) ||
         file.type === "text/csv" ||
         file.type === "text/plain";
+      const isMedia = isSupportedMediaFile(extension, file.type);
 
-      if (isImage || isDocument || isSupportedTextFile) {
+      if (isImage || isDocument || isSupportedTextFile || isMedia) {
         // Create a preview URL for images
         const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
 
@@ -839,28 +708,8 @@ export function ChatInput({
     }
   };
 
-  // Handle viewing images
-  const handleViewImage = (attachment: FilePreview) => {
-    if (attachment.type === chatConfig.filePreviewTypes.image && attachment.file) {
-      // To ensure the preview URL is valid, create a new blob URL
-      // This avoids using a cached URL that may have expired
-      const fileReader = new FileReader();
-      fileReader.onload = (e) => {
-        if (e.target?.result) {
-          const dataUrl = e.target.result.toString();
-          setViewingImage({
-            src: dataUrl,
-            alt: attachment.file.name || t("chatInput.image"),
-          });
-        }
-      };
-      fileReader.readAsDataURL(attachment.file);
-    }
-  };
-
-  // Handle viewing files
-  const handleViewFile = (file: File) => {
-    setViewingFile(file);
+  const handlePreviewFile = (file: File) => {
+    setSelectedPreviewFile(file);
   };
 
   // Render attachment preview
@@ -887,7 +736,7 @@ export function ChatInput({
                     <div className="flex items-center gap-3 w-full">
                       <div
                         className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md cursor-pointer"
-                        onClick={() => handleViewImage(attachment)}
+                        onClick={() => handlePreviewFile(attachment.file)}
                       >
                         {attachment.previewUrl && (
                           <img
@@ -914,13 +763,13 @@ export function ChatInput({
                     <div className="flex items-center gap-3 w-full">
                       <div
                         className="flex-shrink-0 transform group-hover:scale-110 transition-transform w-8 flex justify-center cursor-pointer"
-                        onClick={() => handleViewFile(attachment.file)}
+                        onClick={() => handlePreviewFile(attachment.file)}
                       >
                         {getFileIcon(attachment.file)}
                       </div>
                       <div
                         className="flex-1 overflow-hidden cursor-pointer"
-                        onClick={() => handleViewFile(attachment.file)}
+                        onClick={() => handlePreviewFile(attachment.file)}
                       >
                         <span
                           className="text-sm truncate block max-w-[110px] font-medium"
@@ -1025,6 +874,8 @@ export function ChatInput({
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
+          {/* Token usage indicator */}
+          <TokenUsageIndicator latestMetrics={latestMetrics} />
           {/* Voice to text button */}
           <Tooltip
             title={
@@ -1066,7 +917,7 @@ export function ChatInput({
                 id="file-upload-regular"
                 className="hidden"
                 onChange={handleFileUpload}
-                accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
                 multiple
               />
             </Button>
@@ -1193,25 +1044,22 @@ export function ChatInput({
       chatConfig.supportedTextExtensions.includes(extension) ||
       fileType === "text/csv" ||
       fileType === "text/plain";
+    const isMedia = isSupportedMediaFile(extension, fileType);
 
-    return !(isImage || isDocument || isSupportedTextFile);
+    return !(isImage || isDocument || isSupportedTextFile || isMedia);
   });
 
   // Regular mode, keep the original rendering logic
   return (
     <>
-      {/* Image viewer */}
-      {viewingImage && (
-        <ImageViewer
-          src={viewingImage.src}
-          alt={viewingImage.alt}
-          onClose={() => setViewingImage(null)}
+      {/* File preview drawer */}
+      {selectedPreviewFile && (
+        <FilePreviewDrawer
+          open={!!selectedPreviewFile}
+          source="local"
+          file={selectedPreviewFile}
+          onClose={() => setSelectedPreviewFile(null)}
         />
-      )}
-
-      {/* File viewer */}
-      {viewingFile && (
-        <FileViewer file={viewingFile} onClose={() => setViewingFile(null)} />
       )}
 
       {/* Error message */}
@@ -1220,17 +1068,23 @@ export function ChatInput({
       {/* Chat input part */}
       {isInitialMode ? (
         <div className="flex flex-col items-center justify-center h-full w-full max-w-5xl mx-auto mt-[-80px]">
-          <div className="flex flex-col items-center mb-4">
-            <div className="flex items-center mb-6">
-              <div className="h-16 w-16 rounded-full overflow-hidden mr-4">
-                <img
-                  src={avatarUrl}
-                  alt={appConfig.appName}
-                  className="h-full w-full object-cover"
-                />
+          <div className="flex flex-col items-center mb-6">
+            <div className="h-16 w-16 rounded-full overflow-hidden mb-4 ring-2 ring-offset-2 ring-slate-100">
+              <img
+                src={avatarUrl}
+                alt={appConfig.appName}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            {agentGreeting ? (
+              <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl px-6 py-5 max-w-2xl shadow-sm border border-slate-100 mb-4">
+                <p className="text-lg text-gray-800 leading-relaxed text-center">
+                  {agentGreeting}
+                </p>
               </div>
+            ) : (
               <h1
-                className="text-4xl font-bold bg-clip-text text-transparent"
+                className="text-4xl font-bold bg-clip-text text-transparent mb-2"
                 style={{
                   backgroundImage: (() => {
                     const colors = extractColorsFromUri(
@@ -1244,11 +1098,27 @@ export function ChatInput({
               >
                 {t("chatInput.helloIm", { appName: appConfig.appName })}
               </h1>
-            </div>
-            <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              {appConfig.appDescription || t("chatInput.introMessage")}
-            </p>
+            )}
+            {!agentGreeting && (
+              <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                {appConfig.appDescription || t("chatInput.introMessage")}
+              </p>
+            )}
           </div>
+          {agentExampleQuestions.length > 0 && (
+            <div className="flex flex-col gap-2 max-w-3xl mb-4 w-full">
+              {agentExampleQuestions.map((question, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => onInputChange(question)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-sm text-gray-700 shadow-sm transition-all text-left flex items-center gap-2"
+                >
+                  <span className="text-muted-foreground font-medium">{idx + 1}.</span>
+                  <span>{question}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div
             ref={dropAreaRef}
             className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"

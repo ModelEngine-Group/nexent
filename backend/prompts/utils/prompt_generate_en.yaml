@@ -43,7 +43,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   3. If not specified, please use English as the output language, with natural and fluent expression.
 
   ### Agent Execution Process:
-  To solve tasks, you must plan forward through a series of steps in a loop of 'Think:', 'Code:', and 'Observe Results:' sequences:
+  To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences. **IMPORTANT: You must NOT output 'Observe Results:' before code execution. Observation results can ONLY be generated after code execution.**
 
   1. Think:
      - Determine which tools/assistants need to be used to obtain information or take action
@@ -55,9 +55,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
      - Call tools/assistants correctly according to format specifications
      - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code
      - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.
-
-  3. Observe Results:
-     - View code execution results
+     - **IMPORTANT**: After code execution, the system will return content with "Observation:" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**
 
   After thinking, when you believe you can answer the user's question, you can generate a final answer directly to the user without generating code and stop the loop.
 
@@ -82,7 +80,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   knowledge_info = knowledge_base_search(query="Oriental Pearl Tower introduction", index_names=["local_knowledge_base1", "local_knowledge_base2"])
   print(knowledge_info)
   </code>
-  Observe Results: No results found for query "Oriental Pearl Tower introduction". The search results are insufficient to support an answer.
+  # System returns Observation: No relevant results found
 
   Think: Since no relevant information was found in the local knowledge base, I need to use the web_search tool to query network information.
   Code:
@@ -90,7 +88,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   web_info = web_search(query="Oriental Pearl Tower introduction")
   print(web_info)
   </code>
-  Observe Results: The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China...
+  # System returns Observation: The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China, with a height of 468 meters...
 
   Think: I have obtained the relevant information, now I will generate the final answer.
   The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China...
@@ -105,7 +103,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   itinerary_result = travel_planning_assistant(task="Help me plan tomorrow's trip from Shanghai to Beijing")
   print(itinerary_result)
   </code>
-  Observe Results: Tomorrow's trip planning from Shanghai to Beijing, including transportation, accommodation, attractions, etc.
+  # System returns Observation: Trip plan completed: High-speed train G2, departs 8:00, arrives Beijing South Station at 11:30; Hotel near Wangfujing; Recommended attractions: Tiananmen, Forbidden City, Great Wall...
 
   Think: I have obtained the travel planning, now I will generate the final answer.
   Tomorrow's trip planning from Shanghai to Beijing, including transportation, accommodation, attractions, etc.
@@ -120,7 +118,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   weather_data = weather_api(city="Beijing")
   print(weather_data)
   </code>
-  Observe Results: {"temperature": 25, "humidity": "60%", "condition": "sunny"}
+  # System returns Observation: {"city": "Beijing", "temperature": 25, "humidity": 60, "condition": "sunny"}
 
   Think: Now I have weather data, let the analysis assistant help me analyze this data.
   Code:
@@ -128,7 +126,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   analysis_result = data_analysis_assistant(task="Analyze today's weather data: temperature 25 degrees, humidity 60%, sunny")
   print(analysis_result)
   </code>
-  Observe Results: Today's weather is suitable, temperature is moderate, humidity is normal, suitable for outdoor activities.
+  # System returns Observation: Based on weather data analysis, today is suitable for outdoor activities. Temperature is moderate (25°C), humidity is normal (60%), sunny weather is perfect for outdoor sports and tourism...
 
   Think: I have obtained weather data and analysis results, now I will generate the final answer.
   Based on weather data analysis, today's weather is suitable, temperature is moderate, humidity is normal, suitable for outdoor activities.
@@ -158,7 +156,6 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
   </DISPLAY>
-  Observe Results: The Python quick sort code.
 
   Think: I have obtained the Python quick sort code, now I will generate the final answer.
   The Python quick sort code is as follows:
@@ -250,6 +247,13 @@ USER_PROMPT: |-
   {{assistant_description}}
   {% else %}
   You have no available assistants
+  {% endif %}
+
+  {% if knowledge_base_names %}
+  ### Knowledge Base Configuration Note:
+  When generating few-shot examples, if using the knowledge_base_search tool, you MUST use the following actual configured knowledge base names:
+  {{ knowledge_base_names | default('') }}
+  Please use these names directly in examples, e.g.: knowledge_base_search(query="xxx", index_names=[{{ knowledge_base_names | default('') }}])
   {% endif %}
 
 

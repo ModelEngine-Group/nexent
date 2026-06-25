@@ -1,8 +1,12 @@
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from .extract_image import UniversalImageExtractor
+from io import BytesIO
 
 from .base import FileProcessor
+from .file_splitter import FileSplitter
 from .openpyxl_processor import OpenPyxlProcessor
 from .unstructured_processor import UnstructuredProcessor
 
@@ -17,7 +21,7 @@ class DataProcessCore:
 
     Supported file types:
     - Excel files: .xlsx, .xls
-    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt
+    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt, .epub, .xml, .csv, .json
 
     Supported input methods:
     - In-memory byte data
@@ -28,9 +32,27 @@ class DataProcessCore:
 
     # Supported chunking strategies
     CHUNKING_STRATEGIES = {"basic", "by_title", "none"}
+    
+    EXTRACT_IMAGE_EXTENSIONS = {".pdf", ".doc",
+                                ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
 
     # Supported processors
-    PROCESSORS = {"Unstructured", "OpenPyxl"}
+    PROCESSORS = {"Unstructured", "OpenPyxl", "UniversalImageExtractor"}
+
+    # Supported split extensions (exclude ppt/pptx/html)
+    SPLIT_EXTENSIONS = {
+        ".csv",
+        ".epub",
+        ".xlsx",
+        ".xls",
+        ".json",
+        ".md",
+        ".pdf",
+        ".txt",
+        ".xml",
+        ".doc",
+        ".docx",
+    }
 
     def __init__(self):
         """
@@ -39,6 +61,8 @@ class DataProcessCore:
         self.processors: Dict[str, FileProcessor] = {
             "Unstructured": UnstructuredProcessor(),
             "OpenPyxl": OpenPyxlProcessor(),
+            "UniversalImageExtractor": UniversalImageExtractor(),
+            "FileSplitter": FileSplitter(),
         }
         logger.debug("DataProcessCore initialization completed")
 
@@ -49,7 +73,7 @@ class DataProcessCore:
         chunking_strategy: str = "basic",
         processor: Optional[str] = None,
         **params,
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], List[Dict]]:
         """
         Facade pattern that automatically detects file type and processes files
 
@@ -62,11 +86,13 @@ class DataProcessCore:
             **params: Additional processing parameters
 
         Returns:
-            List of processed chunks, each dictionary contains the following fields:
+            Tuple[List[Dict], List[Dict]]: (chunks, images_info)
+            chunks: List of processed chunks, each dictionary contains the following fields:
             - content: Text content
             - filename: Filename
             - metadata: Metadata (optional, includes chunk_index, source_type, etc.)
             - language: Language identifier (optional)
+            images_info: List of extracted image metadata dicts (may be empty)
 
         Raises:
             ValueError: Invalid parameters
@@ -76,21 +102,81 @@ class DataProcessCore:
         self._validate_parameters(chunking_strategy, processor)
 
         # Select appropriate processor
-        processor_name = processor or self._select_processor_by_filename(
-            filename)
+        if processor:
+            processor_name = processor
+            _, extractor = self._select_processor_by_filename(filename, params)
+        else:
+            processor_name, extractor = self._select_processor_by_filename(
+                filename, params)
+
         processor_instance = self.processors.get(processor_name)
+        extract_image_processor_instance = (
+            self.processors.get(extractor) if extractor else None
+        )
 
         if not processor_instance:
             raise ValueError(f"Unsupported processor: {processor_name}")
+        
+        if extract_image_processor_instance:
+            img_info = extract_image_processor_instance.process_file(
+                file_data, chunking_strategy, filename, **params)
+        else:
+            img_info = []
 
         # Process in-memory file
         logger.info(
             f"Processing in-memory file: {filename} with {processor_name} processor")
         try:
-            return processor_instance.process_file(file_data, chunking_strategy, filename=filename, **params)
+            return processor_instance.process_file(file_data, chunking_strategy, filename=filename, **params), img_info
         except Exception as e:
             logger.error(f"File processing failed for {filename}: {str(e)}")
             raise
+
+    def file_split(
+        self,
+        file_data: bytes,
+        filename: str,
+        splitter: Optional[str] = None,
+        **params,
+    ) -> List[BytesIO]:
+        """
+        Split file into smaller parts using the unified splitter
+
+        Args:
+            file_data: File content byte data
+            filename: Filename
+            splitter: Optional splitter name (reserved for future use)
+            **params: Additional splitter parameters (e.g., max_size, encoding, libreoffice_path)
+
+        Returns:
+            List of BytesIO parts
+
+        Raises:
+            ValueError: Invalid parameters
+            RuntimeError: Split failed
+        """
+        _, ext = os.path.splitext(filename.lower())
+        if ext not in self.SPLIT_EXTENSIONS:
+            return [BytesIO(file_data)]
+
+        splitter_name = splitter or "FileSplitter"
+        splitter_instance = self.processors.get(splitter_name)
+        if not splitter_instance:
+            logger.error(f"Splitter not found: {splitter_name}")
+            return [BytesIO(file_data)]
+
+        max_size = params.pop("max_size", 5 * 1024 * 1024)
+
+        try:
+            parts = splitter_instance.file_process(file_data, filename, max_size=max_size, **params)
+            if not isinstance(parts, list) or not all(isinstance(p, BytesIO) for p in parts):
+                logger.error("Invalid split result format: expected List[BytesIO]")
+                return [BytesIO(file_data)]
+            logger.info(f"Successfully split file: {filename}")
+            return parts
+        except Exception as e:
+            logger.error(f"File split failed for {filename}: {str(e)}")
+            return [BytesIO(file_data)]
 
     def _validate_parameters(self, chunking_strategy: str, processor: Optional[str]) -> None:
         """Validate input parameters"""
@@ -109,14 +195,21 @@ class DataProcessCore:
         logger.debug(
             f"Parameter validation passed: chunking_strategy={chunking_strategy}, processor={processor}")
 
-    def _select_processor_by_filename(self, filename: str) -> str:
+    def _select_processor_by_filename(
+        self, filename: str, params: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, Optional[str]]:
         """Selects a processor based on the file extension."""
         _, file_extension = os.path.splitext(filename)
         file_extension = file_extension.lower()
+
+        extract_image = None
+        model_type = params.get("model_type")
+        if model_type == "multi_embedding" and file_extension in self.EXTRACT_IMAGE_EXTENSIONS:
+            extract_image = "UniversalImageExtractor"
         if file_extension in self.EXCEL_EXTENSIONS:
-            return "OpenPyxl"
+            return "OpenPyxl", extract_image
         else:
-            return "Unstructured"
+            return "Unstructured", extract_image
 
     def get_supported_file_types(self) -> Dict[str, List[str]]:
         """
@@ -147,6 +240,10 @@ class DataProcessCore:
                 ".odt",
                 ".pptx",
                 ".ppt",
+                ".epub",
+                ".json",
+                ".xml",
+                ".csv",
             ]
 
         return {"excel": list(self.EXCEL_EXTENSIONS), "generic": generic_formats}

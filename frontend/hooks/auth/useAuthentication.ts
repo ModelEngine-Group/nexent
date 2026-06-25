@@ -36,6 +36,7 @@ export function useAuthentication(): AuthenticationContextType {
     // UI state
     isLoginModalOpen: authUI.isLoginModalOpen,
     isRegisterModalOpen: authUI.isRegisterModalOpen,
+    registerModalOptions: authUI.registerModalOptions,
     isAuthPromptModalOpen: authUI.isAuthPromptModalOpen,
     isSessionExpiredModalOpen: authUI.isSessionExpiredModalOpen,
 

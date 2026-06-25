@@ -2,12 +2,12 @@
 Global Monitoring Manager for Backend
 
 This module initializes and configures the global monitoring manager instance
-with backend environment variables. All other backend modules should import
-`monitoring_manager` directly from this module.
+with backend environment variables using OTLP protocol. All other backend modules
+should import `monitoring_manager` directly from this module.
 
 Usage:
     from utils.monitoring import monitoring_manager
-    
+
     @monitoring_manager.monitor_endpoint("my_service.my_function")
     async def my_function():
         return {"status": "ok"}
@@ -17,67 +17,88 @@ from nexent.monitor import (
     MonitoringConfig,
     get_monitoring_manager
 )
-# Import configuration from backend (support both relative and absolute imports)
 try:
-    # Try relative import first (when running from backend directory)
     from consts.const import (
         ENABLE_TELEMETRY,
-        SERVICE_NAME,
-        JAEGER_ENDPOINT,
-        PROMETHEUS_PORT,
-        TELEMETRY_SAMPLE_RATE,
-        LLM_SLOW_REQUEST_THRESHOLD_SECONDS,
-        LLM_SLOW_TOKEN_RATE_THRESHOLD
+        MONITORING_PROVIDER,
+        MONITORING_PROJECT_NAME,
+        OTEL_SERVICE_NAME,
+        OTEL_EXPORTER_OTLP_ENDPOINT,
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+        OTEL_EXPORTER_OTLP_PROTOCOL,
+        OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        MONITORING_INSTRUMENT_REQUESTS,
+        MONITORING_FASTAPI_INCLUDED_URLS,
+        MONITORING_FASTAPI_EXCLUDED_URLS,
+        MONITORING_FASTAPI_EXCLUDE_SPANS,
+        MONITORING_TRACE_CONTENT_MODE,
+        MONITORING_TRACE_MAX_CHARS,
+        MONITORING_TRACE_MAX_ITEMS,
+        OTLP_HEADERS,
+        TELEMETRY_SAMPLE_RATE
     )
 except ImportError:
-    # Fallback to absolute import (when running from project root)
     from backend.consts.const import (
         ENABLE_TELEMETRY,
-        SERVICE_NAME,
-        JAEGER_ENDPOINT,
-        PROMETHEUS_PORT,
-        TELEMETRY_SAMPLE_RATE,
-        LLM_SLOW_REQUEST_THRESHOLD_SECONDS,
-        LLM_SLOW_TOKEN_RATE_THRESHOLD
+        MONITORING_PROVIDER,
+        MONITORING_PROJECT_NAME,
+        OTEL_SERVICE_NAME,
+        OTEL_EXPORTER_OTLP_ENDPOINT,
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+        OTEL_EXPORTER_OTLP_PROTOCOL,
+        OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        MONITORING_INSTRUMENT_REQUESTS,
+        MONITORING_FASTAPI_INCLUDED_URLS,
+        MONITORING_FASTAPI_EXCLUDED_URLS,
+        MONITORING_FASTAPI_EXCLUDE_SPANS,
+        MONITORING_TRACE_CONTENT_MODE,
+        MONITORING_TRACE_MAX_CHARS,
+        MONITORING_TRACE_MAX_ITEMS,
+        OTLP_HEADERS,
+        TELEMETRY_SAMPLE_RATE
     )
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# Global Monitoring Manager Instance
-# ============================================================================
-
-# Get the global monitoring manager instance
 monitoring_manager = get_monitoring_manager()
-
-# Initialize monitoring configuration immediately when this module is imported
 
 
 def _initialize_monitoring():
-    """Initialize monitoring configuration with backend environment variables."""
+    """Initialize monitoring configuration with OTLP settings."""
     config = MonitoringConfig(
         enable_telemetry=ENABLE_TELEMETRY,
-        service_name=SERVICE_NAME,
-        jaeger_endpoint=JAEGER_ENDPOINT,
-        prometheus_port=PROMETHEUS_PORT,
+        service_name=OTEL_SERVICE_NAME,
+        provider=MONITORING_PROVIDER or "otlp",
+        otlp_endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
+        otlp_traces_endpoint=OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or None,
+        otlp_metrics_endpoint=OTEL_EXPORTER_OTLP_METRICS_ENDPOINT or None,
+        otlp_protocol=OTEL_EXPORTER_OTLP_PROTOCOL,
+        otlp_headers=OTLP_HEADERS,
+        export_metrics=OTEL_EXPORTER_OTLP_METRICS_ENABLED,
+        instrument_requests=MONITORING_INSTRUMENT_REQUESTS,
+        fastapi_included_urls=MONITORING_FASTAPI_INCLUDED_URLS,
+        fastapi_excluded_urls=MONITORING_FASTAPI_EXCLUDED_URLS,
+        fastapi_exclude_spans=MONITORING_FASTAPI_EXCLUDE_SPANS,
+        project_name=MONITORING_PROJECT_NAME or None,
         telemetry_sample_rate=TELEMETRY_SAMPLE_RATE,
-        llm_slow_request_threshold_seconds=LLM_SLOW_REQUEST_THRESHOLD_SECONDS,
-        llm_slow_token_rate_threshold=LLM_SLOW_TOKEN_RATE_THRESHOLD
+        trace_content_mode=MONITORING_TRACE_CONTENT_MODE,
+        trace_max_chars=MONITORING_TRACE_MAX_CHARS,
+        trace_max_items=MONITORING_TRACE_MAX_ITEMS
     )
 
-    # Configure the SDK monitoring system using the singleton
     monitoring_manager.configure(config)
     logger.info(
-        f"Global monitoring initialized: service_name={SERVICE_NAME}, enable_telemetry={ENABLE_TELEMETRY}")
+        f"OTLP monitoring initialized: service_name={OTEL_SERVICE_NAME}, "
+        f"enable_telemetry={config.enable_telemetry}, provider={config.provider}, "
+        f"endpoint={config.otlp_endpoint}, trace_endpoint={config.get_trace_endpoint()}, "
+        f"protocol={OTEL_EXPORTER_OTLP_PROTOCOL}"
+    )
 
 
-# Initialize monitoring when module is imported
 _initialize_monitoring()
 
-
-# Export the global monitoring manager instance
-__all__ = [
-    'monitoring_manager'
-]
+__all__ = ['monitoring_manager']

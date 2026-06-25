@@ -623,9 +623,18 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         }
 
 
+def _image_exists(session, message_id: int, image_url: str) -> bool:
+    stmt = select(ConversationSourceImage).where(
+        ConversationSourceImage.message_id == message_id,
+        ConversationSourceImage.image_url == image_url,
+        ConversationSourceImage.delete_flag == 'N'
+    ).limit(1)
+    return session.execute(stmt).scalar_one_or_none() is not None
+
+
 def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
     """
-    Create image source reference
+    Create image source reference (skips if the same message_id + image_url already exists).
 
     Args:
         image_data: Dictionary containing image data, must include the following fields:
@@ -634,17 +643,22 @@ def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = Non
         user_id: Reserved parameter for created_by and updated_by fields
 
     Returns:
-        int: Newly created image ID (auto-increment ID)
+        int: Newly created image ID (auto-increment ID), or -1 if skipped due to duplicate
     """
     with get_db_session() as session:
         # Ensure message_id is of integer type
         message_id = int(image_data['message_id'])
+        image_url = image_data['image_url']
+
+        # Skip duplicate: same message_id + image_url already in DB
+        if _image_exists(session, message_id, image_url):
+            return -1
 
         # Prepare data dictionary
         data = {
             "message_id": message_id,
             "conversation_id": image_data.get('conversation_id'),
-            "image_url": image_data['image_url'],
+            "image_url": image_url,
             "delete_flag": 'N',
             # Use the database's CURRENT_TIMESTAMP function
             "create_time": func.current_timestamp()
@@ -1016,3 +1030,71 @@ def get_message_id_by_index(conversation_id: int, message_index: int) -> Optiona
         result = session.execute(stmt).scalar()
 
         return result
+
+
+def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str] = None) -> Optional[int]:
+    """
+    Get the most recent assistant message ID for a conversation.
+
+    Args:
+        conversation_id: Conversation ID (integer)
+        user_id: Optional user ID for ownership check
+
+    Returns:
+        Optional[int]: The latest assistant message ID, or None if not found
+    """
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+
+        stmt = select(ConversationMessage.message_id).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.message_role == 'assistant'
+        ).order_by(desc(ConversationMessage.message_index)).limit(1)
+
+        if user_id:
+            stmt = stmt.join(
+                ConversationRecord,
+                ConversationMessage.conversation_id == ConversationRecord.conversation_id
+            ).where(ConversationRecord.created_by == user_id)
+
+        result = session.execute(stmt).scalar()
+        return result
+
+
+def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[str, Any]]) -> bool:
+    """
+    Merge skill file uploads into an existing message's minio_files field.
+
+    Args:
+        message_id: Message ID to update
+        skill_file_uploads: List of skill file upload metadata dicts to append
+
+    Returns:
+        bool: True if the message was updated, False if the message was not found
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = select(ConversationMessage).where(
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.delete_flag == 'N'
+        )
+        record = session.scalars(stmt).first()
+        if not record:
+            return False
+
+        existing = record.minio_files
+        if existing:
+            try:
+                if isinstance(existing, str):
+                    existing = json.loads(existing)
+            except (json.JSONDecodeError, TypeError):
+                existing = []
+        else:
+            existing = []
+
+        existing.extend(skill_file_uploads)
+        record.minio_files = json.dumps(existing, ensure_ascii=False)
+
+        return True

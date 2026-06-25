@@ -3,7 +3,14 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
-import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
+import {
+  UserRound,
+  LogOut,
+  LogIn,
+  UserRoundPlus,
+  UserCircle,
+  Power,
+} from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
 
@@ -22,6 +29,25 @@ export function AvatarDropdown() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
+
+  const getRoleDisplayName = (role: string) => {
+    switch (role) {
+      case USER_ROLES.SPEED:
+        return t("auth.speed");
+      case USER_ROLES.SU:
+        return t("auth.su");
+      case USER_ROLES.ADMIN:
+        return t("auth.admin");
+      case USER_ROLES.DEV:
+        return t("auth.dev");
+      case USER_ROLES.USER:
+        return t("auth.user");
+      case USER_ROLES.ASSET_OWNER:
+        return t("auth.assetOwner");
+      default:
+        return t("auth.user");
+    }
+  };
 
   // Show loading while authentication is in progress
   if (isLoading) {
@@ -87,6 +113,8 @@ export function AvatarDropdown() {
     );
   }
 
+  const isCasUser = user.authProvider === "cas";
+
   // User has logged in, show user menu
   const menuItems: ItemType[] = [
     {
@@ -96,7 +124,7 @@ export function AvatarDropdown() {
           <div className="font-medium">{user.email}</div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
-              {t(`auth.${(user.role).toLowerCase()}`)}
+              {getRoleDisplayName(user.role)}
             </Tag>
           </div>
         </div>
@@ -140,8 +168,12 @@ export function AvatarDropdown() {
       icon: <Power size={16} />,
       label: t("auth.revoke"),
       // danger: true,
-      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
+      disabled: isCasUser,
+      className: isCasUser
+        ? "cursor-not-allowed opacity-50"
+        : "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
       onClick: () => {
+        if (isCasUser) return;
         setIsDeleteModalOpen(true);
       },
     },
@@ -176,7 +208,11 @@ export function AvatarDropdown() {
         }}
         onCancel={() => setIsDeleteModalOpen(false)}
         loading={isLoading}
-        disabled={user.role === USER_ROLES.ADMIN || user.role === USER_ROLES.SU}
+        disabled={
+          isCasUser ||
+          user.role === USER_ROLES.ADMIN ||
+          user.role === USER_ROLES.SU
+        }
       />
     </ConfigProvider>
   );

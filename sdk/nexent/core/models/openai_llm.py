@@ -1,8 +1,17 @@
 from ...monitor import get_monitoring_manager
+from ...monitor.monitoring import (
+    _MonitoredClient,
+    _monitoring_operation,
+    _monitoring_display_name,
+    _detect_model_type,
+    OPENINFERENCE_INPUT_VALUE,
+)
+from ..utils.token_estimation import estimate_tokens_text
 import logging
 import threading
 import asyncio
 import time
+import json
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -10,13 +19,17 @@ from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from ..utils.observer import MessageObserver, ProcessType
-from .message_utils import prepare_messages_for_completion
 
 logger = logging.getLogger("openai_llm")
 
+
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, model_factory: Optional[str] = None, *args, **kwargs):
+ssl_verify=True, model_factory: Optional[str] = None,
+                 display_name: Optional[str] = None,
+                 extra_body: Optional[Dict[str, Any]] = None,
+                 max_tokens: Optional[int] = None,
+                 timeout_seconds: Optional[float] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -26,7 +39,16 @@ class OpenAIModel(OpenAIServerModel):
             top_p: Top-p sampling parameter (default: 0.95)
             ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
+            timeout_seconds: Timeout in seconds for HTTP requests (default: None, uses client default).
             model_factory: Provider identifier (e.g., openai, modelengine)
+            display_name: Human-readable display name for monitoring
+            extra_body: Optional dict merged into every chat.completions.create
+                       request body. Defaults to None so production behaviour
+                       is unchanged for callers that do not opt in.
+            max_tokens: Per-call completion output cap. Defaults to None so
+                       production keeps the provider default (unbounded /
+                       model max). Benchmarks set this explicitly (e.g. 4096)
+                       to bound degenerate generation loops on long contexts.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -36,22 +58,78 @@ class OpenAIModel(OpenAIServerModel):
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
+        self.display_name = display_name
+        self.extra_body = extra_body or None
+        self.max_tokens = max_tokens
 
-        # Create http_client based on ssl_verify parameter
-        if not ssl_verify:
+        # Create http_client based on ssl_verify parameter and timeout
+        if not ssl_verify or timeout_seconds is not None:
             from openai import DefaultHttpxClient
-            http_client = DefaultHttpxClient(verify=False)
+            client_config = {"verify": ssl_verify}
+            if timeout_seconds is not None:
+                client_config["timeout"] = timeout_seconds
+            http_client = DefaultHttpxClient(**client_config)
             client_kwargs = kwargs.get('client_kwargs', {})
             client_kwargs['http_client'] = http_client
             kwargs['client_kwargs'] = client_kwargs
 
         super().__init__(*args, **kwargs)
 
-    @get_monitoring_manager().monitor_llm_call("openai_chat", "chat_completion")
+        # Wrap the OpenAI client with monitoring interceptor
+        model_type = _detect_model_type(self)
+        model_id = getattr(self, "model_id", None)
+        base_client = getattr(self, "client", None)
+        if base_client is not None and model_id is not None:
+            self.client = _MonitoredClient(base_client, model_id, model_type)
+        else:
+            logger.warning(
+                "OpenAIModel: no `client` attribute after init; "
+                "skipping monitored wrapper (model_id=%s, type=%s)",
+                model_id,
+                model_type,
+            )
+        if self.display_name:
+            _monitoring_display_name.set(self.display_name)
+
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
-                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, **kwargs, ) -> ChatMessage:
-        # Get token tracker from decorator (if monitoring is available)
-        token_tracker = kwargs.pop('_token_tracker', None)
+                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
+        _monitoring_operation.set("chat_completion")
+
+        if _token_tracker is None:
+            invocation_parameters = {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                **{k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))},
+            }
+            trace_attributes = {
+                "llm.invocation_parameters": json.dumps(invocation_parameters, ensure_ascii=False),
+                "model_id": self.model_id,
+            }
+            input_attr_key = (
+                OPENINFERENCE_INPUT_VALUE
+                if isinstance(OPENINFERENCE_INPUT_VALUE, str)
+                else "input.value"
+            )
+            trace_attributes[input_attr_key] = messages or []
+
+            with self._monitoring.trace_llm_request(
+                f"{self.display_name or self.model_id}.generate",
+                self.model_id,
+                **trace_attributes,
+            ) as span:
+                token_tracker = self._monitoring.create_token_tracker(
+                    self.model_id, span)
+                return self.__call__(
+                    messages=messages,
+                    stop_sequences=stop_sequences,
+                    response_format=response_format,
+                    tools_to_call_from=tools_to_call_from,
+                    _token_tracker=token_tracker,
+                    **kwargs,
+                )
+
+        token_tracker = _token_tracker or self._monitoring.create_token_tracker(
+            self.model_id)
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
@@ -61,17 +139,16 @@ class OpenAIModel(OpenAIServerModel):
                 normalized_messages.append(msg)
             elif isinstance(msg, dict):
                 if "role" not in msg or "content" not in msg:
-                    raise ValueError("Each message dict must include 'role' and 'content'.")
+                    raise ValueError(
+                        "Each message dict must include 'role' and 'content'.")
                 normalized_messages.append(ChatMessage.from_dict({
                     "role": msg["role"],
                     "content": msg["content"],
                     "tool_calls": msg.get("tool_calls"),
                 }))
             else:
-                raise TypeError("Messages must be ChatMessage or dict objects.")
-
-        # Prepare messages for completion according to provider requirements.
-        messages_for_completion = prepare_messages_for_completion(normalized_messages, self.model_factory)
+                raise TypeError(
+                    "Messages must be ChatMessage or dict objects.")
 
         # Add completion started event and model parameters
         if token_tracker:
@@ -80,19 +157,43 @@ class OpenAIModel(OpenAIServerModel):
                 model_id=self.model_id,
                 temperature=self.temperature,
                 top_p=self.top_p,
-                message_count=len(messages_for_completion) if messages_for_completion else 0,
+                message_count=len(
+                    normalized_messages) if normalized_messages else 0,
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
         completion_kwargs = self._prepare_completion_kwargs(
-            messages=messages_for_completion, stop_sequences=stop_sequences,
+            messages=normalized_messages, stop_sequences=stop_sequences,
             response_format=response_format, tools_to_call_from=tools_to_call_from, model=self.model_id,
             custom_role_conversions=self.custom_role_conversions, convert_images_to_image_urls=True,
-            temperature=self.temperature, top_p=self.top_p, **kwargs,
+            temperature=self.temperature, top_p=self.top_p,
+            flatten_messages_as_text=self.model_factory == "modelengine", **kwargs,
         )
+
+        completion_kwargs["stream_options"] = {"include_usage": True}
+
+        # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
+        # set when the caller actually supplied something so default OpenAI
+        # behaviour is unchanged for everyone else.
+        if self.extra_body:
+            completion_kwargs["extra_body"] = self.extra_body
+
+        # Bound completion length unless the caller passed their own override
+        # via kwargs (which already landed in completion_kwargs above).
+        if self.max_tokens is not None and "max_tokens" not in completion_kwargs:
+            completion_kwargs["max_tokens"] = self.max_tokens
 
         current_request = self.client.chat.completions.create(
             stream=True, **completion_kwargs)
+
+        # Validate response type: ensure we got a proper iterator, not error strings or dicts
+        # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
+        if isinstance(current_request, str):
+            raise ValueError(f"LLM API returned error string: {current_request}")
+        if isinstance(current_request, dict):
+            error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
+            raise ValueError(f"LLM API returned error: {error_msg}")
+
         chunk_list = []
         token_join = []
         role = None
@@ -106,6 +207,20 @@ class OpenAIModel(OpenAIServerModel):
 
         try:
             for chunk in current_request:
+                # Safety check: skip non-standard chunks that lack expected attributes
+                # This handles edge cases where API returns error responses as chunks
+                if not hasattr(chunk, 'choices'):
+                    # Log warning and continue processing
+                    if hasattr(chunk, '__str__'):
+                        chunk_str = str(chunk)
+                        logger.warning(f"Received non-standard chunk (no 'choices'): {chunk_str[:200]}")
+                    chunk_list.append(chunk)
+                    continue
+
+                if not chunk.choices:
+                    chunk_list.append(chunk)
+                    continue
+
                 new_token = chunk.choices[0].delta.content
                 reasoning_content = getattr(
                     chunk.choices[0].delta, 'reasoning_content', None)
@@ -155,8 +270,24 @@ class OpenAIModel(OpenAIServerModel):
                 self.last_input_token_count = input_tokens
                 self.last_output_token_count = output_tokens
             else:
-                self.last_input_token_count = 0
-                self.last_output_token_count = 0
+                input_text = ""
+                for msg in normalized_messages:
+                    if hasattr(msg, 'content'):
+                        content = msg.content
+                        if isinstance(content, str):
+                            input_text += content
+                        elif isinstance(content, list):
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    input_text += part.get("text", "")
+                input_tokens = estimate_tokens_text(input_text)
+                output_tokens = estimate_tokens_text(model_output)
+                self.last_input_token_count = input_tokens
+                self.last_output_token_count = output_tokens
+                logger.debug(
+                    f"Token usage not returned by API, using estimation: "
+                    f"input_tokens={input_tokens}, output_tokens={output_tokens}"
+                )
 
             # Record completion metrics
             if token_tracker:
@@ -165,6 +296,7 @@ class OpenAIModel(OpenAIServerModel):
 
             if token_tracker:
                 total_duration = time.time() - stream_start_time
+                self._monitoring.set_openinference_output(model_output)
                 self._monitoring.add_span_event("completion_finished", {
                     "total_duration": total_duration,
                     "output_length": len(model_output),
@@ -175,6 +307,13 @@ class OpenAIModel(OpenAIServerModel):
                 ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
                                       content=model_output).model_dump(include={"role", "content", "tool_calls"}))
 
+            from smolagents.monitoring import TokenUsage
+
+            if input_tokens > 0 or output_tokens > 0:
+                message.token_usage = TokenUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens
+                )
             message.raw = current_request
             message.role = MessageRole.ASSISTANT
             return message

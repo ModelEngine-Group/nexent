@@ -7,6 +7,8 @@ export const MODEL_TYPES = {
   STT: "stt",
   TTS: "tts",
   VLM: "vlm",
+  VLM2: "vlm2",
+  VLM3: "vlm3",
 } as const;
 
 // Model source constants
@@ -18,6 +20,7 @@ export const MODEL_SOURCES = {
   CUSTOM: "custom",
   DASHSCOPE: "dashscope",
   TOKENPONY: "tokenpony",
+  VOLCENGINE: "volcengine",
 } as const;
 
 // Model status constants
@@ -44,6 +47,7 @@ export const MODEL_PROVIDER_KEYS = [
   "aliyuncs",
   "tokenpony",
   "dashscope",
+  "volcengine"
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -58,6 +62,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   aliyuncs: "aliyuncs",
   tokenpony: "tokenpony",
   dashscope: "dashscope",
+  volcengine:"bytedance"
 };
 
 // Icon filenames for providers
@@ -70,6 +75,7 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   aliyuncs: "/aliyuncs.png",
   dashscope:"/aliyuncs.png",
   tokenpony: "/tokenpony.png",
+  volcengine: "/volcengine.png"
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
@@ -86,7 +92,8 @@ export const PROVIDER_LINKS: Record<string, string> = {
   jina: "https://jina.ai/",
   baai: "https://www.baai.ac.cn/",
   dashscope: "https://dashscope.aliyun.com/",
-  tokenpony: "https://www.tokenpony.cn/"
+  tokenpony: "https://www.tokenpony.cn/",
+  volcengine:"https://www.volcengine.com/"
 };
 
 // User role constants
@@ -96,6 +103,7 @@ export const USER_ROLES = {
   ADMIN: "ADMIN",
   DEV: "DEV",
   USER: "USER",
+  ASSET_OWNER: "ASSET_OWNER",
 } as const;
 
 // Memory tab key constants

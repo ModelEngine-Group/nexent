@@ -89,6 +89,9 @@ class MinioClient:
         if MinioClient._initialized:
             return
         MinioClient._initialized = True
+        # Explicitly initialize attributes so external callers never hit missing-attribute errors.
+        self._storage_client = None
+        self.storage_config = None
 
     def _ensure_initialized(self):
         """Lazily initialize the storage client on first use."""
@@ -107,6 +110,23 @@ class MinioClient:
                 self.storage_config)
             return True
         return False
+
+    @property
+    def default_bucket(self) -> Optional[str]:
+        """
+        Resolve default bucket safely for callers that need bucket info.
+        Falls back to configured constant when lazy init has not run yet.
+        """
+        try:
+            self._ensure_initialized()
+        except Exception:
+            # Keep this accessor resilient; operational methods can still raise
+            # detailed storage errors when invoked.
+            pass
+
+        if getattr(self, "storage_config", None) is not None:
+            return self.storage_config.default_bucket
+        return MINIO_DEFAULT_BUCKET
 
     def upload_file(
             self,
@@ -158,14 +178,14 @@ class MinioClient:
         self._ensure_initialized()
         return self._storage_client.download_file(object_name, file_path, bucket)
 
-    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Tuple[bool, str]:
+    def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Tuple[bool, str]:
         """
         Get presigned URL for file
 
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
-            expires: URL expiration time in seconds
+            expires: URL expiration time in seconds (default 86400 = 24 hours)
 
         Returns:
             Tuple[bool, str]: (Success status, Presigned URL or error message)
@@ -330,3 +350,51 @@ def filter_property(data, model_class):
     """
     model_fields = model_class.__table__.columns.keys()
     return {key: value for key, value in data.items() if key in model_fields}
+
+
+# ---------------------------------------------------------------------------
+# Monitoring-specific, isolated engine and session management
+# ---------------------------------------------------------------------------
+# Internal engine and session maker for monitoring data, isolated from main pool
+_monitoring_engine = None
+_monitoring_session_maker = None
+
+
+def _get_monitoring_engine():
+    global _monitoring_engine, _monitoring_session_maker
+    if _monitoring_engine is None:
+        _monitoring_engine = create_engine(
+            "postgresql://",
+            connect_args={
+                "host": POSTGRES_HOST,
+                "user": POSTGRES_USER,
+                "password": NEXENT_POSTGRES_PASSWORD,
+                "database": POSTGRES_DB,
+                "port": POSTGRES_PORT,
+                "client_encoding": "utf8",
+            },
+            echo=False,
+            pool_size=3,
+            pool_pre_ping=True,
+            pool_timeout=30,
+        )
+        _monitoring_session_maker = sessionmaker(bind=_monitoring_engine)
+    return _monitoring_engine
+
+
+@contextmanager
+def get_monitoring_db_session(db_session=None):
+    _get_monitoring_engine()
+    session = _monitoring_session_maker() if db_session is None else db_session
+    try:
+        yield session
+        if db_session is None:
+            session.commit()
+    except Exception as e:
+        if db_session is None:
+            session.rollback()
+        logger.error(f"Monitoring database operation failed: {str(e)}")
+        raise
+    finally:
+        if db_session is None:
+            session.close()

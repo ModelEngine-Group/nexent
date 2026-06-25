@@ -20,7 +20,8 @@ export type ModelSource =
   | "dashscope"
   | "tokenpony"
   | "OpenAI-API-Compatible"
-  | "modelengine";
+  | "modelengine"
+  | "volcengine";
 
 // Model type
 export type ModelType =
@@ -30,6 +31,8 @@ export type ModelType =
   | "stt"
   | "tts"
   | "vlm"
+  | "vlm2"
+  | "vlm3"
   | "multi_embedding";
 
 // Model option interface
@@ -46,6 +49,12 @@ export interface ModelOption {
   expectedChunkSize?: number;
   maximumChunkSize?: number;
   chunkingBatchSize?: number;
+  // STT/TTS specific fields
+  modelFactory?: string;
+  modelAppid?: string;
+  accessToken?: string;
+  timeoutSeconds?: number;
+  concurrencyLimit?: number;
 }
 
 // Application configuration interface
@@ -66,8 +75,23 @@ export interface ModelApiConfig {
   modelUrl: string;
 }
 
+// STT model specific configuration interface
+export interface STTModelConfig extends SingleModelConfig {
+  modelFactory?: string; // Model factory (e.g., "volcengine", "dashscope")
+  modelAppid?: string;   // App ID for Volcano STT
+  accessToken?: string;  // Access token for Volcano STT
+}
+
+// TTS model specific configuration interface
+export interface TTSModelConfig extends SingleModelConfig {
+  modelFactory?: string; // Model factory (e.g., "volcengine", "dashscope")
+  modelAppid?: string;   // App ID for Volcano TTS
+  accessToken?: string;  // Access token for Volcano TTS
+}
+
 // Single model configuration interface
 export interface SingleModelConfig {
+  id?: number;
   modelName: string;
   displayName: string;
   apiConfig: ModelApiConfig;
@@ -81,8 +105,10 @@ export interface ModelConfig {
   multiEmbedding: SingleModelConfig;
   rerank: SingleModelConfig;
   vlm: SingleModelConfig;
-  stt: SingleModelConfig;
-  tts: SingleModelConfig;
+  vlm2: SingleModelConfig;
+  vlm3: SingleModelConfig;
+  stt: STTModelConfig;
+  tts: TTSModelConfig;
 }
 
 // Global configuration interface

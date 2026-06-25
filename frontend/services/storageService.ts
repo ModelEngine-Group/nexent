@@ -1,5 +1,6 @@
 import { API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
+import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
 
 import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
@@ -104,13 +105,19 @@ export function extractObjectNameFromUrl(url: string): string | null {
  * @returns Backend API URL for the image
  */
 export function convertImageUrlToApiUrl(url: string): string {
-  // If URL is an external http/https URL (not backend API), use proxy to avoid CORS and 403 errors
+  const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
+
+  // For localhost URLs in development, return original URL directly to avoid proxy issues
+  if (isHttpUrl && /localhost|127\.0\.0\.1/i.test(url)) {
+    return url;
+  }
+
+  // For external http/https URLs, use proxy to avoid CORS issues
   if (
-    (url.startsWith("http://") || url.startsWith("https://")) &&
+    isHttpUrl &&
     !url.includes("/api/file/download/") &&
     !url.includes("/api/image")
   ) {
-    // Use backend proxy to fetch external images (avoids CORS and hotlink protection)
     return API_ENDPOINTS.proxy.image(url);
   }
 
@@ -122,19 +129,6 @@ export function convertImageUrlToApiUrl(url: string): string {
   // Fallback to original URL if extraction fails
   return url;
 }
-
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
-};
 
 const fetchBase64ViaStorage = async (objectName: string) => {
   const response = await fetch(

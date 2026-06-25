@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import types
 import pytest
 from unittest.mock import patch, MagicMock
 from contextlib import contextmanager
@@ -18,9 +19,46 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
+consts_mock.const.ASSET_OWNER_ROLE = "ASSET_OWNER"
+consts_mock.const.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+consts_mock.const.ENABLE_ASSET_OWNER_ROLE = False
+consts_mock.const.PERMISSION_EDIT = "EDIT"
+consts_mock.const.PERMISSION_READ = "READ_ONLY"
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+
+consts_exceptions_mod = types.ModuleType("consts.exceptions")
+
+
+class ValidationError(Exception):
+    pass
+
+
+consts_exceptions_mod.ValidationError = ValidationError
+sys.modules['consts.exceptions'] = consts_exceptions_mod
+
+# Mock consts.agent_unavailable_reasons
+agent_unavailable_reasons_mock = MagicMock()
+agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableReason', (), {
+    'DUPLICATE_NAME': 'duplicate_name',
+    'DUPLICATE_DISPLAY_NAME': 'duplicate_display_name',
+    'MODEL_NOT_CONFIGURED': 'model_not_configured',
+    'MODEL_UNAVAILABLE': 'model_unavailable',
+    'TOOL_UNAVAILABLE': 'tool_unavailable',
+    'ALL_TOOLS_DISABLED': 'all_tools_disabled',
+    'AGENT_NOT_FOUND': 'agent_not_found',
+    'all_reasons': classmethod(lambda cls: [
+        'duplicate_name', 'duplicate_display_name', 'model_not_configured',
+        'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
+    ]),
+    'is_valid_reason': classmethod(lambda cls, reason: reason in [
+        'duplicate_name', 'duplicate_display_name', 'model_not_configured',
+        'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
+    ]),
+})()
+sys.modules['consts.agent_unavailable_reasons'] = agent_unavailable_reasons_mock
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -185,8 +223,13 @@ def mock_tools_draft():
 
 
 @pytest.fixture
-def mock_relations_draft():
+def mock_relations_draft(monkeypatch):
     """Mock relations draft data"""
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=1),
+    )
     return [
         {
             "id": 1,
@@ -258,7 +301,32 @@ def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_
     mock_insert_agent.assert_called_once()
     assert mock_insert_tool.call_count == 2
     assert mock_insert_relation.call_count == 1
+    relation_snapshot = mock_insert_relation.call_args[0][0]
+    assert relation_snapshot["selected_agent_version_no"] == 1
     assert mock_insert_skill.call_count == 1
+
+
+def test_publish_version_impl_unpublished_sub_agent(
+    monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft
+):
+    """Test publishing fails when a sub-agent has no published version"""
+    mock_query_draft = MagicMock(
+        return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", MagicMock(return_value=1))
+
+    with pytest.raises(ValueError, match="Sub-agent 2 has no published version"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+        )
 
 
 def test_publish_version_impl_no_draft(monkeypatch):
@@ -599,10 +667,53 @@ def test_rollback_version_impl_success(monkeypatch):
         "version_no": 1,
         "version_name": "v1.0",
     }
+
+    # Assign the mock to a variable
     mock_search = MagicMock(return_value=mock_version)
-    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
-    mock_update_current = MagicMock(return_value=1)
-    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "search_version_by_version_no",
+        mock_search
+    )
+
+    # Assign the mock to a variable
+    mock_query_snapshot = MagicMock(return_value=(
+        {"agent_id": 1, "name": "Test Agent"},
+        [],
+        [],
+    ))
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_snapshot",
+        mock_query_snapshot
+    )
+
+    # Mock query_agent_draft - THIS WAS MISSING
+    mock_query_draft = MagicMock(return_value=(
+        {"agent_id": 1, "version_no": 0, "name": "Test Agent Draft"},
+        [],
+        [],
+    ))
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_draft",
+        mock_query_draft
+    )
+
+    # mock restore
+    mock_restore = MagicMock()
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "restore_agent_draft",
+        mock_restore
+    )
+
+    # mock skills
+    monkeypatch.setattr(
+        skill_db_mock,
+        "query_skill_instances_by_agent_id",
+        MagicMock(return_value=[])
+    )
 
     result = rollback_version_impl(
         agent_id=1,
@@ -611,9 +722,14 @@ def test_rollback_version_impl_success(monkeypatch):
     )
 
     assert result["version_no"] == 1
+    assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
-    mock_update_current.assert_called_once()
-
+    
+    mock_search.assert_called_once_with(1, "tenant1", 1)
+    mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
+    mock_query_draft.assert_called_once_with(1, "tenant1")  # Verify it was called
+    mock_restore.assert_called_once()
+    
 
 def test_rollback_version_impl_version_not_found(monkeypatch):
     """Test rolling back when version doesn't exist"""
@@ -628,14 +744,47 @@ def test_rollback_version_impl_version_not_found(monkeypatch):
         )
 
 
+def test_rollback_version_impl_snapshot_not_found(monkeypatch):
+
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "search_version_by_version_no",
+        MagicMock(return_value={"version_no": 1})
+    )
+
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_snapshot",
+        MagicMock(return_value=(None, [], []))
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Agent snapshot for version 1 not found"
+    ):
+        rollback_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            target_version_no=1,
+        )
+        
+        
 def test_rollback_version_impl_draft_not_found(monkeypatch):
     """Test rolling back when draft doesn't exist"""
     mock_version = {"version_no": 1}
     mock_search = MagicMock(return_value=mock_version)
     monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
-    mock_update_current = MagicMock(return_value=0)
-    monkeypatch.setattr(agent_version_service_module, "update_agent_current_version", mock_update_current)
-
+    mock_query_snapshot = MagicMock(
+        return_value=(
+            {"agent_id": 1, "version_no": 1, "name": "Test Agent"},
+            [],
+            [],
+        )
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+    mock_query_draft = MagicMock(return_value=(None, [], []))
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft) 
+    
     with pytest.raises(ValueError, match="Agent draft not found"):
         rollback_version_impl(
             agent_id=1,
@@ -1120,7 +1269,7 @@ def test_check_version_snapshot_availability_model_id_zero():
 
 
 def test_check_version_snapshot_availability_no_tools():
-    """Test checking availability when no tools exist"""
+    """Test checking availability when no tools exist (should be available)"""
     agent_info = {"model_id": 1}
 
     is_available, reasons = _check_version_snapshot_availability(
@@ -1130,8 +1279,9 @@ def test_check_version_snapshot_availability_no_tools():
         tool_instances=[],
     )
 
-    assert is_available is False
-    assert "no_tools" in reasons
+    # Having no tools configured is valid - availability should not be affected
+    assert is_available is True
+    assert "no_tools" not in reasons
 
 
 def test_check_version_snapshot_availability_all_tools_disabled():
@@ -1181,6 +1331,7 @@ def test_get_version_detail_or_draft_draft_version(monkeypatch):
     assert result["version"]["version_status"] == "DRAFT"
     assert len(result["tools"]) == 1
     assert result["sub_agent_id_list"] == [2]
+    assert result["sub_agent_relations"] == [{"agent_id": 2, "version_no": None}]
     assert len(result["skills"]) == 1
 
 
@@ -1384,7 +1535,7 @@ def test_list_published_agents_impl_success(monkeypatch):
         return_value=(True, [])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(
+    agent_service_mock.get_model_by_model_id = MagicMock(
         return_value={"display_name": "Test Model", "model_name": "test_model"}
     )
 
@@ -1448,7 +1599,7 @@ def test_list_published_agents_impl_no_group_overlap(monkeypatch):
                 "enabled": True,
                 "current_version_no": 1,
                 "group_ids": "5,6",  # Different groups
-                "created_by": "user1",
+                "created_by": "user2",  # Different creator to test group filtering
                 "name": "Test Agent",
             }
         ]
@@ -1458,6 +1609,11 @@ def test_list_published_agents_impl_no_group_overlap(monkeypatch):
         return_value={"user_role": "USER"}  # Not ADMIN
     )
     agent_service_mock.query_group_ids_by_user = MagicMock(return_value=[1, 2])  # Different groups
+
+    # Mock query_agent_snapshot - though it should not be called since agent is filtered by groups
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({}, [], [])
+    )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
@@ -1532,15 +1688,15 @@ def test_list_published_agents_impl_user_with_groups(monkeypatch):
         return_value=(True, [])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(
+    agent_service_mock.get_model_by_model_id = MagicMock(
         return_value={"display_name": "Test Model", "model_name": "test_model"}
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
     assert len(result) == 1
-    # User should have READ permission (not EDIT)
-    assert result[0]["permission"] == "READ"
+    # User should have READ_ONLY permission (not EDIT)
+    assert result[0]["permission"] == "READ_ONLY"
 
 
 def test_list_published_agents_impl_model_cache(monkeypatch):
@@ -1582,7 +1738,7 @@ def test_list_published_agents_impl_model_cache(monkeypatch):
         return_value=(True, [])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(
+    agent_service_mock.get_model_by_model_id = MagicMock(
         return_value={"display_name": "Test Model", "model_name": "test_model"}
     )
 
@@ -1603,7 +1759,7 @@ def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
                 "enabled": True,
                 "current_version_no": 1,
                 "group_ids": "",  # Empty group_ids - will be filtered by intersection check
-                "created_by": "user1",
+                "created_by": "user2",  # Different creator to test group filtering
                 "name": "Test Agent",
             }
         ]
@@ -1615,6 +1771,11 @@ def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
     # query_group_ids_by_user raises exception - triggers line 724-728
     agent_service_mock.query_group_ids_by_user = MagicMock(
         side_effect=RuntimeError("Database error")
+    )
+
+    # Mock query_agent_snapshot - though it should not be called since agent is filtered by groups
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({}, [], [])
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
@@ -1658,7 +1819,7 @@ def test_list_published_agents_impl_is_available_false(monkeypatch):
         return_value=(False, ["model_not_configured"])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(return_value=None)
+    agent_service_mock.get_model_by_model_id = MagicMock(return_value=None)
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
@@ -1667,8 +1828,7 @@ def test_list_published_agents_impl_is_available_false(monkeypatch):
     assert "model_not_configured" in result[0]["unavailable_reasons"]
 
 
-@pytest.mark.asyncio
-async def test_list_published_agents_impl_exception_handling(monkeypatch):
+def test_list_published_agents_impl_exception_handling(monkeypatch):
     """Test exception handling in list_published_agents_impl"""
     # Mock query_all_agent_info_by_tenant_id to raise an exception
     test_exception = RuntimeError("Database connection failed")
@@ -1683,7 +1843,7 @@ async def test_list_published_agents_impl_exception_handling(monkeypatch):
 
     # Verify that the exception is caught and re-raised as ValueError
     with pytest.raises(ValueError, match="Failed to list published agents: Database connection failed"):
-        await list_published_agents_impl(tenant_id="tenant1", user_id="user1")
+        asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
 
 def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):

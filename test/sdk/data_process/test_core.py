@@ -1,8 +1,37 @@
 import pytest
 from pytest_mock import MockFixture
 from unittest.mock import Mock, MagicMock
+from io import BytesIO
+import sys
+import types
+
+
+fake_unstructured = types.ModuleType("unstructured_inference")
+fake_models = types.ModuleType("unstructured_inference.models")
+fake_tables = types.ModuleType("unstructured_inference.models.tables")
+fake_tables.tables_agent = types.SimpleNamespace(model=None)
+fake_logger = types.ModuleType("unstructured_inference.logger")
+fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
+fake_models.tables = fake_tables
+fake_unstructured.models = fake_models
+sys.modules.setdefault("unstructured_inference", fake_unstructured)
+sys.modules.setdefault("unstructured_inference.models", fake_models)
+sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
+sys.modules.setdefault("unstructured_inference.logger", fake_logger)
 
 from sdk.nexent.data_process.core import DataProcessCore
+
+
+def _unpack_chunks(result):
+    if isinstance(result, tuple):
+        return result[0]
+    return result
+
+
+def _unpack_images(result):
+    if isinstance(result, tuple):
+        return result[1]
+    return []
 
 
 class TestDataProcessCore:
@@ -18,7 +47,8 @@ class TestDataProcessCore:
         assert core is not None
         assert "Unstructured" in core.processors
         assert "OpenPyxl" in core.processors
-        assert len(core.processors) == 2
+        assert "UniversalImageExtractor" in core.processors
+        assert len(core.processors) == 4
 
     def test_file_process_with_excel_file(self, core, mocker: MockFixture):
         """Test file processing with Excel file"""
@@ -29,6 +59,9 @@ class TestDataProcessCore:
                 "metadata": {"chunk_index": 0}}
         ]
         core.processors["OpenPyxl"] = mock_processor
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[])
+        )
 
         file_data = b"fake excel data"
         filename = "test.xlsx"
@@ -36,8 +69,9 @@ class TestDataProcessCore:
         result = core.file_process(
             file_data, filename, chunking_strategy="basic")
 
-        assert len(result) == 1
-        assert result[0]["content"] == "test content"
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "test content"
         mock_processor.process_file.assert_called_once_with(
             file_data, "basic", filename=filename
         )
@@ -57,8 +91,9 @@ class TestDataProcessCore:
         result = core.file_process(
             file_data, filename, chunking_strategy="by_title")
 
-        assert len(result) == 1
-        assert result[0]["content"] == "pdf content"
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "pdf content"
         mock_processor.process_file.assert_called_once_with(
             file_data, "by_title", filename=filename
         )
@@ -68,6 +103,9 @@ class TestDataProcessCore:
         mock_processor = Mock()
         mock_processor.process_file.return_value = [{"content": "test"}]
         core.processors["Unstructured"] = mock_processor
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[])
+        )
 
         file_data = b"data"
         filename = "test.xlsx"
@@ -77,7 +115,8 @@ class TestDataProcessCore:
             file_data, filename, chunking_strategy="basic", processor="Unstructured"
         )
 
-        assert len(result) == 1
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
         mock_processor.process_file.assert_called_once()
 
     def test_file_process_with_additional_params(self, core, mocker: MockFixture):
@@ -94,7 +133,8 @@ class TestDataProcessCore:
             file_data, filename, chunking_strategy="basic", **additional_params
         )
 
-        assert len(result) == 1
+        chunks = _unpack_chunks(result)
+        assert len(chunks) == 1
         mock_processor.process_file.assert_called_once_with(
             file_data, "basic", filename=filename, max_characters=2000, strategy="fast"
         )
@@ -152,7 +192,7 @@ class TestDataProcessCore:
 
     @pytest.mark.parametrize(
         "processor",
-        ["Unstructured", "OpenPyxl"]
+        ["Unstructured", "OpenPyxl", "UniversalImageExtractor"]
     )
     def test_validate_parameters_valid_processors(self, core, processor):
         """Test parameter validation with valid processors"""
@@ -170,21 +210,24 @@ class TestDataProcessCore:
             core._validate_parameters("basic", "InvalidProcessor")
 
     @pytest.mark.parametrize(
-        "filename,expected_processor",
+        "filename,expected_processor,expected_extractor",
         [
-            ("test.xlsx", "OpenPyxl"),
-            ("test.xls", "OpenPyxl"),
-            ("test.XLSX", "OpenPyxl"),
-            ("test.pdf", "Unstructured"),
-            ("test.docx", "Unstructured"),
-            ("test.txt", "Unstructured"),
-            ("test.html", "Unstructured"),
+            ("test.xlsx", "OpenPyxl", "UniversalImageExtractor"),
+            ("test.xls", "OpenPyxl", "UniversalImageExtractor"),
+            ("test.XLSX", "OpenPyxl", "UniversalImageExtractor"),
+            ("test.pdf", "Unstructured", "UniversalImageExtractor"),
+            ("test.docx", "Unstructured", "UniversalImageExtractor"),
+            ("test.pptx", "Unstructured", None),
+            ("test.txt", "Unstructured", None),
+            ("test.html", "Unstructured", None),
         ]
     )
-    def test_select_processor_by_filename(self, core, filename, expected_processor):
+    def test_select_processor_by_filename(self, core, filename, expected_processor, expected_extractor):
         """Test processor selection based on filename"""
-        result = core._select_processor_by_filename(filename)
-        assert result == expected_processor
+        params = {"model_type": "multi_embedding"} if expected_extractor else {}
+        processor_name, extractor = core._select_processor_by_filename(filename, params)
+        assert processor_name == expected_processor
+        assert extractor == expected_extractor
 
     def test_get_supported_file_types(self, core):
         """Test getting supported file types"""
@@ -240,7 +283,8 @@ class TestDataProcessCore:
 
         assert "Unstructured" in result
         assert "OpenPyxl" in result
-        assert len(result) == 2
+        assert "UniversalImageExtractor" in result
+        assert len(result) == 3
 
     @pytest.mark.parametrize(
         "filename,expected",
@@ -310,3 +354,88 @@ class TestDataProcessCore:
 
         assert result["processor_type"] == "excel"
         assert result["file_extension"] == ".xlsx"
+
+    def test_file_process_returns_images_when_extractor_available(self, core, mocker: MockFixture):
+        """Test image extraction is returned for supported file types."""
+        mock_processor = Mock()
+        mock_processor.process_file.return_value = [{"content": "test"}]
+        mock_extractor = Mock()
+        mock_extractor.process_file.return_value = [
+            {"image_bytes": b"img", "image_format": "png", "position": {"page_number": 1}}
+        ]
+        core.processors["Unstructured"] = mock_processor
+        core.processors["UniversalImageExtractor"] = mock_extractor
+
+        result = core.file_process(
+            b"data", "sample.pdf", chunking_strategy="basic", model_type="multi_embedding"
+        )
+
+        chunks = _unpack_chunks(result)
+        images = _unpack_images(result)
+        assert len(chunks) == 1
+        assert len(images) == 1
+        mock_extractor.process_file.assert_called_once()
+
+    def test_file_process_with_explicit_processor_still_extracts_images(self, core):
+        """Test explicit processor still triggers image extraction."""
+        core.processors["Unstructured"] = Mock(process_file=Mock(return_value=[{"content": "ok"}]))
+        core.processors["UniversalImageExtractor"] = Mock(
+            process_file=Mock(return_value=[{"image_bytes": b"x", "image_format": "png", "position": {}}])
+        )
+
+        result = core.file_process(
+            b"data",
+            "report.pdf",
+            chunking_strategy="basic",
+            processor="Unstructured",
+            model_type="multi_embedding",
+        )
+
+        chunks = _unpack_chunks(result)
+        images = _unpack_images(result)
+        assert len(chunks) == 1
+        assert len(images) == 1
+    def test_file_split_unsupported_extension_returns_original_bytes(self, core):
+        """Unsupported extensions should bypass splitting and return original bytes."""
+        data = b"raw-bytes"
+        parts = core.file_split(data, "archive.bin")
+        assert len(parts) == 1
+        assert isinstance(parts[0], BytesIO)
+        assert parts[0].getvalue() == data
+
+    def test_file_split_uses_splitter_with_default_max_size(self, core):
+        """file_split should call FileSplitter with default max_size when omitted."""
+        splitter = Mock()
+        splitter.file_process.return_value = [BytesIO(b"p1"), BytesIO(b"p2")]
+        core.processors["FileSplitter"] = splitter
+
+        parts = core.file_split(b"csv-data", "data.csv")
+
+        assert len(parts) == 2
+        splitter.file_process.assert_called_once_with(
+            b"csv-data", "data.csv", max_size=5 * 1024 * 1024
+        )
+
+    def test_file_split_invalid_split_result_falls_back(self, core):
+        """Non-BytesIO split result should gracefully fall back to original bytes."""
+        splitter = Mock()
+        splitter.file_process.return_value = ["not-bytesio"]
+        core.processors["FileSplitter"] = splitter
+
+        data = b"hello"
+        parts = core.file_split(data, "data.txt", max_size=10)
+
+        assert len(parts) == 1
+        assert parts[0].getvalue() == data
+
+    def test_file_split_splitter_exception_falls_back(self, core):
+        """Exceptions from splitter should gracefully fall back to original bytes."""
+        splitter = Mock()
+        splitter.file_process.side_effect = RuntimeError("split failed")
+        core.processors["FileSplitter"] = splitter
+
+        data = b"hello"
+        parts = core.file_split(data, "data.txt", max_size=10)
+
+        assert len(parts) == 1
+        assert parts[0].getvalue() == data

@@ -16,7 +16,25 @@ class FakeRay:
     def init(self, **kwargs):
         self._initialized = True
         self.inits.append(kwargs)
-
+        
+    def remote(self, *args, **kwargs):
+        """Mock ray.remote decorator"""
+        def decorator(cls_or_func):
+            if hasattr(cls_or_func, '__init__'):
+                def options(**opts):
+                    return cls_or_func
+                cls_or_func.options = options
+            return cls_or_func
+        
+        if args and callable(args[0]) and not kwargs:
+            return decorator(args[0])
+        return decorator
+    
+    def __getattr__(self, name):
+        """Handle any other ray attribute access with a mock"""
+        def mock_method(*args, **kwargs):
+            return None
+        return mock_method
 
 def setup_mocks_for_worker(mocker, initialized=False):
     """Setup all necessary mocks before importing worker module"""
@@ -34,7 +52,7 @@ def setup_mocks_for_worker(mocker, initialized=False):
         const_mod.CELERY_TASK_TIME_LIMIT = 3600
         const_mod.CELERY_WORKER_PREFETCH_MULTIPLIER = 1
         const_mod.ELASTICSEARCH_SERVICE = "http://elasticsearch:9200"
-        const_mod.QUEUES = "process_q,forward_q"
+        const_mod.QUEUES = "process_q,process_part_q,forward_q"
         const_mod.RAY_ADDRESS = "auto"
         const_mod.RAY_preallocate_plasma = False
         const_mod.REDIS_URL = "redis://localhost:6379"
@@ -46,6 +64,16 @@ def setup_mocks_for_worker(mocker, initialized=False):
         const_mod.DISABLE_RAY_DASHBOARD = False
         const_mod.DATA_PROCESS_SERVICE = "http://data-process"
         const_mod.ROOT_DIR = "/mock/root"
+        const_mod.DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = 30
+        const_mod.DP_REDIS_CHUNKS_POLL_INTERVAL_MS = 100
+        const_mod.RAY_ACTOR_NUM_CPUS = 1
+        const_mod.RAY_NUM_CPUS = 4
+        const_mod.PER_WAVE_TIMEOUT = 300
+        const_mod.MAX_TIMEOUT = 3600
+        const_mod.RAY_GLOBAL_ACTOR_POOL_SIZE = 10
+        const_mod.RAY_ACTOR_WARM_TIMEOUT_S = 60
+        const_mod.RAY_GLOBAL_ACTOR_POOL_NAME = "global_actor_pool"
+        const_mod.RAY_GLOBAL_ACTOR_POOL_NAMESPACE = "nexent"
         sys.modules["consts.const"] = const_mod
     
     # Stub celery module and submodules (required by tasks.py imported via __init__.py)
@@ -61,8 +89,20 @@ def setup_mocks_for_worker(mocker, initialized=False):
     
     if "celery.result" not in sys.modules:
         result_mod = types.ModuleType("celery.result")
-        result_mod.AsyncResult = type("AsyncResult", (), {})
-        sys.modules["celery.result"] = result_mod
+    else:
+        result_mod = sys.modules["celery.result"]
+    result_mod.AsyncResult = type("AsyncResult", (), {})
+    # Simple mock that can be used as a decorator/context manager
+    class MockAllowJoinResult:
+        def __call__(self, *args, **kwargs):
+            return self
+        def __enter__(self):
+            return None
+        def __exit__(self, *args):
+            pass
+    
+    result_mod.allow_join_result = MockAllowJoinResult()
+    sys.modules["celery.result"] = result_mod
     
     if "celery.signals" not in sys.modules:
         signals_mod = types.ModuleType("celery.signals")
@@ -113,6 +153,8 @@ def setup_mocks_for_worker(mocker, initialized=False):
             RETRY="RETRY",
             REVOKED="REVOKED"
         )
+        celery_mod.group = lambda *args, **kwargs: None
+        celery_mod.chord = lambda *args, **kwargs: None
         sys.modules["celery"] = celery_mod
     
     # Stub consts.model (required by utils.file_management_utils)
@@ -135,6 +177,7 @@ def setup_mocks_for_worker(mocker, initialized=False):
     if "database.attachment_db" not in sys.modules:
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
+            get_file_stream=lambda object_name, bucket=None: None,
         )
         setattr(sys.modules["database"], "attachment_db", sys.modules["database.attachment_db"])
     if "database.model_management_db" not in sys.modules:
@@ -142,7 +185,12 @@ def setup_mocks_for_worker(mocker, initialized=False):
             get_model_by_model_id=lambda model_id, tenant_id=None: None
         )
         setattr(sys.modules["database"], "model_management_db", sys.modules["database.model_management_db"])
-    
+    if "database.knowledge_db" not in sys.modules:
+        sys.modules["database.knowledge_db"] = types.SimpleNamespace(
+            get_knowledge_record=lambda query=None: {},
+        )
+        setattr(sys.modules["database"], "knowledge_db", sys.modules["database.knowledge_db"])
+
     # Stub utils modules (required by utils.file_management_utils)
     if "utils.auth_utils" not in sys.modules:
         sys.modules["utils.auth_utils"] = types.SimpleNamespace(
@@ -170,6 +218,19 @@ def setup_mocks_for_worker(mocker, initialized=False):
         sys.modules["httpx"] = types.SimpleNamespace()
     if "requests" not in sys.modules:
         sys.modules["requests"] = types.SimpleNamespace()
+    if "redis" not in sys.modules:
+        sys.modules["redis"] = types.SimpleNamespace(
+            Redis=types.SimpleNamespace(
+                from_url=lambda *args, **kwargs: types.SimpleNamespace(
+                    get=lambda *a, **k: None,
+                    set=lambda *a, **k: True,
+                    expire=lambda *a, **k: True,
+                    delete=lambda *a, **k: True,
+                    ping=lambda: True,
+                )
+            ),
+            from_url=lambda *args, **kwargs: types.SimpleNamespace(ping=lambda: True),
+        )
     if "fastapi" not in sys.modules:
         fastapi_mod = types.ModuleType("fastapi")
         fastapi_mod.UploadFile = type("UploadFile", (), {})
@@ -180,7 +241,27 @@ def setup_mocks_for_worker(mocker, initialized=False):
         file_utils_mod = types.ModuleType("utils.file_management_utils")
         file_utils_mod.get_file_size = lambda *args, **kwargs: 0
         sys.modules["utils.file_management_utils"] = file_utils_mod
-    
+
+    # Stub services.redis_service (required by tasks.py via package __init__)
+    if "services.redis_service" not in sys.modules:
+        redis_service_mod = types.ModuleType("services.redis_service")
+
+        class _StubRedisService:
+            def save_error_info(self, *args, **kwargs):
+                return True
+
+            def is_task_cancelled(self, *args, **kwargs):
+                return False
+
+            def save_progress_info(self, *args, **kwargs):
+                return True
+
+            def increment_progress_info(self, *args, **kwargs):
+                return True
+
+        redis_service_mod.get_redis_service = lambda: _StubRedisService()
+        sys.modules["services.redis_service"] = redis_service_mod
+
     # Stub ray_actors (required by tasks.py)
     if "backend.data_process.ray_actors" not in sys.modules:
         ray_actors_mod = types.ModuleType("backend.data_process.ray_actors")
@@ -365,8 +446,8 @@ def test_start_worker_with_defaults(mocker):
     assert len(call_args) == 1
     args = call_args[0]
     assert 'worker' in args
-    assert '--queues=process_q,forward_q' in args
-    assert '--hostname=worker-12345@%h' in args
+    assert '--queues=process_q,process_part_q,forward_q' in args
+    assert '--hostname=None@%h' in args
     assert '--concurrency=4' in args
 
 
@@ -666,3 +747,33 @@ def test_task_failure_handler(mocker):
     )
     
     assert worker_module.worker_state['tasks_failed'] == initial_failed + 1
+
+
+def test_worker_ready_handler_starts_background_threads(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+    mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
+
+    calls = []
+
+    class FakeThread:
+        def __init__(self, target=None, daemon=None):
+            calls.append((target, daemon))
+
+        def start(self):
+            return None
+
+    mocker.patch.object(worker_module.threading, "Thread", FakeThread)
+    worker_module.worker_ready_handler()
+    assert len(calls) >= 1
+
+
+def test_worker_ready_handler_thread_schedule_failure(mocker):
+    worker_module, _ = setup_mocks_for_worker(mocker)
+    worker_module.worker_state['start_time'] = 1000.0
+    mocker.patch("backend.data_process.worker.time.time", return_value=1001.0)
+    mocker.patch("backend.data_process.worker.os.getpid", return_value=7)
+    mocker.patch.object(worker_module.threading, "Thread", side_effect=RuntimeError("thread failed"))
+    worker_module.worker_ready_handler()
+    assert worker_module.worker_state["ready"] is True

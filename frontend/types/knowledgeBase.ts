@@ -9,8 +9,9 @@ import {
 
 // Knowledge base basic type
 export interface KnowledgeBase {
-  id: string;
-  name: string;
+  id: string; // Internal index_name
+  name: string; // User-facing knowledge_name
+  index_name?: string; // Internal index_name (same as id for nexent KBs), used for API calls
   display_name?: string; // User-friendly display name, falls back to name if not available
   description: string | null;
   chunkCount: number;
@@ -19,6 +20,7 @@ export interface KnowledgeBase {
   // Last update time of the knowledge base/index (may fall back to createdAt)
   updatedAt?: any;
   embeddingModel: string;
+  is_multimodal?: boolean;
   knowledge_sources?: string;
   ingroup_permission?: string;
   group_ids?: number[];
@@ -33,6 +35,9 @@ export interface KnowledgeBase {
   tokenNum: number;
   source: string;
   tenant_id?: string;
+  summaryFrequency?: string | null;
+  lastSummaryTime?: string | null;
+  preserve_source_file?: boolean;
 }
 
 // Create knowledge base parameter type
@@ -44,6 +49,8 @@ export interface KnowledgeBaseCreateParams {
   // Group permission and user groups for new knowledge bases
   ingroup_permission?: string;
   group_ids?: number[];
+  is_multimodal?: boolean;
+  preserve_source_file?: boolean;
 }
 
 // Document type
@@ -111,6 +118,7 @@ export interface KnowledgeBaseState {
   selectedIds: string[];
   activeKnowledgeBase: KnowledgeBase | null;
   currentEmbeddingModel: string | null;
+  currentMultiEmbeddingModel: string | null;
   isLoading: boolean;
   syncLoading: boolean;
   error: string | null;
@@ -141,6 +149,10 @@ export type KnowledgeBaseAction =
     }
   | {
       type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ADD_KNOWLEDGE_BASE;
+      payload: KnowledgeBase;
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE;
       payload: KnowledgeBase;
     }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.LOADING; payload: boolean }

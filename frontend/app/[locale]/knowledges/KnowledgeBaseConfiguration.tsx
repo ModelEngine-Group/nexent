@@ -7,10 +7,11 @@ import {
   useRef,
   useLayoutEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal, Row, Col, theme, Button, Input, Form } from "antd";
+import { App, Modal, Row, Col, theme, Button, Input } from "antd";
 import {
   ExclamationCircleFilled,
   WarningFilled,
@@ -45,6 +46,37 @@ import {
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
 
+const EMBEDDING_MODEL_OPTION_DELIMITER = "::";
+const normalizeEmbeddingModelType = (type: string) =>
+  (type || "").trim().toLowerCase();
+
+const toEmbeddingModelOptionValue = (displayName: string, type: string) =>
+  `${displayName}${EMBEDDING_MODEL_OPTION_DELIMITER}${type}`;
+
+const parseEmbeddingModelOptionValue = (value: string) => {
+  const normalizedValue = (value || "").trim();
+  const delimiterIndex = normalizedValue.lastIndexOf(
+    EMBEDDING_MODEL_OPTION_DELIMITER
+  );
+  if (delimiterIndex >= 0) {
+    const displayName = normalizedValue.slice(0, delimiterIndex);
+    const type = normalizedValue.slice(
+      delimiterIndex + EMBEDDING_MODEL_OPTION_DELIMITER.length
+    );
+    return {
+      displayName: displayName || "",
+      type: (type || "").trim(),
+      isMultimodal:
+        normalizeEmbeddingModelType(type || "") === "multi_embedding",
+    };
+  }
+  return {
+    displayName: normalizedValue || "",
+    type: "",
+    isMultimodal: false,
+  };
+};
+
 // EmptyState component defined directly in this file
 interface EmptyStateProps {
   icon?: React.ReactNode | string;
@@ -55,7 +87,7 @@ interface EmptyStateProps {
 }
 
 const EmptyState: React.FC<EmptyStateProps> = ({
-  icon = "📋",
+  icon = "馃搵",
   title,
   description,
   action,
@@ -125,12 +157,18 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
-  const { modelConfig, data: configData, invalidateConfig, config, updateConfig, saveConfig } = useConfig();
+  const {
+    modelConfig,
+    data: configData,
+    invalidateConfig,
+    config,
+    updateConfig,
+    saveConfig,
+  } = useConfig();
   const { token } = theme.useToken();
 
   // Get available embedding models for knowledge base creation
-  const { availableEmbeddingModels } = useModelList({ enabled: true });
-
+  const { models } = useModelList({ enabled: true });
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -146,7 +184,10 @@ function DataConfig({ isActive }: DataConfigProps) {
       setDataMateUrl("");
     }
 
-    if (configData?.app && typeof configData.app.modelEngineEnabled === "boolean") {
+    if (
+      configData?.app &&
+      typeof configData.app.modelEngineEnabled === "boolean"
+    ) {
       setModelEngineEnabled(configData.app.modelEngineEnabled);
     }
 
@@ -160,6 +201,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     createKnowledgeBase,
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
+    updateKnowledgeBase,
     hasKnowledgeBaseModelMismatch,
     refreshKnowledgeBaseData,
     refreshKnowledgeBaseDataWithDataMate,
@@ -182,8 +224,11 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
-  const [newKbIngroupPermission, setNewKbIngroupPermission] = useState<string>("READ_ONLY");
+  const [newKbIngroupPermission, setNewKbIngroupPermission] =
+    useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
+  const [newKbPreserveSourceFile, setNewKbPreserveSourceFile] =
+    useState<boolean>(true);
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
@@ -197,11 +242,65 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
-  // Open warning modal when single Embedding model is not configured (ignore multi-embedding)
+  const availableEmbeddingModels = useMemo(() => {
+    const embeddingRelatedModels = models.filter(
+      (model) => model.type === "embedding" || model.type === "multi_embedding"
+    );
+    const availableKeys = new Set(
+      embeddingRelatedModels
+        .filter((model) => model.connect_status === "available")
+        .map((model) => `${model.displayName}::${model.type}`)
+    );
+
+    return embeddingRelatedModels.filter((model) => {
+      if (model.connect_status === "available") {
+        return true;
+      }
+
+      // For paired records created from a multi-embedding model, mirror availability by display name.
+      if (model.type === "embedding") {
+        return availableKeys.has(`${model.displayName}::multi_embedding`);
+      }
+      if (model.type === "multi_embedding") {
+        return availableKeys.has(`${model.displayName}::embedding`);
+      }
+      return false;
+    });
+  }, [models]);
+
+  const resolveEmbeddingModelId = useCallback(
+    ({
+      displayName,
+      isMultimodal,
+    }: {
+      displayName?: string;
+      isMultimodal?: boolean;
+    }) => {
+      const normalizedDisplayName = (displayName || "").trim();
+      if (!normalizedDisplayName) return undefined;
+
+      const modelType = isMultimodal ? "multi_embedding" : "embedding";
+      return availableEmbeddingModels.find(
+        (model) =>
+          model.displayName === normalizedDisplayName &&
+          model.type === modelType
+      )?.id;
+    },
+    [availableEmbeddingModels]
+  );
+
+  // Open warning modal only when neither embedding nor multi-embedding is configured.
   useEffect(() => {
-    const singleEmbeddingModelName = modelConfig?.embedding?.modelName;
-    setShowEmbeddingWarning(!singleEmbeddingModelName);
-  }, [modelConfig?.embedding?.modelName]);
+    const singleEmbeddingModelName = modelConfig?.embedding?.modelName?.trim();
+    const multiEmbeddingModelName =
+      modelConfig?.multiEmbedding?.modelName?.trim();
+    setShowEmbeddingWarning(
+      !singleEmbeddingModelName && !multiEmbeddingModelName
+    );
+  }, [
+    modelConfig?.embedding?.modelName,
+    modelConfig?.multiEmbedding?.modelName,
+  ]);
 
   // Add event listener for selecting new knowledge base
   useEffect(() => {
@@ -369,11 +468,11 @@ function DataConfig({ isActive }: DataConfigProps) {
           // Directly call fetchKnowledgeBases to update knowledge base list data
           await fetchKnowledgeBases(false, true);
         } catch (error) {
-          log.error("获取知识库最新数据失败:", error);
+          log.error("鑾峰彇鐭ヨ瘑搴撴渶鏂版暟鎹け璐?", error);
         }
       }, 100);
     } catch (error) {
-      log.error("获取文档列表失败:", error);
+      log.error("鑾峰彇鏂囨。鍒楄〃澶辫触:", error);
       message.error(t("knowledgeBase.message.getDocumentsFailed"));
       docDispatch({
         type: "ERROR",
@@ -618,11 +717,35 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbName(defaultName);
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
-    // Set default embedding model - prioritize config's default model, fall back to first available model
-    const configModel = modelConfig?.embedding?.modelName;
-    const defaultModel = configModel || (availableEmbeddingModels.length > 0
-      ? availableEmbeddingModels[0].displayName
-      : "");
+    setNewKbPreserveSourceFile(true);
+    // Set default embedding model:
+    // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
+    const configEmbeddingModel =
+      modelConfig?.embedding?.modelName?.trim() || "";
+    const configMultiEmbeddingModel =
+      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+    const preferredModel = [
+      { modelName: configEmbeddingModel, type: "embedding" },
+      { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
+    ].find(
+      ({ modelName, type }) =>
+        !!modelName &&
+        availableEmbeddingModels.some(
+          (model) => model.displayName === modelName && model.type === type
+        )
+    );
+    const defaultModel =
+      (preferredModel &&
+        toEmbeddingModelOptionValue(
+          preferredModel.modelName,
+          preferredModel.type
+        )) ||
+      (availableEmbeddingModels[0]
+        ? toEmbeddingModelOptionValue(
+            availableEmbeddingModels[0].displayName,
+            availableEmbeddingModels[0].type
+          )
+        : "");
     setNewKbEmbeddingModel(defaultModel);
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
@@ -681,13 +804,23 @@ function DataConfig({ isActive }: DataConfigProps) {
           return;
         }
 
+        const parsedSelectedModel =
+          parseEmbeddingModelOptionValue(newKbEmbeddingModel);
+        const isMultimodal = parsedSelectedModel.isMultimodal;
+        const selectedModelId = resolveEmbeddingModelId({
+          displayName: parsedSelectedModel.displayName,
+          isMultimodal: parsedSelectedModel.isMultimodal,
+        });
+
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
           t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
-          newKbEmbeddingModel
+          parsedSelectedModel.displayName,
+          isMultimodal,
+          newKbPreserveSourceFile
         );
 
         if (!newKB) {
@@ -702,7 +835,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         setHasClickedUpload(false);
         setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
 
-        await uploadDocuments(newKB.id, filesToUpload);
+        await uploadDocuments(newKB.id, filesToUpload, selectedModelId);
         setUploadFiles([]);
 
         knowledgeBasePollingService
@@ -738,7 +871,12 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
 
     try {
-      await uploadDocuments(kbId, filesToUpload);
+      const activeKbModelId = resolveEmbeddingModelId({
+        displayName: kbState.activeKnowledgeBase?.embeddingModel,
+        isMultimodal: kbState.activeKnowledgeBase?.is_multimodal,
+      });
+
+      await uploadDocuments(kbId, filesToUpload, activeKbModelId);
       setUploadFiles([]);
 
       knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
@@ -887,7 +1025,7 @@ function DataConfig({ isActive }: DataConfigProps) {
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
-              currentEmbeddingModel={kbState.currentEmbeddingModel}
+              configuredEmbeddingModels={availableEmbeddingModels}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
               onClick={handleKnowledgeBaseClick}
@@ -900,8 +1038,12 @@ function DataConfig({ isActive }: DataConfigProps) {
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
               onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
-                // Update active knowledge base in context when it's updated
-                if (kbState.activeKnowledgeBase && kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id) {
+                // Update knowledge base in list and active knowledge base
+                updateKnowledgeBase(updatedKnowledgeBase);
+                if (
+                  kbState.activeKnowledgeBase &&
+                  kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id
+                ) {
                   setActiveKnowledgeBase(updatedKnowledgeBase);
                 }
               }}
@@ -948,6 +1090,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onIngroupPermissionChange={setNewKbIngroupPermission}
                 selectedGroupIds={newKbGroupIds}
                 onSelectedGroupIdsChange={setNewKbGroupIds}
+                preserveSourceFile={newKbPreserveSourceFile}
+                onPreserveSourceFileChange={setNewKbPreserveSourceFile}
                 // Embedding model for create mode
                 availableEmbeddingModels={availableEmbeddingModels}
                 selectedEmbeddingModel={newKbEmbeddingModel}
@@ -972,15 +1116,15 @@ function DataConfig({ isActive }: DataConfigProps) {
                 modelMismatch={hasKnowledgeBaseModelMismatch(
                   kbState.activeKnowledgeBase
                 )}
-                currentModel={kbState.currentEmbeddingModel || ""}
+                currentModel={
+                  kbState.activeKnowledgeBase?.is_multimodal
+                    ? modelConfig?.multiEmbedding?.modelName?.trim() || ""
+                    : modelConfig?.embedding?.modelName?.trim() || ""
+                }
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
                   hasKnowledgeBaseModelMismatch(kbState.activeKnowledgeBase)
-                    ? t("document.modelMismatch.withModels", {
-                        currentModel: kbState.currentEmbeddingModel || "",
-                        knowledgeBaseModel:
-                          kbState.activeKnowledgeBase.embeddingModel,
-                      })
+                    ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
                     : undefined
                 }
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
@@ -988,9 +1132,32 @@ function DataConfig({ isActive }: DataConfigProps) {
                 isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
                 onChunkCountChange={() => {
                   // Trigger knowledge base list update to refresh chunk count
-                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
+                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(
+                    true
+                  );
                 }}
-                  permission={kbState.activeKnowledgeBase?.permission}
+                permission={kbState.activeKnowledgeBase?.permission}
+                summaryFrequency={kbState.activeKnowledgeBase?.summaryFrequency}
+                onSummaryFrequencyChange={(frequency) => {
+                  if (kbState.activeKnowledgeBase) {
+                    knowledgeBaseService
+                      .updateSummaryFrequency(
+                        kbState.activeKnowledgeBase.id,
+                        frequency
+                      )
+                      .then(() => {
+                        const updatedKB: KnowledgeBase = {
+                          ...kbState.activeKnowledgeBase!,
+                          summaryFrequency: frequency,
+                        };
+                        updateKnowledgeBase(updatedKB);
+                        setActiveKnowledgeBase(updatedKB);
+                      })
+                      .catch((error) => {
+                        log.error("Failed to update summary frequency:", error);
+                      });
+                  }
+                }}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}
@@ -1074,26 +1241,26 @@ function DataConfig({ isActive }: DataConfigProps) {
           <div className="text-sm text-gray-600">
             {t("knowledgeBase.modal.dataMateConfig.description")}
           </div>
-          <Form layout="vertical">
-            <Form.Item
-              label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}
-              help={dataMateUrlError}
-              validateStatus={dataMateUrlError ? "error" : undefined}
-            >
-              <Input
-                value={dataMateUrl}
-                onChange={(e) => setDataMateUrl(e.target.value)}
-                onBlur={() => {
-                  // Validate on blur
-                  const error = validateDataMateUrl(dataMateUrl);
-                  setDataMateUrlError(error);
-                }}
-                placeholder={t(
-                  "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
-                )}
-              />
-            </Form.Item>
-          </Form>
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-700">
+              {t("knowledgeBase.modal.dataMateConfig.urlLabel")}
+            </label>
+            <Input
+              value={dataMateUrl}
+              onChange={(e) => setDataMateUrl(e.target.value)}
+              onBlur={() => {
+                // Validate on blur
+                const error = validateDataMateUrl(dataMateUrl);
+                setDataMateUrlError(error);
+              }}
+              placeholder={t(
+                "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
+              )}
+            />
+            {dataMateUrlError && (
+              <div className="text-sm text-red-600">{dataMateUrlError}</div>
+            )}
+          </div>
         </div>
       </Modal>
     </>

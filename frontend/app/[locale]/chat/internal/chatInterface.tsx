@@ -30,7 +30,7 @@ import {
   createMessageAttachments,
   cleanupAttachmentUrls,
 } from "@/lib/chat/chatAttachmentUtils";
-import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
+import { ConversationListItem, ApiConversationDetail, HistoryItem } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import {
@@ -38,7 +38,7 @@ import {
   extractAssistantMsgFromResponse,
 } from "@/lib/chatMessageExtractor";
 
-import { Layout } from "antd";
+import { Layout, message } from "antd";
 import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
@@ -113,6 +113,14 @@ export function ChatInterface() {
 
   // Add agent selection state
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentGreeting, setAgentGreeting] = useState<string | null>(null);
+  const [agentExampleQuestions, setAgentExampleQuestions] = useState<string[]>([]);
+
+  const handleAgentSelectWithGreeting = (agentId: string | null, greeting?: string, exampleQuestions?: string[]) => {
+    setSelectedAgentId(agentId);
+    setAgentGreeting(greeting || null);
+    setAgentExampleQuestions(exampleQuestions || []);
+  };
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
@@ -238,6 +246,8 @@ export function ChatInterface() {
     let shouldResetButtonStates = true;
 
     // If in new conversation state, switch to conversation state after sending message
+    // Save the value to local variable before state update for title generation logic
+    let shouldGenerateTitle = conversationManagement.isNewConversation;
     if (conversationManagement.isNewConversation) {
       conversationManagement.setIsNewConversation(false);
     }
@@ -258,6 +268,7 @@ export function ChatInterface() {
     // Handle file upload
     let uploadedFileUrls: Record<string, string> = {};
     let objectNames: Record<string, string> = {}; // Add object name mapping
+    let presignedUrls: Record<string, string> = {}; // Store presigned URLs for external MCP tool access
 
     if (attachments.length > 0) {
       // Show loading state
@@ -265,15 +276,32 @@ export function ChatInterface() {
 
       // Use preprocessing function to upload attachments
       const uploadResult = await uploadAttachments(attachments, t);
+      if (uploadResult.error) {
+        message.error(`${t("chatPreprocess.fileUploadFailed")} ${uploadResult.error}`);
+        setIsLoading(false);
+        return;
+      }
       uploadedFileUrls = uploadResult.uploadedFileUrls;
       objectNames = uploadResult.objectNames; // Get object name mapping
+      presignedUrls = uploadResult.presignedUrls; // Get presigned URLs for external access
+
+      const missingUploads = attachments.filter(
+        (attachment) => !uploadedFileUrls[attachment.file.name] || !objectNames[attachment.file.name]
+      );
+      if (missingUploads.length > 0) {
+        message.error(`${t("chatPreprocess.fileUploadFailed")} ${missingUploads.map((item) => item.file.name).join(", ")}`);
+        setIsLoading(false);
+        return;
+      }
     }
 
     // Use preprocessing function to create message attachments
     const messageAttachments = createMessageAttachments(
       attachments,
       uploadedFileUrls,
-      fileUrls
+      fileUrls,
+      objectNames,
+      presignedUrls
     );
 
     // Create user message object
@@ -434,13 +462,29 @@ export function ChatInterface() {
         conversation_id: id,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
-          .map((msg) => ({
-            role: msg.role,
-            content:
-              msg.role === ROLE_ASSISTANT
-                ? msg.finalAnswer?.trim() || msg.content || ""
-                : msg.content || "",
-          })),
+          .map((msg) => {
+            const historyItem: HistoryItem = {
+              role: msg.role,
+              content:
+                msg.role === ROLE_ASSISTANT
+                  ? msg.finalAnswer?.trim() || msg.content || ""
+                  : msg.content || "",
+            };
+            // Include attachment info for historical messages so the agent
+            // can reference files from previous turns
+            if (msg.attachments && msg.attachments.length > 0) {
+              historyItem.minio_files = msg.attachments.map((attachment) => ({
+                object_name: attachment.object_name || "",
+                name: attachment.name,
+                type: attachment.type,
+                size: attachment.size,
+                url: attachment.url || "",
+                presigned_url: attachment.presigned_url || "",
+                description: attachment.description || "",
+              }));
+            }
+            return historyItem;
+          }),
         minio_files:
           messageAttachments.length > 0
             ? messageAttachments.map((attachment) => {
@@ -456,6 +500,7 @@ export function ChatInterface() {
                   type: attachment.type,
                   size: attachment.size,
                   url: uploadedFileUrls[attachment.name] || attachment.url,
+                  presigned_url: presignedUrls[attachment.name] || "",
                   description: description,
                 };
               })
@@ -544,14 +589,13 @@ export function ChatInterface() {
       resetTimeout();
 
       // Call streaming processing function to handle response
-      // Compatible with both function and direct assignment
       await handleStreamResponse(
         reader,
         setCurrentSessionMessagesFactory(id),
         resetTimeout,
         stepIdCounter,
         setIsSwitchedConversation,
-        conversationManagement.isNewConversation,
+        shouldGenerateTitle,
         conversationManagement.setConversationTitle,
         conversationManagement.fetchConversationList,
         id,
@@ -1143,17 +1187,10 @@ export function ChatInterface() {
   };
 
   // Handle message selection
-  const handleMessageSelect = (messageId: string) => {
-    if (messageId !== selectedMessageId) {
-      // If clicking on new message, set as selected and open right panel
-      setSelectedMessageId(messageId);
-      // Auto open right panel
-      setShowRightPanel(true);
-    } else {
-      // If clicking on already selected message, toggle panel state
-      toggleRightPanel();
-    }
-  };
+  const handleMessageSelect = useCallback((messageId: string) => {
+    setShowRightPanel(true);
+    setSelectedMessageId(messageId);
+  }, []);
 
   // Like/dislike handling
   const handleOpinionChange = async (
@@ -1261,9 +1298,11 @@ export function ChatInterface() {
                 currentConversationId={conversationManagement.selectedConversationId ?? undefined}
                 shouldScrollToBottom={shouldScrollToBottom}
                 selectedAgentId={selectedAgentId}
-                onAgentSelect={setSelectedAgentId}
+                onAgentSelect={handleAgentSelectWithGreeting}
                 onCitationHover={clearCompletedIndicator}
                 onScroll={clearCompletedIndicator}
+                agentGreeting={agentGreeting}
+                agentExampleQuestions={agentExampleQuestions}
               />
             </div>
 

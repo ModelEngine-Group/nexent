@@ -9,12 +9,12 @@ description = "Nexent Agent Framework"
 authors = [
     { name = "Nexent Dev Team" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.12"
 keywords = ["agent", "ai", "framework"]
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
     "aiofiles>=24.1.0",
@@ -23,7 +23,6 @@ dependencies = [
     "httpx[socks]>=0.28.1",
     "numpy>=1.26.4",
     "openai>=1.69.0",
-    "openpyxl>=3.1.5",
     "pydantic[email]>=2.11.1",
     "python-dotenv>=1.1.0",
     "PyYAML>=6.0.1",
@@ -39,8 +38,8 @@ dependencies = [
     "botocore>=1.37.34",
     "python-multipart>=0.0.20",
     "mcpadapt>=0.1.13",
-    "mcp>=1.19.0,<1.23",
-    "fastmcp==2.12.0",
+    "mcp>=1.24.0,<1.30",
+    "fastmcp>=2.14.2,<3.0",
     "docker>=7.0.0",
     "kubernetes>=29.0.0",
     "tiktoken>=0.5.0",
@@ -48,10 +47,18 @@ dependencies = [
     "linkup-sdk",
     "paramiko>=3.4.0",
     "linkup-sdk",
-    "mem0ai>=0.1.117",
+    "mem0ai==0.1.117",
     "pymysql>=1.1.0",
     "psycopg2-binary>=2.9.9",
     "pymssql>=2.2.11",
+    "openpyxl>=3.1.5",
+    "orjson==3.10",
+    "pypdf==6.9.1",
+    "python-pptx==1.0.2",
+    "ijson==3.5.0",
+    "langchain-text-splitters==1.1.2",
+    "ebooklib==0.20",
+    "pypandoc==1.17",
 ]
 
 [tool.uv]
@@ -71,22 +78,17 @@ quality = [
     "pytest>=8.1.0"
 ]
 data_process = [
-    "unstructured[all-docs]"
+    "unstructured[all-docs]",
+    "unstructured-inference==1.2.0",
 ]
 performance = [
-    # OpenTelemetry Core Components
-    "opentelemetry-api==1.20.0",
-    "opentelemetry-sdk==1.20.0",
-    "opentelemetry-semantic-conventions==0.41b0",
-    # OpenTelemetry Instrumentation
-    "opentelemetry-instrumentation==0.41b0",
-    "opentelemetry-instrumentation-fastapi==0.41b0",
-    "opentelemetry-instrumentation-requests==0.41b0",
-    # OpenTelemetry Exporters
-    "opentelemetry-exporter-jaeger",
-    "opentelemetry-exporter-prometheus",
-    # Additional monitoring dependencies
-    "prometheus-client"
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-semantic-conventions>=0.41b0",
+    "opentelemetry-instrumentation>=0.41b0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-requests>=0.41b0",
+    "opentelemetry-exporter-otlp>=1.20.0",
 ]
 dev = [
     "nexent[quality, data_process, performance]"
@@ -98,6 +100,7 @@ exclude = ["tests*", "examples*"]
 
 [tool.setuptools.package-data]
 "nexent.core.prompts" = ["*.yaml"]
+"nexent.assets" = ["*.png", "*.jpg", "*.gif", "*.webp"]
 
 [tool.ruff]
 line-length = 119

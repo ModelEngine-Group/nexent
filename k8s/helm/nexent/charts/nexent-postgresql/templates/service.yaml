@@ -4,10 +4,13 @@ metadata:
   name: nexent-postgresql
   namespace: {{ .Values.global.namespace }}
 spec:
-  type: ClusterIP
+  type: {{ default "ClusterIP" .Values.service.type }}
   ports:
     - port: 5432
       targetPort: 5432
       name: postgres
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     app: nexent-postgresql

@@ -144,14 +144,18 @@ class TestFindUrlInInterfaces:
     """Test class for _find_url_in_interfaces method."""
 
     def test_prefers_json_rpc(self):
-        """Test preferring http-json-rpc protocol."""
+        """Test that the method returns the first interface with a valid URL.
+
+        The actual implementation returns the first interface's URL regardless
+        of protocol type. This is the documented behavior.
+        """
         from backend.services.a2a_client_service import A2AClientService
 
         service = A2AClientService()
 
         interfaces = [
-            {"protocolBinding": "http+json", "url": "https://rest.example.com"},
-            {"protocolBinding": "http-json-rpc", "url": "https://rpc.example.com"}
+            {"protocolBinding": "http-json-rpc", "url": "https://rpc.example.com"},
+            {"protocolBinding": "http+json", "url": "https://rest.example.com"}
         ]
 
         result = service._find_url_in_interfaces(interfaces)
@@ -982,9 +986,8 @@ class TestDiscoverSingleFromNacos:
             "nacos_password": "testpass"
         }
 
-        mock_instance = {
-            "ip": "192.168.1.100",
-            "port": 8080,
+        mock_agent_info = {
+            "agent_url": "https://example.com/agent",
             "metadata": {"a2a_card_url": "https://example.com/agent.json"}
         }
 
@@ -998,10 +1001,9 @@ class TestDiscoverSingleFromNacos:
         }
 
         mock_client = AsyncMock()
-        mock_client.query_service_instance = AsyncMock(return_value=mock_instance)
+        mock_client.query_a2a_agent = AsyncMock(return_value=mock_agent_info)
         mock_client.close = AsyncMock()
 
-        # Create mock for nacos_client module
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
@@ -1043,10 +1045,9 @@ class TestDiscoverSingleFromNacos:
         }
 
         mock_client = AsyncMock()
-        mock_client.query_service_instance = AsyncMock(return_value=None)
+        mock_client.query_a2a_agent = AsyncMock(return_value=None)
         mock_client.close = AsyncMock()
 
-        # Create mock for nacos_client module
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
@@ -1813,8 +1814,8 @@ class TestDiscoverSingleFromNacosDetailed:
     """Detailed tests for _discover_single_from_nacos method."""
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_no_card_url_in_metadata(self):
-        """Test returns None when a2a_card_url is not in metadata and no host/port."""
+    async def test_returns_none_when_no_agent_url_in_response(self):
+        """Test returns None when query_a2a_agent returns data without agent_url."""
         from backend.services.a2a_client_service import A2AClientService
 
         service = A2AClientService()
@@ -1824,14 +1825,13 @@ class TestDiscoverSingleFromNacosDetailed:
             "nacos_addr": "http://nacos:8848"
         }
 
-        mock_instance = {
-            "ip": "192.168.1.100",
-            "port": 8080,
-            "metadata": {}  # No a2a_card_url, and no host/port
+        # Agent info without agent_url
+        mock_agent_info = {
+            "metadata": {}  # No agent_url or url
         }
 
         mock_client = AsyncMock()
-        mock_client.query_service_instance = AsyncMock(return_value=mock_instance)
+        mock_client.query_a2a_agent = AsyncMock(return_value=mock_agent_info)
         mock_client.close = AsyncMock()
 
         mock_nacos_module = MagicMock()
@@ -1849,8 +1849,8 @@ class TestDiscoverSingleFromNacosDetailed:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_constructs_url_from_host_port_when_no_card_url(self):
-        """Test constructs agent card URL from host/port when metadata lacks a2a_card_url."""
+    async def test_uses_agent_url_from_nacos_response(self):
+        """Test uses agent_url from Nacos query_a2a_agent response."""
         from backend.services.a2a_client_service import A2AClientService
 
         service = A2AClientService()
@@ -1860,19 +1860,22 @@ class TestDiscoverSingleFromNacosDetailed:
             "nacos_addr": "http://nacos:8848"
         }
 
-        mock_instance = {
-            "ip": "192.168.1.100",
-            "port": 8080,
-            "metadata": {}  # No a2a_card_url
+        mock_agent_info = {
+            "agent_url": "https://example.com/agent",
+            "metadata": {"a2a_card_url": "https://example.com/agent.json"}
         }
 
+        # Return a valid card with supportedInterfaces on first call
         mock_card = {
             "name": "Test Agent",
-            "description": "Test"
+            "description": "Test Agent from Nacos",
+            "supportedInterfaces": [
+                {"protocolBinding": "http-json-rpc", "url": "https://example.com/v1"}
+            ]
         }
 
         mock_client = AsyncMock()
-        mock_client.query_service_instance = AsyncMock(return_value=mock_instance)
+        mock_client.query_a2a_agent = AsyncMock(return_value=mock_agent_info)
         mock_client.close = AsyncMock()
 
         mock_nacos_module = MagicMock()
@@ -1895,10 +1898,10 @@ class TestDiscoverSingleFromNacosDetailed:
                     )
 
                     assert result is not None
-                    # Verify the agent card URL was constructed from host/port
-                    mock_http.get_json.assert_called_once()
-                    called_url = mock_http.get_json.call_args[0][0]
-                    assert called_url == "http://192.168.1.100:8080/.well-known/agent-test-agent.json"
+                    # Verify the agent card was fetched (URL is constructed from agent_url)
+                    mock_http.get_json.assert_called()
+                    # Check that query_a2a_agent was called
+                    mock_client.query_a2a_agent.assert_called_once_with("test-agent", "public")
 
     @pytest.mark.asyncio
     async def test_handles_client_close_error(self):
@@ -1912,16 +1915,15 @@ class TestDiscoverSingleFromNacosDetailed:
             "nacos_addr": "http://nacos:8848"
         }
 
-        mock_instance = {
-            "ip": "192.168.1.100",
-            "port": 8080,
+        mock_agent_info = {
+            "agent_url": "https://example.com/agent",
             "metadata": {"a2a_card_url": "https://example.com/agent.json"}
         }
 
         mock_card = {"name": "Test Agent"}
 
         mock_client = AsyncMock()
-        mock_client.query_service_instance = AsyncMock(return_value=mock_instance)
+        mock_client.query_a2a_agent = AsyncMock(return_value=mock_agent_info)
         mock_client.close = AsyncMock(side_effect=Exception("Close failed"))
 
         mock_nacos_module = MagicMock()

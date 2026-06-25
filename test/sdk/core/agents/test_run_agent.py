@@ -1,3 +1,5 @@
+import types
+import importlib.machinery
 import pytest
 import importlib
 import sys
@@ -57,7 +59,20 @@ for _sub in [
     elif _sub == "local_python_executor":
         setattr(sub_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     elif _sub == "memory":
-        for _name in ["ActionStep", "ToolCall", "TaskStep", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
+        class _TaskStepBase:
+            def __init__(self, task=None):
+                self.task = task
+        class _ActionStepBase:
+            def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+                self.step_number = step_number
+                self.timing = timing
+                self.action_output = action_output
+                self.model_output = model_output
+        setattr(sub_mod, "TaskStep", _TaskStepBase)
+        setattr(sub_mod, "ActionStep", _ActionStepBase)
+        setattr(sub_mod, "AgentMemory", MagicMock)
+        setattr(sub_mod, "MemoryStep", MagicMock)
+        for _name in ["ToolCall", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
             setattr(sub_mod, _name, MagicMock(name=f"smolagents.memory.{_name}"))
     elif _sub == "models":
         setattr(sub_mod, "ChatMessage", MagicMock(name="smolagents.models.ChatMessage"))
@@ -89,8 +104,10 @@ for _sub in [
     # Will be added to module_mocks below
 
 # Top-level exports expected directly from `smolagents` by nexent_agent.py
-for _name in ["ActionStep", "TaskStep", "AgentText", "handle_agent_output_types"]:
-    setattr(mock_smolagents, _name, MagicMock(name=f"smolagents.{_name}"))
+setattr(mock_smolagents, "TaskStep", mock_smolagents.memory.TaskStep)
+setattr(mock_smolagents, "ActionStep", mock_smolagents.memory.ActionStep)
+setattr(mock_smolagents, "AgentText", MagicMock(name="smolagents.AgentText"))
+setattr(mock_smolagents, "handle_agent_output_types", MagicMock(name="smolagents.handle_agent_output_types"))
 # Export Timing from monitoring submodule to top-level
 setattr(mock_smolagents, "Timing", mock_smolagents.monitoring.Timing)
 # Also export Tool at top-level so that `from smolagents import Tool` works
@@ -103,6 +120,13 @@ mock_langchain_core_tools_mod = MagicMock(name="langchain_core.tools")
 mock_langchain_core_tools_mod.BaseTool = MagicMock(name="BaseTool")
 mock_langchain_core_mod = MagicMock(name="langchain_core")
 mock_langchain_core_mod.tools = mock_langchain_core_tools_mod
+
+sys.modules['elangchain_cor'] = MagicMock()
+sys.modules['langchain_core.documents'] = MagicMock()
+sys.modules['langchain_core.documents.Document'] = MagicMock()
+sys.modules['langchain_core.documents.BaseDocumentTransformer'] = MagicMock()
+sys.modules['langchain_text_splitters'] = MagicMock()
+sys.modules['langchain_text_splitters.MarkdownHeaderTextSplitter'] = MagicMock()
 
 # Re-use mocks from test_nexent_agent for langchain and openai to avoid real imports
 mock_langchain_tools = MagicMock()
@@ -123,6 +147,10 @@ mock_nexent.skills.SkillManager = MagicMock(name="SkillManager")
 sys.modules["nexent"] = mock_nexent
 sys.modules["nexent.skills"] = mock_nexent.skills
 
+openai_module = types.ModuleType("openai")
+openai_module.__spec__ = importlib.machinery.ModuleSpec("openai", loader=None)
+sys.modules['openai'] = openai_module
+
 module_mocks = {
     "smolagents": mock_smolagents,
     "smolagents.tools": mock_smolagents_tools_mod,
@@ -141,7 +169,7 @@ module_mocks = {
     "langchain": mock_langchain,
     "langchain.tools": mock_langchain_tools,
     # Minimal openai mock needed by other modules
-    "openai": MagicMock(),
+    "openai": openai_module,
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(ChatCompletionMessage=mock_openai_chat_completion_message),
@@ -723,3 +751,55 @@ def test_normalize_mcp_config_edge_cases():
     assert result["transport"] == "sse"
     # Empty string authorization creates empty headers dict
     assert result.get("headers") == {"Authorization": ""}
+
+
+@pytest.mark.asyncio
+async def test_agent_run_uses_copy_context(basic_agent_run_info, monkeypatch):
+    """agent_run passes ctx.run as Thread target, preserving contextvars."""
+    basic_agent_run_info.observer.get_cached_message.side_effect = [[]]
+
+    async def fast_sleep(duration):
+        ...
+
+    monkeypatch.setattr(run_agent.asyncio, "sleep", fast_sleep)
+
+    captured_target = {}
+
+    class CapturingThread:
+        def __init__(self, target=None, args=None):
+            captured_target["target"] = target
+            captured_target["args"] = args
+
+        def start(self):
+            ...
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(run_agent, "Thread", CapturingThread)
+
+    async for _ in run_agent.agent_run(basic_agent_run_info):
+        pass
+
+    assert captured_target["target"] is not None
+    assert callable(captured_target["target"])
+
+
+def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatch):
+    """contextvars set before agent_run_thread are visible inside the thread."""
+    from contextvars import ContextVar
+
+    test_var = ContextVar("test_preserve_var", default="missing")
+
+    captured_value = {}
+
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    def create_nexent_agent(*args, **kwargs):
+        captured_value["val"] = test_var.get()
+        return mock_nexent_instance
+
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(side_effect=create_nexent_agent))
+
+    test_var.set("preserved!")
+    run_agent.agent_run_thread(basic_agent_run_info)
+    assert captured_value.get("val") == "preserved!"

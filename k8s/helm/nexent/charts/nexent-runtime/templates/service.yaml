@@ -4,10 +4,13 @@ metadata:
   name: nexent-runtime
   namespace: {{ .Values.global.namespace }}
 spec:
-  type: ClusterIP
+  type: {{ default "ClusterIP" .Values.service.type }}
   ports:
     - port: 5014
       targetPort: 5014
       name: http
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     app: nexent-runtime

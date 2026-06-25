@@ -74,8 +74,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   knowledgeBaseId,
   documents,
   getFileIcon,
-  currentEmbeddingModel = null,
-  knowledgeBaseEmbeddingModel = "",
+  currentEmbeddingModel,
+  knowledgeBaseEmbeddingModel,
   onChunkCountChange,
   permission,
 }) => {
@@ -128,55 +128,33 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     setTooltipResetKey((prev) => prev + 1);
   }, []);
 
+  const effectiveIndexName = knowledgeBaseId || knowledgeBaseName;
+
+  const hasKnowledgeBaseModel =
+    Boolean(knowledgeBaseEmbeddingModel) &&
+    knowledgeBaseEmbeddingModel !== "unknown";
+  const hasCurrentModel = Boolean(currentEmbeddingModel);
+
   // Determine if embedding models mismatch (specific condition for tooltip)
   const isEmbeddingModelMismatch = React.useMemo(() => {
-    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
+    if (!hasKnowledgeBaseModel) {
       return false;
     }
-    if (knowledgeBaseEmbeddingModel === "unknown") {
-      return false;
-    }
-    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
-  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
+    return (
+      !hasCurrentModel || currentEmbeddingModel !== knowledgeBaseEmbeddingModel
+    );
+  }, [
+    currentEmbeddingModel,
+    hasCurrentModel,
+    hasKnowledgeBaseModel,
+    knowledgeBaseEmbeddingModel,
+  ]);
 
   // Determine if in read-only mode (embedding model mismatch OR user has READ_ONLY permission)
   // Note: isReadOnlyMode is broader, includes model mismatch and other conditions
   const isReadOnlyMode = React.useMemo(() => {
-    // Check if user has READ_ONLY permission
-    if (permission === "READ_ONLY") {
-      return true;
-    }
-    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
-      return false;
-    }
-    if (knowledgeBaseEmbeddingModel === "unknown") {
-      return false;
-    }
-    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
-  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel, permission]);
-
-  // Determine if search should be disabled (only when embedding model mismatch, NOT for READ_ONLY permission)
-  // This allows READ_ONLY users to still perform search
-  const isSearchDisabled = React.useMemo(() => {
-    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
-      return false;
-    }
-    if (knowledgeBaseEmbeddingModel === "unknown") {
-      return false;
-    }
-    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
-  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
-
-  // Disabled tooltip message when embedding model mismatch
-  const disabledTooltipMessage = React.useMemo(() => {
-    if (isEmbeddingModelMismatch && currentEmbeddingModel && knowledgeBaseEmbeddingModel && knowledgeBaseEmbeddingModel !== "unknown") {
-      return t("document.chunk.tooltip.disabledDueToModelMismatch", {
-        currentModel: currentEmbeddingModel,
-        knowledgeBaseModel: knowledgeBaseEmbeddingModel
-      });
-    }
-    return "";
-  }, [isEmbeddingModelMismatch, currentEmbeddingModel, knowledgeBaseEmbeddingModel, t]);
+    return permission === "READ_ONLY" || isEmbeddingModelMismatch;
+  }, [permission, isEmbeddingModelMismatch]);
 
   // Set active document when documents change
   useEffect(() => {
@@ -201,14 +179,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   // Load chunks for active document with server-side pagination
   const loadChunks = React.useCallback(async () => {
-    if (!knowledgeBaseName || !activeDocumentKey) {
+    if (!effectiveIndexName || !activeDocumentKey) {
       return;
     }
 
     setLoading(true);
     try {
       const result = await knowledgeBaseService.previewChunksPaginated(
-        knowledgeBaseName,
+        effectiveIndexName,
         pagination.page,
         pagination.pageSize,
         activeDocumentKey
@@ -229,7 +207,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         // Use setTimeout to ensure DOM is updated
         setTimeout(() => {
           if (contentScrollRef.current) {
-            contentScrollRef.current.scrollTop = contentScrollRef.current.scrollHeight;
+            contentScrollRef.current.scrollTop =
+              contentScrollRef.current.scrollHeight;
           }
         }, 100);
       }
@@ -240,7 +219,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setLoading(false);
     }
   }, [
-    knowledgeBaseName,
+    effectiveIndexName,
     activeDocumentKey,
     pagination.page,
     pagination.pageSize,
@@ -322,15 +301,22 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
 
     // Check embedding model consistency before searching
-    if (isEmbeddingModelMismatch && currentEmbeddingModel && knowledgeBaseEmbeddingModel && knowledgeBaseEmbeddingModel !== "unknown") {
-      message.error(t("document.chunk.error.searchFailed", {
-        currentModel: currentEmbeddingModel,
-        knowledgeBaseModel: knowledgeBaseEmbeddingModel
-      }));
+    if (
+      isEmbeddingModelMismatch &&
+      currentEmbeddingModel &&
+      knowledgeBaseEmbeddingModel &&
+      knowledgeBaseEmbeddingModel !== "unknown"
+    ) {
+      message.error(
+        t("document.chunk.error.searchFailed", {
+          currentModel: currentEmbeddingModel,
+          knowledgeBaseModel: knowledgeBaseEmbeddingModel,
+        })
+      );
       return;
     }
 
-    if (!knowledgeBaseName) {
+    if (!effectiveIndexName) {
       message.error(t("document.chunk.error.searchFailed"));
       return;
     }
@@ -340,7 +326,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
     try {
       const response = await knowledgeBaseService.hybridSearch(
-        knowledgeBaseId,
+        effectiveIndexName,
         trimmedValue,
         {
           topK: pagination.pageSize,
@@ -352,11 +338,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         return {
           id: item.id || "",
           content: item.content || "",
-          path_or_url: item.path_or_url,
+          path_or_url: item.path_or_url || item.url || item.pathOrUrl,
           filename: item.filename,
           create_time: item.create_time,
           score: item.score, // Preserve search score for display
-          source_type: item.source_type, // Preserve source type for display
+          source_type:
+            item.source_type === "local" || item.source_type === "minio"
+              ? "file"
+              : item.source_type, // Preserve source type for display
         };
       });
 
@@ -373,16 +362,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       setChunkSearchLoading(false);
     }
   }, [
-    knowledgeBaseName,
-    knowledgeBaseId,
+    effectiveIndexName,
+    currentEmbeddingModel,
+    isEmbeddingModelMismatch,
+    knowledgeBaseEmbeddingModel,
     message,
     pagination.pageSize,
     resetChunkSearch,
     searchValue,
     t,
-    isEmbeddingModelMismatch,
-    currentEmbeddingModel,
-    knowledgeBaseEmbeddingModel,
   ]);
 
   const refreshChunks = React.useCallback(async () => {
@@ -454,7 +442,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   };
 
   const handleChunkSubmit = async () => {
-    if (!knowledgeBaseName) {
+    if (!effectiveIndexName) {
       message.error(t("document.chunk.error.loadFailed"));
       return;
     }
@@ -463,26 +451,12 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
-    // Check embedding model consistency before creating chunk
-    if (chunkModalMode === "create") {
-      if (knowledgeBaseEmbeddingModel &&
-        knowledgeBaseEmbeddingModel !== "unknown" &&
-        currentEmbeddingModel &&
-        currentEmbeddingModel !== knowledgeBaseEmbeddingModel) {
-        message.error(t("document.chunk.error.createFailed", {
-          currentModel: currentEmbeddingModel,
-          knowledgeBaseModel: knowledgeBaseEmbeddingModel
-        }));
-        return;
-      }
-    }
-
     try {
       const values = await chunkForm.validateFields();
       setChunkSubmitting(true);
       if (chunkModalMode === "create") {
         const filenamePayload = values.filename?.trim() || undefined;
-        await knowledgeBaseService.createChunk(knowledgeBaseName, {
+        await knowledgeBaseService.createChunk(effectiveIndexName, {
           content: values.content,
           filename: filenamePayload,
           path_or_url: activeDocumentKey,
@@ -503,7 +477,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           return;
         }
         await knowledgeBaseService.updateChunk(
-          knowledgeBaseName,
+          effectiveIndexName,
           editingChunk.id,
           {
             content: values.content,
@@ -541,7 +515,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       message.error(t("document.chunk.error.missingChunkId"));
       return;
     }
-    if (!knowledgeBaseName) {
+    if (!effectiveIndexName) {
       message.error(t("document.chunk.error.deleteFailed"));
       return;
     }
@@ -556,7 +530,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       danger: true,
       onOk: async () => {
         try {
-          await knowledgeBaseService.deleteChunk(knowledgeBaseName, chunk.id);
+          await knowledgeBaseService.deleteChunk(effectiveIndexName, chunk.id);
           message.success(t("document.chunk.success.delete"));
           forceCloseTooltips();
           // Update chunk count immediately for better UX
@@ -629,8 +603,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   const tabItems = documents.map((doc) => {
     const chunkCount = isChunkSearchActive
-      ? chunkSearchResultMap?.[doc.id]?.length ?? 0
-      : documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0;
+      ? (chunkSearchResultMap?.[doc.id]?.length ?? 0)
+      : (documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0);
     const isActive = doc.id === activeDocumentKey;
     const chunkSearchChunks = chunkSearchResultMap?.[doc.id] ?? [];
     const docChunksData = isActive
@@ -654,7 +628,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       label: renderDocumentLabel(doc, chunkCount),
       children: (
         <div className="flex h-full flex-col min-h-0 overflow-hidden">
-          <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 pb-8">
+          <div
+            ref={contentScrollRef}
+            className="flex-1 min-h-0 overflow-y-auto p-4 pb-8"
+          >
             {showLoadingState ? (
               <div className="flex h-52 items-center justify-center">
                 <Spin size="large" />
@@ -761,12 +738,18 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                               </div>
                               <div className="text-xs text-gray-500">
                                 {chunk.source_type === "datamate"
-                                  ? t("document.chunk.source.datamate", "来源: Datamate")
+                                  ? t(
+                                      "document.chunk.source.datamate",
+                                      "\u6765\u6e90: Datamate"
+                                    )
                                   : chunk.source_type === "file" ||
-                                    chunk.source_type === "minio" ||
-                                    chunk.source_type === "local"
-                                  ? t("document.chunk.source.nexent", "来源: Nexent")
-                                  : ""}
+                                      chunk.source_type === "minio" ||
+                                      chunk.source_type === "local"
+                                    ? t(
+                                        "document.chunk.source.nexent",
+                                        "\u6765\u6e90: Nexent"
+                                      )
+                                    : ""}
                               </div>
                             </div>
                           )}
@@ -795,8 +778,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   }
 
   const activeDocumentTotal = isChunkSearchActive
-    ? chunkSearchResultMap?.[activeDocumentKey]?.length ?? 0
-    : documentChunkCounts[activeDocumentKey] ?? total ?? 0;
+    ? (chunkSearchResultMap?.[activeDocumentKey]?.length ?? 0)
+    : (documentChunkCounts[activeDocumentKey] ?? total ?? 0);
   const shouldShowPagination = !isChunkSearchActive && activeDocumentTotal > 0;
 
   return (
@@ -805,57 +788,37 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         {/* Search and Add Button Bar */}
         <div className="flex items-center justify-end gap-2 px-2 py-3 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
-            {/* Wrap search input with tooltip when model mismatch */}
-            {isEmbeddingModelMismatch ? (
-              <Tooltip title={disabledTooltipMessage}>
-                <span className="inline-block">
-                  <Input
-                    placeholder={t("document.chunk.search.placeholder")}
-                    value={searchValue}
-                    onChange={(e) => setSearchValue(e.target.value)}
-                    onPressEnter={() => {
+            <Input
+              placeholder={t("document.chunk.search.placeholder")}
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+              onPressEnter={() => {
+                void handleSearch();
+              }}
+              style={{ width: 320 }}
+              suffix={
+                <div className="flex items-center gap-1">
+                  {searchValue && (
+                    <Button
+                      type="text"
+                      icon={<X size={16} />}
+                      onClick={handleClearSearch}
+                      size="small"
+                      className="text-gray-500 hover:text-gray-700"
+                    />
+                  )}
+                  <Button
+                    type="text"
+                    icon={<Search size={16} />}
+                    onClick={() => {
                       void handleSearch();
                     }}
-                    style={{ width: 320 }}
-                    disabled={true}
+                    size="small"
+                    loading={chunkSearchLoading}
                   />
-                </span>
-              </Tooltip>
-            ) : (
-                <Input
-                  placeholder={t("document.chunk.search.placeholder")}
-                  value={searchValue}
-                  onChange={(e) => setSearchValue(e.target.value)}
-                  onPressEnter={() => {
-                    void handleSearch();
-                  }}
-                  style={{ width: 320 }}
-                  disabled={isSearchDisabled}
-                  suffix={
-                    <div className="flex items-center gap-1">
-                      {searchValue && (
-                        <Button
-                          type="text"
-                          icon={<X size={16} />}
-                          onClick={handleClearSearch}
-                          size="small"
-                          className="text-gray-500 hover:text-gray-700"
-                        />
-                      )}
-                      <Button
-                        type="text"
-                        icon={<Search size={16} />}
-                        onClick={() => {
-                          void handleSearch();
-                        }}
-                        size="small"
-                        loading={chunkSearchLoading}
-                        disabled={isSearchDisabled}
-                      />
-                    </div>
-                  }
-                />
-            )}
+                </div>
+              }
+            />
           </div>
           {/* Create Chunk button - hide when user has READ_ONLY permission */}
           {!isReadOnlyMode && (
@@ -864,7 +827,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                 type="text"
                 icon={<FilePlus2 size={16} />}
                 onClick={openCreateChunkModal}
-                disabled={isEmbeddingModelMismatch}
               ></Button>
             </Tooltip>
           )}
@@ -933,8 +895,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
             </div>
           </Form.Item>
           {/* Hidden field to preserve filename value for form submission */}
-          <Form.Item name="filename" hidden>
-          </Form.Item>
+          <Form.Item name="filename" hidden></Form.Item>
           <Form.Item
             label={
               <span className="font-semibold ml-1">
@@ -952,10 +913,8 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           </Form.Item>
         </Form>
       </Modal>
-
     </TooltipProvider>
   );
 };
 
 export default DocumentChunk;
-

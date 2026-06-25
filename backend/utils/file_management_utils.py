@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import time
 import traceback
 from pathlib import Path
 from typing import List
@@ -15,7 +16,6 @@ from consts.const import DATA_PROCESS_SERVICE, LIBREOFFICE_PROFILE_DIR
 from consts.model import ProcessParams
 from database.attachment_db import get_file_size_from_minio
 from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger("file_management_utils")
 
@@ -45,18 +45,13 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
         if not files:
             return None
 
-        # Get chunking size according to the embedding model
-        embedding_model_id = None
+        # Get tenant_id from authorization for downstream task processing
+        embedding_model_id = process_params.model_id
         tenant_id = None
         try:
             _, tenant_id = get_current_user_id(process_params.authorization)
-            # Get embedding model ID from tenant config
-            tenant_config = tenant_config_manager.load_config(tenant_id)
-            embedding_model_id_str = tenant_config.get("EMBEDDING_ID") if tenant_config else None
-            if embedding_model_id_str:
-                embedding_model_id = int(embedding_model_id_str)
         except Exception as e:
-            logger.warning(f"Failed to get embedding model ID for tenant: {e}")
+            logger.warning(f"Failed to get tenant_id from authorization: {e}")
 
         # Build headers with authorization
         headers = {
@@ -134,19 +129,23 @@ async def trigger_data_process(files: List[dict], process_params: ProcessParams)
 
 async def get_all_files_status(index_name: str):
     """
-    Get status for all files according to index_name, matching corresponding tasks, 
+    Get status for all files according to index_name, matching corresponding tasks,
     and then convert to custom state
-    
+
     Args:
         index_name: Index name to filter tasks
-        
+
     Returns:
         Dictionary with path_or_url as keys and dict values: {state, latest_task_id}
     """
+    start_time = time.time()
     try:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(f"{DATA_PROCESS_SERVICE}/tasks/indices/{index_name}", timeout=10.0)
+            http_duration = time.time() - start_time
+            logger.info(f"[get_all_files_status] HTTP request to {DATA_PROCESS_SERVICE}/tasks/indices/{index_name} "
+                       f"completed in {http_duration:.3f}s, status={response.status_code}")
             if response.status_code == 200:
                 tasks_list = response.json()
             else:
@@ -214,41 +213,46 @@ async def get_all_files_status(index_name: str):
                     file_state['total_chunks'] = task_info.get(
                         'total_chunks', file_state.get('total_chunks'))
         result = {}
+        # Use local fallback logic for state conversion (avoiding HTTP call to external service)
+        # The conversion logic is simple and can be done locally
+        step_local_start = time.time()
+
+        # Batch fetch progress info from Redis for all task_ids (single round-trip)
+        redis_progress_batch = {}
+        if file_states:
+            try:
+                from services.redis_service import get_redis_service
+                redis_service = get_redis_service()
+                all_task_ids = [fs.get('latest_task_id', '') for fs in file_states.values()]
+                all_task_ids = [tid for tid in all_task_ids if tid]
+                if all_task_ids:
+                    redis_progress_batch = redis_service.batch_get_progress_info(all_task_ids) or {}
+            except Exception as e:
+                logger.debug(f"Failed to batch get Redis progress info: {e}")
+
         for path_or_url, file_state in file_states.items():
-            # Call remote state conversion API so this service no longer depends on Celery
-            custom_state = await _convert_to_custom_state(
+            custom_state = _convert_to_custom_state_local(
                 process_celery_state=file_state['process_state'] or '',
                 forward_celery_state=file_state['forward_state'] or ''
             )
-            # Try to get progress from Redis - always check Redis for real-time progress
-            # especially when task is in progress (FORWARDING or PROCESSING)
+
+            # Get progress from pre-fetched batch Redis data
             processed_chunks = file_state.get('processed_chunks')
             total_chunks = file_state.get('total_chunks')
             task_id = file_state['latest_task_id'] or ''
 
-            # Always try to get latest progress from Redis if task_id exists
-            # Redis has the most up-to-date progress during vectorization
-            if task_id:
-                try:
-                    from services.redis_service import get_redis_service
-                    redis_service = get_redis_service()
-                    progress_info = redis_service.get_progress_info(task_id)
-                    if progress_info:
-                        # Use Redis progress as primary source (it's updated in real-time)
-                        redis_processed = progress_info.get('processed_chunks')
-                        redis_total = progress_info.get('total_chunks')
-                        if redis_processed is not None:
-                            processed_chunks = redis_processed
-                        if redis_total is not None:
-                            total_chunks = redis_total
-                        logger.debug(
-                            f"Retrieved progress from Redis for task {task_id}: {processed_chunks}/{total_chunks}")
-                    else:
-                        logger.debug(
-                            f"No progress info in Redis for task {task_id}, using task state values: {processed_chunks}/{total_chunks}")
-                except Exception as e:
+            # Use pre-fetched batch Redis data for progress
+            if task_id and task_id in redis_progress_batch:
+                progress_info = redis_progress_batch.get(task_id)
+                if progress_info:
+                    redis_processed = progress_info.get('processed_chunks')
+                    redis_total = progress_info.get('total_chunks')
+                    if redis_processed is not None:
+                        processed_chunks = redis_processed
+                    if redis_total is not None:
+                        total_chunks = redis_total
                     logger.debug(
-                        f"Failed to get progress from Redis for task {task_id}: {str(e)}")
+                        f"Retrieved progress from batch Redis for task {task_id}: {processed_chunks}/{total_chunks}")
 
             result[path_or_url] = {
                 'state': custom_state,
@@ -259,41 +263,26 @@ async def get_all_files_status(index_name: str):
                 'processed_chunks': processed_chunks,
                 'total_chunks': total_chunks,
             }
+        step_local_duration = time.time() - step_local_start
+        logger.info(f"[get_all_files_status] Local processing: {len(result)} files in {step_local_duration:.3f}s")
+        total_duration = time.time() - start_time
+        logger.info(f"[get_all_files_status] Complete: {len(result)} files processed in {total_duration:.3f}s")
         return result
     except Exception as e:
         logger.error(f"Error getting all files status for index {index_name}, details: {str(e)} {traceback.format_exc()}")
         return {}  # Return empty dict on error
 
 
-async def _convert_to_custom_state(process_celery_state: str, forward_celery_state: str) -> str:
-    """Delegates Celery-state conversion to the data-process service.
-
-    This removes the direct dependency on the *celery* package for callers of
-    `file_management_utils`.
+def _convert_to_custom_state_local(process_celery_state: str, forward_celery_state: str) -> str:
     """
-    try:
-        payload = {
-            "process_state": process_celery_state,
-            "forward_state": forward_celery_state,
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(f"{DATA_PROCESS_SERVICE}/tasks/convert_state", json=payload, timeout=5.0)
-
-        if response.status_code == 200:
-            return response.json().get("state", "WAIT_FOR_PROCESSING")
-        else:
-            logger.warning(
-                "State conversion service error: %s - %s", response.status_code, response.text
-            )
-    except Exception as e:
-        logger.warning("Failed to convert state via service: %s", str(e))
-
-    # Fallback mapping without Celery dependency (string comparison only)
+    Local state conversion logic - handles all known Celery states.
+    Returns "UNKNOWN" only if the states are not recognized.
+    """
     success = "SUCCESS"
     failure = "FAILURE"
     pending = "PENDING"
     started = "STARTED"
+    unknown = "UNKNOWN"
 
     if process_celery_state == failure:
         return "PROCESS_FAILED"
@@ -303,6 +292,11 @@ async def _convert_to_custom_state(process_celery_state: str, forward_celery_sta
         return "COMPLETED"
     if not process_celery_state and not forward_celery_state:
         return "WAIT_FOR_PROCESSING"
+
+    # Check if states are known Celery states
+    known_states = {success, failure, pending, started, ""}
+    if process_celery_state not in known_states or forward_celery_state not in known_states:
+        return unknown
 
     forward_state_map = {
         pending: "WAIT_FOR_FORWARDING",

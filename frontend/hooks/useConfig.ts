@@ -8,6 +8,7 @@ import {
   AppConfig,
   ModelConfig,
   SingleModelConfig,
+  STTModelConfig,
 } from "@/types/modelConfig";
 import { ICON_TYPES } from "@/const/modelConfig";
 import { getAvatarUrl } from "@/lib/avatar";
@@ -34,6 +35,7 @@ const defaultConfig: GlobalConfig = {
   },
   models: {
     llm: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -42,6 +44,7 @@ const defaultConfig: GlobalConfig = {
       },
     },
     embedding: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -51,6 +54,7 @@ const defaultConfig: GlobalConfig = {
       dimension: 0,
     },
     multiEmbedding: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -60,6 +64,7 @@ const defaultConfig: GlobalConfig = {
       dimension: 0,
     },
     rerank: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -68,6 +73,23 @@ const defaultConfig: GlobalConfig = {
       },
     },
     vlm: {
+      id: 0,
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
+    vlm2: {
+      modelName: "",
+      displayName: "",
+      apiConfig: {
+        apiKey: "",
+        modelUrl: "",
+      },
+    },
+    vlm3: {
       modelName: "",
       displayName: "",
       apiConfig: {
@@ -76,20 +98,28 @@ const defaultConfig: GlobalConfig = {
       },
     },
     stt: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
         apiKey: "",
         modelUrl: "",
       },
+      modelFactory: "",
+      modelAppid: "",
+      accessToken: "",
     },
     tts: {
+      id: 0,
       modelName: "",
       displayName: "",
       apiConfig: {
         apiKey: "",
         modelUrl: "",
       },
+      modelFactory: "dashscope",
+      modelAppid: "",
+      accessToken: "",
     },
   },
 };
@@ -99,6 +129,7 @@ function transformModelEntry(
   withDimension = false
 ): SingleModelConfig {
   return {
+    id: raw?.id ?? 0,
     modelName: raw?.name || "",
     displayName: raw?.displayName || "",
     apiConfig: {
@@ -106,6 +137,24 @@ function transformModelEntry(
       modelUrl: raw?.apiConfig?.modelUrl || "",
     },
     ...(withDimension ? { dimension: raw?.dimension || 0 } : {}),
+  };
+}
+
+/**
+ * Transform backend voice model config (STT or TTS) to frontend format
+ */
+function transformVoiceModelEntry(raw: Record<string, any> | undefined): STTModelConfig {
+  return {
+    id: raw?.id ?? 0,
+    modelName: raw?.name || "",
+    displayName: raw?.displayName || "",
+    apiConfig: {
+      apiKey: raw?.apiConfig?.apiKey || "",
+      modelUrl: raw?.apiConfig?.modelUrl || "",
+    },
+    modelFactory: raw?.modelFactory || "",
+    modelAppid: raw?.modelAppid || "",
+    accessToken: raw?.accessToken || "",
   };
 }
 
@@ -140,8 +189,10 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
         ),
         rerank: transformModelEntry(backendConfig.models.rerank),
         vlm: transformModelEntry(backendConfig.models.vlm),
-        stt: transformModelEntry(backendConfig.models.stt),
-        tts: transformModelEntry(backendConfig.models.tts),
+        vlm2: transformModelEntry(backendConfig.models.vlm2),
+        vlm3: transformModelEntry(backendConfig.models.vlm3),
+        stt: transformVoiceModelEntry(backendConfig.models.stt),
+        tts: transformVoiceModelEntry(backendConfig.models.tts),
       }
     : defaultConfig.models;
 
@@ -174,7 +225,10 @@ function loadConfigFromStorage(): GlobalConfig | null {
 
     if (storedModelConfig) {
       try {
-        mergedConfig.models = JSON.parse(storedModelConfig);
+        mergedConfig.models = deepMerge(
+          mergedConfig.models,
+          JSON.parse(storedModelConfig)
+        );
       } catch (error) {
         log.error("Failed to parse model config:", error);
       }
@@ -264,13 +318,36 @@ export function useConfig() {
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
   // Whether config has selected a VLM model
-  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+  const isVlmAvailable = !!(
+    config?.models?.vlm?.modelName ||
+    config?.models?.vlm?.displayName ||
+    config?.models?.vlm2?.modelName ||
+    config?.models?.vlm2?.displayName ||
+    config?.models?.vlm3?.modelName ||
+    config?.models?.vlm3?.displayName
+  );
+
+  const isImageUnderstandingAvailable = !!(
+    config?.models?.vlm?.modelName ||
+    config?.models?.vlm?.displayName
+  );
+
+  const isVideoUnderstandingAvailable = !!(
+    config?.models?.vlm3?.modelName ||
+    config?.models?.vlm3?.displayName
+  );
 
   // Whether config has selected an Embedding model
   const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
 
+  // Whether config has selected a Multi-Embedding model
+  const isMultiEmbeddingAvailable = !!(config?.models?.multiEmbedding?.modelName || config?.models?.multiEmbedding?.displayName);
+
   // Default LLM model name from config (modelName or displayName)
   const defaultLlmModelName = config?.models?.llm?.modelName || config?.models?.llm?.displayName || "";
+
+  // Default LLM model config (the full config from load_config, not resolved from model list)
+  const defaultLlmModelConfig = config?.models?.llm;
 
   const updateAppConfig = useCallback(
     (partial: Partial<AppConfig>) => {
@@ -347,8 +424,12 @@ export function useConfig() {
     appConfig: config?.app,
     modelConfig: config?.models,
     isVlmAvailable,
+    isImageUnderstandingAvailable,
+    isVideoUnderstandingAvailable,
     isEmbeddingAvailable,
+    isMultiEmbeddingAvailable,
     defaultLlmModelName,
+    defaultLlmModelConfig,
     updateAppConfig,
     updateModelConfig,
     updateConfig,

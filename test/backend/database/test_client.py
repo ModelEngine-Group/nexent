@@ -67,7 +67,8 @@ with patch('nexent.storage.storage_client_factory.create_storage_client_from_con
         minio_client,
         get_db_session,
         as_dict,
-        filter_property
+        filter_property,
+        get_monitoring_db_session,
     )
 
 
@@ -623,3 +624,52 @@ class TestFilterProperty:
         result = filter_property(data, mock_model)
 
         assert result == {}
+
+
+class TestAdditionalCoverage:
+    def test_minio_default_bucket_fallback_on_init_error(self, mocker):
+        MinioClient._instance = None
+        MinioClient._initialized = False
+        client = MinioClient()
+        client.storage_config = None
+        mocker.patch.object(client, "_ensure_initialized", side_effect=RuntimeError("x"))
+        mocker.patch("backend.database.client.MINIO_DEFAULT_BUCKET", "fallback-bucket")
+        assert client.default_bucket == "fallback-bucket"
+
+    def test_as_dict_for_sqlalchemy_object_and_mapping(self, mocker):
+        from datetime import datetime
+        dt = datetime(2025, 1, 1, 0, 0, 0)
+
+        class Obj:
+            __mapper__ = object()
+            created = dt
+            name = "n1"
+
+        mock_col_created = MagicMock()
+        mock_col_created.key = "created"
+        mock_col_name = MagicMock()
+        mock_col_name.key = "name"
+        mocker.patch("backend.database.client.class_mapper", return_value=MagicMock(columns=[mock_col_created, mock_col_name]))
+        orm_result = as_dict(Obj())
+        assert orm_result["created"] == dt.isoformat()
+        assert orm_result["name"] == "n1"
+
+        mapping_obj = MagicMock()
+        mapping_obj._mapping = {"a": 1}
+        assert as_dict(mapping_obj) == {"a": 1}
+
+    def test_get_monitoring_db_session_paths(self, mocker):
+        mock_session = MagicMock()
+        mocker.patch("backend.database.client._get_monitoring_engine")
+        mocker.patch("backend.database.client._monitoring_session_maker", MagicMock(return_value=mock_session))
+
+        with get_monitoring_db_session() as s:
+            assert s is mock_session
+        mock_session.commit.assert_called_once()
+        mock_session.close.assert_called_once()
+
+        provided = MagicMock()
+        with pytest.raises(ValueError):
+            with get_monitoring_db_session(provided):
+                raise ValueError("boom")
+        provided.rollback.assert_not_called()

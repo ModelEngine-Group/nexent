@@ -13,11 +13,29 @@ import {
   KnowledgeBasesWithDataMateStatus,
   DataMateSyncError,
 } from "@/types/knowledgeBase";
+import type {
+  AidpKnowledgeBaseItem,
+  AidpKnowledgeBaseListResponse,
+} from "@/types/agentConfig";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
 
 // @ts-ignore
 const fetch: typeof fetchWithAuth = fetchWithAuth;
+
+const normalizeIsMultimodal = (value: unknown): boolean => {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "y" || normalized === "true" || normalized === "yes";
+  }
+  if (typeof value === "number") return value === 1;
+  return false;
+};
+
+const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
+  normalizeIsMultimodal(indexInfo.is_multimodal ?? stats.is_multimodal);
 
 // Knowledge base service class
 class KnowledgeBaseService {
@@ -141,7 +159,10 @@ class KnowledgeBaseService {
     userId: string
   ): Promise<Array<{ id: string; name: string }>> {
     try {
-      const url = new URL(API_ENDPOINTS.idata.knowledgeSpaces, window.location.origin);
+      const url = new URL(
+        API_ENDPOINTS.idata.knowledgeSpaces,
+        window.location.origin
+      );
       url.searchParams.set("idata_api_base", idataApiBase);
       url.searchParams.set("api_key", apiKey);
       url.searchParams.set("user_id", userId);
@@ -156,8 +177,12 @@ class KnowledgeBaseService {
       // Check for error response from middleware (has code field)
       if (result.code !== undefined && result.code !== 0) {
         const errorCode = result.code || response.status;
-        const errorMessage = result.message || "Failed to fetch iData knowledge spaces";
-        log.error("iData API error:", { code: errorCode, message: errorMessage });
+        const errorMessage =
+          result.message || "Failed to fetch iData knowledge spaces";
+        log.error("iData API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
         throw new ApiError(errorCode, errorMessage);
       }
 
@@ -198,7 +223,10 @@ class KnowledgeBaseService {
       if (result.code !== undefined && result.code !== 0) {
         const errorCode = result.code || response.status;
         const errorMessage = result.message || "Failed to fetch iData datasets";
-        log.error("iData API error:", { code: errorCode, message: errorMessage });
+        log.error("iData API error:", {
+          code: errorCode,
+          message: errorMessage,
+        });
         throw new ApiError(errorCode, errorMessage);
       }
 
@@ -350,6 +378,139 @@ class KnowledgeBaseService {
     }
   }
 
+  /**
+   * Fetch Haotian knowledge sets via backend proxy.
+   */
+  async getHaotianKnowledgeSets(
+    listUrl: string,
+    externalAuthorization: string
+  ): Promise<{
+    knowledge_sets: Array<{
+      name: string;
+      knowledge_bases: Array<{ dify_dataset_id: string; name: string }>;
+    }>;
+  }> {
+    const response = await fetch(API_ENDPOINTS.haotian.knowledgeSets, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        list_url: listUrl,
+        authorization: externalAuthorization,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Failed to fetch Haotian knowledge sets");
+    }
+    return data;
+  }
+
+  /**
+   * Test Haotian connection via backend proxy.
+   */
+  async testHaotianConnection(
+    listUrl: string,
+    externalAuthorization: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.haotian.testConnection, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          list_url: listUrl,
+          authorization: externalAuthorization,
+        }),
+      });
+      if (response.ok) return { success: true };
+      const errorData = await response.json();
+      return { success: false, error: errorData.detail || "Connection failed" };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Connection test failed",
+      };
+    }
+  }
+
+  async getAidpKnowledgeBases(
+    serverUrl: string,
+    apiKey: string,
+    page: number = 1,
+    pageSize: number = 20
+  ): Promise<AidpKnowledgeBaseListResponse> {
+    try {
+      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
+      url.searchParams.set("server_url", serverUrl);
+      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("page_size", String(pageSize));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch AIDP knowledge bases";
+        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      return {
+        value: Array.isArray(result.value) ? result.value : [],
+        total_count:
+          typeof result.total_count === "number" ? result.total_count : undefined,
+        next_link: typeof result.next_link === "string" ? result.next_link : null,
+      };
+    } catch (error) {
+      log.error("Failed to fetch AIDP knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  mapAidpKnowledgeBasesToKnowledgeBases(
+    items: AidpKnowledgeBaseItem[]
+  ): KnowledgeBase[] {
+    return items.map((item) => ({
+      id: String(item.kds_id),
+      name: item.kds_name || String(item.kds_id),
+      display_name: item.kds_name || String(item.kds_id),
+      description: item.description || "AIDP knowledge base",
+      documentCount: item.document_count || 0,
+      chunkCount: item.chunk_count || 0,
+      createdAt: null,
+      updatedAt: null,
+      embeddingModel: "unknown",
+      knowledge_sources: "aidp",
+      ingroup_permission: "",
+      group_ids: [],
+      store_size: "",
+      process_source: "AIDP",
+      avatar: "",
+      chunkNum: 0,
+      language: "",
+      nickname: "",
+      parserId: "",
+      permission: "",
+      tokenNum: 0,
+      source: "aidp",
+      tenant_id: "",
+    }));
+  }
+
   // Sync Dify knowledge bases
   async syncDifyDatasets(
     difyApiBase: string,
@@ -476,6 +637,7 @@ class KnowledgeBaseService {
                   return {
                     id: kbId,
                     name: kbName,
+                    index_name: kbId, // Internal index_name for API calls
                     display_name: indexInfo.display_name || indexInfo.name,
                     description: "Elasticsearch index",
                     documentCount: stats.doc_count || 0,
@@ -487,7 +649,14 @@ class KnowledgeBaseService {
                       stats.update_date ||
                       stats.creation_date ||
                       null,
-                    embeddingModel: stats.embedding_model || "unknown",
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
+                    // Use embedding_model_name (display_name) from backend, fallback to ES stats
+                    embeddingModel:
+                      indexInfo.embedding_model_name ||
+                      stats.embedding_model ||
+                      "unknown",
+                    summaryFrequency: indexInfo.summary_frequency || null,
+                    lastSummaryTime: indexInfo.last_summary_time || null,
                     knowledge_sources:
                       indexInfo.knowledge_sources || "elasticsearch",
                     ingroup_permission: indexInfo.ingroup_permission || "",
@@ -503,6 +672,7 @@ class KnowledgeBaseService {
                     tokenNum: 0,
                     source: "nexent",
                     tenant_id: indexInfo.tenant_id,
+                    preserve_source_file: indexInfo.preserve_source_file ?? true,
                   };
                 }
               );
@@ -555,6 +725,7 @@ class KnowledgeBaseService {
                     createdAt: stats.creation_date || null,
                     updatedAt: stats.update_date || stats.creation_date || null,
                     embeddingModel: stats.embedding_model || "unknown",
+                    is_multimodal: resolveIsMultimodal(indexInfo, stats),
                     knowledge_sources:
                       indexInfo.knowledge_sources || "datamate",
                     ingroup_permission: indexInfo.ingroup_permission || "",
@@ -677,13 +848,16 @@ class KnowledgeBaseService {
       const requestBody: {
         name: string;
         description: string;
-        embedding_model_name?: string;
+        embeddingModel?: string;
         ingroup_permission?: string;
         group_ids?: number[];
+        is_multimodal?: boolean;
+        preserve_source_file?: boolean;
       } = {
         name: params.name,
         description: params.description || "",
-        embedding_model_name: params.embeddingModel || "",
+        embeddingModel: params.embeddingModel || "",
+        is_multimodal: params.is_multimodal || false,
       };
 
       // Include group permission and user groups if provided
@@ -692,6 +866,9 @@ class KnowledgeBaseService {
       }
       if (params.group_ids && params.group_ids.length > 0) {
         requestBody.group_ids = params.group_ids;
+      }
+      if (params.preserve_source_file !== undefined) {
+        requestBody.preserve_source_file = params.preserve_source_file;
       }
 
       const response = await fetch(
@@ -718,6 +895,7 @@ class KnowledgeBaseService {
         chunkCount: 0,
         createdAt: new Date().toISOString(),
         embeddingModel: params.embeddingModel || "",
+        is_multimodal: params.is_multimodal || false,
         avatar: "",
         chunkNum: 0,
         language: "",
@@ -827,7 +1005,8 @@ class KnowledgeBaseService {
   async uploadDocuments(
     kbId: string,
     files: File[],
-    chunkingStrategy?: string
+    chunkingStrategy?: string,
+    modelId?: number
   ): Promise<void> {
     try {
       // Create FormData object
@@ -889,6 +1068,7 @@ class KnowledgeBaseService {
           files: filesToProcess,
           chunking_strategy: chunkingStrategy,
           destination: "minio",
+          model_id: modelId,
         }),
       });
 
@@ -1063,6 +1243,39 @@ class KnowledgeBaseService {
         throw error;
       }
       throw new Error("Failed to change summary");
+    }
+  }
+
+  // Update auto-summary frequency for a knowledge base
+  async updateSummaryFrequency(
+    indexName: string,
+    frequency: string | null
+  ): Promise<void> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateSummaryFrequency(indexName),
+        {
+          method: "PATCH",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ summary_frequency: frequency }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            `HTTP error! status: ${response.status}`
+        );
+      }
+    } catch (error) {
+      log.error("Error updating summary frequency:", error);
+      throw error;
     }
   }
 
@@ -1406,6 +1619,99 @@ class KnowledgeBaseService {
     } catch (error) {
       log.error("Failed to get document error info:", error);
       throw error;
+    }
+  }
+
+  // Embedding model status and configuration
+  async getEmbeddingModelStatus(indexName: string): Promise<{
+    status: "configured" | "legacy" | "missing";
+    needs_config: boolean;
+    index_name: string;
+    knowledge_name: string;
+    model_id: string | null;
+    embedding_model_name: string | null;
+    model_info: {
+      model_id: string;
+      model_name: string;
+      display_name: string;
+      model_type: string;
+    } | null;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.embeddingModelStatus(indexName),
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new ApiError(
+          response.status,
+          errorData.detail ||
+            errorData.message ||
+            "Failed to get embedding model status"
+        );
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      log.error("Failed to get embedding model status:", error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to get embedding model status");
+    }
+  }
+
+  async updateEmbeddingModel(
+    indexName: string,
+    modelId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.updateEmbeddingModel(indexName),
+        {
+          method: "PUT",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ model_id: modelId }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          data.detail || data.message || "Failed to update embedding model"
+        );
+      }
+
+      return {
+        success: true,
+        message: data.message || "Embedding model updated successfully",
+      };
+    } catch (error) {
+      log.error("Failed to update embedding model:", error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Failed to update embedding model");
     }
   }
 }

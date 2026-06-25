@@ -29,6 +29,22 @@ logger = logging.getLogger("a2a_agent_db")
 # Default cache TTL in seconds (24 hours)
 DEFAULT_CACHE_TTL_HOURS = 24
 
+
+def _extract_base_url(url: str) -> str:
+    """Extract base URL (scheme + host + port) from a full URL.
+
+    Args:
+        url: Full URL, e.g., http://example.com/path/to/agent.json
+
+    Returns:
+        Base URL, e.g., http://example.com
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.port:
+        return f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+    return f"{parsed.scheme}://{parsed.hostname}"
+
 # Standard human-readable protocol label
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_JSONRPC = "JSONRPC"
@@ -51,27 +67,19 @@ def _generate_endpoint_id(agent_id: int) -> str:
 
 
 def _extract_primary_interface(supported_interfaces: List[Dict[str, Any]]) -> tuple[str, str]:
-    """Extract the primary interface (HTTP+JSON) from supported interfaces.
+    """Extract the primary interface (first one) from supported interfaces.
 
     Args:
         supported_interfaces: List of interface objects with protocolBinding, url, protocolVersion.
 
     Returns:
         Tuple of (agent_url, protocol_version).
-        Falls back to first interface if HTTP+JSON not found.
+        Returns empty string for url if no interfaces found.
     """
     if not supported_interfaces:
         return "", "1.0"
 
-    # Prefer HTTP+JSON
-    for iface in supported_interfaces:
-        if iface.get("protocolBinding", "").upper() in (PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC, PROTOCOL_GRPC):
-            return (
-                iface.get("url", ""),
-                iface.get("protocolVersion", "1.0")
-            )
-
-    # Fall back to first interface
+    # Return the first interface to ensure URL and protocol are from the same interface
     first = supported_interfaces[0]
     return (
         first.get("url", ""),
@@ -148,6 +156,7 @@ def create_external_agent_from_url(
     version: Optional[str] = None,
     streaming: bool = False,
     supported_interfaces: Optional[List[Dict[str, Any]]] = None,
+    base_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create or update an external A2A agent discovered from URL.
 
@@ -162,6 +171,7 @@ def create_external_agent_from_url(
         version: Agent version from Agent Card.
         streaming: Whether this agent supports SSE streaming.
         supported_interfaces: All supported protocol interfaces.
+        base_url: Base URL for health checks (service root address).
 
     Returns:
         Created agent information dict.
@@ -169,6 +179,10 @@ def create_external_agent_from_url(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
     protocol_type = _extract_protocol_type(supported_interfaces)
+
+    # Extract base_url from source_url if not provided
+    if not base_url and source_url:
+        base_url = _extract_base_url(source_url)
 
     with _get_db_session() as session:
         # Check if agent already exists by source_url
@@ -191,6 +205,8 @@ def create_external_agent_from_url(
             existing.cached_at = now
             existing.cache_expires_at = expires_at
             existing.updated_by = user_id
+            if base_url:
+                existing.base_url = base_url
             agent = existing
         else:
             # Create new record
@@ -210,6 +226,7 @@ def create_external_agent_from_url(
                 raw_card=raw_card,
                 cached_at=now,
                 cache_expires_at=expires_at,
+                base_url=base_url,
                 delete_flag='N'
             )
             session.add(agent)
@@ -226,6 +243,7 @@ def create_external_agent_from_url(
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
+            "base_url": agent.base_url,
             "is_available": agent.is_available,
             "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
             "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
@@ -244,6 +262,7 @@ def create_external_agent_from_nacos(
     version: Optional[str] = None,
     streaming: bool = False,
     supported_interfaces: Optional[List[Dict[str, Any]]] = None,
+    base_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create or update an external A2A agent discovered from Nacos.
 
@@ -259,6 +278,7 @@ def create_external_agent_from_nacos(
         version: Agent version from Agent Card.
         streaming: Whether this agent supports SSE streaming.
         supported_interfaces: All supported protocol interfaces.
+        base_url: Base URL for health checks (service root address).
 
     Returns:
         Created agent information dict.
@@ -266,6 +286,10 @@ def create_external_agent_from_nacos(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=DEFAULT_CACHE_TTL_HOURS)
     protocol_type = _extract_protocol_type(supported_interfaces)
+
+    # Extract base_url from agent_url if not provided
+    if not base_url and agent_url:
+        base_url = _extract_base_url(agent_url)
 
     with _get_db_session() as session:
         # Check if agent already exists by nacos_config_id + nacos_agent_name
@@ -288,6 +312,8 @@ def create_external_agent_from_nacos(
             existing.cached_at = now
             existing.cache_expires_at = expires_at
             existing.updated_by = user_id
+            if base_url:
+                existing.base_url = base_url
             agent = existing
         else:
             agent = A2AExternalAgent(
@@ -307,6 +333,7 @@ def create_external_agent_from_nacos(
                 raw_card=raw_card,
                 cached_at=now,
                 cache_expires_at=expires_at,
+                base_url=base_url,
                 delete_flag='N'
             )
             session.add(agent)
@@ -323,6 +350,7 @@ def create_external_agent_from_nacos(
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
+            "base_url": agent.base_url,
             "is_available": agent.is_available,
             "cached_at": agent.cached_at.isoformat() if agent.cached_at else None,
             "cache_expires_at": agent.cache_expires_at.isoformat() if agent.cache_expires_at else None,
@@ -360,6 +388,7 @@ def get_external_agent_by_id(external_agent_id: int, tenant_id: str) -> Optional
             "supported_interfaces": agent.supported_interfaces,
             "source_type": agent.source_type,
             "source_url": agent.source_url,
+            "base_url": agent.base_url,
             "nacos_config_id": agent.nacos_config_id,
             "nacos_agent_name": agent.nacos_agent_name,
             "raw_card": agent.raw_card,
@@ -416,6 +445,8 @@ def list_external_agents(
                 "protocol_type": agent.protocol_type,
                 "supported_interfaces": agent.supported_interfaces,
                 "source_type": agent.source_type,
+                "source_url": agent.source_url,
+                "base_url": agent.base_url,
                 "is_available": agent.is_available,
                 "last_check_result": agent.last_check_result,
                 "create_time": agent.create_time.isoformat() if agent.create_time else None,
@@ -1714,6 +1745,7 @@ def get_nacos_config_by_id(config_id: str, tenant_id: str) -> Optional[Dict[str,
             "name": config.name,
             "nacos_addr": config.nacos_addr,
             "nacos_username": config.nacos_username,
+            "nacos_password": config.nacos_password,
             "namespace_id": config.namespace_id,
             "description": config.description,
             "is_active": config.is_active,
@@ -1749,6 +1781,8 @@ def list_nacos_configs(tenant_id: str, is_active: Optional[bool] = None) -> List
                 "name": config.name,
                 "nacos_addr": config.nacos_addr,
                 "namespace_id": config.namespace_id,
+                "nacos_username": config.nacos_username,
+                "nacos_password": config.nacos_password,
                 "is_active": config.is_active,
                 "last_scan_at": config.last_scan_at.isoformat() if config.last_scan_at else None,
             }
@@ -1802,6 +1836,75 @@ def delete_nacos_config(config_id: str, tenant_id: str) -> bool:
 
         config.delete_flag = 'Y'
         return True
+
+
+def update_nacos_config(
+    config_id: str,
+    tenant_id: str,
+    user_id: str,
+    name: Optional[str] = None,
+    nacos_addr: Optional[str] = None,
+    nacos_username: Optional[str] = None,
+    nacos_password: Optional[str] = None,
+    namespace_id: Optional[str] = None,
+    description: Optional[str] = None,
+    is_active: Optional[bool] = None
+) -> Optional[Dict[str, Any]]:
+    """Update a Nacos config.
+
+    Args:
+        config_id: The config ID.
+        tenant_id: Tenant ID.
+        user_id: User who is updating this config.
+        name: Optional new display name.
+        nacos_addr: Optional new Nacos server address.
+        nacos_username: Optional new Nacos username.
+        nacos_password: Optional new Nacos password.
+        namespace_id: Optional new Nacos namespace.
+        description: Optional new description.
+        is_active: Optional active status.
+
+    Returns:
+        Updated config information dict, or None if not found.
+    """
+    with _get_db_session() as session:
+        config = session.query(A2ANacosConfig).filter(
+            A2ANacosConfig.config_id == config_id,
+            A2ANacosConfig.tenant_id == tenant_id,
+            A2ANacosConfig.delete_flag != 'Y'
+        ).first()
+
+        if not config:
+            return None
+
+        if name is not None:
+            config.name = name
+        if nacos_addr is not None:
+            config.nacos_addr = nacos_addr
+        if nacos_username is not None:
+            config.nacos_username = nacos_username
+        if nacos_password is not None:
+            config.nacos_password = nacos_password
+        if namespace_id is not None:
+            config.namespace_id = namespace_id
+        if description is not None:
+            config.description = description
+        if is_active is not None:
+            config.is_active = is_active
+
+        config.updated_by = user_id
+        session.flush()
+
+        return {
+            "id": config.id,
+            "config_id": config.config_id,
+            "name": config.name,
+            "nacos_addr": config.nacos_addr,
+            "namespace_id": config.namespace_id,
+            "nacos_username": config.nacos_username,
+            "nacos_password": config.nacos_password,
+            "is_active": config.is_active,
+        }
 
 
 # =============================================================================

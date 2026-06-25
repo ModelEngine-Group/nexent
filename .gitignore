@@ -19,9 +19,16 @@ docker/uploads
 docker/openssh-server
 docker/volumes/db/data
 docker/.env
+docker/monitoring/monitoring.env
 docker/.run
 docker/deploy.options
-k8s/helm/.deploy.options
+k8s/helm/deploy.options
+scripts/deployment/local-config.yaml
+scripts/deployment/generated/
+docker/.env.generated
+docker/docker-compose.generated.yml
+k8s/helm/nexent/generated-values.yaml
+k8s/helm/nexent/generated-secrets-values.yaml
 
 frontend_standalone/
 .pnpm-store/
@@ -34,3 +41,29 @@ model-assets/
 *.pytest_cache
 *.coverage
 *coverage.xml
+
+# Log files
+*.log
+
+.sisyphus/
+.opencode/
+openspec/
+logs/
+
+.agents/
+.devspace/
+devspace.yaml
+k8s/helm/**/*.tgz
+k8s/helm/nexent/Chart.lock
+
+MAC_DEVELOPMENT_GUIDE.md
+data/
+sdk/benchmark/.env
+/docker/.env.bak
+
+.venv
+
+.pytest-tmp
+doc/mermaid
+
+.claude/skills/python-import-triage

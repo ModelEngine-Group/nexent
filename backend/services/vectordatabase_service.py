@@ -10,6 +10,7 @@ Main features include:
 4. Health check interface
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -20,15 +21,15 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
+from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, DashScopeMultimodalEmbedding, BaseEmbedding
 from nexent.core.models.rerank_model import OpenAICompatibleRerank, BaseRerank
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ
+from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ, ASSET_OWNER_TENANT_ID
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
-from database.attachment_db import delete_file
+from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
     create_knowledge_record,
     delete_knowledge_record,
@@ -36,13 +37,17 @@ from database.knowledge_db import (
     update_knowledge_record,
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
+    update_last_doc_update_time,
+    update_last_summary_time,
+    update_embedding_model_by_index_name,
 )
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
-from database.model_management_db import get_model_records
+from database.model_management_db import get_model_by_display_name, get_model_by_model_id, get_model_records
 from services.redis_service import get_redis_service
 from services.group_service import get_tenant_default_group_id
+from services.asset_owner_visibility import postprocess_knowledge_visibility
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.str_utils import convert_string_to_list
@@ -74,6 +79,134 @@ def _update_progress(task_id: str, processed: int, total: int):
     except Exception as e:
         logger.warning(
             f"[PROGRESS CALLBACK] Exception updating progress for task {task_id}: {str(e)}")
+
+
+def _get_embedding_model_display_name(model_id: Optional[int], tenant_id: str) -> str:
+    """
+    Get embedding model display_name from model_id.
+
+    Args:
+        model_id: The model ID to look up
+        tenant_id: Tenant ID for the lookup
+
+    Returns:
+        The model's display_name if found, empty string otherwise
+    """
+    if model_id is None:
+        return ""
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model:
+            return model.get("display_name", "")
+    except Exception as e:
+        logger.warning(f"Failed to get display_name for model_id {model_id}: {e}")
+    return ""
+
+
+def _is_multimodal_by_model_id(model_id: Optional[int], tenant_id: str) -> bool:
+    """
+    Determine whether an embedding model is multimodal based on model_id.
+
+    Args:
+        model_id: The embedding model ID.
+        tenant_id: Tenant ID for model lookup.
+
+    Returns:
+        True when the model type is `multi_embedding`, otherwise False.
+    """
+    if model_id is None:
+        return False
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model:
+            return model.get("model_type") == "multi_embedding"
+    except Exception as e:
+        logger.warning(f"Failed to determine multimodal flag for model_id {model_id}: {e}")
+    return False
+
+
+class KnowledgeBaseNeedsModelConfigError(Exception):
+    """Exception raised when a knowledge base needs an embedding model to be configured."""
+    def __init__(self, index_name: str, message: str = None):
+        self.index_name = index_name
+        self.message = message or f"Knowledge base '{index_name}' needs an embedding model to be configured"
+        super().__init__(self.message)
+
+
+def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[Optional[Any], Optional[int], dict]:
+    """
+    Get the embedding model for a knowledge base by its index_name.
+
+    Args:
+        tenant_id: Tenant ID
+        index_name: The index name of the knowledge base
+
+    Returns:
+        Tuple of (embedding model instance or None, model_id or None, metadata dict)
+        metadata contains: {
+            "status": str,           # "ok" | "needs_config" | "error"
+            "needs_update": bool,    # Whether the database needs to be updated
+            "update_info": dict,     # Fields to update if needs_update is True
+            "message": str           # Status message
+        }
+
+    Design principles:
+        - Force explicit configuration: model_id must be explicitly set by user
+        - No auto-fix: never automatically use tenant default model
+        - Clear error guidance: return needs_config status for user action
+    """
+    try:
+        knowledge_record = get_knowledge_record({
+            "index_name": index_name,
+            "tenant_id": tenant_id,
+            "include_asset_owner_assets": True,
+        })
+
+        if not knowledge_record:
+            return None, None, {
+                "status": "error",
+                "needs_update": False,
+                "message": f"Knowledge base '{index_name}' not found"
+            }
+
+        model_id = knowledge_record.get("embedding_model_id")
+
+        # Case 1: model_id exists and is valid, use it
+        if model_id:
+            model, _ = get_embedding_model_by_id(tenant_id, model_id)
+            if model:
+                return model, model_id, {
+                    "status": "ok",
+                    "needs_update": False,
+                    "message": "Embedding model found"
+                }
+            # Model ID exists but model not found - fall through to error
+            logger.warning(f"Model ID {model_id} specified for index '{index_name}' but model not found")
+
+        # Case 2: model_id does not exist or is invalid
+        # Design principle: Force explicit configuration, no auto-fix
+        # Return needs_config to guide user to select a model
+        embedding_model_name = knowledge_record.get("embedding_model_name")
+        if embedding_model_name:
+            # Has model_name but no valid model_id (legacy data)
+            logger.warning(f"Index '{index_name}' has embedding_model_name but no valid model_id, needs explicit configuration")
+        else:
+            # No model configured at all
+            logger.error(f"Index '{index_name}' has no embedding model configured")
+
+        return None, None, {
+            "status": "needs_config",
+            "needs_update": False,
+            "message": f"No embedding model configured for knowledge base '{index_name}'. Please select a model."
+        }
+
+    except Exception as e:
+        logger.warning(f"Failed to get embedding model for index {index_name}: {e}")
+        return None, None, {
+            "status": "error",
+            "needs_update": False,
+            "message": str(e)
+        }
 
 
 ALLOWED_CHUNK_FIELDS = {
@@ -175,71 +308,142 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
     # Case B: Name is available in this tenant
     return {"status": "available"}
 
+def _normalize_model_type(raw_model_type: Optional[str]) -> Optional[str]:
+    if raw_model_type in ["multiEmbedding", "multi_embedding"]:
+        return "multi_embedding"
+    if raw_model_type == "embedding":
+        return "embedding"
+    return None
 
-def get_embedding_model(tenant_id: str, model_name: Optional[str] = None):
+def _build_model_config(model: dict) -> dict:
+    return {
+        "model_repo": model.get("model_repo", ""),
+        "model_name": model["model_name"],
+        "api_key": model.get("api_key", ""),
+        "base_url": model.get("base_url", ""),
+        "model_type": model.get("model_type", "embedding"),
+        "max_tokens": model.get("max_tokens", 1024),
+        "ssl_verify": model.get("ssl_verify", True),
+    }
+
+def _create_embedding_model(model: dict) -> Any:
+    model_config = _build_model_config(model)
+    common_kwargs = {
+        "api_key": model_config.get("api_key", ""),
+        "base_url": model_config.get("base_url", ""),
+        "model_name": get_model_name_from_config(model_config) or "",
+        "embedding_dim": model_config.get("max_tokens", 1024),
+        "ssl_verify": model_config.get("ssl_verify", True),
+    }
+    if model.get("model_type", "embedding") == "multi_embedding":
+        model_factory = model.get("model_factory", "").lower()
+        if model_factory == "dashscope":
+            return DashScopeMultimodalEmbedding(**common_kwargs)
+        return JinaEmbedding(**common_kwargs)
+    return OpenAICompatibleEmbedding(**common_kwargs)
+
+def get_embedding_model(
+        tenant_id: str,
+        model_name: Optional[str] = None,
+        model_type: Optional[str] = None
+) -> tuple[Optional[Any], Optional[int]]:
     """
     Get the embedding model for the tenant, optionally using a specific model name.
 
     Args:
         tenant_id: Tenant ID
-        model_name: Optional specific model name to use (format: "model_repo/model_name" or just "model_name")
-                   If provided, will try to find the model in the tenant's model list.
+        model_name: Optional display name of the embedding model to use.
+                   If provided, will find the model by display_name in the tenant's model list.
+        model_type: Optional model type filter. When model_name is omitted, queries tenant
+                   model records by this type; when model_type is also omitted, prefers
+                   embedding models, then multi_embedding models.
 
     Returns:
-        Embedding model instance or None
+        Tuple of (embedding model instance or None, model_id or None)
     """
-    # If model_name is provided, try to find it in the tenant's models
     if model_name:
         try:
-            models = get_model_records({"model_type": "embedding"}, tenant_id)
-            for model in models:
-                model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
-                if model_display_name == model_name:
-                    # Found the model, create embedding instance
-                    model_config = {
-                        "model_repo": model.get("model_repo", ""),
-                        "model_name": model["model_name"],
-                        "api_key": model.get("api_key", ""),
-                        "base_url": model.get("base_url", ""),
-                        "model_type": "embedding",
-                        "max_tokens": model.get("max_tokens", 1024),
-                        "ssl_verify": model.get("ssl_verify", True),
-                    }
-                    return OpenAICompatibleEmbedding(
-                        api_key=model_config.get("api_key", ""),
-                        base_url=model_config.get("base_url", ""),
-                        model_name=get_model_name_from_config(model_config) or "",
-                        embedding_dim=model_config.get("max_tokens", 1024),
-                        ssl_verify=model_config.get("ssl_verify", True),
-                    )
+            model_type = _normalize_model_type(model_type)
+            if model_type:
+                model = get_model_by_display_name(model_name, tenant_id, model_type)
+            else:
+                model = get_model_by_display_name(model_name, tenant_id)
+
+            if not model or model.get("model_type") not in ["embedding", "multi_embedding"]:
+                logger.warning(f"Model '{model_name}' not found or is not an embedding model")
+                return None, None
+
+            return _create_embedding_model(model), model.get("model_id")
         except Exception as e:
             logger.warning(f"Failed to get embedding model by name {model_name}: {e}")
-
-    # Fall back to default embedding model (current behavior)
-    model_config = tenant_config_manager.get_model_config(
-        key="EMBEDDING_ID", tenant_id=tenant_id)
-
-    model_type = model_config.get("model_type", "")
-
-    if model_type == "embedding":
-        # Get the es core
-        return OpenAICompatibleEmbedding(
-            api_key=model_config.get("api_key", ""),
-            base_url=model_config.get("base_url", ""),
-            model_name=get_model_name_from_config(model_config) or "",
-            embedding_dim=model_config.get("max_tokens", 1024),
-            ssl_verify=model_config.get("ssl_verify", True),
-        )
-    elif model_type == "multi_embedding":
-        return JinaEmbedding(
-            api_key=model_config.get("api_key", ""),
-            base_url=model_config.get("base_url", ""),
-            model_name=get_model_name_from_config(model_config) or "",
-            embedding_dim=model_config.get("max_tokens", 1024),
-            ssl_verify=model_config.get("ssl_verify", True),
-        )
     else:
-        return None
+        try:
+            if model_type:
+                records = get_model_records({"model_type": model_type}, tenant_id)
+            else:
+                records = get_model_records({"model_type": "embedding"}, tenant_id)
+                if not records:
+                    records = get_model_records({"model_type": "multi_embedding"}, tenant_id)
+
+            if records:
+                model = records[0]
+                if model.get("model_type") in ["embedding", "multi_embedding"]:
+                    return _create_embedding_model(model), model.get("model_id")
+                logger.warning(
+                    f"Resolved model is not an embedding model: {model.get('model_type')}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to get default embedding model for tenant {tenant_id}: {e}")
+
+    return None, None
+
+
+def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[Any], Optional[int]]:
+    """
+    Get the embedding model by model_id.
+
+    Args:
+        tenant_id: Tenant ID
+        model_id: Model ID to query
+
+    Returns:
+        Tuple of (embedding model instance or None, model_id or None)
+    """
+    try:
+        model = get_model_by_model_id(model_id, tenant_id)
+        if model and model.get("model_type") in ["embedding", "multi_embedding"]:
+            model_config = {
+                "model_repo": model.get("model_repo", ""),
+                "model_name": model["model_name"],
+                "api_key": model.get("api_key", ""),
+                "base_url": model.get("base_url", ""),
+                "model_type": model.get("model_type", "embedding"),
+                "max_tokens": model.get("max_tokens", 1024),
+                "ssl_verify": model.get("ssl_verify", True),
+            }
+            model_type = model.get("model_type", "embedding")
+            if model_type == "multi_embedding":
+                embedding_model = JinaEmbedding(
+                    api_key=model_config.get("api_key", ""),
+                    base_url=model_config.get("base_url", ""),
+                    model_name=get_model_name_from_config(model_config) or "",
+                    embedding_dim=model_config.get("max_tokens", 1024),
+                    ssl_verify=model_config.get("ssl_verify", True),
+                )
+            else:
+                embedding_model = OpenAICompatibleEmbedding(
+                    api_key=model_config.get("api_key", ""),
+                    base_url=model_config.get("base_url", ""),
+                    model_name=get_model_name_from_config(model_config) or "",
+                    embedding_dim=model_config.get("max_tokens", 1024),
+                    ssl_verify=model_config.get("ssl_verify", True),
+                )
+            return embedding_model, model.get("model_id")
+        else:
+            logger.warning(f"Model with id {model_id} not found or is not an embedding model")
+    except Exception as e:
+        logger.warning(f"Failed to get embedding model by id {model_id}: {e}")
+    return None, None
 
 
 def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
@@ -415,11 +619,19 @@ class ElasticSearchService:
                 None, description="ID of the user creating the knowledge base"),
             tenant_id: Optional[str] = Body(
                 None, description="ID of the tenant creating the knowledge base"),
+            model_id: Optional[int] = Body(
+                None, description="ID of the embedding model to use"),
     ):
         try:
             if vdb_core.check_index_exists(index_name):
                 raise Exception(f"Index {index_name} already exists")
-            embedding_model = get_embedding_model(tenant_id)
+
+            # Get embedding model by model_id if provided
+            if model_id:
+                embedding_model, actual_model_id = get_embedding_model_by_id(tenant_id, model_id)
+            else:
+                embedding_model, actual_model_id = None, None
+
             success = vdb_core.create_index(index_name, embedding_dim=embedding_dim or (
                 embedding_model.embedding_dim if embedding_model else 1024))
             if not success:
@@ -427,7 +639,8 @@ class ElasticSearchService:
             knowledge_data = {"index_name": index_name,
                               "created_by": user_id,
                               "tenant_id": tenant_id,
-                              "embedding_model_name": embedding_model.model}
+                              "embedding_model_name": embedding_model.model if embedding_model else None,
+                              "embedding_model_id": actual_model_id}
             create_knowledge_record(knowledge_data)
             return {"status": "success", "message": f"Index {index_name} created successfully"}
         except Exception as e:
@@ -443,6 +656,8 @@ class ElasticSearchService:
             ingroup_permission: Optional[str] = None,
             group_ids: Optional[List[int]] = None,
             embedding_model_name: Optional[str] = None,
+            is_multimodal: Optional[bool] = None,
+            preserve_source_file: Optional[bool] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -462,13 +677,25 @@ class ElasticSearchService:
             group_ids: List of group IDs (optional)
             embedding_model_name: Specific embedding model name to use (optional).
                                    If provided, will use this model instead of tenant default.
+            preserve_source_file: Whether to preserve uploaded source documents after
+                                   vectorization (optional; defaults to True when omitted).
 
         For backward compatibility, legacy callers can still use create_index() directly
         with an explicit index_name.
         """
         try:
             # Get embedding model - use user-selected model if provided, otherwise use tenant default
-            embedding_model = get_embedding_model(tenant_id, embedding_model_name)
+            selected_model_type = None
+            if is_multimodal is True:
+                selected_model_type = "multi_embedding"
+            elif is_multimodal is False and embedding_model_name:
+                selected_model_type = "embedding"
+
+            embedding_model, model_id = get_embedding_model(
+                tenant_id,
+                embedding_model_name,
+                selected_model_type
+            )
 
             # Determine the embedding model name to save: use user-provided name if available,
             # otherwise use the model's display name
@@ -483,6 +710,7 @@ class ElasticSearchService:
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "embedding_model_name": saved_embedding_model_name,
+                "embedding_model_id": model_id,
             }
 
             # Add group permission and group IDs if provided
@@ -490,6 +718,8 @@ class ElasticSearchService:
                 knowledge_data["ingroup_permission"] = ingroup_permission
             if group_ids is not None:
                 knowledge_data["group_ids"] = group_ids
+            if preserve_source_file is not None:
+                knowledge_data["preserve_source_file"] = preserve_source_file
 
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
@@ -571,6 +801,77 @@ class ElasticSearchService:
         return result
 
     @staticmethod
+    def update_embedding_model(
+            index_name: str,
+            model_id: int,
+            tenant_id: str,
+            user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update the embedding model for a knowledge base.
+
+        Args:
+            index_name: Internal index name of the knowledge base
+            model_id: ID of the embedding model to use
+            tenant_id: Tenant ID
+            user_id: ID of the user making the update
+
+        Returns:
+            Dict containing update result information
+
+        Raises:
+            ValueError: If model is not found or is not an embedding model
+            Exception: If update fails
+        """
+        try:
+            # Validate the model exists and is an embedding model
+            model = get_model_by_model_id(model_id, tenant_id)
+            if not model:
+                raise ValueError(f"Model with id {model_id} not found")
+
+            if model.get("model_type") not in ["embedding", "multi_embedding"]:
+                raise ValueError(
+                    f"Model '{model.get('display_name', model_id)}' is not an embedding model. "
+                    f"Please select an embedding model."
+                )
+
+            # Update the database record
+            # Use display_name as embedding_model_name
+            embedding_model_name = model.get("display_name")
+            success = update_embedding_model_by_index_name(
+                index_name=index_name,
+                embedding_model_id=model_id,
+                embedding_model_name=embedding_model_name,
+                tenant_id=tenant_id,
+                user_id=user_id or ""
+            )
+
+            if not success:
+                raise Exception(f"Failed to update embedding model for index '{index_name}'")
+
+            logger.info(
+                f"Embedding model updated for knowledge base '{index_name}' "
+                f"to model '{model.get('display_name', model_id)}' (id: {model_id}) by user '{user_id}'"
+            )
+
+            # Use display_name for consistency with database update
+            model_display_name = model.get("display_name")
+            return {
+                "status": "success",
+                "index_name": index_name,
+                "model_id": model_id,
+                "model_name": model_display_name,
+                "model_display_name": model.get("display_name"),
+                "message": f"Embedding model updated successfully to '{model_display_name}'"
+            }
+
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update embedding model for index '{index_name}': {e}")
+            raise Exception(f"Failed to update embedding model: {str(e)}")
+
+    @staticmethod
     async def delete_index(
             index_name: str = Path(...,
                                    description="Name of the index to delete"),
@@ -631,7 +932,9 @@ class ElasticSearchService:
         Permission logic:
         - SU: All knowledgebases visible, all editable
         - ADMIN: Knowledgebases from same tenant visible, all editable
-        - USER/DEV: Knowledgebases where user belongs to intersecting groups, permission determined by:
+        - DEV on ASSET_OWNER-scoped records: all visible, read-only (READ_ONLY)
+        - SU/ADMIN/SPEED cross-tenant view of ASSET_OWNER records: read-only
+        - USER/DEV (non-ASSET_OWNER records): group intersection required; permission by:
             * If user is creator: editable
             * If ingroup_permission=EDIT: editable
             * If ingroup_permission=READ_ONLY: read-only
@@ -663,7 +966,9 @@ class ElasticSearchService:
         es_indices_list = vdb_core.get_user_indices(pattern)
 
         # Get all knowledgebase records from database (for cleanup and permission checking)
-        all_db_records = get_knowledge_info_by_tenant_id(target_tenant_id)
+        all_db_records = get_knowledge_info_by_tenant_id(
+            target_tenant_id
+        )
 
         # Filter visible knowledgebases based on user role and permissions
         visible_knowledgebases = []
@@ -679,6 +984,8 @@ class ElasticSearchService:
 
             # Check permission based on user role
             permission = None
+            record_tenant_id = str(record.get("tenant_id") or "")
+            is_asset_owner_record = record_tenant_id == ASSET_OWNER_TENANT_ID
 
             # Fallback logic: if user_id equals user_tenant_id, treat as legacy admin user
             # even if user_role is None or empty
@@ -690,7 +997,12 @@ class ElasticSearchService:
                 effective_user_role = "SPEED"
                 logger.info("User under SPEED version is treated as admin")
 
-            if effective_user_role in ["SU", "ADMIN", "SPEED"]:
+            if is_asset_owner_record:
+                if effective_user_role in ["ASSET_OWNER"]:
+                    permission = PERMISSION_EDIT
+                elif effective_user_role in ["SU", "ADMIN", "SPEED", "DEV"]:
+                    permission = PERMISSION_READ
+            elif effective_user_role in ["SU", "ADMIN", "SPEED", "ASSET_OWNER"]:
                 # SU, ADMIN and SPEED roles can see all knowledgebases
                 permission = PERMISSION_EDIT
             elif effective_user_role in ["USER", "DEV"]:
@@ -756,6 +1068,11 @@ class ElasticSearchService:
                     model_name_is_none_list.append(index_name)
 
         # Build response
+        visible_knowledgebases = postprocess_knowledge_visibility(
+            visible_knowledgebases,
+            caller_role=user_role,
+            caller_tenant_id=target_tenant_id,
+        )
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         response = {
@@ -774,6 +1091,12 @@ class ElasticSearchService:
                     index_name = record["index_name"]
                     index_stats = indice_stats.get(index_name, {})
 
+                    # Get embedding model display_name from model_id
+                    model_id = record.get("embedding_model_id")
+                    tenant_id = record.get("tenant_id") or target_tenant_id
+                    embedding_model_display_name = _get_embedding_model_display_name(model_id, tenant_id)
+                    is_multimodal = _is_multimodal_by_model_id(model_id, tenant_id)
+
                     stats_info.append({
                         # Internal index name (used as ID)
                         "name": index_name,
@@ -784,9 +1107,17 @@ class ElasticSearchService:
                         # knowledge source and ingroup permission from DB record
                         "knowledge_sources": record["knowledge_sources"],
                         "ingroup_permission": record["ingroup_permission"],
+                        "is_multimodal": is_multimodal,
                         "tenant_id": record.get("tenant_id"),
+                        # Embedding model info: display_name from model_id
+                        "embedding_model_name": embedding_model_display_name or record.get("embedding_model_name", ""),
+                        "embedding_model_id": model_id,
                         # Update time for sorting and display
                         "update_time": record.get("update_time"),
+                        # Auto-summary settings
+                        "summary_frequency": record.get("summary_frequency"),
+                        "last_summary_time": record.get("last_summary_time"),
+                        "preserve_source_file": record.get("preserve_source_file", True),
                         "stats": index_stats,
                     })
 
@@ -812,6 +1143,9 @@ class ElasticSearchService:
                        ] = Body(..., description="Document List to process"),
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
             task_id: Optional[str] = None,
+            model_id: Optional[int] = Body(
+                None, description="ID of the embedding model to use"),
+            large_mode: bool = False,
     ):
         """
         Index documents and create vector embeddings, create index if it doesn't exist
@@ -821,6 +1155,8 @@ class ElasticSearchService:
             index_name: Index name
             data: List containing document data to be indexed
             vdb_core: VectorDatabaseCore instance
+            task_id: Optional task ID for progress tracking
+            model_id: Optional model ID for the embedding model
 
         Returns:
             IndexingResponse object containing indexing result information
@@ -833,7 +1169,7 @@ class ElasticSearchService:
             if not vdb_core.check_index_exists(index_name):
                 try:
                     ElasticSearchService.create_index(
-                        index_name, vdb_core=vdb_core)
+                        index_name, vdb_core=vdb_core, model_id=model_id)
                     logger.info(f"Created new index {index_name}")
                 except Exception as create_error:
                     raise Exception(
@@ -882,12 +1218,27 @@ class ElasticSearchService:
                     "author": author,
                     "date": date,
                     "content": text,
-                    "process_source": "Unstructured",
+                    "process_source": metadata.get("process_source", "Unstructured"),
                     "file_size": file_size,
                     "create_time": create_time,
                     "languages": metadata.get("languages", []),
                     "embedding_model_name": embedding_model_name
                 }
+                
+                image_url = metadata.get("image_url", "")
+                if len(image_url) > 0:
+                    # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)
+                    try:
+                        file_stream = get_file_stream(
+                            object_name=image_url)
+                        if file_stream is None:
+                            raise FileNotFoundError(
+                                f"Unable to fetch file from URL: {image_url}")
+                        document["image_bytes"] = file_stream.read()
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to fetch file from {image_url}: {e}")
+                        raise
 
                 documents.append(document)
 
@@ -908,8 +1259,9 @@ class ElasticSearchService:
                 'tenant_id') if knowledge_record else None
 
             if tenant_id:
+                model_type = "EMBEDDING_ID" if embedding_model.model_type == "text" else "MULTI_EMBEDDING_ID"
                 model_config = tenant_config_manager.get_model_config(
-                    key="EMBEDDING_ID", tenant_id=tenant_id)
+                    key=model_type, tenant_id=tenant_id)
                 embedding_batch_size = model_config.get("chunk_batch", 10)
                 if embedding_batch_size is None:
                     embedding_batch_size = 10
@@ -939,6 +1291,7 @@ class ElasticSearchService:
                     embedding_model=embedding_model,
                     documents=documents,
                     embedding_batch_size=embedding_batch_size,
+                    large_mode=large_mode,
                     progress_callback=lambda processed, total: _update_progress(
                         task_id, processed, total) if task_id else None
                 )
@@ -958,6 +1311,9 @@ class ElasticSearchService:
                     except Exception as e:
                         logger.warning(
                             f"[REDIS PROGRESS] Exception updating final progress for task {task_id}: {str(e)}")
+
+                # Update last_doc_update_time for auto-summary tracking
+                update_last_doc_update_time(index_name)
 
                 return {
                     "success": True,
@@ -993,35 +1349,33 @@ class ElasticSearchService:
         """
         try:
             files_map: Dict[str, Dict[str, Any]] = {}
-            # Get existing files from ES
+            total_start_time = time.time()
+
+            logger.info(f"[list_files] index={index_name}, include_chunks={include_chunks}")
+
+            # Step 1: Get existing files from ES (includes chunk_count via aggregation)
+            step1_start = time.time()
             existing_files = vdb_core.get_documents_detail(index_name)
+            step1_duration = time.time() - step1_start
+            logger.info(f"[list_files:step1] ES get_documents_detail: {len(existing_files)} files in {step1_duration:.3f}s")
 
-            # Get unique celery files list and the status of each file
+            # Step 2: Get celery task statuses from external service
+            step2_start = time.time()
             celery_task_files = await get_all_files_status(index_name)
+            step2_duration = time.time() - step2_start
+            logger.info(f"[list_files:step2] Celery task status: {len(celery_task_files)} tasks in {step2_duration:.3f}s")
 
-            # For files already stored in ES, add to files list
+            # Step 3: Build files_map from ES data
+            step3_start = time.time()
             for file_info in existing_files:
                 utc_create_time_str = file_info.get('create_time', '')
-                # Try to parse the create_time string, fallback to current timestamp if format is invalid
                 try:
                     utc_create_timestamp = datetime.strptime(utc_create_time_str, '%Y-%m-%dT%H:%M:%S').replace(
                         tzinfo=timezone.utc).timestamp()
                 except (ValueError, TypeError):
                     utc_create_timestamp = time.time()
 
-                # Always re-query chunk count to ensure accuracy (aggregation may be stale)
                 path_or_url = file_info.get('path_or_url')
-                chunk_count = file_info.get('chunk_count', 0)
-                try:
-                    count_result = vdb_core.client.count(
-                        index=index_name,
-                        body={"query": {"term": {"path_or_url": path_or_url}}}
-                    )
-                    chunk_count = count_result.get("count", chunk_count)
-                except Exception as count_err:
-                    logger.warning(
-                        f"Failed to get chunk count for {path_or_url}: {count_err}, using aggregation value {chunk_count}")
-
                 file_data = {
                     'path_or_url': path_or_url,
                     'file': file_info.get('filename', ''),
@@ -1029,64 +1383,39 @@ class ElasticSearchService:
                     'create_time': int(utc_create_timestamp * 1000),
                     'status': "COMPLETED",
                     'latest_task_id': '',
-                    'chunk_count': chunk_count,
+                    'chunk_count': file_info.get('chunk_count', 0),
                     'error_reason': None,
                     'has_error_info': False
                 }
                 files_map[path_or_url] = file_data
+            step3_duration = time.time() - step3_start
+            logger.info(f"[list_files:step3] Build files_map from ES: {len(existing_files)} files in {step3_duration:.3f}s")
 
-            # For files not yet stored in ES (files currently being processed)
+            # Step 4: Merge celery task data (Redis progress already fetched in get_all_files_status)
+            step4_start = time.time()
+            celery_file_count = 0
             for path_or_url, status_info in celery_task_files.items():
-                status_dict = status_info if isinstance(
-                    status_info, dict) else {}
+                celery_file_count += 1
+                status_dict = status_info if isinstance(status_info, dict) else {}
 
-                # Get source_type and original_filename, with defaults
-                source_type = status_dict.get('source_type') if status_dict.get(
-                    'source_type') else 'minio'
+                source_type = status_dict.get('source_type') if status_dict.get('source_type') else 'minio'
                 original_filename = status_dict.get('original_filename')
+                filename = original_filename or (os.path.basename(path_or_url) if path_or_url else '')
 
-                # Determine the filename
-                filename = original_filename or (
-                    os.path.basename(path_or_url) if path_or_url else '')
-
-                # Safely get file size; default to 0 on any error
                 file_size = 0
                 if path_or_url in files_map:
                     file_size = files_map[path_or_url].get('file_size', 0)
                 else:
                     try:
-                        file_size = get_file_size(
-                            source_type or 'minio', path_or_url)
+                        file_size = get_file_size(source_type or 'minio', path_or_url)
                     except Exception as size_err:
-                        logger.error(
-                            f"Failed to get file size for '{path_or_url}': {size_err}")
+                        logger.error(f"Failed to get file size for '{path_or_url}': {size_err}")
                         file_size = 0
 
-                # Get progress from status_dict first, then try Redis for real-time updates
+                # Get progress from celery_task_files (already includes Redis batch data)
                 processed_chunks = status_dict.get('processed_chunks')
                 total_chunks = status_dict.get('total_chunks')
                 task_id = status_dict.get('latest_task_id', '')
-
-                # Always try to get latest progress from Redis if task_id exists
-                # Redis has the most up-to-date progress during vectorization
-                if task_id:
-                    try:
-                        redis_service = get_redis_service()
-                        progress_info = redis_service.get_progress_info(
-                            task_id)
-                        if progress_info:
-                            redis_processed = progress_info.get(
-                                'processed_chunks')
-                            redis_total = progress_info.get('total_chunks')
-                            if redis_processed is not None:
-                                processed_chunks = redis_processed
-                            if redis_total is not None:
-                                total_chunks = redis_total
-                            logger.debug(
-                                f"Retrieved progress from Redis for task {task_id}: {processed_chunks}/{total_chunks}")
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to get progress from Redis for task {task_id}: {str(e)}")
 
                 if path_or_url in files_map:
                     file_data = files_map[path_or_url]
@@ -1102,13 +1431,12 @@ class ElasticSearchService:
                     }
                     files_map[path_or_url] = file_data
 
-                file_data['status'] = status_dict.get('state', file_data.get(
-                    'status', 'UNKNOWN'))
+                file_data['status'] = status_dict.get('state', file_data.get('status', 'UNKNOWN'))
                 file_data['latest_task_id'] = task_id
                 file_data['processed_chunk_num'] = processed_chunks
                 file_data['total_chunk_num'] = total_chunks
 
-                # Get error reason for failed documents
+                # Get error reason for failed documents (fetch from Redis batch if needed)
                 if task_id and status_dict.get('state') in ['PROCESS_FAILED', 'FORWARD_FAILED']:
                     try:
                         redis_service = get_redis_service()
@@ -1116,17 +1444,20 @@ class ElasticSearchService:
                         if error_reason:
                             file_data['error_reason'] = error_reason
                             file_data['has_error_info'] = True
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to get error info for task {task_id}: {str(e)}")
+                    except Exception:
+                        pass  # Error info is optional, don't fail the request
+            step4_duration = time.time() - step4_start
+            logger.info(f"[list_files:step4] Merge celery tasks: {celery_file_count} tasks in {step4_duration:.3f}s")
 
             files = list(files_map.values())
+            logger.info(f"[list_files:step4] Total files built: {len(files)}")
 
             # Unified chunks processing for all files
             if include_chunks:
-                # Prepare msearch body for all completed files
+                step5_start = time.time()
                 completed_files_map = {
                     f['path_or_url']: f for f in files if f['status'] == "COMPLETED"}
+                completed_count = len(completed_files_map)
                 msearch_body = []
 
                 for path_or_url in completed_files_map.keys():
@@ -1137,7 +1468,6 @@ class ElasticSearchService:
                         "_source": ["id", "title", "content", "create_time"]
                     })
 
-                # Initialize chunks for all files
                 for file_data in files:
                     file_data['chunks'] = []
                     file_data['chunk_count'] = file_data.get('chunk_count', 0)
@@ -1169,52 +1499,130 @@ class ElasticSearchService:
                                 })
 
                             file_data['chunks'] = chunks
-                            # Get accurate chunk count using count query instead of len(chunks)
-                            # because msearch may have size limits
-                            try:
-                                count_result = vdb_core.client.count(
-                                    index=index_name,
-                                    body={
-                                        "query": {"term": {"path_or_url": file_path}}}
-                                )
-                                file_data['chunk_count'] = count_result.get(
-                                    "count", len(chunks))
-                            except Exception as count_err:
-                                logger.warning(
-                                    f"Failed to get chunk count for {file_path}: {count_err}, using len(chunks)")
-                                file_data['chunk_count'] = len(chunks)
+                            # chunk_count from aggregation is already accurate
+                            # no need for additional count queries
 
                     except Exception as e:
                         logger.error(
                             f"Error during msearch for chunks: {str(e)}")
+                step5_duration = time.time() - step5_start
+                logger.info(f"[list_files:step5] ES msearch chunks: {completed_count} files in {step5_duration:.3f}s")
             else:
-                # When include_chunks=False, ensure chunk_count is accurate for completed files
+                # When include_chunks=False, chunk_count is already accurate from ES aggregation
+                # No need for additional count queries - doc_count from terms aggregation is accurate
                 for file_data in files:
                     file_data['chunks'] = []
-                    if file_data.get('status') == "COMPLETED":
-                        # Always re-query chunk count for completed files to ensure accuracy
-                        try:
-                            count_result = vdb_core.client.count(
-                                index=index_name,
-                                body={
-                                    "query": {"term": {"path_or_url": file_data.get('path_or_url')}}}
-                            )
-                            file_data['chunk_count'] = count_result.get(
-                                "count", 0)
-                        except Exception as count_err:
-                            logger.warning(
-                                f"Failed to get chunk count for {file_data.get('path_or_url')}: {count_err}")
-                            file_data['chunk_count'] = file_data.get(
-                                'chunk_count', 0)
-                    else:
-                        file_data['chunk_count'] = file_data.get(
-                            'chunk_count', 0)
+                    # chunk_count is already set from ES aggregation (doc_count)
+                    file_data['chunk_count'] = file_data.get('chunk_count', 0)
+
+            for file_data in files:
+                file_data["source_available"] = (
+                    ElasticSearchService._compute_source_available(file_data)
+                )
+
+            total_duration = time.time() - total_start_time
+            logger.info(f"[list_files:complete] index={index_name}, total_files={len(files)}, "
+                       f"total_duration={total_duration:.3f}s")
 
             return {"files": files}
 
         except Exception as e:
             raise Exception(
                 f"Error getting file list for index {index_name}: {str(e)}")
+
+    DOCUMENT_DELETE_SCOPES = ("source_only", "full")
+
+    @staticmethod
+    def _preview_pdf_cache_object_name(object_name: str) -> str:
+        """Object key for Office-to-PDF preview cache (matches file_management_service)."""
+        name_without_ext = (
+            object_name.rsplit(".", 1)[0] if "." in object_name else object_name
+        )
+        hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
+        return f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
+
+    @staticmethod
+    def _compute_source_available(file_data: Dict[str, Any]) -> bool:
+        path_or_url = file_data.get("path_or_url") or ""
+        status = file_data.get("status", "")
+        if status != "COMPLETED":
+            return True
+        if path_or_url.startswith("knowledge_base/"):
+            return file_exists(path_or_url)
+        return True
+
+    @staticmethod
+    def delete_source_file(path_or_url: str) -> Dict[str, Any]:
+        """Remove MinIO source (and preview cache); does not touch Elasticsearch."""
+        minio_result = delete_file(path_or_url)
+        deleted_minio = bool(minio_result.get("success"))
+
+        if path_or_url.startswith("knowledge_base/"):
+            preview_key = ElasticSearchService._preview_pdf_cache_object_name(
+                path_or_url
+            )
+            try:
+                if file_exists(preview_key):
+                    delete_file(preview_key)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete preview cache for '%s': %s",
+                    path_or_url,
+                    exc,
+                )
+
+        return {"deleted_minio": deleted_minio}
+
+    @staticmethod
+    async def _assert_source_only_deletable(
+            index_name: str, path_or_url: str
+    ) -> None:
+        celery_task_files = await get_all_files_status(index_name)
+        status_info = celery_task_files.get(path_or_url)
+        if not status_info or not isinstance(status_info, dict):
+            return
+        state = status_info.get("state") or ""
+        if state and state != "COMPLETED":
+            raise ValueError(
+                f"Cannot delete source file while document is in state '{state}'. "
+                "Wait until processing completes or use scope=full to remove the document."
+            )
+
+    @staticmethod
+    async def delete_document_by_scope(
+            index_name: str,
+            path_or_url: str,
+            scope: str,
+            vdb_core: VectorDatabaseCore,
+    ) -> Dict[str, Any]:
+        if scope not in ElasticSearchService.DOCUMENT_DELETE_SCOPES:
+            raise ValueError(
+                f"Invalid scope '{scope}'. "
+                f"Must be one of: {ElasticSearchService.DOCUMENT_DELETE_SCOPES}"
+            )
+
+        if scope == "source_only":
+            await ElasticSearchService._assert_source_only_deletable(
+                index_name, path_or_url
+            )
+            minio_part = ElasticSearchService.delete_source_file(path_or_url)
+            return {
+                "status": "success",
+                "scope": scope,
+                "deleted_es_count": 0,
+                "deleted_minio": minio_part.get("deleted_minio", False),
+                "source_available": False,
+                "message": (
+                    "Source file deleted; index chunks and vectors preserved."
+                ),
+            }
+
+        result = ElasticSearchService.delete_documents(
+            index_name, path_or_url, vdb_core
+        )
+        result["scope"] = scope
+        result["source_available"] = False
+        return result
 
     @staticmethod
     def delete_documents(
@@ -1228,6 +1636,10 @@ class ElasticSearchService:
             index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
+
+        # Update last_doc_update_time for auto-summary tracking
+        update_last_doc_update_time(index_name)
+
         return {"status": "success", "deleted_es_count": deleted_count, "deleted_minio": minio_result.get("success")}
 
     @staticmethod
@@ -1450,6 +1862,8 @@ class ElasticSearchService:
                 "index_name": index_name
             }
             update_knowledge_record(update_data)
+            # Update last_summary_time for auto-summary tracking
+            update_last_summary_time(index_name)
             return {"status": "success", "message": f"Index {index_name} summary updated successfully",
                     "summary": summary_result}
         except Exception as e:
@@ -1550,23 +1964,23 @@ class ElasticSearchService:
         Automatically generates and stores embedding for semantic search.
         """
         try:
-            # Get knowledge base's embedding model name
-            embedding_model_name = None
+            # Get knowledge base's embedding model by model_id
+            embedding_model_id = None
             if tenant_id:
                 try:
                     knowledge_record = get_knowledge_record({
                         "index_name": index_name,
                         "tenant_id": tenant_id
                     })
-                    embedding_model_name = knowledge_record.get("embedding_model_name") if knowledge_record else None
+                    embedding_model_id = knowledge_record.get("embedding_model_id") if knowledge_record else None
                 except Exception as e:
-                    logger.warning(f"Failed to get embedding model name for index {index_name}: {e}")
+                    logger.warning(f"Failed to get embedding model id for index {index_name}: {e}")
 
             # Generate embedding if we have content and can get embedding model
             embedding_vector = None
             if chunk_request.content:
                 try:
-                    embedding_model = get_embedding_model(tenant_id, embedding_model_name) if tenant_id else None
+                    embedding_model = get_embedding_model_by_id(tenant_id, embedding_model_id)[0] if tenant_id and embedding_model_id else None
                     if embedding_model:
                         embeddings = embedding_model.get_embeddings(chunk_request.content)
                         if embeddings and len(embeddings) > 0:
@@ -1596,8 +2010,8 @@ class ElasticSearchService:
             # Add embedding if generated
             if embedding_vector:
                 chunk_payload["embedding"] = embedding_vector
-                if embedding_model_name:
-                    chunk_payload["embedding_model_name"] = embedding_model_name
+                if embedding_model_id:
+                    chunk_payload["embedding_model_id"] = embedding_model_id
 
             result = vdb_core.create_chunk(index_name, chunk_payload)
             return {
@@ -1617,6 +2031,7 @@ class ElasticSearchService:
         chunk_request: ChunkUpdateRequest,
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ):
         """
         Update a chunk document.
@@ -1700,10 +2115,23 @@ class ElasticSearchService:
             if weight_accurate < 0 or weight_accurate > 1:
                 raise ValueError("weight_accurate must be between 0 and 1")
 
-            embedding_model = get_embedding_model(tenant_id)
+            # Get embedding model from the first index's knowledge base record
+            if not index_names:
+                raise ValueError("At least one index name is required")
+
+            embedding_model, model_id, meta = get_embedding_model_by_index_name(tenant_id, index_names[0])
+
             if not embedding_model:
-                raise ValueError(
-                    "No embedding model configured for the current tenant")
+                if meta.get("status") == "needs_config":
+                    # Return a clear error indicating model needs to be configured
+                    raise KnowledgeBaseNeedsModelConfigError(
+                        index_name=index_names[0],
+                        message=f"Knowledge base '{index_names[0]}' does not have an embedding model configured. Please select a model in the knowledge base settings."
+                    )
+                else:
+                    raise ValueError(
+                        f"No embedding model found for index '{index_names[0]}'. "
+                        f"Please configure an embedding model for this knowledge base.")
 
             start_time = time.perf_counter()
             raw_results = vdb_core.hybrid_search(
@@ -1729,6 +2157,8 @@ class ElasticSearchService:
                 "total": len(formatted_results),
                 "query_time_ms": elapsed_ms,
             }
+        except KnowledgeBaseNeedsModelConfigError:
+            raise
         except ValueError:
             raise
         except Exception as exc:

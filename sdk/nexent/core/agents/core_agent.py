@@ -2,6 +2,7 @@ import json
 import ast
 import time
 import threading
+from datetime import datetime
 from textwrap import dedent
 from typing import Any, Optional, List, Dict
 from collections.abc import Generator
@@ -17,6 +18,8 @@ from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
     extract_code_from_text
 
+from ...monitor import get_monitoring_manager
+
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined
 
@@ -24,12 +27,20 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
+from .agent_context import ContextManager
+from .agent_model import AgentVerificationConfig
+from .verification import VerificationController, VerificationResult
+from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
-    """Extract code blocs from the LLM's output for execution.
+    """Extract code blocks from the LLM's output for execution.
 
-    This function is used to parse code that needs to be executed, so it only handles
-    <code> format and legacy python formats.
+    This function handles only two formats:
+    - <code>...</code>: primary execution format
+    - ```<RUN>...</RUN>```: legacy format for backward compatibility
+
+    Note: ```python / ```py blocks are intentionally NOT extracted here to prevent
+    KB content containing code examples from being accidentally executed.
 
     Args:
         text (`str`): LLM's output text to parse.
@@ -81,42 +92,6 @@ def parse_code_blobs(text: str) -> str:
 
     if run_matches:
         return "\n\n".join(match.strip() for match in run_matches)
-
-    # Fallback to original patterns: py|python (for execution)
-    # Use string operations to prevent backtracking
-    py_matches = []
-    search_pos = 0
-    while True:
-        # Find ```py or ```python
-        start = text.find("```py", search_pos)
-        if start == -1:
-            start = text.find("```python", search_pos)
-        if start == -1:
-            break
-        # Skip the opening backticks and optional language specifier
-        if text[start:start + len("```python")] == "```python":
-            content_start = start + len("```python")
-        else:
-            content_start = start + len("```py")
-        # Skip optional newline after opening fence
-        if content_start < len(text) and text[content_start] == "\n":
-            content_start += 1
-        # Find the closing ```
-        end = text.find("```", content_start)
-        if end == -1:
-            break
-        py_matches.append(text[content_start:end])
-        search_pos = end + len("```")
-
-    if py_matches:
-        return "\n\n".join(match.strip() for match in py_matches)
-
-    # Maybe the LLM outputted a code blob directly
-    try:
-        ast.parse(text)
-        return text
-    except SyntaxError:
-        pass
 
     raise ValueError(
         dedent(
@@ -207,11 +182,139 @@ class FinalAnswerError(Exception):
     pass
 
 
+def _build_final_answer_messages(task: str, agent_prompt_templates: Dict[str, Any], memory_messages: List) -> List[ChatMessage]:
+    """Build messages for final answer generation.
+
+    Args:
+        task: The original task prompt
+        agent_prompt_templates: Prompt templates from the agent
+        memory_messages: Messages from agent memory
+
+    Returns:
+        List of ChatMessage for final answer generation
+    """
+    from smolagents.models import MessageRole
+
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=[{"type": "text", "text": agent_prompt_templates["final_answer"]["pre_messages"]}]
+        )
+    ]
+    messages += memory_messages[1:]
+    messages.append(
+        ChatMessage(
+            role=MessageRole.USER,
+            content=[{"type": "text", "text": Template(
+                agent_prompt_templates["final_answer"]["post_messages"],
+                undefined=StrictUndefined
+            ).render(task=task)}]
+        )
+    )
+    return messages
+
+
 class CoreAgent(CodeAgent):
-    def __init__(self, observer: MessageObserver, prompt_templates: Dict[str, Any] | None = None, *args, **kwargs):
+    def __init__(
+        self,
+        observer: MessageObserver,
+        prompt_templates: Dict[str, Any] | None = None,
+        verification_config: AgentVerificationConfig | None = None,
+        *args,
+        **kwargs
+    ):
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.observer = observer
+        self.verification_config = verification_config or AgentVerificationConfig(enabled=False)
+        self.verification_controller = VerificationController(
+            config=self.verification_config,
+            observer=observer,
+            agent_name=self.agent_name,
+            model=self.model,
+            logger=self.logger,
+        )
         self.stop_event = threading.Event()
+        self._history_step_count = 0  # For ContextManager, record boundary for compression
+        self.context_manager: ContextManager = None
+        self.step_metrics: List[dict] = []  # Quantitative metrics per step
+        self._last_uncompressed_est = 0
+        # Override smolagent default to prevent extracting ```python blocks from KB content.
+        # code_block_tags[0] and [1] are used by the system prompt template for opening/closing
+        # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
+        # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
+        self.code_block_tags = ["", ""]
+
+    def _verification_tool_names(self) -> List[str]:
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                names.update(str(name) for name in container.keys())
+            except AttributeError:
+                continue
+        names.add("final_answer")
+        return sorted(names)
+
+    def _append_verification_feedback(self, action_step: ActionStep, result: VerificationResult) -> None:
+        feedback = self.verification_controller.build_feedback_observation(result)
+        if action_step.observations:
+            action_step.observations += feedback
+        else:
+            action_step.observations = feedback
+
+    def _build_verification_memory_summary(
+        self,
+        current_step: ActionStep | None = None,
+        max_chars: int = 8000,
+    ) -> str:
+        summaries = []
+        steps = list(self.memory.steps[-8:])
+        if current_step is not None:
+            steps.append(current_step)
+        for step in steps:
+            if isinstance(step, TaskStep):
+                summaries.append(f"Task: {truncate_content(str(step.task), max_length=1200)}")
+            elif isinstance(step, ActionStep):
+                code = truncate_content(str(getattr(step, "code_action", "") or ""), max_length=1200)
+                observations = truncate_content(str(getattr(step, "observations", "") or ""), max_length=1800)
+                output = truncate_content(str(getattr(step, "action_output", "") or ""), max_length=1200)
+                summaries.append(
+                    f"Step {getattr(step, 'step_number', '?')}:\n"
+                    f"Code: {code}\n"
+                    f"Observation: {observations}\n"
+                    f"Output: {output}"
+                )
+        return truncate_content("\n\n".join(summaries), max_length=max_chars)
+
+    def _finalize_failed_verification_candidate(
+        self,
+        action_step: ActionStep,
+        verification_result: VerificationResult,
+        verification_round: int,
+        max_rounds: int,
+        candidate_answer: Any,
+    ) -> tuple[bool, Any]:
+        if verification_round < max_rounds:
+            verification_result.phase = "repair"
+            self.verification_controller.emit(
+                verification_result,
+                verification_round,
+            )
+            self._append_verification_feedback(action_step, verification_result)
+            action_step.is_final_answer = False
+            return False, None
+
+        verification_result.phase = "final_fail"
+        self.verification_controller.emit(
+            verification_result,
+            verification_round,
+        )
+        controlled_answer = self.verification_controller.build_controlled_failure_answer(
+            candidate_answer,
+            verification_result,
+        )
+        action_step.is_final_answer = True
+        action_step.action_output = controlled_answer
+        return True, controlled_answer
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -235,6 +338,7 @@ class CoreAgent(CodeAgent):
             # Format as JSON with truncation for readability
             messages_json = json.dumps(messages_data, indent=2, ensure_ascii=False, default=str)
             truncated_messages = truncate_content(messages_json, max_length=1000)
+            truncated_messages = messages_json
 
             # Format stop sequences
             stop_seq_str = ", ".join(f'"{seq}"' for seq in stop_sequences) if stop_sequences else "None"
@@ -265,7 +369,7 @@ Additional Args:
 
         except Exception as e:
             # Don't let logging errors break the model call
-            self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.WARNING)
+            self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
@@ -277,8 +381,22 @@ Additional Args:
 
         memory_messages = self.write_memory_to_messages()
 
-        input_messages = memory_messages.copy()
+        chars_per_token = (
+            self.context_manager.config.chars_per_token
+            if self.context_manager
+            else 1.5
+        )
+        self._last_uncompressed_est = msg_token_count(
+            memory_messages, chars_per_token
+        )
 
+        input_messages = memory_messages.copy()
+        # import pdb; pdb.set_trace()
+        # Trigger context compression if needed before building messages
+        if self.context_manager and self.context_manager.config.enabled:
+            input_messages = self.context_manager.compress_if_needed(
+                self.model, self.memory, input_messages, self._history_step_count
+            )
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
@@ -320,7 +438,22 @@ Additional Args:
             # Record parsing results
             self.observer.add_message(
                 self.agent_name, ProcessType.PARSE, code_action)
+            verification_controller = getattr(self, "verification_controller", None)
+            if verification_controller:
+                precheck = verification_controller.verify_before_tool_call(
+                    code_action=code_action,
+                    step_number=memory_step.step_number,
+                    available_tool_names=self._verification_tool_names(),
+                )
+                if not precheck.passed and precheck.severity == "blocking":
+                    self._append_verification_feedback(memory_step, precheck)
+                    raise AgentExecutionError(
+                        precheck.repair_instruction or precheck.user_visible_note or "Action failed verification.",
+                        self.logger,
+                    )
 
+        except AgentExecutionError:
+            raise
         except Exception:
             self.logger.log_markdown(
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
@@ -336,8 +469,27 @@ Additional Args:
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
+        exec_start = time.time()
         try:
-            code_output = self.python_executor(code_action)
+            monitoring_manager = get_monitoring_manager()
+            with monitoring_manager.trace_tool_call(
+                "python_interpreter",
+                self.name,
+                {"code": code_action, "step_number": memory_step.step_number},
+            ):
+                code_output = self.python_executor(code_action)
+                monitoring_manager.set_tool_output({
+                    "output": getattr(code_output, "output", None),
+                    "is_final_answer": getattr(code_output, "is_final_answer", False),
+                    "logs": getattr(code_output, "logs", ""),
+                })
+            if getattr(code_output, "is_final_answer", False):
+                with monitoring_manager.trace_tool_call(
+                    "FinalAnswerTool",
+                    self.name,
+                    {"step_number": memory_step.step_number},
+                ):
+                    monitoring_manager.set_tool_output(code_output.output)
             execution_outputs_console = []
             if len(code_output.logs) > 0:
                 # Record execution results
@@ -350,6 +502,7 @@ Additional Args:
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
+            exec_duration_ms = (time.time() - exec_start) * 1000
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
                     self.python_executor.state["_print_outputs"])
@@ -364,13 +517,55 @@ Additional Args:
                     self.logger.log(
                         Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
+            self.logger.log(
+                f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
+                level=LogLevel.ERROR,
+            )
             raise AgentExecutionError(error_msg, self.logger)
+
+        exec_duration_ms = (time.time() - exec_start) * 1000
+        self.logger.log(
+            f"[Code Execution] step={memory_step.step_number} completed in {exec_duration_ms:.1f}ms",
+            level=LogLevel.INFO,
+        )
 
         truncated_output = None
         if code_output is not None and code_output.output is not None:
             truncated_output = truncate_content(str(code_output.output))
             observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
+
+        verification_controller = getattr(self, "verification_controller", None)
+        if verification_controller:
+            postcheck = verification_controller.verify_after_tool_call(
+                code_action=code_action,
+                observation=memory_step.observations,
+                step_number=memory_step.step_number,
+                is_final_answer=bool(code_output.is_final_answer),
+            )
+            if not postcheck.passed and postcheck.severity == "blocking":
+                self._append_verification_feedback(memory_step, postcheck)
+                raise AgentExecutionError(
+                    postcheck.repair_instruction or postcheck.user_visible_note or "Action result failed verification.",
+                    self.logger,
+                )
+            if postcheck.severity == "warning":
+                self._append_verification_feedback(memory_step, postcheck)
+
+        # Pre-truncate observations when ContextManager is enabled. Keeps the
+        # head + tail of long outputs around a truncation marker so downstream
+        # compression sees bounded-length step records and the model can still
+        # search/read for the elided portion.
+        if self.context_manager and self.context_manager.config.enabled:
+            max_obs = self.context_manager.config.max_observation_length
+            if max_obs > 0 and memory_step.observations and len(memory_step.observations) > max_obs:
+                obs_text = memory_step.observations
+                half = max_obs // 2
+                truncation_marker = (
+                    f"\n...[Output truncated to {max_obs} characters. "
+                    f"Use search or read tools to find specific results.]\n"
+                )
+                memory_step.observations = obs_text[:half] + truncation_marker + obs_text[-half:]
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -405,15 +600,27 @@ Additional Args:
         ```
         """
         max_steps = max_steps or self.max_steps
-        self.task = task
+        # Prepend current time to the user task instead of baking it into the
+        # system prompt. This keeps the system prefix stable so prompt/KV caches
+        # can hit across requests; only the trailing user message varies.
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.task = f"[Current time: {time_str}]\n\n{task}"
         if additional_args is not None:
             self.state.update(additional_args)
             self.task += f"""
 You have been provided with these additional arguments, that you can access using the keys as variables in your python code:
 {str(additional_args)}."""
 
+        system_prompt_content = self.system_prompt
+        if self.context_manager and self.context_manager.get_registered_components():
+            component_messages = self.context_manager.build_system_prompt()
+            if component_messages:
+                system_prompt_content = "\n\n".join(
+                    msg.get("content", "") for msg in component_messages if msg.get("role") == "system"
+                )
+
         self.memory.system_prompt = SystemPromptStep(
-            system_prompt=self.system_prompt)
+            system_prompt=system_prompt_content)
         if reset:
             self.memory.reset()
             self.monitor.reset()
@@ -516,6 +723,17 @@ You have been provided with these additional arguments, that you can access usin
         action_step = None
         self.step_number = 1
         returned_final_answer = False
+        final_verification_round = 0
+        verification_config = getattr(
+            self,
+            "verification_config",
+            AgentVerificationConfig(enabled=False),
+        )
+        max_final_verification_rounds = (
+            verification_config.max_final_rounds
+            if verification_config and verification_config.enabled
+            else 1
+        )
         while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
 
@@ -527,30 +745,81 @@ You have been provided with these additional arguments, that you can access usin
                     yield output
 
                 if isinstance(output, ActionOutput) and output.is_final_answer:
-                    final_answer = output.output
+                    candidate_answer = output.output
                     self.logger.log(
-                        Text(f"Final answer: {final_answer}", style=f"bold {YELLOW_HEX}"),
+                        Text(f"Final answer: {candidate_answer}", style=f"bold {YELLOW_HEX}"),
                         level=LogLevel.INFO,
                     )
 
-                    if self.final_answer_checks:
-                        self._validate_final_answer(final_answer)
-                    returned_final_answer = True
-                    action_step.is_final_answer = True
+                    if verification_config.enabled and verification_config.final_verification_enabled:
+                        final_verification_round += 1
+                        verification_result = self.verification_controller.verify_final_answer(
+                            task=task,
+                            candidate=candidate_answer,
+                            memory_summary=self._build_verification_memory_summary(action_step),
+                            round_number=final_verification_round,
+                        )
+                        if verification_result.passed:
+                            final_answer = candidate_answer
+                            if self.final_answer_checks:
+                                self._validate_final_answer(final_answer)
+                            returned_final_answer = True
+                            action_step.is_final_answer = True
+                        else:
+                            returned_final_answer, final_answer = self._finalize_failed_verification_candidate(
+                                action_step=action_step,
+                                verification_result=verification_result,
+                                verification_round=final_verification_round,
+                                max_rounds=max_final_verification_rounds,
+                                candidate_answer=candidate_answer,
+                            )
+                    else:
+                        final_answer = candidate_answer
+                        if self.final_answer_checks:
+                            self._validate_final_answer(final_answer)
+                        returned_final_answer = True
+                        action_step.is_final_answer = True
 
             except FinalAnswerError:
                 # When the model does not output code, directly treat the large model content as the final answer
-                final_answer = action_step.model_output
-                if isinstance(final_answer, str):
-                    final_answer = convert_code_format(final_answer)
-                returned_final_answer = True
-                action_step.is_final_answer = True
+                candidate_answer = action_step.model_output
+                if isinstance(candidate_answer, str):
+                    candidate_answer = convert_code_format(candidate_answer)
+
+                if verification_config.enabled and verification_config.final_verification_enabled:
+                    final_verification_round += 1
+                    verification_result = self.verification_controller.verify_final_answer(
+                        task=task,
+                        candidate=candidate_answer,
+                        memory_summary=self._build_verification_memory_summary(action_step),
+                        round_number=final_verification_round,
+                    )
+                    if verification_result.passed:
+                        final_answer = candidate_answer
+                        if self.final_answer_checks:
+                            self._validate_final_answer(final_answer)
+                        returned_final_answer = True
+                        action_step.is_final_answer = True
+                    else:
+                        returned_final_answer, final_answer = self._finalize_failed_verification_candidate(
+                            action_step=action_step,
+                            verification_result=verification_result,
+                            verification_round=final_verification_round,
+                            max_rounds=max_final_verification_rounds,
+                            candidate_answer=candidate_answer,
+                        )
+                else:
+                    final_answer = candidate_answer
+                    returned_final_answer = True
+                    action_step.is_final_answer = True
 
             except AgentError as e:
                 action_step.error = e
 
             finally:
                 self._finalize_step(action_step)
+                # add quantitative collection
+                self._collect_step_metrics(action_step)
                 self.memory.steps.append(action_step)
                 yield action_step
                 self.step_number += 1
@@ -559,6 +828,184 @@ You have been provided with these additional arguments, that you can access usin
             final_answer = "<user_break>"
 
         if not returned_final_answer and self.step_number == max_steps + 1:
+            max_steps_data = json.dumps({
+                "completedSteps": self.step_number - 1,
+                "maxSteps": max_steps,
+                "message": ""
+            })
+            self.observer.add_message(
+                self.agent_name, ProcessType.MAX_STEPS_REACHED, max_steps_data)
+            # _handle_max_steps_reached already yields the final step internally
+            # and sets action_step.error, so don't yield again to avoid duplicate error
             final_answer = self._handle_max_steps_reached(task)
-            yield action_step
+            if verification_config.enabled and verification_config.final_verification_enabled:
+                final_verification_round += 1
+                verification_result = self.verification_controller.verify_final_answer(
+                    task=task,
+                    candidate=final_answer,
+                    memory_summary=self._build_verification_memory_summary(),
+                    round_number=final_verification_round,
+                )
+                if not verification_result.passed:
+                    final_answer = self.verification_controller.build_controlled_failure_answer(
+                        final_answer,
+                        verification_result,
+                    )
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
+
+
+    def _collect_step_metrics(self, action_step: ActionStep):
+        """Extract single-step data into structured metrics"""
+        metric = {
+            "step_number": action_step.step_number,
+            "timestamp": time.time(),
+            "main_llm": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+            },
+            "compression": {
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_hits": 0,
+                "cache_types": [],
+            },
+            "memory_state": {
+                "estimated_input_tokens": 0,
+                "estimated_output_tokens": 0,
+            },
+            "uncompressed_mem_est_input": 0,
+            "cache_hit": False,
+            "cache_types": [],
+        }
+
+        # 1. Main model tokens
+        if action_step.token_usage:
+            metric["main_llm"]["input_tokens"] = action_step.token_usage.input_tokens
+            metric["main_llm"]["output_tokens"] = action_step.token_usage.output_tokens
+
+        # 2. Compression overhead (from ContextManager)
+        if self.context_manager and self.context_manager.config.enabled:
+            comp_stats = self.context_manager.get_step_compression_stats()
+            metric["compression"].update(comp_stats)
+            metric["cache_hit"] = comp_stats.get("cache_hits", 0) > 0
+            metric["cache_types"] = comp_stats.get("cache_types", [])
+        else:
+            metric["compression"] = {
+                "calls": 0, "input_tokens": 0, "output_tokens": 0,
+                "cache_hits": 0, "cache_types": [],
+            }
+            metric["cache_hit"] = False
+            metric["cache_types"] = []
+
+        # 3. Current memory estimated length
+        chars_per_token = (
+            self.context_manager.config.chars_per_token
+            if self.context_manager
+            else 1.5
+        )
+        metric["memory_state"]["estimated_input_tokens"] = msg_token_count(
+            action_step.model_input_messages, chars_per_token
+        )
+        metric["memory_state"]["estimated_output_tokens"] = msg_token_count(
+            action_step.model_output_message, chars_per_token
+        )
+
+        # 4. Uncompressed memory estimation
+        metric["uncompressed_mem_est_input"] = getattr(
+            self, "_last_uncompressed_est", 0
+        )
+        self._last_uncompressed_est = 0
+
+        # 5. Compression ratio
+        uncompressed = metric["uncompressed_mem_est_input"]
+        compressed = metric["memory_state"]["estimated_input_tokens"]
+        if uncompressed > 0:
+            metric["compression_ratio"] = round(
+                (1 - compressed / uncompressed) * 100, 1
+            )
+        else:
+            metric["compression_ratio"] = 0.0
+
+        self.step_metrics.append(metric)
+        token_threshold = (
+            self.context_manager.config.token_threshold
+            if self.context_manager and self.context_manager.config.enabled
+            else None
+        )
+        get_monitoring_manager().record_agent_step_metrics(
+            metric,
+            token_threshold=token_threshold,
+        )
+
+    def _handle_max_steps_reached(self, task: str) -> Any:
+        """Handle the case when max steps is reached by generating final answer with streaming.
+
+        This method overrides the parent class implementation to use streaming for
+        the final answer generation, allowing the observer to receive thinking tokens
+        in real-time.
+
+        Args:
+            task: The original task prompt
+
+        Returns:
+            The final answer content string
+        """
+        from smolagents.models import MessageRole
+
+        action_step_start_time = time.time()
+
+        # Send STEP_COUNT to start a new step for the final answer thinking process
+        # This ensures the thinking content is displayed in the task details panel
+        self.observer.add_message(
+            self.agent_name, ProcessType.STEP_COUNT, self.step_number)
+
+        # Build messages for final answer generation
+        memory_messages = self.write_memory_to_messages()
+        messages = _build_final_answer_messages(task, self.prompt_templates, memory_messages)
+
+        # Create the final memory step with error
+        final_memory_step = ActionStep(
+            step_number=self.step_number,
+            error=AgentMaxStepsError("Reached max steps.", self.logger),
+            timing=Timing(start_time=action_step_start_time),
+        )
+
+        # Track accumulated content and token usage for streaming
+        accumulated_content = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        role = None
+
+        try:
+            # Use streaming call (model.__call__) to generate final answer
+            # This will trigger observer.add_model_new_token() and
+            # observer.add_model_reasoning_content() in OpenAIModel
+            chat_message: ChatMessage = self.model(messages)
+
+            # Update role and content from the completed message
+            role = chat_message.role
+            model_output = chat_message.content or ""
+
+            # Accumulate token usage if available
+            if chat_message.token_usage:
+                total_input_tokens = chat_message.token_usage.input_tokens
+                total_output_tokens = chat_message.token_usage.output_tokens
+
+        except Exception as e:
+            # Fallback to error message if streaming fails
+            model_output = f"Error in generating final LLM output: {e}"
+            self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
+
+        # Finalize the memory step
+        final_memory_step.timing.end_time = time.time()
+        final_memory_step.token_usage = TokenUsage(
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens
+        )
+        final_memory_step.action_output = model_output
+
+        self._finalize_step(final_memory_step)
+        self.memory.steps.append(final_memory_step)
+
+        return model_output

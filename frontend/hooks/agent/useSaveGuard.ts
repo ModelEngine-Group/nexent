@@ -112,6 +112,10 @@ export const useSaveGuard = () => {
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
+      const relatedExternalAgentIds = (currentEditedAgent.external_sub_agent_id_list || [])
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
       const groupIds = (currentEditedAgent.group_ids || [])
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
@@ -131,6 +135,7 @@ export const useSaveGuard = () => {
         model_id: currentEditedAgent.model_id ?? undefined,
         max_steps: currentEditedAgent.max_step,
         provide_run_summary: currentEditedAgent.provide_run_summary,
+        verification_config: currentEditedAgent.verification_config,
         enabled: true,
         business_description: currentEditedAgent.business_description,
         duty_prompt: currentEditedAgent.duty_prompt,
@@ -138,10 +143,15 @@ export const useSaveGuard = () => {
         few_shots_prompt: currentEditedAgent.few_shots_prompt,
         business_logic_model_name: currentEditedAgent.business_logic_model_name ?? undefined,
         business_logic_model_id: currentEditedAgent.business_logic_model_id ?? undefined,
+        prompt_template_id: currentEditedAgent.prompt_template_id ?? 0,
+        prompt_template_name: currentEditedAgent.prompt_template_name ?? "system_default",
         enabled_tool_ids: enabledToolIds,
         enabled_skill_ids: enabledSkillIds,
         related_agent_ids: relatedAgentIds,
+        related_external_agent_ids: relatedExternalAgentIds,
         ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
+        greeting_message: currentEditedAgent.greeting_message,
+        example_questions: currentEditedAgent.example_questions,
       });
 
       if (result.success) {
@@ -152,13 +162,13 @@ export const useSaveGuard = () => {
         );
 
         // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
-        const isCreatingMode = useAgentConfigStore.getState().isCreatingMode;
         const finalAgentId = result.data?.agent_id || currentAgentId;
         if (!finalAgentId) {
           throw new Error("Failed to get agent ID after save operation");
         }
 
         // Handle create mode: exit create mode and select the newly created agent
+        const isCreatingMode = useAgentConfigStore.getState().isCreatingMode;
         if (isCreatingMode) {
           try {
             // Load the full agent details

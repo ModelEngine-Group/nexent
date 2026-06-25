@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
 import { User, AuthInfoResponse, AuthorizationContextType } from "@/types/auth";
+import { USER_ROLES } from "@/const/auth";
 import { authService } from "@/services/authService";
 import { authEvents, authzEventUtils } from "@/lib/authEvents";
 import { AUTH_EVENTS} from "@/const/auth";
@@ -11,6 +12,7 @@ import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { checkSessionValid } from "@/lib/session";
+import { useGroupList } from "@/hooks/group/useGroupList";
 
 /**
  * Custom hook for authorization management
@@ -208,6 +210,18 @@ export function useAuthorization(): AuthorizationContextType {
     return accessibleRoutes.includes(route);
   }, [accessibleRoutes]);
 
+  // Internal group list query - fetches all groups for the user's tenant
+  const { data: allGroupsData } = useGroupList(user?.tenantId ?? null);
+  const allGroupIds = useMemo(
+    () => allGroupsData?.groups.map((g) => g.group_id) ?? [],
+    [allGroupsData]
+  );
+
+  const getAccessibleGroupIds = useCallback((): number[] => {
+    const canSelectAllGroups = user?.role === USER_ROLES.SU || user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SPEED
+    return canSelectAllGroups ? allGroupIds : allGroupIds.filter((id) => groupIds.includes(id));
+  }, [allGroupIds, groupIds, user?.role]);
+
   return {
     user,
     groupIds,
@@ -221,6 +235,7 @@ export function useAuthorization(): AuthorizationContextType {
     hasPermission,
     hasAnyPermission,
     canAccessRoute,
+    getAccessibleGroupIds,
     isAuthzPromptModalOpen,
     openAuthzPromptModal,
     closeAuthzPromptModal,

@@ -43,10 +43,10 @@ def file_process(self,
 
 ## 📁 Supported File Formats
 
-- **Text files**: .txt, .md, .csv
-- **Documents**: .pdf, .docx, .pptx
+- **Text files**: .txt, .md, .csv, .json
+- **Documents**: .pdf, .docx, .pptx, .epub
 - **Images**: .jpg, .png, .gif (with OCR)
-- **Web content**: HTML, URLs
+- **Web content**: HTML, URLs, XML
 - **Archives**: .zip, .tar
 
 ## 💡 Usage Examples

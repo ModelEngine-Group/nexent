@@ -33,6 +33,7 @@ export interface Agent {
   tenant_id: string;
   enabled: boolean;
   provide_run_summary: boolean;
+  verification_config?: Record<string, any>;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
@@ -53,6 +54,7 @@ export interface AgentVersion {
   source_type: string;
   source_version_no: number;
   status: string;
+  is_a2a: boolean;
   create_time: string;
   update_time: string;
 }

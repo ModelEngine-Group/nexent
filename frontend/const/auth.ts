@@ -5,7 +5,13 @@ export enum USER_ROLES {
   DEV = "DEV",
   USER = "USER",
   SPEED = "SPEED",
+  ASSET_OWNER = "ASSET_OWNER",
 }
+
+export const ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE";
+
+/** Virtual tenant ID for asset administrators (matches backend consts.const.ASSET_OWNER). */
+export const ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id";
 
 export const STATUS_CODES = {
   SUCCESS: 200,
@@ -33,6 +39,7 @@ export const COOKIE_NAMES = {
   ACCESS_TOKEN: "nexent_access_token",
   REFRESH_TOKEN: "nexent_refresh_token",
   EXPIRES_AT: "nexent_token_expires_at",
+  OAUTH_PENDING: "nexent_oauth_pending",
 } as const;
 
 // Type-safe authentication events (used with authEvents emitter)
@@ -40,7 +47,7 @@ export const AUTH_EVENTS = {
   LOGIN_SUCCESS: "auth:login-success",
   REGISTER_SUCCESS: "auth:register-success",
   LOGOUT: "auth:logout",
-  SESSION_EXPIRED: "auth:session-expired",  // Deprecated: this is an authorization event; prefer AUTHZ_EVENTS.PERMISSION_DENIED.
+  SESSION_EXPIRED: "auth:session-expired", // Deprecated: this is an authorization event; prefer AUTHZ_EVENTS.PERMISSION_DENIED.
   TOKEN_REFRESHED: "auth:token-refreshed",
   SERVICE_UNAVAILABLE: "auth:service-unavailable",
   BACK_TO_HOME: "nav:back-to-home",
@@ -52,4 +59,3 @@ export const AUTHZ_EVENTS = {
   PERMISSIONS_READY: "authz:permissions-ready",
   PERMISSIONS_UPDATED: "authz:permissions-updated",
 } as const;
-

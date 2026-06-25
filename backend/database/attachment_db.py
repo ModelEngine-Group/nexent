@@ -2,9 +2,81 @@ import io
 import os
 import uuid
 from datetime import datetime
-from typing import Any, BinaryIO, Dict, List, Optional
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from .client import minio_client
+from consts.const import S3_URL_PREFIX
+from consts.const import NORTHBOUND_EXTERNAL_URL
+from urllib.parse import quote
+
+
+def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """
+    Normalize object_name + bucket from supported URL styles.
+
+    Supports:
+    - s3://bucket/key
+    - /bucket/key
+    - key (uses provided bucket or default bucket)
+    """
+    if not object_name:
+        return object_name, bucket
+
+    if object_name.startswith(S3_URL_PREFIX):
+        s3_path = object_name[len(S3_URL_PREFIX) :]
+        parts = s3_path.split("/", 1)
+        parsed_bucket = parts[0] if parts[0] else None
+        parsed_key = parts[1] if len(parts) > 1 else ""
+        return parsed_key, parsed_bucket or bucket
+
+    if object_name.startswith("/"):
+        path = object_name.lstrip("/")
+        parts = path.split("/", 1)
+        parsed_bucket = parts[0] if parts[0] else None
+        parsed_key = parts[1] if len(parts) > 1 else ""
+        return parsed_key, parsed_bucket or bucket
+
+    return object_name, bucket
+
+
+def build_s3_url(object_name: str, bucket: Optional[str] = None) -> str:
+    """
+    Build an s3://bucket/key style URL from an object name (or passthrough if already s3://).
+    """
+    if not object_name:
+        return ""
+
+    if object_name.startswith(S3_URL_PREFIX):
+        return object_name
+
+    if object_name.startswith("/"):
+        path = object_name.lstrip("/")
+        parts = path.split("/", 1)
+        if len(parts) == 2:
+            return f"{S3_URL_PREFIX}{parts[0]}/{parts[1]}"
+        return f"{S3_URL_PREFIX}{parts[0]}/"
+
+    resolved_bucket = bucket or minio_client.default_bucket
+    if resolved_bucket:
+        return f"{S3_URL_PREFIX}{resolved_bucket}/{object_name}"
+    return f"{S3_URL_PREFIX}{object_name}"
+
+
+def _build_mcp_presigned_url(presigned_url: str) -> str:
+    """
+    Build northbound API proxy URL for MCP tools.
+
+    Args:
+        presigned_url: Original MinIO presigned URL
+
+    Returns:
+        str: URL wrapped with northbound API proxy, with presigned_url URL-encoded
+    """
+    if not presigned_url:
+        return ""
+    # URL-encode the presigned_url before embedding it as a query parameter
+    encoded_presigned_url = quote(presigned_url, safe='')
+    return f"{NORTHBOUND_EXTERNAL_URL}/nb/v1/file/fetch?presigned_url={encoded_presigned_url}"
 
 
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
@@ -28,7 +100,13 @@ def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
     return f"{prefix}/{timestamp}_{unique_id}{ext}"
 
 
-def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optional[str] = None) -> Dict[str, Any]:
+def upload_file(
+        file_path: str,
+        object_name: Optional[str] = None,
+        bucket: Optional[str] = None,
+        generate_presigned_url: bool = True,
+        presigned_url_expires: int = 86400
+) -> Dict[str, Any]:
     """
     Upload local file to MinIO
 
@@ -36,6 +114,8 @@ def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optio
         file_path: Local file path
         object_name: Object name, if not specified will be auto-generated
         bucket: Bucket name, if not specified will use default bucket
+        generate_presigned_url: Whether to generate presigned URL for external access (default True)
+        presigned_url_expires: Expiration time in seconds for presigned URL (default 86400 = 24 hours)
 
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
@@ -55,6 +135,12 @@ def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optio
 
     if success:
         response["url"] = result
+        # Generate presigned URL for external access if requested
+        if generate_presigned_url:
+            presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
+            if presigned_result.get("success"):
+                # Only expose MCP URL (with proxy prefix), not raw MinIO URL
+                response["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
     else:
         response["error"] = result
 
@@ -65,7 +151,10 @@ def upload_fileobj(
         file_obj: BinaryIO,
         file_name: str,
         bucket: Optional[str] = None,
-        prefix: str = "attachments"
+        prefix: str = "attachments",
+        generate_presigned_url: bool = True,
+        presigned_url_expires: int = 86400,
+        file_size: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Upload file object to MinIO
@@ -75,6 +164,9 @@ def upload_fileobj(
         file_name: File name
         bucket: Bucket name, if not specified will use default bucket
         prefix: Object name prefix, default is "attachments"
+        generate_presigned_url: Whether to generate presigned URL for external access (default True)
+        presigned_url_expires: Expiration time in seconds for presigned URL (default 86400 = 24 hours)
+        file_size: Pre-calculated file size in bytes. If not provided, will be calculated internally.
 
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
@@ -82,19 +174,26 @@ def upload_fileobj(
     # Generate object name
     object_name = generate_object_name(file_name, prefix=prefix)
 
-    # Get current position
-    current_pos = file_obj.tell()
-
-    # Calculate file size
-    file_obj.seek(0, os.SEEK_END)
-    file_size = file_obj.tell()
-
-    # Reset to original position
-    file_obj.seek(current_pos)
+    # Calculate file size if not provided
+    if file_size is None:
+        try:
+            current_pos = file_obj.tell()
+            file_obj.seek(0, os.SEEK_END)
+            file_size = file_obj.tell()
+            file_obj.seek(0)  # Seek to beginning for upload
+        except (ValueError, IOError):
+            file_size = 0
+            file_obj.seek(0)  # Try to seek to beginning anyway
 
     # Upload file
     success, result = minio_client.upload_fileobj(
         file_obj, object_name, bucket)
+
+    # Restore original position (if file is still open)
+    try:
+        file_obj.seek(0)
+    except (ValueError, IOError):
+        pass  # File is closed, ignore
 
     # Build response
     response = {"success": success, "object_name": object_name, "file_name": file_name, "file_size": file_size,
@@ -102,6 +201,12 @@ def upload_fileobj(
 
     if success:
         response["url"] = result
+        # Generate presigned URL for external access if requested
+        if generate_presigned_url:
+            presigned_result = get_file_url(object_name, bucket, presigned_url_expires)
+            if presigned_result.get("success"):
+                # Only expose MCP URL (with proxy prefix), not raw MinIO URL
+                response["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
     else:
         response["error"] = result
 
@@ -134,14 +239,14 @@ def download_file(object_name: str, file_path: str, bucket: Optional[str] = None
     return response
 
 
-def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Dict[str, Any]:
+def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 86400) -> Dict[str, Any]:
     """
     Get presigned URL for file
 
     Args:
         object_name: Object name
         bucket: Bucket name, if not specified will use default bucket
-        expires: URL expiration time in seconds
+        expires: URL expiration time in seconds (default 86400 = 24 hours)
 
     Returns:
         Dict[str, Any]: Result containing success flag, URL and error message (if any)
@@ -165,6 +270,9 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
     """
     Get file size by object name
     """
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
+    # Ensure minio_client is initialized before accessing storage_config
+    minio_client._ensure_initialized()
     bucket = bucket or minio_client.storage_config.default_bucket
     return minio_client.get_file_size(object_name, bucket)
 
@@ -172,15 +280,16 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
 def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
     """
     Check if a file exists in the bucket.
-    
+
     Args:
         object_name: Object name in storage
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         bool: True if file exists, False otherwise
     """
     try:
+        object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
         return minio_client.file_exists(object_name, bucket)
     except Exception:
         return False
@@ -189,15 +298,17 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
 def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None) -> Dict[str, Any]:
     """
     Copy a file within the same bucket (atomic operation in MinIO).
-    
+
     Args:
         source_object: Source object name
         dest_object: Destination object name
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         Dict[str, Any]: Result containing success flag and error message (if any)
     """
+    source_object, bucket = _normalize_object_and_bucket(source_object, bucket)
+    dest_object, bucket = _normalize_object_and_bucket(dest_object, bucket)
     success, result = minio_client.copy_file(source_object, dest_object, bucket)
     if success:
         return {"success": True, "object_name": result}
@@ -223,8 +334,8 @@ def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str,
     for file in files:
         file["content_type"] = get_content_type(file["key"])
 
-        # Get presigned URL (valid for 1 hour)
-        success, url = minio_client.get_file_url(file["key"], bucket, 3600)
+        # Get presigned URL (valid for 24 hours)
+        success, url = minio_client.get_file_url(file["key"], bucket, 86400)
         if success:
             file["url"] = url
 
@@ -242,7 +353,9 @@ def delete_file(object_name: str, bucket: Optional[str] = None) -> Dict[str, Any
     Returns:
         Dict[str, Any]: Delete result, containing success flag and error message (if any)
     """
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
     if not bucket:
+        minio_client._ensure_initialized()
         bucket = minio_client.storage_config.default_bucket
     success, result = minio_client.delete_file(object_name, bucket)
 
@@ -265,6 +378,7 @@ def get_file_stream(object_name: str, bucket: Optional[str] = None) -> Optional[
     Returns:
         Optional[BinaryIO]: Standard BinaryIO stream object, or None if failed
     """
+    object_name, bucket = _normalize_object_and_bucket(object_name, bucket)
     success, result = minio_client.get_file_stream(object_name, bucket)
     if not success:
         return None
@@ -341,6 +455,7 @@ def get_content_type(file_path: str) -> str:
                   '.html': 'text/html',
                   '.htm': 'text/html',
                   '.json': 'application/json',
+                  '.epub': 'application/epub',
                   '.xml': 'application/xml',
                   '.zip': 'application/zip',
                   '.rar': 'application/x-rar-compressed',

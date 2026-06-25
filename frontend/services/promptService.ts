@@ -1,6 +1,13 @@
 import { API_ENDPOINTS } from './api';
 
-import { GeneratePromptParams, StreamResponseData } from '@/types/agentConfig';
+import {
+  GeneratePromptParams,
+  OptimizePromptSectionParams,
+  OptimizePromptSectionResponse,
+  OptimizePromptBadCaseParams,
+  OptimizePromptBadCaseResponse,
+  StreamResponseData,
+} from '@/types/agentConfig';
 import { fetchWithAuth, getAuthHeaders } from '@/lib/auth';
 // @ts-ignore
 const fetch = fetchWithAuth;
@@ -63,3 +70,18 @@ export const generatePromptStream = async (
     if (onComplete) onComplete();
   }
 };
+
+export const optimizePromptSection = async (
+  params: OptimizePromptSectionParams,
+): Promise<OptimizePromptSectionResponse> => {
+  const response = await fetch(API_ENDPOINTS.prompt.optimize, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(params),
+  });
+
+  const result = await response.json();
+  return result.data as OptimizePromptSectionResponse;
+};
+
+// optimizePromptBadCase removed: badcase optimization is now fully automated in agent debug.

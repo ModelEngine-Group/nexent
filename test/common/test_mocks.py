@@ -22,7 +22,6 @@ def _ensure_path(path: Path) -> None:
 
 
 def _create_module(name: str, **attrs: Any) -> types.ModuleType:
-    """Create a module with the given attributes."""
     module = types.ModuleType(name)
     for attr_name, attr_value in attrs.items():
         setattr(module, attr_name, attr_value)
@@ -112,6 +111,8 @@ def setup_common_mocks():
         "multiEmbedding": "MULTI_EMBEDDING_ID",
         "rerank": "RERANK_ID",
         "vlm": "VLM_ID",
+        "vlm2": "VLM2_ID",
+        "vlm3": "VLM3_ID",
         "stt": "STT_ID",
         "tts": "TTS_ID"
     }

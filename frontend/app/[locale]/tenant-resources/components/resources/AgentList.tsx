@@ -33,6 +33,7 @@ import { fetchAgentVersionList } from "@/services/agentVersionService";
 import { Agent } from "@/types/agentConfig";
 import ExpandEditModal from "@/app/agents/components/agentInfo/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -61,21 +62,6 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
-
-  const getUnavailableReasonLabel = (reason: string) => {
-    switch (reason) {
-      case "duplicate_name":
-        return t("agent.unavailableReasons.duplicate_name");
-      case "duplicate_display_name":
-        return t("agent.unavailableReasons.duplicate_display_name");
-      case "tool_unavailable":
-        return t("agent.unavailableReasons.tool_unavailable");
-      case "model_unavailable":
-        return t("agent.unavailableReasons.model_unavailable");
-      default:
-        return reason;
-    }
-  };
 
   // View modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -357,7 +343,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         const reasons = Array.isArray(record.unavailable_reasons)
           ? record.unavailable_reasons.filter((r) => Boolean(r))
           : [];
-        const reasonLabels = reasons.map((r) => getUnavailableReasonLabel(String(r)));
+        const reasonLabels = getUnavailableReasonLabels(reasons, t);
 
         return (
           <div className="flex items-center gap-2 min-w-0">
@@ -425,20 +411,19 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="space-y-6 flex-1 overflow-auto">
-        <div className="min-w-0">
-          <Table
-            columns={columns}
-            dataSource={agents as AgentListRow[]}
-            rowKey="id"
-            loading={isLoading}
-            size="small"
-            pagination={{ pageSize: 10 }}
-            locale={{ emptyText: t("space.noAgents") }}
-            scroll={{ x: true }}
-          />
-        </div>
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-hidden">
+        <Table
+          columns={columns}
+          dataSource={agents as AgentListRow[]}
+          rowKey="id"
+          loading={isLoading}
+          size="small"
+          pagination={{ pageSize: 10 }}
+          locale={{ emptyText: t("space.noAgents") }}
+          scroll={{ y: "calc(100vh - 480px)" }}
+          className="[&_.ant-table]:h-full"
+        />
       </div>
 
       {/* View Modal */}

@@ -1,9 +1,11 @@
 import logging
-from typing import List
-from sqlalchemy import update
+from typing import List, Optional
+from sqlalchemy import or_, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from database.agent_version_db import query_current_version_no
+from consts.const import ASSET_OWNER_TENANT_ID
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
@@ -22,9 +24,12 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
     with get_db_session() as session:
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y'
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
+            AgentInfo.delete_flag != 'Y',
         ).first()
 
         if not agent:
@@ -98,6 +103,40 @@ def query_sub_agents_id_list(main_agent_id: int, tenant_id: str, version_no: int
         return [relation.selected_agent_id for relation in relations]
 
 
+def query_sub_agent_relations(main_agent_id: int, tenant_id: str, version_no: int = 0) -> List[dict]:
+    """
+    Query sub-agent relations by main agent id, including pinned version info.
+    Default version_no=0 queries the draft version.
+
+    Args:
+        main_agent_id: Parent agent ID
+        tenant_id: Tenant ID
+        version_no: Version number to filter. Default 0 = draft/editing state
+    """
+    with get_db_session() as session:
+        query = session.query(AgentRelation).filter(
+            AgentRelation.parent_agent_id == main_agent_id,
+            AgentRelation.tenant_id == tenant_id,
+            AgentRelation.version_no == version_no,
+            AgentRelation.delete_flag != 'Y')
+        relations = query.all()
+        return [as_dict(relation) for relation in relations]
+
+
+def resolve_sub_agent_version_no(
+    selected_agent_id: int,
+    selected_agent_version_no: Optional[int],
+    tenant_id: str,
+) -> int:
+    """
+    Resolve the effective version number for a sub-agent relation.
+    Uses pinned version when set; otherwise falls back to child's current published version.
+    """
+    if selected_agent_version_no is not None:
+        return selected_agent_version_no
+    return query_current_version_no(agent_id=selected_agent_id, tenant_id=tenant_id) or 0
+
+
 def clear_agent_new_mark(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
     """
     Clear the NEW mark for an agent.
@@ -158,7 +197,8 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     :return: Created agent object
     """
     info_with_metadata = dict(agent_info)
-    info_with_metadata.setdefault("max_steps", 5)
+    info_with_metadata.setdefault("max_steps", 15)
+    info_with_metadata.setdefault("verification_config", None)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -192,8 +232,14 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,
+            "prompt_template_id": new_agent.prompt_template_id,
+            "prompt_template_name": new_agent.prompt_template_name,
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
+            "enable_context_manager": new_agent.enable_context_manager,
+            "verification_config": new_agent.verification_config,
+            "greeting_message": new_agent.greeting_message,
+            "example_questions": new_agent.example_questions,
             "current_version_no": new_agent.current_version_no,
             "version_no": new_agent.version_no,
             "created_by": new_agent.created_by,

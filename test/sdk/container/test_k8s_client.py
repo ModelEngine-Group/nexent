@@ -11,6 +11,7 @@ from nexent.container.k8s_client import (
     KubernetesContainerClient,
     ContainerError,
     ContainerConnectionError,
+    _sanitize_k8s_name,
 )
 from nexent.container.k8s_config import KubernetesContainerConfig
 
@@ -88,6 +89,79 @@ def mock_pod():
     ]
     pod.spec.containers = [container]
     return pod
+
+
+# ---------------------------------------------------------------------------
+# Test _sanitize_k8s_name
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeK8sName:
+    """Test _sanitize_k8s_name helper function"""
+
+    def test_sanitize_basic_alphanumeric(self):
+        """Test basic alphanumeric string passes through"""
+        assert _sanitize_k8s_name("test-service") == "test-service"
+        assert _sanitize_k8s_name("abc123") == "abc123"
+
+    def test_sanitize_lowercase_conversion(self):
+        """Test uppercase letters are converted to lowercase"""
+        assert _sanitize_k8s_name("TestService") == "testservice"
+        assert _sanitize_k8s_name("UPPERCASE") == "uppercase"
+
+    def test_sanitize_special_characters_replaced(self):
+        """Test special characters are replaced with dash"""
+        assert _sanitize_k8s_name("test@service") == "test-service"
+        assert _sanitize_k8s_name("foo#bar") == "foo-bar"
+        assert _sanitize_k8s_name("test$123") == "test-123"
+
+    def test_sanitize_consecutive_special_chars(self):
+        """Test consecutive special characters are collapsed to single dash"""
+        assert _sanitize_k8s_name("foo@@bar") == "foo-bar"
+        assert _sanitize_k8s_name("test@#$service") == "test-service"
+        assert _sanitize_k8s_name("a!!b") == "a-b"
+
+    def test_sanitize_leading_special_chars(self):
+        """Test leading special characters are removed"""
+        assert _sanitize_k8s_name("@test") == "test"
+        assert _sanitize_k8s_name("#foo") == "foo"
+        assert _sanitize_k8s_name("!test@service") == "test-service"
+
+    def test_sanitize_trailing_special_chars(self):
+        """Test trailing special characters are removed"""
+        assert _sanitize_k8s_name("test@") == "test"
+        assert _sanitize_k8s_name("test-service!") == "test-service"
+
+    def test_sanitize_mixed_case_with_specials(self):
+        """Test mixed case with special characters"""
+        assert _sanitize_k8s_name("Foo@Bar!Test") == "foo-bar-test"
+
+    def test_sanitize_empty_string(self):
+        """Test empty string returns 'unknown'"""
+        assert _sanitize_k8s_name("") == "unknown"
+
+    def test_sanitize_only_special_chars(self):
+        """Test string with only special characters returns 'unknown'"""
+        assert _sanitize_k8s_name("@@@") == "unknown"
+        assert _sanitize_k8s_name("!@#") == "unknown"
+
+    def test_sanitize_none(self):
+        """Test None returns 'unknown'"""
+        assert _sanitize_k8s_name(None) == "unknown"
+
+    def test_sanitize_with_dots(self):
+        """Test dots are converted to dashes"""
+        assert _sanitize_k8s_name("foo.bar") == "foo-bar"
+        assert _sanitize_k8s_name("foo...bar") == "foo-bar"
+
+    def test_sanitize_underscore_replaced(self):
+        """Test underscores are replaced with dash"""
+        assert _sanitize_k8s_name("foo_bar") == "foo-bar"
+
+    def test_sanitize_spaces_replaced(self):
+        """Test spaces are replaced with dash"""
+        assert _sanitize_k8s_name("foo bar") == "foo-bar"
+        assert _sanitize_k8s_name("foo  bar") == "foo-bar"
 
 
 # ---------------------------------------------------------------------------
@@ -176,55 +250,137 @@ class TestGeneratePodName:
 
     def test_generate_pod_name_basic(self, k8s_container_client):
         """Test basic pod name generation"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", "user12345")
-        assert name == "mcp-test-service-tenant12-user1234"  # user_id truncated to 8 chars
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", "user12345")
+            assert name == "mcp-test-service-tenant12-user1234-a1b2c3d4"
 
     def test_generate_pod_name_with_special_chars(self, k8s_container_client):
         """Test pod name generation with special characters"""
-        name = k8s_container_client._generate_pod_name(
-            "test@service#123", "tenant123", "user12345")
-        assert name == "mcp-test-service-123-tenant12-user1234"  # user_id truncated to 8 chars
-        assert "@" not in name
-        assert "#" not in name
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test@service#123", "tenant123", "user12345")
+            assert name == "mcp-test-service-123-tenant12-user1234-a1b2c3d4"
+            assert "@" not in name
+            assert "#" not in name
+
+    def test_generate_pod_name_consecutive_special_chars(self, k8s_container_client):
+        """Test pod name generation with consecutive special characters"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "foo@@bar", "tenant123", "user12345")
+            assert name == "mcp-foo-bar-tenant12-user1234-a1b2c3d4"
+            assert "--" not in name
+
+    def test_generate_pod_name_leading_special_chars(self, k8s_container_client):
+        """Test pod name generation with leading special characters"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "@test-service", "tenant123", "user12345")
+            # "@test-service" -> "test-service" (leading @ stripped)
+            assert name.startswith("mcp-test")
+            assert not name.startswith("mcp-@")
+
+    def test_generate_pod_name_trailing_special_chars(self, k8s_container_client):
+        """Test pod name generation with trailing special characters"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service@", "tenant123", "user12345")
+            assert name == "mcp-test-service-tenant12-user1234-a1b2c3d4"
+            assert name.endswith("-a1b2c3d4")
+
+    def test_generate_pod_name_uppercase(self, k8s_container_client):
+        """Test pod name generation with uppercase letters"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "TestService", "tenant123", "user12345")
+            assert name == "mcp-testservice-tenant12-user1234-a1b2c3d4"
+
+    def test_generate_pod_name_underscores(self, k8s_container_client):
+        """Test pod name generation with underscores"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test_service", "tenant_123", "user_12345")
+            # tenant_123 -> tenant-123 (9 chars), truncated to 8 -> tenant-1
+            # user_12345 -> user-12345 (10 chars), truncated to 8 -> user-123
+            assert name == "mcp-test-service-tenant-1-user-123-a1b2c3d4"
+
+    def test_generate_pod_name_dots(self, k8s_container_client):
+        """Test pod name generation with dots"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test.service", "tenant.123", "user.12345")
+            # tenant.123 -> tenant.123 (9 chars), truncated to 8 -> tenant.1
+            # user.12345 -> user.12345 (10 chars), truncated to 8 -> user.123
+            assert name == "mcp-test-service-tenant-1-user-123-a1b2c3d4"
+
+    def test_generate_pod_name_spaces(self, k8s_container_client):
+        """Test pod name generation with spaces"""
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test service", "tenant 123", "user 12345")
+            # tenant 123 -> tenant 123 (9 chars), truncated to 8 -> tenant 1
+            # user 12345 -> user 12345 (10 chars), truncated to 8 -> user 123
+            assert name == "mcp-test-service-tenant-1-user-123-a1b2c3d4"
 
     def test_generate_pod_name_long_user_id(self, k8s_container_client):
         """Test pod name generation with long user ID"""
         long_user_id = "a" * 20
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", long_user_id)
-        # Should only use first 8 characters of tenant_id and user_id
-        assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", long_user_id)
+            # Should only use first 8 characters of tenant_id and user_id
+            assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}-a1b2c3d4"
 
     def test_generate_pod_name_short_user_id(self, k8s_container_client):
         """Test pod name generation with short user ID"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", "user")
-        assert name == "mcp-test-service-tenant12-user"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", "user")
+            assert name == "mcp-test-service-tenant12-user-a1b2c3d4"
 
     def test_generate_pod_name_empty_tenant(self, k8s_container_client):
         """Test pod name generation with empty tenant_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "", "user12345")
-        assert name == "mcp-test-service--user1234"  # user_id truncated to 8 chars
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "", "user12345")
+            assert name == "mcp-test-service-unknown-user1234-a1b2c3d4"
 
     def test_generate_pod_name_empty_user(self, k8s_container_client):
         """Test pod name generation with empty user_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", "")
-        assert name == "mcp-test-service-tenant12-"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", "")
+            assert name == "mcp-test-service-tenant12-unknown-a1b2c3d4"
 
     def test_generate_pod_name_none_tenant(self, k8s_container_client):
         """Test pod name generation with None tenant_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", None, "user12345")
-        assert name == "mcp-test-service--user1234"  # user_id truncated to 8 chars
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", None, "user12345")
+            assert name == "mcp-test-service-unknown-user1234-a1b2c3d4"
 
     def test_generate_pod_name_none_user(self, k8s_container_client):
         """Test pod name generation with None user_id"""
-        name = k8s_container_client._generate_pod_name(
-            "test-service", "tenant123", None)
-        assert name == "mcp-test-service-tenant12-"
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = k8s_container_client._generate_pod_name(
+                "test-service", "tenant123", None)
+            assert name == "mcp-test-service-tenant12-unknown-a1b2c3d4"
 
 
 # ---------------------------------------------------------------------------
@@ -441,40 +597,42 @@ class TestStartContainer:
         mock_core_v1 = MagicMock()
         mock_apps_v1 = MagicMock()
 
-        # Create pod with matching name (pod_name is generated, not from fixture)
-        pod_name = "mcp-test-service-tenant12-user1234"
-        mock_pod = MagicMock()
-        mock_pod.metadata = MagicMock()
-        mock_pod.metadata.uid = "test-pod-uid-12345"
-        mock_pod.metadata.name = pod_name
-        mock_pod.status = MagicMock()
-        mock_pod.status.phase = "Running"
-        mock_pod.status.container_statuses = [MagicMock(ready=True)]
-        mock_core_v1.read_namespaced_pod.return_value = mock_pod
+        # Create pod with matching name (pod_name is generated with uuid)
+        with patch("nexent.container.k8s_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            generated_pod_name = "mcp-test-service-tenant12-user1234-a1b2c3d4"
+            mock_pod = MagicMock()
+            mock_pod.metadata = MagicMock()
+            mock_pod.metadata.uid = "test-pod-uid-12345"
+            mock_pod.metadata.name = generated_pod_name
+            mock_pod.status = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.status.container_statuses = [MagicMock(ready=True)]
+            mock_core_v1.read_namespaced_pod.return_value = mock_pod
 
-        config = KubernetesContainerConfig(
-            namespace="test-namespace",
-            service_port=5020,
-        )
-
-        with patch("nexent.container.k8s_client.client.CoreV1Api", return_value=mock_core_v1), \
-             patch("nexent.container.k8s_client.client.AppsV1Api", return_value=mock_apps_v1), \
-             patch("nexent.container.k8s_client.kubernetes.config.load_kube_config"):
-            client = KubernetesContainerClient(config)
-            client.core_v1 = mock_core_v1
-            client.apps_v1 = mock_apps_v1
-
-            result = await client.start_container(
-                service_name="test-service",
-                tenant_id="tenant123",
-                user_id="user12345",
-                full_command=["npx", "-y", "test-mcp"],
+            config = KubernetesContainerConfig(
+                namespace="test-namespace",
+                service_port=5020,
             )
 
-            assert result["status"] == "existing"
-            assert result["container_id"] == "test-pod-uid-12345"
-            assert result["service_url"] == f"http://{pod_name}:5020/mcp"
-            mock_core_v1.read_namespaced_pod.assert_called_once()
+            with patch("nexent.container.k8s_client.client.CoreV1Api", return_value=mock_core_v1), \
+                 patch("nexent.container.k8s_client.client.AppsV1Api", return_value=mock_apps_v1), \
+                 patch("nexent.container.k8s_client.kubernetes.config.load_kube_config"):
+                client = KubernetesContainerClient(config)
+                client.core_v1 = mock_core_v1
+                client.apps_v1 = mock_apps_v1
+
+                result = await client.start_container(
+                    service_name="test-service",
+                    tenant_id="tenant123",
+                    user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
+                )
+
+                assert result["status"] == "existing"
+                assert result["container_id"] == "test-pod-uid-12345"
+                assert result["service_url"] == f"http://{generated_pod_name}:5020/mcp"
+                mock_core_v1.read_namespaced_pod.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_start_container_existing_not_running(self, k8s_container_client, mock_pod):
@@ -1246,6 +1404,26 @@ class TestListContainers:
         result = k8s_container_client.list_containers(service_name="test@service#123")
 
         assert len(result) == 0
+
+    def test_list_containers_service_filter_consecutive_special_chars(self, k8s_container_client, mock_pod):
+        """Test listing containers with service filter containing consecutive special characters"""
+        k8s_container_client.core_v1.list_namespaced_pod.return_value = MagicMock(items=[mock_pod])
+
+        # The sanitized version of "test@@service" is "test-service"
+        # Since mock_pod's component is "test-service", it should match
+        result = k8s_container_client.list_containers(service_name="test@@service")
+
+        assert len(result) == 1
+
+    def test_list_containers_service_filter_leading_special_chars(self, k8s_container_client, mock_pod):
+        """Test listing containers with service filter containing leading special characters"""
+        k8s_container_client.core_v1.list_namespaced_pod.return_value = MagicMock(items=[mock_pod])
+
+        # The sanitized version of "@test-service" is "test-service" (leading @ stripped)
+        # Since mock_pod's component is "test-service", it should match
+        result = k8s_container_client.list_containers(service_name="@test-service")
+
+        assert len(result) == 1
 
     def test_list_containers_pod_no_ports(self, k8s_container_client):
         """Test listing containers when pod has no ports configured"""

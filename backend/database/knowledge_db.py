@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 
+import logging
 import uuid
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -7,6 +8,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
 from utils.str_utils import convert_list_to_string
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES
+
+logger = logging.getLogger("knowledge_db")
 
 
 def _generate_index_name(knowledge_id: int) -> str:
@@ -30,6 +34,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
             - user_id: Optional user ID for created_by and updated_by fields
             - tenant_id: Optional tenant ID for created_by and updated_by fields
             - embedding_model_name: embedding model name for the knowledge base
+            - preserve_source_file: whether to preserve uploaded source documents (optional)
 
     Returns:
         Dict[str, Any]: Dictionary with at least 'knowledge_id' and 'index_name'
@@ -49,9 +54,11 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
                 "tenant_id": query.get("tenant_id"),
                 "embedding_model_name": query.get("embedding_model_name"),
+                "embedding_model_id": query.get("embedding_model_id"),
                 "knowledge_name": knowledge_name,
                 "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
                 "ingroup_permission": query.get("ingroup_permission"),
+                "preserve_source_file": query.get("preserve_source_file", True),
             }
 
             # For backward compatibility: if caller explicitly provides index_name,
@@ -112,10 +119,16 @@ def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
 
             if existing_record:
                 # Update existing record
-                existing_record.knowledge_name = query.get('knowledge_name') or query.get('index_name')
-                existing_record.knowledge_describe = query.get('knowledge_describe', '')
-                existing_record.knowledge_sources = query.get('knowledge_sources', 'elasticsearch')
-                existing_record.embedding_model_name = query.get('embedding_model_name')
+                existing_record.knowledge_name = query.get(
+                    'knowledge_name') or query.get('index_name')
+                existing_record.knowledge_describe = query.get(
+                    'knowledge_describe', '')
+                existing_record.knowledge_sources = query.get(
+                    'knowledge_sources', 'elasticsearch')
+                existing_record.embedding_model_name = query.get(
+                    'embedding_model_name')
+                existing_record.embedding_model_id = query.get(
+                    'embedding_model_id')
                 existing_record.updated_by = query.get('user_id')
                 existing_record.update_time = func.current_timestamp()
 
@@ -245,9 +258,11 @@ def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, An
 
             # Support both index_name and knowledge_name queries
             if 'index_name' in query:
-                db_query = db_query.filter(KnowledgeRecord.index_name == query['index_name'])
+                db_query = db_query.filter(
+                    KnowledgeRecord.index_name == query['index_name'])
             elif 'knowledge_name' in query:
-                db_query = db_query.filter(KnowledgeRecord.knowledge_name == query['knowledge_name'])
+                db_query = db_query.filter(
+                    KnowledgeRecord.knowledge_name == query['knowledge_name'])
 
             # Add tenant_id filter only if it is provided in the query
             if 'tenant_id' in query and query['tenant_id'] is not None:
@@ -345,6 +360,43 @@ def update_model_name_by_index_name(index_name: str, embedding_model_name: str, 
         raise e
 
 
+def update_embedding_model_by_index_name(
+    index_name: str,
+    embedding_model_id: int,
+    embedding_model_name: str,
+    tenant_id: str,
+    user_id: str
+) -> bool:
+    """
+    Update the embedding model (both ID and name) for a knowledge base.
+
+    Args:
+        index_name: Internal index name of the knowledge base
+        embedding_model_id: New embedding model ID
+        embedding_model_name: New embedding model name
+        tenant_id: Tenant ID
+        user_id: User ID making the update
+
+    Returns:
+        bool: Whether the update was successful
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y',
+                KnowledgeRecord.tenant_id == tenant_id
+            ).update({
+                "embedding_model_id": embedding_model_id,
+                "embedding_model_name": embedding_model_name,
+                "updated_by": user_id
+            })
+            session.commit()
+            return result > 0
+    except SQLAlchemyError as e:
+        raise e
+
+
 def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str:
     """
     Get the internal index_name from user-facing knowledge_name.
@@ -361,16 +413,138 @@ def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str
     """
     try:
         with get_db_session() as session:
+            # First try resolving by user-facing knowledge_name.
             result = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.knowledge_name == knowledge_name,
                 KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
             ).first()
-
             if result:
                 return result.index_name
+
+            # Backward/forward compatibility: if caller already passes internal index_name,
+            # accept it directly by resolving on index_name as well.
+            index_result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if index_result:
+                return index_result.index_name
+
             raise ValueError(
                 f"Knowledge base '{knowledge_name}' not found for the current tenant"
             )
     except SQLAlchemyError as e:
         raise e
+
+
+def get_knowledge_name_map_by_index_names(index_names: List[str]) -> Dict[str, str]:
+    """
+    Get a mapping from index_name to knowledge_name (display name) for the given index_names.
+    Used to build user-friendly knowledge base summaries in prompts.
+
+    Args:
+        index_names: List of internal index names
+
+    Returns:
+        Dict[str, str]: Mapping of index_name -> knowledge_name.
+                       If a knowledge base is not found in the database,
+                       the index_name itself is used as the fallback value.
+    """
+    if not index_names:
+        return {}
+
+    try:
+        with get_db_session() as session:
+            result = session.query(
+                KnowledgeRecord.index_name,
+                KnowledgeRecord.knowledge_name
+            ).filter(
+                KnowledgeRecord.index_name.in_(index_names),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+
+            knowledge_name_map = {}
+            for row in result:
+                knowledge_name_map[row.index_name] = row.knowledge_name
+
+            for index_name in index_names:
+                if index_name not in knowledge_name_map:
+                    knowledge_name_map[index_name] = index_name
+
+            return knowledge_name_map
+    except SQLAlchemyError:
+        logger.exception("Query knowledge name map error")
+        raise
+
+
+def update_summary_frequency(index_name: str, summary_frequency: Optional[str],
+                             _tenant_id: str, user_id: str) -> bool:
+    """Update the auto-summary frequency for a knowledge base."""
+    valid_frequencies = VALID_SUMMARY_FREQUENCIES
+    if summary_frequency not in valid_frequencies:
+        raise ValueError(f"Invalid summary_frequency: {summary_frequency}")
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if not record:
+                return False
+            record.summary_frequency = summary_frequency
+            record.updated_by = user_id
+            session.commit()
+            return True
+    except SQLAlchemyError:
+        logger.exception("Update summary frequency error")
+        raise
+
+
+def update_last_summary_time(index_name: str):
+    """Update last_summary_time to now after a successful summary generation."""
+    from datetime import datetime
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if record:
+                record.last_summary_time = datetime.now()
+                session.commit()
+    except SQLAlchemyError:
+        logger.exception("Update last summary time error")
+        raise
+
+
+def update_last_doc_update_time(index_name: str):
+    """Update last_doc_update_time to now after document add/delete operation."""
+    from datetime import datetime
+    try:
+        with get_db_session() as session:
+            record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == index_name,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+            if record:
+                record.last_doc_update_time = datetime.now()
+                session.commit()
+    except SQLAlchemyError:
+        logger.exception("Update last doc update time error")
+        raise
+
+
+def get_knowledge_bases_for_auto_summary() -> List[Dict[str, Any]]:
+    """Query all knowledge bases with non-null summary_frequency."""
+    try:
+        with get_db_session() as session:
+            records = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.summary_frequency.isnot(None),
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(record) for record in records]
+    except SQLAlchemyError:
+        logger.exception("Get knowledge bases error")
+        raise

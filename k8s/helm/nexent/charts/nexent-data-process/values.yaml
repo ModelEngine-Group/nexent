@@ -10,12 +10,12 @@ resources:
   dataProcess:
     requests:
       memory: 512Mi
-      cpu: 4
+      cpu: 0.5
     limits:
-      memory: 4Gi
+      memory: 64Gi
       cpu: 8
 
 config:
   skipProxy: "true"
   pythonPath: "/opt/backend"
-  dockerEnvironment: "true"
+  dockerEnvironment: "false"

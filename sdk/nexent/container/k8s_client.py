@@ -8,6 +8,9 @@ for network access.
 import asyncio
 import logging
 import socket
+import re
+import uuid
+
 import kubernetes
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +23,47 @@ from .container_client_base import ContainerClient
 from .k8s_config import KubernetesContainerConfig
 
 logger = logging.getLogger("nexent.container.kubernetes")
+
+# Kubernetes naming constraints: lowercase alphanumeric or dash, cannot start/end with dash,
+# cannot have consecutive dashes, max 253 characters
+K8S_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
+K8S_CONSECUTIVE_DASHES = re.compile(r"-+")
+
+
+def _sanitize_k8s_name(name: str) -> str:
+    """Convert arbitrary string to valid Kubernetes resource name.
+
+    Rules:
+    - Convert to lowercase
+    - Replace invalid characters with dash
+    - Collapse consecutive dashes
+    - Remove leading/trailing dashes
+    - Must start with alphanumeric
+
+    Args:
+        name: Input string to sanitize
+
+    Returns:
+        Valid Kubernetes name (lowercase alphanumeric and dashes only)
+    """
+    if not name:
+        return "unknown"
+
+    # Lowercase and replace invalid chars with dash
+    sanitized = K8S_NAME_PATTERN.sub("-", name.lower())
+
+    # Collapse consecutive dashes
+    sanitized = K8S_CONSECUTIVE_DASHES.sub("-", sanitized)
+
+    # Remove leading/trailing dashes
+    sanitized = sanitized.strip("-")
+
+    # Ensure it starts with alphanumeric
+    if sanitized and not sanitized[0].isalnum():
+        sanitized = "x" + sanitized
+
+    # Fallback if empty
+    return sanitized if sanitized else "unknown"
 
 
 class ContainerError(Exception):
@@ -75,10 +119,11 @@ class KubernetesContainerClient(ContainerClient):
 
     def _generate_pod_name(self, service_name: str, tenant_id: str, user_id: str) -> str:
         """Generate unique pod name with service, tenant, and user segments."""
-        safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
-        tenant_part = (tenant_id or "")[:8]
-        user_part = (user_id or "")[:8]
-        return f"mcp-{safe_name}-{tenant_part}-{user_part}"
+        safe_name = _sanitize_k8s_name(service_name)
+        tenant_part = _sanitize_k8s_name(tenant_id)[:8]
+        user_part = _sanitize_k8s_name(user_id)[:8]
+        uuid_part = uuid.uuid4().hex[:8]
+        return f"mcp-{safe_name}-{tenant_part}-{user_part}-{uuid_part}"
 
     def _get_labels(self, service_name: str, tenant_id: str, user_id: str) -> Dict[str, str]:
         """Generate labels for pod and service."""
@@ -483,7 +528,7 @@ class KubernetesContainerClient(ContainerClient):
 
                 # Filter by service_name if provided
                 if service_name:
-                    safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
+                    safe_name = _sanitize_k8s_name(service_name)
                     pod_component = labels.get(self.LABEL_COMPONENT, "")
                     if safe_name not in pod_component:
                         continue

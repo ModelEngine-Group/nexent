@@ -1,5 +1,7 @@
+import base64
 import json
 import logging
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -340,6 +342,7 @@ class ElasticSearchCore(VectorDatabaseCore):
         batch_size: int = 64,
         content_field: str = "content",
         embedding_batch_size: int = 10,
+        large_mode: bool = False,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """
@@ -364,17 +367,8 @@ class ElasticSearchCore(VectorDatabaseCore):
 
         # Smart strategy selection
         total_docs = len(documents)
-        if total_docs < 64:
-            # Small data: direct insertion, using wait_for refresh
-            return self._small_batch_insert(
-                index_name=index_name,
-                documents=documents,
-                content_field=content_field,
-                embedding_model=embedding_model,
-                progress_callback=progress_callback,
-            )
-        else:
-            # Large data: using context manager
+        if total_docs >= 64 or large_mode:
+            # Large path: use context manager for index setting optimization.
             estimated_duration = max(60, total_docs // 100)
             with self.bulk_operation_context(index_name, estimated_duration):
                 return self._large_batch_insert(
@@ -386,6 +380,15 @@ class ElasticSearchCore(VectorDatabaseCore):
                     embedding_batch_size=embedding_batch_size,
                     progress_callback=progress_callback,
                 )
+        else:
+            # Small data: direct insertion, using wait_for refresh
+            return self._small_batch_insert(
+                index_name=index_name,
+                documents=documents,
+                content_field=content_field,
+                embedding_model=embedding_model,
+                progress_callback=progress_callback,
+            )
 
     def _small_batch_insert(
         self,
@@ -397,22 +400,26 @@ class ElasticSearchCore(VectorDatabaseCore):
     ) -> int:
         """Small batch insertion: real-time"""
         try:
-            # Preprocess documents
             processed_docs = self._preprocess_documents(
                 documents, content_field)
-
-            # Get embeddings
-            inputs = [doc[content_field] for doc in processed_docs]
-            embeddings = embedding_model.get_embeddings(inputs)
+            
+            # Preprocess documents
+            processed_docs, embeddings = self._prepare_small_batch_embeddings(
+                processed_docs, content_field, embedding_model
+            )
 
             # Prepare bulk operations
-            operations = []
-            for doc, embedding in zip(processed_docs, embeddings):
-                operations.append({"index": {"_index": index_name}})
-                doc["embedding"] = embedding
-                if "embedding_model_name" not in doc:
-                    doc["embedding_model_name"] = embedding_model.embedding_model_name
-                operations.append(doc)
+            operations = self._build_bulk_operations(
+                index_name=index_name,
+                processed_docs=processed_docs,
+                embeddings=embeddings,
+                embedding_model=embedding_model,
+            )
+
+            indexed_count = len(processed_docs)
+            if indexed_count == 0:
+                logger.info("Small batch insert skipped: no documents to index.")
+                return 0
 
             # Execute bulk insertion, wait for refresh to complete
             response = self.client.bulk(
@@ -423,18 +430,69 @@ class ElasticSearchCore(VectorDatabaseCore):
 
             if progress_callback:
                 try:
-                    progress_callback(len(documents), len(documents))
+                    progress_callback(indexed_count, indexed_count)
                 except Exception as e:
                     logger.warning(
                         f"[VECTORIZE] Progress callback failed in small batch: {str(e)}")
 
             logger.info(
-                f"Small batch insert completed: {len(documents)} chunks indexed.")
-            return len(documents)
+                f"Small batch insert completed: {indexed_count} chunks indexed.")
+            return indexed_count
 
         except Exception as e:
             logger.error(f"Small batch insert failed: {e}")
             raise
+
+    def _prepare_small_batch_embeddings(
+        self,
+        processed_docs: List[Dict[str, Any]],
+        content_field: str,
+        embedding_model: BaseEmbedding,
+    ):
+        if embedding_model.model_type == "multimodal":
+            inputs = []
+            for doc in processed_docs:
+                if doc.get("process_source") == "UniversalImageExtractor":
+                    img_bytes = doc.pop("image_bytes", "")
+                    if len(img_bytes) > 0:
+                        image_base64_str = base64.b64encode(
+                            img_bytes).decode("utf-8")
+                        data = f"data:image/jpeg;base64,{image_base64_str}"
+                        inputs.append({"image": data})
+                else:
+                    inputs.append({"text": doc[content_field]})
+            embeddings = embedding_model.get_multimodal_embeddings(inputs)
+            return processed_docs, embeddings
+        else:
+            filtered_docs = [
+                doc
+                for doc in processed_docs
+                if doc.get("process_source") != "UniversalImageExtractor"
+            ]
+            inputs = [doc[content_field] for doc in filtered_docs]
+            embeddings = embedding_model.get_embeddings(inputs)
+            return filtered_docs, embeddings
+
+    @staticmethod
+    def _build_bulk_operations(
+        index_name: str,
+        processed_docs: List[Dict[str, Any]],
+        embeddings: List[Any],
+        embedding_model: BaseEmbedding,
+    ) -> List[Dict[str, Any]]:
+        operations = []
+        for doc, embedding in zip(processed_docs, embeddings):
+            operations.append({"index": {"_index": index_name}})
+            embedding_field = (
+                "multi_embedding"
+                if doc.get("process_source") == "UniversalImageExtractor"
+                else "embedding"
+            )
+            doc[embedding_field] = embedding
+            if "embedding_model_name" not in doc:
+                doc["embedding_model_name"] = embedding_model.embedding_model_name
+            operations.append(doc)
+        return operations
 
     def _large_batch_insert(
         self,
@@ -451,103 +509,126 @@ class ElasticSearchCore(VectorDatabaseCore):
         Splits large document batches into smaller chunks to respect embedding API limits before bulk inserting into Elasticsearch.
         """
         try:
+            sub_batch_max_retries = self.max_retries
+
             processed_docs = self._preprocess_documents(
                 documents, content_field)
+            if embedding_model.model_type != "multimodal":
+                processed_docs = [
+                    doc for doc in processed_docs
+                    if doc.get("process_source") != "UniversalImageExtractor"
+                ]
             total_indexed = 0
             total_vectorized = 0
             total_docs = len(processed_docs)
-            es_total_batches = (total_docs + batch_size - 1) // batch_size
+            es_total_batches = 1
             start_time = time.time()
 
             logger.info(
                 f"=== [INDEXING START] Total chunks: {total_docs}, ES batch size: {batch_size}, Total ES batches: {es_total_batches} ==="
             )
 
-            for i in range(0, total_docs, batch_size):
-                es_batch = processed_docs[i: i + batch_size]
-                es_batch_num = i // batch_size + 1
-                es_batch_start_time = time.time()
+            es_batch = processed_docs
+            es_batch_num = 1
+            es_batch_start_time = time.time()
 
-                # Store documents and their embeddings for this Elasticsearch batch
-                doc_embedding_pairs = []
+            # Store documents and their embeddings for this Elasticsearch batch
+            doc_embedding_pairs = []
 
-                # Sub-batch for embedding API
-                # Use the provided embedding_batch_size (default 10) to reduce provider pressure
-                for j in range(0, len(es_batch), embedding_batch_size):
-                    embedding_sub_batch = es_batch[j: j + embedding_batch_size]
-                    # Retry logic for embedding API call (3 retries, 1s delay)
-                    # Note: embedding_model.get_embeddings() already has built-in retries with exponential backoff
-                    # This outer retry handles additional failures
-                    max_retries = 3
-                    retry_delay = 1.0
-                    success = False
-
-                    for retry_attempt in range(max_retries):
-                        try:
+            # Sub-batch for embedding API
+            # Use the provided embedding_batch_size (default 10) to reduce provider pressure
+            for j in range(0, len(es_batch), embedding_batch_size):
+                embedding_sub_batch = es_batch[j: j + embedding_batch_size]
+                # Retry logic for embedding API call.
+                # Important: do not silently skip failed sub-batches, otherwise upper layer sees
+                # partial indexing and reports false-negative "failed then ready".
+                for retry_attempt in range(sub_batch_max_retries):
+                    try:
+                        if embedding_model.model_type == "multimodal":
+                            inputs = []
+                            docs_for_embeddings = []
+                            for doc in embedding_sub_batch:
+                                if doc.get("process_source") == "UniversalImageExtractor":
+                                    img_bytes = doc.pop("image_bytes", "")
+                                    if len(img_bytes) > 0:
+                                        image_base64_str = base64.b64encode(
+                                            img_bytes).decode('utf-8')
+                                        data = f"data:image/jpeg;base64,{image_base64_str}"
+                                        inputs.append({"image": data})
+                                        docs_for_embeddings.append(doc)
+                                else:
+                                    inputs.append({"text": doc[content_field]})
+                                    docs_for_embeddings.append(doc)
+                            embeddings = embedding_model.get_multimodal_embeddings(inputs)
+                            for doc, embedding in zip(docs_for_embeddings, embeddings):
+                                doc_embedding_pairs.append((doc, embedding))
+                        else:
                             inputs = [doc[content_field]
-                                      for doc in embedding_sub_batch]
+                                        for doc in embedding_sub_batch]
                             embeddings = embedding_model.get_embeddings(inputs)
-
                             for doc, embedding in zip(embedding_sub_batch, embeddings):
                                 doc_embedding_pairs.append((doc, embedding))
-
-                            success = True
-                            total_vectorized += len(embedding_sub_batch)
-                            if progress_callback:
-                                try:
-                                    progress_callback(
-                                        total_vectorized, total_docs)
-                                    logger.debug(
-                                        f"[VECTORIZE] Progress callback (embedding) {total_vectorized}/{total_docs} (ES batch {es_batch_num}/{es_total_batches}, sub-batch start {j})")
-                                except Exception as callback_err:
-                                    logger.warning(
-                                        f"[VECTORIZE] Progress callback failed during embedding: {callback_err}")
-                            break  # Success, exit retry loop
-
-                        except Exception as e:
-                            if retry_attempt < max_retries - 1:
+                        
+                        total_vectorized += len(embedding_sub_batch)
+                        if progress_callback:
+                            try:
+                                progress_callback(
+                                    total_vectorized, total_docs)
+                                logger.debug(
+                                    f"[VECTORIZE] Progress callback (embedding) {total_vectorized}/{total_docs} (ES batch {es_batch_num}/{es_total_batches}, sub-batch start {j})")
+                            except Exception as callback_err:
                                 logger.warning(
-                                    f"Embedding API error (attempt {retry_attempt + 1}/{max_retries}): {e}, ES batch num: {es_batch_num}, sub-batch start: {j}, size: {len(embedding_sub_batch)}. Retrying in {retry_delay}s..."
-                                )
-                                time.sleep(retry_delay)
-                            else:
-                                logger.error(
-                                    f"Embedding API error after {max_retries} attempts: {e}, ES batch num: {es_batch_num}, sub-batch start: {j}, size: {len(embedding_sub_batch)}"
-                                )
+                                    f"[VECTORIZE] Progress callback failed during embedding: {callback_err}")
+                        break  # Success, exit retry loop
 
-                    if not success:
-                        # Skip this sub-batch after all retries failed
-                        continue
+                    except Exception as e:
+                        retry_delay = min(1.0 * (2 ** retry_attempt), 30.0)
+                        if retry_attempt < sub_batch_max_retries - 1:
+                            logger.warning(
+                                f"Embedding API error (attempt {retry_attempt + 1}/{sub_batch_max_retries}): "
+                                f"{e}, ES batch num: {es_batch_num}, sub-batch start: {j}, "
+                                f"size: {len(embedding_sub_batch)}. Retrying in {retry_delay}s..."
+                            )
+                            time.sleep(retry_delay)
+                        else:
+                            logger.error(
+                                f"Embedding API error after {sub_batch_max_retries} attempts: {e}, "
+                                f"ES batch num: {es_batch_num}, sub-batch start: {j}, "
+                                f"size: {len(embedding_sub_batch)}"
+                            )
+                            # Escalate to upper layer retry instead of returning partial success.
+                            raise
 
-                # Perform a single bulk insert for the entire Elasticsearch batch
-                if not doc_embedding_pairs:
-                    logger.warning(
-                        f"No documents with embeddings to index for ES batch {es_batch_num}")
-                    continue
+            # Perform a single bulk insert for the entire Elasticsearch batch
+            if not doc_embedding_pairs:
+                logger.warning(
+                    f"No documents with embeddings to index for ES batch {es_batch_num}")
+                return 0
 
-                operations = []
-                for doc, embedding in doc_embedding_pairs:
-                    operations.append({"index": {"_index": index_name}})
-                    doc["embedding"] = embedding
-                    if "embedding_model_name" not in doc:
-                        doc["embedding_model_name"] = getattr(
-                            embedding_model, "embedding_model_name", "unknown")
-                    operations.append(doc)
+            operations = []
+            for doc, embedding in doc_embedding_pairs:
+                operations.append({"index": {"_index": index_name}})
+                doc["multi_embedding" if doc["process_source"]
+                        == "UniversalImageExtractor" else "embedding"] = embedding
+                if "embedding_model_name" not in doc:
+                    doc["embedding_model_name"] = getattr(
+                        embedding_model, "embedding_model_name", "unknown")
+                operations.append(doc)
 
-                try:
-                    response = self.client.bulk(
-                        index=index_name, operations=operations, refresh=False)
-                    self._handle_bulk_errors(response)
-                    total_indexed += len(doc_embedding_pairs)
-                    es_batch_elapsed = time.time() - es_batch_start_time
-                    logger.info(
-                        f"[ES BATCH {es_batch_num}/{es_total_batches}] Indexed {len(doc_embedding_pairs)} documents in {es_batch_elapsed:.2f}s. Total progress: {total_indexed}/{total_docs}"
-                    )
+            try:
+                response = self.client.bulk(
+                    index=index_name, operations=operations, refresh=False)
+                self._handle_bulk_errors(response)
+                total_indexed += len(doc_embedding_pairs)
+                es_batch_elapsed = time.time() - es_batch_start_time
+                logger.info(
+                    f"[ES BATCH {es_batch_num}/{es_total_batches}] Indexed {len(doc_embedding_pairs)} documents in {es_batch_elapsed:.2f}s. Total progress: {total_indexed}/{total_docs}"
+                )
 
-                except Exception as e:
-                    logger.error(
-                        f"Bulk insert error: {e}, ES batch num: {es_batch_num}")
-                    raise
+            except Exception as e:
+                logger.error(
+                    f"Bulk insert error: {e}, ES batch num: {es_batch_num}")
+                raise
 
             self._force_refresh_with_retry(index_name)
             total_elapsed = time.time() - start_time
@@ -979,20 +1060,41 @@ class ElasticSearchCore(VectorDatabaseCore):
         query_embedding = embedding_model.get_embeddings(query_text)[0]
 
         # Prepare the search query
-        search_query = {
-            "knn": {
-                "field": "embedding",
-                "query_vector": query_embedding,
-                "k": top_k,
-                "num_candidates": top_k * 2,
-            },
-            "size": top_k,
-            "_source": {"excludes": ["embedding"]},
-        }
-
-        # Execute the search across multiple indices
-        raw_results = self.exec_query(index_pattern, search_query)
-
+        if embedding_model.model_type == "multimodal":
+            search_text_query = {
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": query_embedding,
+                    "k": top_k,
+                    "num_candidates": top_k * 2,
+                },
+                "size": top_k,
+                "_source": {"excludes": ["embedding"]},
+            }
+            search_image_query = {
+                "knn": {
+                        "field": "multi_embedding",
+                        "query_vector": query_embedding,
+                        "k": top_k,
+                        "num_candidates": top_k * 2,
+                    },
+                "size": top_k,
+                "_source": {"excludes": ["multi_embedding"]},
+            }
+            raw_results = self.exec_query(index_pattern, search_text_query) + self.exec_query(index_pattern, search_image_query)
+        else:
+            search_query = {
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": query_embedding,
+                    "k": top_k,
+                    "num_candidates": top_k * 2,
+                },
+                "size": top_k,
+                "_source": {"excludes": ["embedding"]},
+            }
+            raw_results = self.exec_query(index_pattern, search_query)
+ 
         return raw_results
 
     def hybrid_search(
@@ -1137,6 +1239,13 @@ class ElasticSearchCore(VectorDatabaseCore):
                            for r in accurate_results]) if accurate_results else 1
         max_semantic = max([r.get("score", 0)
                            for r in semantic_results]) if semantic_results else 1
+        is_multimodal = embedding_model.model_type == "multimodal"
+        image_semantic_scores = [
+            r.get("score", 0)
+            for r in semantic_results
+            if r.get("document", {}).get("process_source") == "UniversalImageExtractor"
+        ]
+        max_semantic_image = max(image_semantic_scores) if image_semantic_scores else 1
 
         # Calculate combined scores and sort
         results = []
@@ -1148,7 +1257,10 @@ class ElasticSearchCore(VectorDatabaseCore):
 
                 # Normalize scores
                 normalized_accurate = accurate_score / max_accurate if max_accurate > 0 else 0
-                normalized_semantic = semantic_score / max_semantic if max_semantic > 0 else 0
+                if is_multimodal and result.get("document", {}).get("process_source") == "UniversalImageExtractor":
+                    normalized_semantic = semantic_score / max_semantic_image if max_semantic_image > 0 else 0
+                else:
+                    normalized_semantic = semantic_score / max_semantic if max_semantic > 0 else 0
 
                 # Calculate weighted combined score
                 combined_score = weight_accurate * normalized_accurate + \
@@ -1168,9 +1280,20 @@ class ElasticSearchCore(VectorDatabaseCore):
                     f"Warning: Error processing result for doc_id {doc_id}: {e}")
                 continue
 
-        # Sort by combined score and return top k results
+        # Sort by combined score and return results
         results.sort(key=lambda x: x["score"], reverse=True)
-        final_results = results[:top_k]
+        if is_multimodal:
+            text_results = [
+                r for r in results
+                if r.get("document", {}).get("process_source") != "UniversalImageExtractor"
+            ][:top_k]
+            image_results = [
+                r for r in semantic_results
+                if r.get("document", {}).get("process_source") == "UniversalImageExtractor"
+            ]
+            final_results = text_results + image_results
+        else:
+            final_results = results[:top_k]
 
         return final_results
 

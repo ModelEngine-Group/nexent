@@ -19,7 +19,7 @@ import {
 } from "@/services/storageService";
 import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
-import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { App } from "antd";
 
 // Selected file state for preview drawer
@@ -85,6 +85,14 @@ const getFileIcon = (name: string, contentType?: string) => {
   }
   if (chatConfig.fileIcons.json.includes(extension)) {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
+  }
+
+  // Audio and video files are uploaded as regular attachments for multimodal tools.
+  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
+    return <FileTextFilled size={iconSize} color="#16a085" />;
+  }
+  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
+    return <FileTextFilled size={iconSize} color="#8e44ad" />;
   }
 
   // Compressed file

@@ -1,11 +1,15 @@
 import sys
+import types
+import importlib
 from unittest.mock import patch, MagicMock, call
 
 import pytest
 
 # Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+boto3_module.client = MagicMock()
+sys.modules["boto3"] = boto3_module
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
@@ -22,6 +26,31 @@ minio_client_mock.client = MagicMock()
 minio_config_mock = MagicMock()
 minio_config_mock.validate = MagicMock()
 
+if 'consts.const' in sys.modules and not hasattr(sys.modules['consts.const'], 'APP_DESCRIPTION'):
+    sys.modules.pop('consts.const', None)
+if 'consts' in sys.modules and not hasattr(sys.modules['consts'], '__path__'):
+    sys.modules.pop('consts', None)
+
+database_client_module = types.ModuleType('database.client')
+database_client_module.MinioClient = MagicMock()
+database_client_module.minio_client = minio_client_mock
+database_client_module.as_dict = MagicMock(side_effect=lambda value: value)
+database_client_module.db_client = MagicMock()
+database_client_module.db_client.clean_string_values = MagicMock(side_effect=lambda value: value)
+database_client_module.get_db_session = MagicMock()
+sys.modules['database.client'] = database_client_module
+database_package = sys.modules.get('database') or importlib.import_module('database')
+setattr(database_package, 'client', database_client_module)
+database_model_management_module = types.ModuleType('database.model_management_db')
+database_model_management_module.get_model_by_model_id = MagicMock()
+database_model_management_module.get_model_id_by_display_name = MagicMock()
+database_model_management_module.get_model_records = MagicMock(return_value=[])
+sys.modules['database.model_management_db'] = database_model_management_module
+setattr(database_package, 'model_management_db', database_model_management_module)
+backend_database_client_module = sys.modules.get('backend.database.client')
+if backend_database_client_module is not None and not hasattr(backend_database_client_module, 'minio_client'):
+    backend_database_client_module.minio_client = minio_client_mock
+
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig',
@@ -29,7 +58,7 @@ patch('nexent.storage.minio_config.MinIOStorageConfig',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 patch('database.client.MinioClient', return_value=minio_client_mock).start()
-patch('backend.database.client.minio_client', minio_client_mock).start()
+patch('backend.database.client.minio_client', minio_client_mock, create=True).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import backend modules after all patches are applied
@@ -52,14 +81,17 @@ def service_mocks():
     with patch('backend.services.config_sync_service.tenant_config_manager') as mock_tenant_config_manager, \
             patch('backend.services.config_sync_service.get_env_key') as mock_get_env_key, \
             patch('backend.services.config_sync_service.safe_value') as mock_safe_value, \
+            patch('backend.services.config_sync_service.get_model_records') as mock_get_model_records, \
             patch('backend.services.config_sync_service.get_model_id_by_display_name') as mock_get_model_id, \
             patch('backend.services.config_sync_service.get_model_name_from_config') as mock_get_model_name, \
             patch('backend.services.config_sync_service.logger') as mock_logger:
 
+        mock_get_model_records.return_value = []
         yield {
             'tenant_config_manager': mock_tenant_config_manager,
             'get_env_key': mock_get_env_key,
             'safe_value': mock_safe_value,
+            'get_model_records': mock_get_model_records,
             'get_model_id': mock_get_model_id,
             'get_model_name': mock_get_model_name,
             'logger': mock_logger
@@ -457,6 +489,32 @@ class TestSaveConfigImpl:
         # Verify logger
         service_mocks['logger'].info.assert_called_once_with(
             "Configuration saved successfully")
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_passes_model_type_to_lookup(self, service_mocks):
+        config = MagicMock()
+        config.model_dump.return_value = {
+            "app": {},
+            "models": {
+                "embedding": {
+                    "modelName": "text-embedding-ada-002",
+                    "displayName": "Ada Embeddings",
+                    "apiConfig": {"apiKey": "k", "baseUrl": "https://api"}
+                }
+            }
+        }
+
+        service_mocks['tenant_config_manager'].load_config.return_value = {}
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+        service_mocks['safe_value'].side_effect = lambda value: str(value) if value is not None else ""
+        service_mocks['get_model_records'].return_value = [{"model_id": 123}]
+
+        await save_config_impl(config, "tenant-id", "user-id")
+
+        service_mocks['get_model_records'].assert_called_once_with(
+            {"display_name": "Ada Embeddings", "model_type": "embedding"},
+            "tenant-id"
+        )
 
     @pytest.mark.asyncio
     async def test_save_config_impl_model_config(self, service_mocks):
@@ -1336,6 +1394,8 @@ class TestLoadConfigImpl:
                 "MULTI_EMBEDDING_ID": {},
                 "RERANK_ID": {},
                 "VLM_ID": {},
+                "VLM2_ID": {},
+                "VLM3_ID": {},
                 "STT_ID": {},
                 "TTS_ID": {}
             }
@@ -1348,7 +1408,7 @@ class TestLoadConfigImpl:
 
         # Assert
         assert isinstance(result, dict)
-        assert len(result) == 7  # All model types should be present
+        assert len(result) == 9  # All model types should be present
 
         # Verify successful configs
         assert result["llm"]["displayName"] == "GPT-4"
@@ -1372,20 +1432,20 @@ class TestLoadConfigImpl:
         # Assert
         assert isinstance(result, dict)
         # All model types should still be present with empty configs
-        assert len(result) == 7
+        assert len(result) == 9
 
         # All configs should be empty due to exceptions
-        for model_key in ["llm", "embedding", "multiEmbedding", "rerank", "vlm", "stt", "tts"]:
+        for model_key in ["llm", "embedding", "multiEmbedding", "rerank", "vlm", "vlm2", "vlm3", "stt", "tts"]:
             assert result[model_key]["name"] == ""
             assert result[model_key]["displayName"] == ""
             assert result[model_key]["apiConfig"]["apiKey"] == ""
             assert result[model_key]["apiConfig"]["modelUrl"] == ""
 
         # Verify that logger.warning was called for each model type
-        assert service_mocks['logger'].warning.call_count == 7
+        assert service_mocks['logger'].warning.call_count == 9
         warning_calls = service_mocks['logger'].warning.call_args_list
         expected_configs = ["LLM_ID", "EMBEDDING_ID", "MULTI_EMBEDDING_ID",
-                            "RERANK_ID", "VLM_ID", "STT_ID", "TTS_ID"]
+                            "RERANK_ID", "VLM_ID", "VLM2_ID", "VLM3_ID", "STT_ID", "TTS_ID"]
         for i, config_key in enumerate(expected_configs):
             assert f"Failed to get config for {config_key}: Database completely down" in warning_calls[
                 i][0][0]
@@ -1666,6 +1726,7 @@ class TestBuildModelConfig:
         # Test with None
         result = build_model_config(None)
         assert result == {
+            "id": None,
             "name": "",
             "displayName": "",
             "apiConfig": {
@@ -1677,6 +1738,7 @@ class TestBuildModelConfig:
         # Test with empty dict
         result = build_model_config({})
         assert result == {
+            "id": None,
             "name": "",
             "displayName": "",
             "apiConfig": {

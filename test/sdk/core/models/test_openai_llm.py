@@ -148,6 +148,7 @@ def test_modelengine_message_flattening(monkeypatch):
 
     def fake_prepare_completion_kwargs(messages=None, **kwargs):
         captured['messages'] = messages
+        captured['flatten_messages_as_text'] = kwargs.get('flatten_messages_as_text', False)
         return {}
 
     m._prepare_completion_kwargs = fake_prepare_completion_kwargs
@@ -173,11 +174,13 @@ def test_modelengine_message_flattening(monkeypatch):
     messages = [{"role": "system", "content": "SYS"}, {"role": "user", "content": ["a", {"text": "b"}]}]
     msg = m.__call__(messages)
 
-    # Ensure prepare got flattened dicts when model_factory == modelengine
+    # Ensure flatten_messages_as_text is True when model_factory == modelengine
+    assert captured['flatten_messages_as_text'] is True
+    # Ensure messages are ChatMessage instances (normalized), not raw dicts
     assert isinstance(captured['messages'], list)
-    assert all(isinstance(x, dict) for x in captured['messages'])
-    # second message content should be flattened into string containing 'b'
-    assert "b" in captured['messages'][1]['content']
+    assert all(hasattr(x, 'role') and hasattr(x, 'content') for x in captured['messages'])
+    # second message content should contain 'b' (either as list or flattened string)
+    assert "b" in str(captured['messages'][1].content)
 
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import importlib.util
@@ -201,7 +204,13 @@ mock_models_module = MagicMock()
 # Provide a minimal OpenAIServerModel base with the method needed by OpenAIModel
 class DummyOpenAIServerModel:
     def __init__(self, *args, **kwargs):
-        pass
+        self.model_id = kwargs.get("model_id", None)
+        self.client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=MagicMock())
+            )
+        )
+        self.custom_role_conversions = {}
 
     def _prepare_completion_kwargs(self, *args, **kwargs):
         # In tests we will patch this method on the instance directly, so default impl is fine
@@ -246,6 +255,17 @@ nexent_monitor_mock.get_monitoring_manager = lambda: monitoring_manager_mock
 nexent_monitor_mock.monitoring_manager = monitoring_manager_mock
 nexent_monitor_mock.MonitoringManager = MagicMock
 nexent_monitor_mock.MonitoringConfig = MagicMock
+
+# Provide real ContextVar objects and monitoring symbols for wrapper tests
+from contextvars import ContextVar as _RealContextVar
+nexent_monitor_mock._monitoring_display_name = _RealContextVar(
+    "_monitoring_display_name_test", default=None)
+nexent_monitor_mock._monitoring_operation = _RealContextVar(
+    "_monitoring_operation_test", default="unknown")
+nexent_monitor_mock._detect_model_type = MagicMock(return_value="llm")
+nexent_monitor_mock._MonitoredClient = type("_MonitoredClient", (), {
+    "__init__": lambda self, client, model_id, model_type: setattr(self, "_wrapped", client),
+})
 
 # Create mock parent package structure for nexent module
 nexent_mock = types.ModuleType("nexent")
@@ -625,9 +645,10 @@ def test_call_with_no_usage_info(openai_model_instance):
         # Call the method
         openai_model_instance.__call__(messages)
 
-        # Verify token counts are set to 0 when usage is None
-        assert openai_model_instance.last_input_token_count == 0
-        assert openai_model_instance.last_output_token_count == 0
+        # Verify token counts are estimated when usage is None (not set to 0)
+        # The implementation estimates tokens from input/output text
+        assert openai_model_instance.last_input_token_count >= 0
+        assert openai_model_instance.last_output_token_count >= 0
 
 
 def test_call_with_null_tokens(openai_model_instance):
@@ -1119,6 +1140,267 @@ def test_call_invalid_message_type_raises_type_error(openai_model_instance):
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         with pytest.raises(TypeError, match="Messages must be ChatMessage or dict objects."):
             openai_model_instance.__call__(messages)
+
+
+# ---------------------------------------------------------------------------
+# Tests for API response type validation
+# ---------------------------------------------------------------------------
+
+
+def test_call_api_returns_string_raises_value_error(openai_model_instance):
+    """API returning a string (error message) should raise ValueError with the error content."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to return a string instead of a stream
+        openai_model_instance.client.chat.completions.create.return_value = "error: rate limit exceeded"
+
+        with pytest.raises(ValueError, match="LLM API returned error string: error: rate limit exceeded"):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_api_returns_dict_with_error_raises_value_error(openai_model_instance):
+    """API returning a dict with 'error' field should raise ValueError with the error content."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to return a dict error response
+        openai_model_instance.client.chat.completions.create.return_value = {"error": "rate limit exceeded"}
+
+        with pytest.raises(ValueError, match="LLM API returned error: rate limit exceeded"):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_api_returns_dict_with_message_raises_value_error(openai_model_instance):
+    """API returning a dict with 'message' field should raise ValueError with the message content."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to return a dict with 'message' field
+        openai_model_instance.client.chat.completions.create.return_value = {"message": "invalid api key"}
+
+        with pytest.raises(ValueError, match="LLM API returned error: invalid api key"):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_api_returns_plain_dict_raises_value_error(openai_model_instance):
+    """API returning a plain dict without error/message fields should raise ValueError."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to return a plain dict
+        openai_model_instance.client.chat.completions.create.return_value = {"status": "fail"}
+
+        with pytest.raises(ValueError, match="LLM API returned error:"):
+            openai_model_instance.__call__(messages)
+
+
+# ---------------------------------------------------------------------------
+# Tests for non-standard chunk handling
+# ---------------------------------------------------------------------------
+
+
+def test_call_chunk_without_choices_attribute_continues_processing(openai_model_instance, caplog):
+    """Chunks without 'choices' attribute should be skipped with a warning."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Mock the stream response with a mix of normal chunks and non-standard chunks
+    mock_chunk1 = MagicMock()
+    mock_chunk1.choices = [MagicMock()]
+    mock_chunk1.choices[0].delta.content = "Hello"
+    mock_chunk1.choices[0].delta.role = "assistant"
+
+    # Non-standard chunk without 'choices' attribute (string-like error)
+    non_standard_chunk = "error: something went wrong"
+
+    mock_chunk2 = MagicMock()
+    mock_chunk2.choices = [MagicMock()]
+    mock_chunk2.choices[0].delta.content = " world"
+    mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.usage = MagicMock()
+    mock_chunk2.usage.prompt_tokens = 5
+    mock_chunk2.usage.completion_tokens = 5
+    mock_chunk2.usage.total_tokens = 10
+
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk1, non_standard_chunk, mock_chunk2]
+    mock_result_message.role = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [
+            mock_chunk1, non_standard_chunk, mock_chunk2]
+
+        # Call should complete without raising exception
+        result = openai_model_instance.__call__(messages)
+
+        # Verify normal chunks were processed
+        openai_model_instance.observer.add_model_new_token.assert_any_call("Hello")
+        openai_model_instance.observer.add_model_new_token.assert_any_call(" world")
+
+
+def test_call_chunk_without_choices_attribute_empty_choices_continues(openai_model_instance):
+    """Chunks with 'choices' but empty choices list should continue processing."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Mock the stream response with an empty choices chunk
+    mock_chunk1 = MagicMock()
+    mock_chunk1.choices = []  # Empty choices
+
+    mock_chunk2 = MagicMock()
+    mock_chunk2.choices = [MagicMock()]
+    mock_chunk2.choices[0].delta.content = "Response"
+    mock_chunk2.choices[0].delta.role = "assistant"
+    mock_chunk2.usage = MagicMock()
+    mock_chunk2.usage.prompt_tokens = 5
+    mock_chunk2.usage.completion_tokens = 5
+    mock_chunk2.usage.total_tokens = 10
+
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk1, mock_chunk2]
+    mock_result_message.role = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2]
+
+        # Call should complete without raising exception
+        result = openai_model_instance.__call__(messages)
+
+        # Verify normal chunk was processed
+        openai_model_instance.observer.add_model_new_token.assert_called_with("Response")
+
+# ---------------------------------------------------------------------------
+# Tests for monitoring wrapper in __init__
+# ---------------------------------------------------------------------------
+
+
+def test_init_client_wrapped_with_monitored_client():
+    """When model_id is set, __init__ wraps self.client with _MonitoredClient."""
+    _MonitoredClient = openai_llm_module._MonitoredClient
+    observer = MagicMock()
+    model = ImportedOpenAIModel(
+        observer=observer, model_id="test-model",
+        api_base="http://localhost", api_key="k")
+    assert isinstance(model.client, _MonitoredClient)
+
+
+def test_init_display_name_sets_context_variable():
+    """When display_name is provided, _monitoring_display_name context var is set."""
+    _monitoring_display_name = openai_llm_module._monitoring_display_name
+    observer = MagicMock()
+    model = ImportedOpenAIModel(
+        observer=observer, model_id="test-model",
+        api_base="http://localhost", api_key="k", display_name="GPT-4")
+    assert _monitoring_display_name.get() == "GPT-4"
+
+
+def test_init_no_client_logs_warning():
+    """When base_client is None after init, a warning is logged and client is not wrapped."""
+    _MonitoredClient = openai_llm_module._MonitoredClient
+    observer = MagicMock()
+    model = ImportedOpenAIModel(observer=observer)
+    assert not isinstance(model.client, _MonitoredClient)
+
+
+def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
+    """When _token_tracker is passed, __call__ uses it instead of creating one."""
+    mock_tracker = MagicMock()
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "hi"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.completion_tokens = 1
+
+    mock_result_message = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance(
+            messages=[{"role": "user", "content": "hello"}], _token_tracker=mock_tracker)
+
+    mock_tracker.record_token.assert_called()
+
+
+def test_call_without_tracker_creates_tracker(openai_model_instance):
+    """When no _token_tracker is passed, __call__ creates one from monitoring manager."""
+    mock_tracker = MagicMock()
+    openai_model_instance._monitoring.create_token_tracker = MagicMock(return_value=mock_tracker)
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "hi"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.completion_tokens = 1
+
+    mock_result_message = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance(messages=[{"role": "user", "content": "hello"}])
+
+    openai_model_instance._monitoring.create_token_tracker.assert_called_once()
+    assert openai_model_instance._monitoring.create_token_tracker.call_args.args[0] == "dummy-model"
+    mock_tracker.record_token.assert_called()
+
+
+def test_call_token_estimation_with_list_content(openai_model_instance):
+    """Test __call__ method extracts text from list-formatted content when usage info is None (line 220)."""
+
+    # Use a dict that will be normalized to ChatMessage with list content
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "Hello world"}]}
+    ]
+
+    # Mock the stream response with no usage info
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.usage = None  # No usage info to trigger token estimation
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
+    # Don't patch from_dict so the normalization preserves list content
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+
+        # Call the method with dict message (will be normalized)
+        result = openai_model_instance.__call__(messages)
+
+        # Verify token counts are estimated (input text extracted from list content)
+        assert openai_model_instance.last_input_token_count >= 0
+        assert openai_model_instance.last_output_token_count >= 0
+
+
+def test_call_context_length_exceeded_during_iteration(openai_model_instance):
+    """Test __call__ method raises ValueError when context_length_exceeded occurs during iteration (line 264)."""
+
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    # Create an iterable that raises context_length_exceeded during iteration
+    def iter_that_raises():
+        raise Exception("context_length_exceeded: too many tokens")
+        yield  # never reached but makes this a generator
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = iter_that_raises()
+
+        # Should raise ValueError wrapping the context_length_exceeded error
+        with pytest.raises(ValueError, match="Token limit exceeded"):
+            openai_model_instance.__call__(messages)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

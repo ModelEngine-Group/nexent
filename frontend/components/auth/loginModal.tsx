@@ -1,17 +1,77 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Form, Input, Button, Typography, Space } from "antd";
-import { UserRound, LockKeyhole } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { Modal, Form, Input, Button, Typography, Space, Divider, Alert } from "antd";
+import { UserRound, LockKeyhole, Github, Link2, KeyRound } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import { oauthService } from "@/services/oauthService";
+import { casService, CasConfig } from "@/services/casService";
 import log from "@/lib/logger";
 
 const { Text } = Typography;
+
+const providerIconMap: Record<string, React.ReactNode> = {
+  github: <Github size={18} />,
+};
+
+function OAuthLoginButtons() {
+  const { t } = useTranslation("common");
+  const [providers, setProviders] = useState<Array<{ name: string; display_name: string; icon: string }>>([]);
+
+  useEffect(() => {
+    oauthService.getEnabledProviders().then((p) => setProviders(p));
+  }, []);
+
+  if (providers.length === 0) return null;
+
+  return (
+    <div className="mt-2 mb-2">
+      <Divider plain>{t("auth.oauthDivider") || "or"}</Divider>
+      <div className="flex flex-col gap-2">
+        {providers.map((provider) => (
+          <Button
+            key={provider.name}
+            block
+            size="large"
+            icon={providerIconMap[provider.icon] || <Link2 size={18} />}
+            onClick={() => oauthService.startOAuthLogin(provider.name)}
+          >
+            {t("auth.oauthLogin", { provider: provider.display_name }) || `${provider.display_name} Login`}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CasLoginButton() {
+  const { t } = useTranslation("common");
+  const [config, setConfig] = useState<CasConfig | null>(null);
+
+  useEffect(() => {
+    casService.getConfig().then(setConfig);
+  }, []);
+
+  if (!config?.enabled || config.login_mode !== "button") return null;
+
+  return (
+    <div className="mt-2 mb-2">
+      <Button
+        block
+        size="large"
+        icon={<KeyRound size={18} />}
+        onClick={() => casService.startLogin()}
+      >
+        {t("auth.casLogin", { provider: config.display_name }) || `${config.display_name} Login`}
+      </Button>
+    </div>
+  );
+}
 
 /**
  * LoginModal Component
@@ -32,14 +92,47 @@ export function LoginModal() {
 
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [form] = Form.useForm();
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const { t } = useTranslation("common");
+
+  const getOAuthLoginErrorMessage = useCallback(
+    (error: string) => {
+      const key = `auth.oauthErrors.${error}`;
+      const translated = t(key);
+      if (translated !== key) {
+        return translated;
+      }
+      return t("auth.oauthLoginFailedGeneric");
+    },
+    [t]
+  );
+
+  useEffect(() => {
+    const error = searchParams.get("oauth_error");
+    if (error) {
+      setOauthError(getOAuthLoginErrorMessage(error));
+      router.replace("/");
+    }
+  }, [searchParams, router, getOAuthLoginErrorMessage]);
+
+  useEffect(() => {
+    if (!isLoginModalOpen || isAuthenticated || isSpeedMode) return;
+    casService.getConfig().then((config) => {
+      if (config.enabled && config.login_mode === "force") {
+        casService.startLogin();
+      }
+    });
+  }, [isLoginModalOpen, isAuthenticated, isSpeedMode]);
 
   const resetForm = () => {
     setEmailError("");
     setPasswordError(false);
+    setOauthError(null);
     form.resetFields();
   };
 
@@ -60,9 +153,6 @@ export function LoginModal() {
       setPasswordError(false);
     }
   };
-
-  // Internationalization hook for multi-language support
-  const { t } = useTranslation("common");
 
   /**
    * Handles form submission for user login
@@ -188,6 +278,16 @@ export function LoginModal() {
           className="mt-6"
           autoComplete="off"
         >
+          {oauthError && (
+            <Alert
+              message={oauthError}
+              type="error"
+              showIcon
+              closable
+              onClose={() => setOauthError(null)}
+              className="mb-4"
+            />
+          )}
           {/* Email input field */}
           <Form.Item
             name="email"
@@ -241,6 +341,11 @@ export function LoginModal() {
               {isLoading ? t("auth.loggingIn") : t("auth.login")}
             </Button>
           </Form.Item>
+
+          <CasLoginButton />
+
+          {/* OAuth login section */}
+          <OAuthLoginButtons />
 
           {/* Registration link section (hidden when opened from session expired flow) */}
           

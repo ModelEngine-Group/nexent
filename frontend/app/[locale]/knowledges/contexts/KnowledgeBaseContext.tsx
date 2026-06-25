@@ -71,6 +71,13 @@ const knowledgeBaseReducer = (
         ...state,
         knowledgeBases: [...state.knowledgeBases, action.payload],
       };
+    case KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE:
+      return {
+        ...state,
+        knowledgeBases: state.knowledgeBases.map((kb) =>
+          kb.id === action.payload.id ? action.payload : kb
+        ),
+      };
     case KNOWLEDGE_BASE_ACTION_TYPES.LOADING:
       return {
         ...state,
@@ -110,11 +117,14 @@ export const KnowledgeBaseContext = createContext<{
     source?: string,
     ingroup_permission?: string,
     group_ids?: number[],
-    embeddingModel?: string
+    embeddingModel?: string,
+    is_multimodal?: boolean,
+    preserve_source_file?: boolean
   ) => Promise<KnowledgeBase | null>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
   setActiveKnowledgeBase: (kb: KnowledgeBase | null) => void;
+  updateKnowledgeBase: (kb: KnowledgeBase) => void;
   isKnowledgeBaseSelectable: (kb: KnowledgeBase) => boolean;
   hasKnowledgeBaseModelMismatch: (kb: KnowledgeBase) => boolean;
   refreshKnowledgeBaseData: (forceRefresh?: boolean) => Promise<void>;
@@ -125,6 +135,7 @@ export const KnowledgeBaseContext = createContext<{
     selectedIds: [],
     activeKnowledgeBase: null,
     currentEmbeddingModel: null,
+    currentMultiEmbeddingModel: null,
     isLoading: false,
     syncLoading: false,
     error: null,
@@ -135,6 +146,7 @@ export const KnowledgeBaseContext = createContext<{
   deleteKnowledgeBase: async () => false,
   selectKnowledgeBase: () => {},
   setActiveKnowledgeBase: () => {},
+  updateKnowledgeBase: () => {},
   isKnowledgeBaseSelectable: () => false,
   hasKnowledgeBaseModelMismatch: () => false,
   refreshKnowledgeBaseData: async () => {},
@@ -159,6 +171,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     selectedIds: [],
     activeKnowledgeBase: null,
     currentEmbeddingModel: null,
+    currentMultiEmbeddingModel: null,
     isLoading: false,
     syncLoading: false,
     error: null,
@@ -168,11 +181,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   // Check if knowledge base is selectable - memoized with useCallback
   const isKnowledgeBaseSelectable = useCallback(
     (kb: KnowledgeBase): boolean => {
-      // If no current embedding model is set, not selectable
-      if (!state.currentEmbeddingModel) {
-        return false;
-      }
-
       // Check if knowledge base has content (documents or chunks)
       const hasContent =
         (kb.documentCount || 0) > 0 || (kb.chunkCount || 0) > 0;
@@ -187,22 +195,46 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         return true;
       }
 
-      // For local knowledge bases, only selectable when model exactly matches current model
-      return (
-        kb.embeddingModel === "unknown" ||
-        kb.embeddingModel === state.currentEmbeddingModel
-      );
+      if (kb.embeddingModel === "unknown") {
+        return true;
+      }
+
+      const currentEmbeddingModel = state.currentEmbeddingModel?.trim() || "";
+      const currentMultiEmbeddingModel =
+        modelConfig?.multiEmbedding?.modelName?.trim() || "";
+
+      if (kb.is_multimodal) {
+        // Multimodal KB is selectable as long as current multimodal model is configured.
+        return !!currentMultiEmbeddingModel;
+      }
+
+      // Text KB is selectable as long as current embedding model is configured.
+      return !!currentEmbeddingModel;
     },
-    [state.currentEmbeddingModel]
+    [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel]
   );
 
   // Check if knowledge base has model mismatch (for display purposes)
-  // Note: Always return false to remove model mismatch restrictions
   const hasKnowledgeBaseModelMismatch = useCallback(
     (kb: KnowledgeBase): boolean => {
-      return false;
+      if (kb.embeddingModel === "unknown") {
+        return false;
+      }
+      if (kb.source === "datamate") {
+        return false;
+      }
+
+      if (kb.is_multimodal) {
+        const multiEmbeddingModel =
+          modelConfig?.multiEmbedding?.modelName?.trim() || "";
+        // Only show warning when the required current model is not configured.
+        return !multiEmbeddingModel;
+      }
+
+      // Only show warning when the required current model is not configured.
+      return !state.currentEmbeddingModel;
     },
-    []
+    [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel]
   );
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
@@ -303,6 +335,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SET_ACTIVE, payload: kb });
   }, []);
 
+  // Update knowledge base in list - memoized with useCallback
+  const updateKnowledgeBase = useCallback((kb: KnowledgeBase) => {
+    dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.UPDATE_KNOWLEDGE_BASE, payload: kb });
+  }, []);
+
   // Create knowledge base - memoized with useCallback
   const createKnowledgeBase = useCallback(
     async (
@@ -311,17 +348,33 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       source: string = "elasticsearch",
       ingroup_permission?: string,
       group_ids?: number[],
-      embeddingModel?: string
+      embeddingModel?: string,
+      is_multimodal?: boolean,
+      preserve_source_file?: boolean
     ) => {
       try {
+        const selectedEmbeddingModel = embeddingModel?.trim() || "";
+        const defaultMultiEmbeddingModel =
+          modelConfig?.multiEmbedding?.modelName?.trim() || "";
+        const resolvedIsMultimodal =
+          typeof is_multimodal === "boolean"
+            ? is_multimodal
+            : !!defaultMultiEmbeddingModel &&
+              selectedEmbeddingModel === defaultMultiEmbeddingModel;
+        const fallbackEmbeddingModel = resolvedIsMultimodal
+          ? defaultMultiEmbeddingModel
+          : state.currentEmbeddingModel || "";
+        const resolvedEmbeddingModel =
+          selectedEmbeddingModel || fallbackEmbeddingModel;
         const newKB = await knowledgeBaseService.createKnowledgeBase({
           name,
           description,
           source,
-          // Use provided embeddingModel if available, otherwise fall back to current model or default
-          embeddingModel: embeddingModel || state.currentEmbeddingModel || "",
+          embeddingModel: resolvedEmbeddingModel,
           ingroup_permission,
           group_ids,
+          is_multimodal: resolvedIsMultimodal,
+          preserve_source_file,
         });
         return newKB;
       } catch (error) {
@@ -333,7 +386,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         return null;
       }
     },
-    [state.currentEmbeddingModel, t]
+    [modelConfig?.multiEmbedding?.modelName, state.currentEmbeddingModel, t]
   );
 
   // Delete knowledge base - memoized with useCallback
@@ -596,6 +649,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       deleteKnowledgeBase,
       selectKnowledgeBase,
       setActiveKnowledgeBase,
+      updateKnowledgeBase,
       isKnowledgeBaseSelectable,
       hasKnowledgeBaseModelMismatch,
       refreshKnowledgeBaseData,
@@ -603,12 +657,15 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     }),
     [
       state,
+      dispatch,
       fetchKnowledgeBases,
       createKnowledgeBase,
       deleteKnowledgeBase,
       selectKnowledgeBase,
       setActiveKnowledgeBase,
+      updateKnowledgeBase,
       isKnowledgeBaseSelectable,
+      hasKnowledgeBaseModelMismatch,
       refreshKnowledgeBaseData,
       refreshKnowledgeBaseDataWithDataMate,
     ]

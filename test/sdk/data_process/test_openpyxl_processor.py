@@ -3,6 +3,22 @@ import pytest
 from pytest_mock import MockFixture
 from unittest.mock import Mock, MagicMock, patch
 from copy import deepcopy
+import sys
+import types
+
+
+fake_unstructured = types.ModuleType("unstructured_inference")
+fake_models = types.ModuleType("unstructured_inference.models")
+fake_tables = types.ModuleType("unstructured_inference.models.tables")
+fake_tables.tables_agent = types.SimpleNamespace(model=None)
+fake_logger = types.ModuleType("unstructured_inference.logger")
+fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
+fake_models.tables = fake_tables
+fake_unstructured.models = fake_models
+sys.modules.setdefault("unstructured_inference", fake_unstructured)
+sys.modules.setdefault("unstructured_inference.models", fake_models)
+sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
+sys.modules.setdefault("unstructured_inference.logger", fake_logger)
 
 from sdk.nexent.data_process.openpyxl_processor import OpenPyxlProcessor
 
@@ -79,7 +95,7 @@ class TestOpenPyxlProcessor:
         """Test successful workbook loading"""
         mock_wb = Mock()
         mock_load_workbook = mocker.patch(
-            "sdk.nexent.data_process.openpyxl_processor.openpyxl.load_workbook",
+            "openpyxl.load_workbook",
             return_value=mock_wb
         )
         mocker.patch(
@@ -96,7 +112,7 @@ class TestOpenPyxlProcessor:
     def test_load_workbook_failure(self, processor, mocker: MockFixture):
         """Test workbook loading failure"""
         mocker.patch(
-            "sdk.nexent.data_process.openpyxl_processor.openpyxl.load_workbook",
+            "openpyxl.load_workbook",
             side_effect=Exception("Load failed")
         )
 

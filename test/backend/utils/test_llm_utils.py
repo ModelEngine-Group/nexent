@@ -16,6 +16,10 @@ nexent_module = types.ModuleType("nexent")
 nexent_module.__path__ = []
 sys.modules['nexent'] = nexent_module
 
+sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
+sys.modules['nexent.monitor'].set_monitoring_context = MagicMock()
+sys.modules['nexent.monitor'].set_monitoring_operation = MagicMock()
+
 storage_pkg = types.ModuleType("nexent.storage")
 storage_pkg.__path__ = []
 sys.modules['nexent.storage'] = storage_pkg
@@ -52,6 +56,12 @@ sys.modules['nexent.vector_database.elasticsearch_core'] = vector_db_es_module
 vector_db_pkg.elasticsearch_core = vector_db_es_module
 vector_db_es_module.ElasticSearchCore = MagicMock()
 vector_db_es_module.Elasticsearch = MagicMock()
+
+monitor_module = types.ModuleType("nexent.monitor")
+monitor_module.set_monitoring_context = MagicMock()
+monitor_module.set_monitoring_operation = MagicMock()
+sys.modules['nexent.monitor'] = monitor_module
+nexent_module.monitor = monitor_module
 
 # Stub nexent.core.utils.observer MessageObserver used by llm_utils
 observer_mod = types.ModuleType("nexent.core.utils.observer")
@@ -136,6 +146,8 @@ class TestCallLLMForSystemPrompt:
             temperature=0.3,
             top_p=0.95,
             ssl_verify=True,
+            display_name=None,
+            timeout_seconds=None,
         )
 
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
@@ -491,6 +503,30 @@ class AdditionalLLMUtilsTests:
         res = call_llm_for_system_prompt(2, "u2", "s2")
         assert res == "ABC"
 
+    def test_call_llm_for_system_prompt_skips_chunk_without_choices(self, mocker: MockFixture):
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://y", "api_key": "k2"}
+        mock_get_model_name.return_value = "gpt-6"
+
+        mock_instance = mock_openai.return_value
+
+        empty_chunk = MagicMock()
+        empty_chunk.choices = []
+
+        valid_chunk = MagicMock()
+        valid_chunk.choices = [MagicMock()]
+        valid_chunk.choices[0].delta.content = "OK"
+
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [empty_chunk, valid_chunk]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        res = call_llm_for_system_prompt(2, "u2", "s2")
+        assert res == "OK"
+
     def test_call_llm_for_system_prompt_with_callback(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with callback"""
         mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
@@ -610,6 +646,37 @@ class AdditionalLLMUtilsTests:
         )
 
         assert result == ""
+
+    def test_call_llm_for_system_prompt_skips_empty_choices_chunk(self, mocker: MockFixture):
+        """Test call_llm_for_system_prompt skips chunks with empty choices."""
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_get_model_name.return_value = "gpt-4"
+
+        mock_llm_instance = mock_openai.return_value
+
+        empty_chunk = MagicMock()
+        empty_chunk.choices = []
+
+        valid_chunk = MagicMock()
+        valid_chunk.choices = [MagicMock()]
+        valid_chunk.choices[0].delta.content = "Generated prompt"
+        valid_chunk.choices[0].delta.reasoning_content = None
+
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [empty_chunk, valid_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {}
+
+        result = call_llm_for_system_prompt(
+            1,
+            "user prompt",
+            "system prompt",
+        )
+
+        assert result == "Generated prompt"
 
     def test_call_llm_for_system_prompt_with_thinking_tags(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with thinking tags"""
@@ -756,6 +823,7 @@ class AdditionalLLMUtilsTests:
             temperature=0.3,
             top_p=0.95,
             ssl_verify=True,
+            display_name=None,
         )
 
     def test_call_llm_for_system_prompt_reasoning_content_logging(self, mocker: MockFixture):
@@ -1090,6 +1158,102 @@ class TestCallLLMForSystemPromptErrorHandling:
             call_llm_for_system_prompt(1, "user prompt", "system prompt")
 
         assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+
+    def test_monitoring_context_set_with_tenant_id(self, mocker: MockFixture):
+        """set_monitoring_context must be called with tenant_id when provided."""
+        mock_set_ctx = mocker.patch('backend.utils.llm_utils.set_monitoring_context')
+        mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
+        mock_get_model_name.return_value = "gpt-4"
+
+        mock_instance = mock_openai.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "result"
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        call_llm_for_system_prompt(1, "u", "s", tenant_id="t-42")
+
+        mock_set_ctx.assert_called_once_with(tenant_id="t-42")
+
+    def test_monitoring_context_not_called_without_tenant_id(self, mocker: MockFixture):
+        """set_monitoring_context must NOT be called when tenant_id is None."""
+        mock_set_ctx = mocker.patch('backend.utils.llm_utils.set_monitoring_context')
+        mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
+        mock_get_model_name.return_value = "gpt-4"
+
+        mock_instance = mock_openai.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "result"
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        call_llm_for_system_prompt(1, "u", "s")
+
+        mock_set_ctx.assert_not_called()
+
+    def test_set_monitoring_operation_with_display_name(self, mocker: MockFixture):
+        """set_monitoring_operation called with display_name from model config."""
+        mock_set_op = mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {
+            "base_url": "http://x", "api_key": "k", "display_name": "MyModel"
+        }
+        mock_get_model_name.return_value = "gpt-4"
+
+        mock_instance = mock_openai.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "result"
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        call_llm_for_system_prompt(1, "u", "s")
+
+        mock_set_op.assert_called_once_with(
+            "system_prompt_generation", display_name="MyModel"
+        )
+
+    def test_set_monitoring_operation_without_display_name(self, mocker: MockFixture):
+        """set_monitoring_operation called with display_name=None when not in config."""
+        mock_set_op = mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
+        mock_get_model_name.return_value = "gpt-4"
+
+        mock_instance = mock_openai.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "result"
+        mock_instance.client = MagicMock()
+        mock_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_instance._prepare_completion_kwargs.return_value = {}
+
+        call_llm_for_system_prompt(1, "u", "s")
+
+        mock_set_op.assert_called_once_with(
+            "system_prompt_generation", display_name=None
+        )
 
     def test_error_empty_message(self, mocker: MockFixture):
         """Test error handling for exception with empty message."""

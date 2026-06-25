@@ -18,12 +18,6 @@ export interface AgentGenerationCache {
   expiryMs: number;
   /** Whether a generation is currently in progress */
   isGenerating: boolean;
-  /** Business description used for generation */
-  businessDescription: string;
-  /** Business logic model ID */
-  businessLogicModelId: number;
-  /** Business logic model name */
-  businessLogicModelName: string;
   /** Generated duty prompt */
   dutyPrompt: string;
   /** Generated constraint prompt */
@@ -36,6 +30,10 @@ export interface AgentGenerationCache {
   agentDisplayName: string;
   /** Generated agent description */
   agentDescription: string;
+  /** Generated greeting message */
+  greetingMessage: string;
+  /** Generated example questions */
+  exampleQuestions: string;
 }
 
 /**
@@ -46,15 +44,14 @@ const DEFAULT_CACHE: AgentGenerationCache = {
   timestamp: 0,
   expiryMs: 30 * 60 * 1000, // 30 minutes
   isGenerating: false,
-  businessDescription: "",
-  businessLogicModelId: 0,
-  businessLogicModelName: "",
   dutyPrompt: "",
   constraintPrompt: "",
   fewShotsPrompt: "",
   agentName: "",
   agentDisplayName: "",
   agentDescription: "",
+  greetingMessage: "",
+  exampleQuestions: "",
 };
 
 /**
@@ -165,24 +162,12 @@ export function updateAgentGenerationCache<K extends keyof AgentGenerationCache>
  * Mark generation as in-progress in cache
  * @param agentId - The agent ID (use 0 for create mode)
  * @param isGenerating - Whether generation is in progress
- * @param businessInfo - Optional business info to cache
  */
 export function setAgentGenerationStatus(
   agentId: number,
-  isGenerating: boolean,
-  businessInfo?: {
-    businessDescription: string;
-    businessLogicModelId: number;
-    businessLogicModelName: string;
-  }
+  isGenerating: boolean
 ): void {
-  const updates = businessInfo
-    ? { isGenerating, ...businessInfo }
-    : { isGenerating };
-  updateAgentGenerationCache<keyof typeof updates>(
-    agentId,
-    updates as Pick<AgentGenerationCache, 'isGenerating' | 'businessDescription' | 'businessLogicModelId' | 'businessLogicModelName'>
-  );
+  updateAgentGenerationCache(agentId, { isGenerating });
 }
 
 /**
@@ -194,7 +179,7 @@ export function setAgentGenerationStatus(
 export function saveGeneratedField<
   K extends keyof Pick<
     AgentGenerationCache,
-    'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription'
+    'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription' | 'greetingMessage' | 'exampleQuestions'
   >
 >(
   agentId: number,

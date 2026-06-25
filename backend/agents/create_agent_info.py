@@ -1,39 +1,128 @@
+﻿import json
 import threading
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
-from datetime import datetime
 
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
+from nexent.core.agents.agent_context import ContextManagerConfig
 from nexent.memory.memory_service import search_memory_in_levels
 
-from services.file_management_service import get_llm_model
+from services.file_management_service import get_llm_model, validate_urls_access
 from services.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
-    get_embedding_model,
+    get_embedding_model_by_index_name,
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
-from services.image_service import get_vlm_model
-from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
+from services.image_service import get_video_understanding_model, get_vlm_model
+from database.agent_db import (
+    search_agent_info_by_agent_id,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+)
 from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE
-import re
+from utils.context_utils import build_context_components
+from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
+from consts.model import AgentToolParamsRequest, ToolParamsRequest
+from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
+
+
+def _normalize_tool_params_request(tool_params: Optional[ToolParamsRequest | Dict[str, Any]]) -> ToolParamsRequest:
+    """Normalize request-scoped tool parameter overrides into a ToolParamsRequest."""
+    if tool_params is None:
+        return ToolParamsRequest()
+    if isinstance(tool_params, ToolParamsRequest):
+        return tool_params
+    if not isinstance(tool_params, dict):
+        raise ValidationError("tool_params must be an object.")
+    try:
+        return ToolParamsRequest.model_validate(tool_params)
+    except Exception as exc:
+        raise ValidationError(f"Invalid tool_params payload: {exc}") from exc
+
+
+def _get_agent_tool_overrides(
+    tool_params: Optional[ToolParamsRequest],
+    agent_name: Optional[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Resolve tool overrides for a specific agent by its name."""
+    if tool_params is None:
+        return {}
+    if not agent_name:
+        return {}
+    agent_override = tool_params.agents.get(agent_name)
+    if agent_override is None:
+        return {}
+    return dict(agent_override.tools)
+
+
+def _merge_tool_params(
+    tool_record: Dict[str, Any],
+    override_params: Optional[Dict[str, Any]],
+    extra_params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Merge request overrides on top of tool instance defaults from DB.
+
+    Args:
+        tool_record: Tool configuration from database
+        override_params: Request-scoped overrides from tool_params
+        extra_params: Additional internal params not in DB schema (e.g., document_paths)
+
+    Returns:
+        Merged params dict with DB defaults, overrides, and extra params
+    """
+    merged_params: Dict[str, Any] = {}
+    for param in tool_record.get("params", []):
+        merged_params[param["name"]] = param.get("default")
+
+    if override_params:
+        merged_params.update(override_params)
+
+    # Extra params (e.g., internal access control params) always take precedence
+    if extra_params:
+        merged_params.update(extra_params)
+
+    return merged_params
+
+
+def _build_internal_s3_url(file: dict) -> str:
+    """Build a valid S3 URL for internal tools from uploaded file metadata."""
+    if not isinstance(file, dict):
+        return ""
+
+    object_name = str(file.get("object_name") or "").strip().lstrip("/")
+    if object_name:
+        bucket = MINIO_DEFAULT_BUCKET or "nexent"
+        return f"s3://{bucket}/{object_name}"
+
+    url = str(file.get("url") or "").strip()
+    if not url or url.startswith("blob:") or url.startswith("s3:/blob:"):
+        return ""
+
+    if url.startswith("s3://"):
+        return url
+
+    if url.startswith("s3:/"):
+        return "s3://" + url.replace("s3:/", "", 1).lstrip("/")
+
+    return "s3:/" + url
 
 
 def _get_skills_for_template(
@@ -245,7 +334,9 @@ async def create_model_config_list(tenant_id):
                             ),
                         url=record["base_url"],
                         ssl_verify=record.get("ssl_verify", True),
-                        model_factory=record.get("model_factory")))
+                        model_factory=record.get("model_factory"),
+                        timeout_seconds=record.get("timeout_seconds"),
+                        concurrency_limit=record.get("concurrency_limit")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -256,7 +347,9 @@ async def create_model_config_list(tenant_id):
                         "model_name") else "",
                     url=main_model_config.get("base_url", ""),
                     ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory")))
+                    model_factory=main_model_config.get("model_factory"),
+                    timeout_seconds=main_model_config.get("timeout_seconds"),
+                    concurrency_limit=main_model_config.get("concurrency_limit")))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -264,7 +357,9 @@ async def create_model_config_list(tenant_id):
                         "model_name") else "",
                     url=main_model_config.get("base_url", ""),
                     ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory")))
+                    model_factory=main_model_config.get("model_factory"),
+                    timeout_seconds=main_model_config.get("timeout_seconds"),
+                    concurrency_limit=main_model_config.get("concurrency_limit")))
 
     return model_list
 
@@ -278,18 +373,23 @@ async def create_agent_config(
     allow_memory_search: bool = True,
     version_no: int = 0,
     override_model_id: int | None = None,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
+    normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
-    sub_agent_id_list = query_sub_agents_id_list(
+    sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
-    for sub_agent_id in sub_agent_id_list:
-        # Get the current published version for this sub-agent (from draft version 0)
-        sub_agent_version_no = query_current_version_no(
-            agent_id=sub_agent_id, tenant_id=tenant_id) or 0
+    for rel in sub_agent_relations:
+        sub_agent_id = rel['selected_agent_id']
+        sub_agent_version_no = resolve_sub_agent_version_no(
+            selected_agent_id=sub_agent_id,
+            selected_agent_version_no=rel.get('selected_agent_version_no'),
+            tenant_id=tenant_id,
+        )
         sub_agent_config = await create_agent_config(
             agent_id=sub_agent_id,
             tenant_id=tenant_id,
@@ -299,13 +399,20 @@ async def create_agent_config(
             allow_memory_search=allow_memory_search,
             version_no=sub_agent_version_no,
             override_model_id=None,
+            tool_params=normalized_tool_params,
         )
         managed_agents.append(sub_agent_config)
 
     # create external A2A agents (synchronous function, no await needed)
     external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
 
-    tool_list = await create_tool_config_list(agent_id, tenant_id, user_id, version_no=version_no)
+    tool_list = await create_tool_config_list(
+        agent_id,
+        tenant_id,
+        user_id,
+        version_no=version_no,
+        tool_params=normalized_tool_params,
+    )
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
@@ -351,6 +458,77 @@ async def create_agent_config(
             # Bubble up to streaming layer so it can emit <MEM_FAILED> and fall back
             raise Exception(f"Failed to retrieve memory list: {e}")
 
+    # Append active memory tools if memory is enabled
+    if memory_context.user_config.memory_switch and memory_context.memory_config:
+        try:
+            memory_metadata = {
+                "memory_config": memory_context.memory_config,
+                "memory_user_config": memory_context.user_config,
+                "tenant_id": memory_context.tenant_id,
+                "user_id": memory_context.user_id,
+                "agent_id": memory_context.agent_id,
+            }
+
+            store_tool_config = ToolConfig(
+                class_name="StoreMemoryTool",
+                name="store_memory",
+                description=(
+                    "Save important information to long-term memory for future recall. "
+                    "Use this when the user shares personal preferences, facts about themselves, "
+                    "project context, or instructions that should persist across conversations. "
+                    "Do NOT store transient information like temporary calculations, information "
+                    "already in the knowledge base, or data the user explicitly says to forget."
+                ),
+                inputs=json.dumps({
+                    "content": {
+                        "type": "string",
+                        "description": "The information to remember",
+                        "description_zh": "需要记住的信息"
+                    }
+                }, ensure_ascii=False),
+                output_type="string",
+                params={},
+                source="local",
+                usage=None,
+                metadata=memory_metadata,
+            )
+            tool_list.append(store_tool_config)
+
+            search_tool_config = ToolConfig(
+                class_name="SearchMemoryTool",
+                name="search_memory",
+                description=(
+                    "Search long-term memory for relevant information from previous interactions. "
+                    "Use this when you need context about the user's preferences, past decisions, "
+                    "or previously discussed topics that aren't in the current conversation. "
+                    "The system already provides some memory context automatically -- use this tool "
+                    "when you need to search for specific information not already available."
+                ),
+                inputs=json.dumps({
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language query describing what to search for",
+                        "description_zh": "描述要搜索内容的自然语言查询"
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return",
+                        "description_zh": "返回结果的最大数量",
+                        "default": 5,
+                        "nullable": True
+                    }
+                }, ensure_ascii=False),
+                output_type="string",
+                params={},
+                source="local",
+                usage=None,
+                metadata=memory_metadata,
+            )
+            tool_list.append(search_tool_config)
+            logger.debug("Active memory tools appended to agent tool list")
+        except Exception as e:
+            logger.warning(f"Failed to append active memory tools: {e}")
+
     # Build knowledge base summary
     knowledge_base_summary = ""
     try:
@@ -358,11 +536,15 @@ async def create_agent_config(
             if "KnowledgeBaseSearchTool" == tool.class_name:
                 index_names = tool.params.get("index_names")
                 if index_names:
+                    # Reuse the index_name -> display_name mapping from tool.metadata
+                    # (already computed in create_tool_config_list to avoid redundant DB query)
+                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
                     for index_name in index_names:
                         try:
+                            display_name = index_name_to_display_map.get(index_name, index_name)
                             message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{index_name}**: {summary}\n\n"
+                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
                         except Exception as e:
                             logger.warning(
                                 f"Failed to get summary for knowledge base {index_name}: {e}")
@@ -377,6 +559,8 @@ async def create_agent_config(
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
+    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+
     render_kwargs = {
         "duty": duty_prompt,
         "constraint": constraint_prompt,
@@ -389,17 +573,49 @@ async def create_agent_config(
         "APP_DESCRIPTION": app_description,
         "memory_list": memory_list,
         "knowledge_base_summary": knowledge_base_summary,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "user_id": user_id,
     }
     system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
+    model_max_tokens = 10000
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
         model_name = model_info["display_name"] if model_info is not None else "main_model"
+        if model_info is not None and model_info.get("max_tokens"):
+            model_max_tokens = model_info["max_tokens"]
     else:
         model_name = "main_model"
+
+    # Use agent-level setting for context management, default to False.
+    # When ContextManager is disabled, do not attach context_components because
+    # downstream runtime may prefer component-based prompt assembly over the
+    # rendered system_prompt, causing the actual model input to diverge from the
+    # template output.
+    enable_context_manager = agent_info.get("enable_context_manager", False)
+    context_components = []
+    if enable_context_manager:
+        context_components = build_context_components(
+            duty=duty_prompt,
+            constraint=constraint_prompt,
+            few_shots=few_shots_prompt,
+            app_name=app_name,
+            app_description=app_description,
+            user_id=user_id,
+            language=language,
+            is_manager=is_manager,
+            tools=render_kwargs["tools"],
+            skills=skills,
+            managed_agents=render_kwargs["managed_agents"],
+            external_a2a_agents=render_kwargs["external_a2a_agents"],
+            memory_list=memory_list,
+            memory_search_query=last_user_query,
+            knowledge_base_summary=knowledge_base_summary,
+        )
+    cm_config = ContextManagerConfig(
+        enabled=enable_context_manager,
+        token_threshold=model_max_tokens,
+    )
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
@@ -410,26 +626,55 @@ async def create_agent_config(
             agent_id=agent_id
         ),
         tools=tool_list + _get_skill_script_tools(agent_id, tenant_id, version_no),
-        max_steps=agent_info.get("max_steps", 10),
+        max_steps=agent_info.get("max_steps", 15),
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         managed_agents=managed_agents,
-        external_a2a_agents=external_a2a_agents
+        external_a2a_agents=external_a2a_agents,
+        context_manager_config=cm_config,
+        context_components=context_components,
+        verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
     )
     return agent_config
 
 
-async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int = 0):
-    # create tool
+async def create_tool_config_list(
+    agent_id,
+    tenant_id,
+    user_id,
+    version_no: int = 0,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
+    normalized_tool_params = _normalize_tool_params_request(tool_params)
 
     # now only admin can modify the agent, user_id is not used
     tools_list = search_tools_for_sub_agent(agent_id, tenant_id, version_no=version_no)
+
+    # Look up agent name for use in error messages.
+    # Agent name is optional for tool_params matching (matching uses tool identifiers only),
+    # but we include it in error messages so callers can identify which agent/tool caused a failure.
+    agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    agent_name = agent_info.get("name") if agent_info else None
+    agent_tool_overrides = _get_agent_tool_overrides(normalized_tool_params, agent_name)
+
+    tool_keys_seen = set()
     for tool in tools_list:
-        param_dict = {}
-        for param in tool.get("params", []):
-            param_dict[param["name"]] = param.get("default")
+        tool_identifier = tool.get("name") or tool.get("class_name")
+        if tool_identifier in tool_keys_seen:
+            raise ValidationError(
+                f"Duplicate tool identifier '{tool_identifier}' found in agent '{agent_name or agent_id}'."
+            )
+        tool_keys_seen.add(tool_identifier)
+
+        override_params = None
+        if tool.get("name") in agent_tool_overrides:
+            override_params = agent_tool_overrides[tool.get("name")]
+        elif tool.get("class_name") in agent_tool_overrides:
+            override_params = agent_tool_overrides[tool.get("class_name")]
+
+        param_dict = _merge_tool_params(tool, override_params)
         tool_config = ToolConfig(
             class_name=tool.get("class_name"),
             name=tool.get("name"),
@@ -448,24 +693,62 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
                     tool_config.metadata = langchain_tool
                     break
 
+        # Extract document_paths for KnowledgeBaseSearchTool (internal access control, not in DB schema)
+        document_paths = None
+        if override_params and "document_paths" in override_params:
+            document_paths = override_params.get("document_paths")
+        # Also check using the tool name as key
+        if not document_paths:
+            kb_overrides = agent_tool_overrides.get("knowledge_base_search")
+            if kb_overrides and "document_paths" in kb_overrides:
+                document_paths = kb_overrides.get("document_paths")
+
         # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
-            rerank = param_dict.get("rerank", False)
-            rerank_model_name = param_dict.get("rerank_model_name", "")
+            rerank = tool_config.params.get("rerank", False)
+            rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(
                     tenant_id=tenant_id, model_name=rerank_model_name
                 )
 
+            # Build display_name to index_name mapping for LLM parameter conversion
+            # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
+            index_names = tool_config.params.get("index_names", [])
+            display_name_to_index_map = {}
+            index_name_to_display_map = {}
+            if index_names:
+                knowledge_name_map = get_knowledge_name_map_by_index_names(index_names)
+                # Reverse the mapping: display_name (knowledge_name) -> index_name
+                for idx_name, kb_name in knowledge_name_map.items():
+                    display_name_to_index_map[kb_name] = idx_name
+                    index_name_to_display_map[idx_name] = kb_name
+
             tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
-                "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "embedding_model": None,
                 "rerank_model": rerank_model,
+                "display_name_to_index_map": display_name_to_index_map,
+                "index_name_to_display_map": index_name_to_display_map,
+                # Internal access control: restrict results to specific document paths (path_or_urls)
+                "document_paths": document_paths,
             }
+
+            if not index_names:
+                raise ValidationError(
+                    f"[{agent_name or agent_id}] knowledge_base_search tool requires index_names, "
+                    f"but it is not configured in the agent and not provided via tool_params.")
+
+            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            if not embedding_model:
+                raise ValidationError(
+                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"Please configure an embedding model for this knowledge base.")
+            tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool"]:
-            rerank = param_dict.get("rerank", False)
-            rerank_model_name = param_dict.get("rerank_model_name", "")
+            rerank = tool_config.params.get("rerank", False)
+            rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
             if rerank and rerank_model_name:
                 rerank_model = get_rerank_model(
@@ -479,12 +762,21 @@ async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int 
             tool_config.metadata = {
                 "llm_model": get_llm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
-                "data_process_service_url": DATA_PROCESS_SERVICE
+                "data_process_service_url": DATA_PROCESS_SERVICE,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
         elif tool_config.class_name == "AnalyzeImageTool":
             tool_config.metadata = {
+                # get_vlm_model reads the first multimodal slot, now shown as image understanding.
                 "vlm_model": get_vlm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
+            tool_config.metadata = {
+                "vlm_model": get_video_understanding_model(tenant_id=tenant_id),
+                "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
 
         tool_config_list.append(tool_config)
@@ -552,18 +844,165 @@ async def prepare_prompt_templates(
     return prompt_templates
 
 
-async def join_minio_file_description_to_query(minio_files, query):
+async def join_minio_file_description_to_query(
+    minio_files,
+    query,
+    history=None,
+    max_files: int = 50,
+    max_chars: int = 10000,
+):
+    """
+    Join MinIO file descriptions to the user query.
+
+    This function formats uploaded file information into a structured description
+    that includes both S3 URL (for internal tools) and presigned_url (for external MCP tools).
+    It processes files from both the current message and historical messages.
+
+    De-duplication is performed using the file URL as the unique key. A maximum
+    file count and total character limit are enforced to prevent prompt bloat.
+
+    Args:
+        minio_files: List of file info dicts from current message upload
+        query: Original user query
+        history: Optional list of historical message dicts, each may contain minio_files
+        max_files: Maximum number of files to include (default 50)
+        max_chars: Maximum total characters for file descriptions (default 10000)
+
+    Returns:
+        Modified query with file descriptions appended
+    """
     final_query = query
+    seen_urls: set[str] = set()
+    all_files: list[dict] = []
+
+    # Collect files from current message first (higher priority)
     if minio_files and isinstance(minio_files, list):
-        file_descriptions = []
         for file in minio_files:
-            if isinstance(file, dict) and "url" in file and file["url"] and "name" in file and file["name"]:
-                file_descriptions.append(f"File name: {file['name']}, S3 URL: s3:/{file['url']}")
+            if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
+                s3_url = _build_internal_s3_url(file)
+                if not s3_url:
+                    continue
+                if s3_url not in seen_urls:
+                    seen_urls.add(s3_url)
+                    all_files.append(file)
+
+    # Collect files from historical messages (lower priority, already-deduped)
+    if history and isinstance(history, list):
+        for msg in history:
+            if isinstance(msg, dict) and msg.get("minio_files"):
+                for file in msg["minio_files"]:
+                    if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
+                        s3_url = _build_internal_s3_url(file)
+                        if not s3_url:
+                            continue
+                        if s3_url not in seen_urls:
+                            seen_urls.add(s3_url)
+                            all_files.append(file)
+
+    # Enforce file count limit (keep most recent files by truncating from the end)
+    if len(all_files) > max_files:
+        all_files = all_files[:max_files]
+        logger.debug(f"File list truncated from {len(all_files)} to {max_files} files")
+
+    if all_files:
+        file_descriptions: list[str] = []
+        # Calculate fixed overhead that is added only once
+        prefix = "User uploaded files. The file information is as follows:\n"
+        suffix = f"\n\nUser wants to answer questions based on the information in the above files: {query}"
+        fixed_overhead = len(prefix) + len(suffix)
+
+        for i, file in enumerate(all_files):
+            s3_url = _build_internal_s3_url(file)
+            presigned_url = file.get("presigned_url", "")
+
+            # Build description with both URLs
+            if presigned_url:
+                desc = (
+                    f"File name: {file['name']}\n"
+                    f"- S3 URL: {s3_url}  [for tools WITHOUT [MCP] prefix, like analyze_text_file]\n"
+                    f"- presigned_url: {presigned_url}  [for tools WITH [MCP] prefix]"
+                )
+            else:
+                desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
+
+            # Calculate total length if we include this description
+            # Each description after the first adds 2 chars for \n\n separator
+            separator_chars = 2 if i > 0 else 0
+            total_len = sum(len(d) for d in file_descriptions) + len(desc) + separator_chars + fixed_overhead
+
+            # Check if adding this description would exceed the character limit
+            if total_len > max_chars:
+                logger.debug(
+                    f"File descriptions truncated at {len(file_descriptions)} files "
+                    f"to stay within {max_chars} character limit"
+                )
+                break
+
+            file_descriptions.append(desc)
+
         if file_descriptions:
-            final_query = "User uploaded files. The file information is as follows:\n"
-            final_query += "\n".join(file_descriptions) + "\n\n"
-            final_query += f"User wants to answer questions based on the information in the above files: {query}"
+            final_query = prefix + "\n\n".join(file_descriptions) + suffix
+
     return final_query
+
+
+def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files: int = 20) -> str:
+    """Format minio_files into a string for embedding in history content.
+
+    Args:
+        minio_files: List of file info dicts
+        max_files: Maximum number of files to include per message
+
+    Returns:
+        Formatted string describing the files, or empty string if no files
+    """
+    if not minio_files or not isinstance(minio_files, list):
+        return ""
+
+    file_lines = []
+    for i, file in enumerate(minio_files):
+        if i >= max_files:
+            file_lines.append(f"  - ... (and {len(minio_files) - max_files} more files)")
+            break
+        if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
+            s3_url = _build_internal_s3_url(file)
+            if not s3_url:
+                continue
+            presigned_url = file.get("presigned_url", "")
+            if presigned_url:
+                file_lines.append(
+                    f"  - {file['name']}: {s3_url} (for non-MCP tools), presigned_url: {presigned_url} (for [MCP] tools)"
+                )
+            else:
+                file_lines.append(f"  - {file['name']}: {s3_url}")
+
+    if not file_lines:
+        return ""
+
+    return "\n[Attached files]:\n" + "\n".join(file_lines)
+
+
+def _convert_history_with_minio_files(history: List) -> Optional[List[AgentHistory]]:
+    """Convert HistoryItem list to AgentHistory list, embedding minio_files into content.
+
+    Args:
+        history: List of HistoryItem from API
+
+    Returns:
+        List of AgentHistory with file info embedded in content, or None if history is None
+    """
+    if history is None:
+        return None
+
+    result = []
+    for item in history:
+        content = item.content
+        if item.minio_files:
+            file_info = _format_minio_files_for_content(item.minio_files)
+            if file_info:
+                content = content + file_info if content else file_info
+        result.append(AgentHistory(role=item.role, content=content))
+    return result
 
 
 def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict) -> list:
@@ -603,6 +1042,7 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
+    tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -617,7 +1057,11 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
-    final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
+    final_query = await join_minio_file_description_to_query(
+        minio_files=minio_files,
+        query=query,
+        history=history
+    )
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
         "agent_id": agent_id,
@@ -631,7 +1075,7 @@ async def create_agent_run_info(
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
 
-    agent_config = await create_agent_config(**create_config_kwargs)
+    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
@@ -646,7 +1090,7 @@ async def create_agent_run_info(
     # Filter MCP servers and tools, and build mcp_host with authorization
     used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
 
-    # Build mcp_host list with authorization tokens
+    # Build mcp_host list with authorization tokens and custom headers
     mcp_host = []
     for url in used_mcp_urls:
         # Find the MCP record for this URL
@@ -661,14 +1105,22 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }
-            # Add authorization if present
+            headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:
-                mcp_config["authorization"] = auth_token
+                headers["Authorization"] = auth_token
+            custom_headers = mcp_record.get("custom_headers")
+            if custom_headers and isinstance(custom_headers, dict):
+                headers.update(custom_headers)
+            if headers:
+                mcp_config["headers"] = headers
             mcp_host.append(mcp_config)
         else:
             # Fallback to string format if record not found
             mcp_host.append(url)
+
+    # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
+    converted_history = _convert_history_with_minio_files(history)
 
     agent_run_info = AgentRunInfo(
         query=final_query,
@@ -676,7 +1128,7 @@ async def create_agent_run_info(
         observer=MessageObserver(lang=language),
         agent_config=agent_config,
         mcp_host=mcp_host,
-        history=history,
+        history=converted_history,
         stop_event=threading.Event()
     )
     return agent_run_info

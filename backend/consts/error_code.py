@@ -141,6 +141,23 @@ class ErrorCode(Enum):
     PROFILE_UPDATE_FAILED = "110102"  # Profile update failed
     PROFILE_USER_ALREADY_EXISTS = "110103"  # User already exists
     PROFILE_INVALID_CREDENTIALS = "110104"  # Invalid credentials
+    # 02 - Password
+    PROFILE_PASSWORD_WEAK = "110201"  # Password does not meet strength requirements
+    PROFILE_PASSWORD_SAME_AS_OLD = "110202"  # New password cannot be the same as old password
+
+    # ==================== 16 OAuth / 第三方登录 ====================
+    # 01 - Provider
+    OAUTH_PROVIDER_NOT_CONFIGURED = "160101"  # OAuth provider not configured
+    OAUTH_PROVIDER_DISABLED = "160102"  # OAuth provider disabled
+    OAUTH_PROVIDER_UNSUPPORTED = "160103"  # OAuth provider not supported
+    OAUTH_PROVIDER_ERROR = "160104"  # OAuth provider returned an error
+
+    # 02 - Account Linking
+    OAUTH_LINK_FAILED = "160201"  # Failed to link OAuth account
+    OAUTH_UNLINK_FAILED = "160202"  # Failed to unlink OAuth account
+    OAUTH_UNLINK_LAST_METHOD = "160203"  # Cannot unlink last auth method
+    OAUTH_ACCOUNT_NOT_FOUND = "160204"  # OAuth account link not found
+    OAUTH_ACCOUNT_ALREADY_LINKED = "160205"  # OAuth account already linked
 
     # ==================== 12 TenantResource / 租户资源 ====================
     # 01 - Tenant
@@ -171,6 +188,12 @@ class ErrorCode(Enum):
     IDATA_AUTH_ERROR = "130404"  # iData auth error
     IDATA_RATE_LIMIT = "130405"  # iData rate limit
     IDATA_RESPONSE_ERROR = "130406"  # iData response error
+
+    # 05 - AIDP Service
+    AIDP_SERVICE_ERROR = "130501"  # AIDP service error
+    AIDP_CONFIG_INVALID = "130502"  # Invalid AIDP configuration
+    AIDP_CONNECTION_ERROR = "130503"  # AIDP connection error
+    AIDP_AUTH_ERROR = "130504"  # AIDP auth error
 
     # ==================== 14 Northbound / 北向接口 ====================
     # 01 - Request
@@ -237,4 +260,22 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.IDATA_CONNECTION_ERROR: 502,
     ErrorCode.IDATA_RESPONSE_ERROR: 502,
     ErrorCode.IDATA_RATE_LIMIT: 429,
+    # AIDP (module 13)
+    ErrorCode.AIDP_CONFIG_INVALID: 400,
+    ErrorCode.AIDP_AUTH_ERROR: 401,
+    ErrorCode.AIDP_CONNECTION_ERROR: 502,
+    # OAuth (module 16)
+    ErrorCode.OAUTH_PROVIDER_NOT_CONFIGURED: 400,
+    ErrorCode.OAUTH_PROVIDER_DISABLED: 400,
+    ErrorCode.OAUTH_PROVIDER_UNSUPPORTED: 400,
+    ErrorCode.OAUTH_PROVIDER_ERROR: 502,
+    ErrorCode.OAUTH_LINK_FAILED: 500,
+    ErrorCode.OAUTH_UNLINK_FAILED: 500,
+    ErrorCode.OAUTH_UNLINK_LAST_METHOD: 400,
+    ErrorCode.OAUTH_ACCOUNT_NOT_FOUND: 404,
+    ErrorCode.OAUTH_ACCOUNT_ALREADY_LINKED: 409,
+    # Profile - Password (module 11)
+    ErrorCode.PROFILE_INVALID_CREDENTIALS: 400,
+    ErrorCode.PROFILE_PASSWORD_WEAK: 400,
+    ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD: 400,
 }

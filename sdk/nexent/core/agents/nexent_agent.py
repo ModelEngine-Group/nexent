@@ -1,10 +1,17 @@
+import json
+import functools
+import inspect
+import logging
 import re
 import time
+from dataclasses import replace
 from threading import Event
-from typing import List
+from typing import Any, Callable, Dict, List
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
+
+from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 
 from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
@@ -12,6 +19,124 @@ from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+from .agent_context import ContextManager
+
+# Safe base imports for Python interpreter - excludes file modification and system access modules
+SAFE_PYTHON_INTERPRETER_IMPORTS = [
+    "math", "cmath", "statistics", "decimal", "fractions", "random",
+    "collections", "itertools", "functools", "heapq", "bisect", "array", "copy",
+    "re", "string", "textwrap", "unicodedata",
+    "datetime", "time", "calendar",
+    "base64", "hashlib", "hmac",
+    "json", "csv",
+    "uuid", "pprint", "operator", "typing",
+]
+
+logger = logging.getLogger(__name__)
+
+
+def _tool_name(tool_obj: Any) -> str:
+    """Return the most useful tool name for monitoring."""
+    return (
+        getattr(tool_obj, "name", None)
+        or getattr(tool_obj, "__name__", None)
+        or type(tool_obj).__name__
+    )
+
+
+def _is_retriever_tool(tool_obj: Any) -> bool:
+    """Classify tools that should use RETRIEVER rather than TOOL semantics."""
+    name = type(tool_obj).__name__
+    return name in ("KnowledgeBaseSearchTool", "SearchMemoryTool")
+
+
+def _build_tool_input(callable_obj: Callable, args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort conversion of tool call arguments into span input attributes."""
+    try:
+        signature = inspect.signature(callable_obj)
+        bound = signature.bind_partial(*args, **kwargs)
+        return dict(bound.arguments)
+    except (TypeError, ValueError):
+        tool_input: Dict[str, Any] = {}
+        if args:
+            tool_input["args"] = list(args)
+        if kwargs:
+            tool_input.update(kwargs)
+        return tool_input
+
+
+def _wrap_tool_with_monitoring(tool_obj: Any, agent_name: str) -> Any:
+    """Wrap smolagents tools and callables with a tool span."""
+    if getattr(tool_obj, "_nexent_monitoring_wrapped", False):
+        return tool_obj
+
+    monitoring_manager = get_monitoring_manager()
+    tool_name = _tool_name(tool_obj)
+    is_retriever_tool = _is_retriever_tool(tool_obj)
+
+    def monitored_span(tool_input: Dict[str, Any]):
+        if is_retriever_tool:
+            return monitoring_manager.trace_retriever_call(
+                tool_name,
+                agent_name,
+                tool_input,
+            )
+        return monitoring_manager.trace_tool_call(tool_name, agent_name, tool_input)
+
+    def set_monitored_output(result: Any) -> None:
+        if is_retriever_tool:
+            monitoring_manager.set_retriever_output(result)
+        else:
+            monitoring_manager.set_tool_output(result)
+
+    if hasattr(tool_obj, "forward") and callable(tool_obj.forward):
+        original_forward = tool_obj.forward
+
+        if inspect.iscoroutinefunction(original_forward):
+            @functools.wraps(original_forward)
+            async def monitored_forward(*args, **kwargs):
+                tool_input = _build_tool_input(original_forward, args, kwargs)
+                with monitored_span(tool_input):
+                    result = await original_forward(*args, **kwargs)
+                    set_monitored_output(result)
+                    return result
+        else:
+            @functools.wraps(original_forward)
+            def monitored_forward(*args, **kwargs):
+                tool_input = _build_tool_input(original_forward, args, kwargs)
+                with monitored_span(tool_input):
+                    result = original_forward(*args, **kwargs)
+                    set_monitored_output(result)
+                    return result
+
+        tool_obj.forward = monitored_forward
+        setattr(tool_obj, "_nexent_monitoring_wrapped", True)
+        return tool_obj
+
+    if callable(tool_obj):
+        original_callable = tool_obj
+
+        if inspect.iscoroutinefunction(original_callable):
+            @functools.wraps(original_callable)
+            async def monitored_callable(*args, **kwargs):
+                tool_input = _build_tool_input(original_callable, args, kwargs)
+                with monitored_span(tool_input):
+                    result = await original_callable(*args, **kwargs)
+                    set_monitored_output(result)
+                    return result
+        else:
+            @functools.wraps(original_callable)
+            def monitored_callable(*args, **kwargs):
+                tool_input = _build_tool_input(original_callable, args, kwargs)
+                with monitored_span(tool_input):
+                    result = original_callable(*args, **kwargs)
+                    set_monitored_output(result)
+                    return result
+
+        setattr(monitored_callable, "_nexent_monitoring_wrapped", True)
+        return monitored_callable
+
+    return tool_obj
 
 
 class NexentAgent:
@@ -55,7 +180,11 @@ class NexentAgent:
             temperature=model_config.temperature,
             top_p=model_config.top_p,
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
-            model_factory=model_config.model_factory
+            model_factory=model_config.model_factory,
+            display_name=model_config.cite_name,
+extra_body=model_config.extra_body,
+            max_tokens=model_config.max_tokens,
+            timeout_seconds=model_config.timeout_seconds,
         )
         model.stop_event = self.stop_event
         return model
@@ -69,11 +198,16 @@ class NexentAgent:
             raise ValueError(f"{class_name} not found in local")
         else:
             if class_name == "KnowledgeBaseSearchTool":
-                # Filter out conflicting parameters from params to avoid conflicts
-                # These parameters have exclude=True and cannot be passed to __init__
-                # due to smolagents.tools.Tool wrapper restrictions
+                # Filter out conflicting parameters from params to avoid conflicts.
+                # Parameters declared with exclude=True cannot be passed to __init__
+                # due to smolagents.tools.Tool wrapper restrictions; they are set as
+                # attributes on the instance after construction, sourced from metadata.
+                # `document_paths` is intentionally hidden from the LLM and only
+                # populated via tool_params from the northbound interface.
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer",
+                                                 "rerank_model", "display_name_to_index_map",
+                                                 "document_paths"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -85,6 +219,15 @@ class NexentAgent:
                     "embedding_model", None) if tool_config.metadata else None
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+                tools_obj.display_name_to_index_map = tool_config.metadata.get(
+                    "display_name_to_index_map", {}) if tool_config.metadata else {}
+                # Internal access control: restrict results to documents whose
+                # path_or_url is in the allow list. Only the northbound interface
+                # may populate this; never the LLM.
+                tools_obj.set_document_paths(
+                    tool_config.metadata.get(
+                        "document_paths") if tool_config.metadata else None
+                )
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
@@ -93,17 +236,46 @@ class NexentAgent:
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+            elif class_name == "HaotianSearchTool":
+                # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model", "rerank"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
             elif class_name == "AnalyzeTextFileTool":
+                # Extract validate_url_access from metadata if it's callable
+                validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
+                if validate_url_access is not None and not callable(validate_url_access):
+                    validate_url_access = None
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),
                                        data_process_service_url=tool_config.metadata.get("data_process_service_url", []),
+                                       validate_url_access=validate_url_access,
                                        **params)
-            elif class_name == "AnalyzeImageTool":
+            elif class_name in ["AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool"]:
+                # Extract validate_url_access from metadata if it's callable
+                validate_url_access = tool_config.metadata.get("validate_url_access") if tool_config.metadata else None
+                if validate_url_access is not None and not callable(validate_url_access):
+                    validate_url_access = None
                 tools_obj = tool_class(observer=self.observer,
                                        vlm_model=tool_config.metadata.get("vlm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),
+                                       validate_url_access=validate_url_access,
                                        **params)
+            elif class_name in ["StoreMemoryTool", "SearchMemoryTool"]:
+                tools_obj = tool_class()
+                tools_obj.observer = self.observer
+                tools_obj.memory_config = tool_config.metadata.get(
+                    "memory_config", {}) if tool_config.metadata else {}
+                tools_obj.tenant_id = tool_config.metadata.get(
+                    "tenant_id", "") if tool_config.metadata else ""
+                tools_obj.user_id = tool_config.metadata.get(
+                    "user_id", "") if tool_config.metadata else ""
+                tools_obj.agent_id = tool_config.metadata.get(
+                    "agent_id", "") if tool_config.metadata else ""
+                tools_obj.memory_user_config = tool_config.metadata.get(
+                    "memory_user_config", None) if tool_config.metadata else None
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):
@@ -218,14 +390,20 @@ class NexentAgent:
             prompt_templates = agent_config.prompt_templates
 
             try:
-                tool_list = [self.create_tool(tool_config) for tool_config in agent_config.tools]
+                tool_list = [
+                    _wrap_tool_with_monitoring(
+                        self.create_tool(tool_config),
+                        agent_config.name,
+                    )
+                    for tool_config in agent_config.tools
+                ]
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
                 # Create internal managed agents recursively
                 managed_agents_list = [
-                    self.create_single_agent(sub_agent_config) 
+                    self.create_single_agent(sub_agent_config)
                     for sub_agent_config in agent_config.managed_agents
                 ]
             except Exception as e:
@@ -256,12 +434,25 @@ class NexentAgent:
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
+                verification_config=agent_config.verification_config,
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
-                additional_authorized_imports=["*"],
+                additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
             )
             agent.stop_event = self.stop_event
+
+            # Mount context manager if config provided
+            ctx_config = getattr(agent_config, 'context_manager_config', None)
+            if ctx_config:
+                agent.context_manager = ContextManager(
+                    config=ctx_config,
+                    max_steps=agent_config.max_steps
+                )
+                context_components = getattr(agent_config, 'context_components', None)
+                if context_components:
+                    for component in context_components:
+                        agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:
@@ -294,48 +485,197 @@ class NexentAgent:
                                                           timing=Timing(start_time=time.time()),
                                                           action_output=msg.content, model_output=msg.content))
 
+        self.agent._history_step_count = len(self.agent.memory.steps)
     def agent_run_with_observer(self, query: str, reset=True):
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
+        monitoring_manager = get_monitoring_manager()
+        current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
+        metadata = replace(
+            current_metadata,
+            agent_name=current_metadata.agent_name or self.agent.agent_name,
+            query=current_metadata.query if current_metadata.query is not None else query,
+        )
         observer = self.agent.observer
-        try:
-            for step_log in self.agent.run(query, stream=True, reset=reset):
-                # Add content to observer
-                if not isinstance(step_log, ActionStep):
-                    continue
-                # Keep duration
-                if hasattr(step_log, "duration"):
-                    observer.add_message("", ProcessType.TOKEN_COUNT, str(round(float(step_log.duration), 2)))
+        total_output_tokens = 0
+        final_answer_for_trace = None
+        with monitoring_manager.start_agent_run(metadata):
+            with monitoring_manager.trace_agent_step(
+                "agent.run.loop",
+                metadata,
+                step_type="agent_loop",
+            ):
+                try:
+                    step_log = None
+                    for step_log in self.agent.run(query, stream=True, reset=reset):
+                        # Add content to observer
+                        if not isinstance(step_log, ActionStep):
+                            continue
+                        # Emit token stats after each action step
+                        step_duration = getattr(step_log.timing, "duration", None)
+                        step_input = None
+                        step_output = None
+                        if hasattr(step_log, "token_usage") and step_log.token_usage is not None:
+                            step_input = getattr(step_log.token_usage, "input_tokens", None)
+                            step_output = getattr(step_log.token_usage, "output_tokens", None)
+                        if step_output:
+                            total_output_tokens += step_output
 
-                if hasattr(step_log, "error") and step_log.error is not None:
-                    observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                        estimated_context = None
+                        if hasattr(self.agent, "step_metrics") and self.agent.step_metrics:
+                            estimated_context = self.agent.step_metrics[-1].get(
+                                "memory_state", {}
+                            ).get("estimated_input_tokens")
 
-            final_answer = step_log.output  # Last log is the run's final_answer
+                        token_threshold = None
+                        if (
+                            hasattr(self.agent, "context_manager")
+                            and self.agent.context_manager is not None
+                        ):
+                            token_threshold = self.agent.context_manager.config.token_threshold
 
-            if isinstance(final_answer, AgentText):
-                final_answer_str = convert_code_format(final_answer.to_string())
-            else:
-                # prepare for multi-modal final_answer
-                final_answer_str = convert_code_format(str(final_answer))
-            final_answer_str = re.sub(
-                THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
-            # Remove "思考：" or "思考:" prefix content (until two newlines)
-            final_answer_str = re.sub(
-                THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
-            observer.add_message(self.agent.agent_name,
-                                 ProcessType.FINAL_ANSWER, final_answer_str)
+                        token_data = {
+                            "step_number": step_log.step_number,
+                            "duration": round(float(step_duration), 2) if step_duration is not None else 0.0,
+                            "step_input_tokens": step_input,
+                            "step_output_tokens": step_output,
+                            "total_output_tokens": total_output_tokens,
+                            "estimated_context_tokens": estimated_context,
+                            "token_threshold": token_threshold,
+                        }
+                        observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
-            # Check if we need to stop from external stop_event
-            if self.agent.stop_event.is_set():
-                observer.add_message(self.agent.agent_name, ProcessType.ERROR,
-                                     "Agent execution interrupted by external stop signal")
-        except Exception as e:
-            observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
-                                 content=f"Error in interaction: {str(e)}")
-            raise ValueError(f"Error in interaction: {str(e)}")
+                        if hasattr(step_log, "error") and step_log.error is not None:
+                            observer.add_message("", ProcessType.ERROR, str(step_log.error))
+
+                    if step_log is None:
+                        raise ValueError("Agent run produced no output")
+
+                    final_answer = step_log.output  # Last log is the run's final_answer
+
+                    if isinstance(final_answer, AgentText):
+                        final_answer_str = convert_code_format(final_answer.to_string())
+                    else:
+                        # prepare for multi-modal final_answer
+                        final_answer_str = convert_code_format(str(final_answer))
+                    final_answer_str = re.sub(
+                        THINK_TAG_PATTERN, "", final_answer_str, flags=re.DOTALL | re.IGNORECASE)
+                    # Remove thinking prefix content (until two newlines)
+                    final_answer_str = re.sub(
+                        THINK_PREFIX_PATTERN, "", final_answer_str, flags=re.DOTALL)
+                    final_answer_for_trace = final_answer_str
+                    monitoring_manager.set_openinference_output(final_answer_str)
+                    observer.add_message(self.agent.agent_name,
+                                         ProcessType.FINAL_ANSWER, final_answer_str)
+
+                    # Check if we need to stop from external stop_event
+                    if self.agent.stop_event.is_set():
+                        observer.add_message(self.agent.agent_name, ProcessType.ERROR,
+                                             "Agent execution interrupted by external stop signal")
+                except Exception as e:
+                    observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
+                                         content=f"Error in interaction: {str(e)}")
+                    raise ValueError(f"Error in interaction: {str(e)}")
+
+                finally:
+                    self._log_step_metrics()
+
+            if final_answer_for_trace is not None:
+                if hasattr(self.agent, "step_metrics"):
+                    monitoring_manager.set_agent_context_metrics(self.agent.step_metrics)
+                monitoring_manager.set_openinference_output(final_answer_for_trace)
 
     def set_agent(self, agent: CoreAgent):
         if not isinstance(agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(agent)}")
         self.agent = agent
+
+    def _log_step_metrics(self):
+        """Output step_metrics to log or local file for quantitative analysis of context management."""
+        if not hasattr(self.agent, "step_metrics") or not self.agent.step_metrics:
+            return
+
+        metrics = self.agent.step_metrics
+
+        # Pre-collect all values
+        real_i_vals = [m['main_llm']['input_tokens'] for m in metrics]
+        real_o_vals = [m['main_llm']['output_tokens'] for m in metrics]
+        comp_i_vals = [m['compression']['input_tokens'] for m in metrics]
+        comp_o_vals = [m['compression']['output_tokens'] for m in metrics]
+        est_i_vals  = [m['memory_state']['estimated_input_tokens'] for m in metrics]
+        est_o_vals  = [m['memory_state']['estimated_output_tokens'] for m in metrics]
+        raw_i_vals  = [m['uncompressed_mem_est_input'] for m in metrics]
+        save_vals   = [f"{m['compression_ratio']}%" for m in metrics]
+        hit_vals    = [str(m['cache_hit']) for m in metrics]
+
+        # Total summary
+        total_ri   = sum(real_i_vals)
+        total_ro   = sum(real_o_vals)
+        total_ci   = sum(comp_i_vals)
+        total_co   = sum(comp_o_vals)
+        total_ei   = sum(est_i_vals)
+        total_eo   = sum(est_o_vals)
+        total_raw  = sum(raw_i_vals)
+        hit_count  = sum(1 for m in metrics if m['cache_hit'])
+
+        if total_raw > 0:
+            total_save_str = f"{round((1 - total_ei / total_raw) * 100, 1)}%"
+        else:
+            total_save_str = "N/A"
+        hit_total_str = f"{hit_count}/{len(metrics)}"
+
+        # Column widths based on max value width
+        def _val_width(vals, extra_val=None):
+            w = 0
+            for v in vals:
+                w = max(w, len(str(v)))
+            if extra_val is not None:
+                w = max(w, len(str(extra_val)))
+            return w
+
+        w_ri   = _val_width(real_i_vals, total_ri)
+        w_ro   = _val_width(real_o_vals, total_ro)
+        w_ci   = _val_width(comp_i_vals, total_ci)
+        w_co   = _val_width(comp_o_vals, total_co)
+        w_ei   = _val_width(est_i_vals, total_ei)
+        w_eo   = _val_width(est_o_vals, total_eo)
+        w_raw  = _val_width(raw_i_vals, total_raw)
+        w_save = _val_width(save_vals, total_save_str)
+        w_hit  = _val_width(hit_vals, hit_total_str)
+
+        # Prefix formatting
+        max_step_digits = max(len(str(m['step_number'])) for m in metrics)
+        step_prefix_fmt = f"Step {{:>{max_step_digits}}}:  "
+        total_prefix = "Total:  " + " " * max_step_digits
+
+        lines = []
+        for i, m in enumerate(metrics):
+            lines.append(
+                step_prefix_fmt.format(m['step_number']) +
+                f"real_i={real_i_vals[i]:>{w_ri}}  real_o={real_o_vals[i]:>{w_ro}} | "
+                f"comp_i={comp_i_vals[i]:>{w_ci}}  comp_o={comp_o_vals[i]:>{w_co}} | "
+                f"est_i={est_i_vals[i]:>{w_ei}}  est_o={est_o_vals[i]:>{w_eo}} | "
+                f"est_raw_i={raw_i_vals[i]:>{w_raw}}  save={save_vals[i]:>{w_save}} | "
+                f"hit={hit_vals[i]:>{w_hit}}"
+            )
+
+        lines.append(
+            total_prefix +
+            f"real_i={total_ri:>{w_ri}}  real_o={total_ro:>{w_ro}} | "
+            f"comp_i={total_ci:>{w_ci}}  comp_o={total_co:>{w_co}} | "
+            f"est_i={total_ei:>{w_ei}}  est_o={total_eo:>{w_eo}} | "
+            f"est_raw_i={total_raw:>{w_raw}}  save={total_save_str:>{w_save}} | "
+            f"hit={hit_total_str:>{w_hit}}"
+        )
+        if self.agent.context_manager:
+            lines.append(f"Context Manager Global: {self.agent.context_manager.get_all_compression_stats()}")
+
+        lines.append(
+            "-----"
+        )
+        logger.debug("\n".join(lines))
+
+        # Optional: write to local file
+        with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")

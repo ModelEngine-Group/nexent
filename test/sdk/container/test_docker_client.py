@@ -329,31 +329,39 @@ class TestGenerateContainerName:
 
     def test_generate_container_name_basic(self, docker_container_client):
         """Test basic container name generation"""
-        name = docker_container_client._generate_container_name(
-            "test-service", "tenant123", "user12345")
-        assert name == "mcp-test-service-tenant12-user1234"
+        with patch("nexent.container.docker_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = docker_container_client._generate_container_name(
+                "test-service", "tenant123", "user12345")
+            assert name == "mcp-test-service-tenant12-user1234-a1b2c3d4"
 
     def test_generate_container_name_with_special_chars(self, docker_container_client):
         """Test container name generation with special characters"""
-        name = docker_container_client._generate_container_name(
-            "test@service#123", "tenant123", "user12345")
-        assert name == "mcp-test-service-123-tenant12-user1234"
-        assert "@" not in name
-        assert "#" not in name
+        with patch("nexent.container.docker_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = docker_container_client._generate_container_name(
+                "test@service#123", "tenant123", "user12345")
+            assert name == "mcp-test-service-123-tenant12-user1234-a1b2c3d4"
+            assert "@" not in name
+            assert "#" not in name
 
     def test_generate_container_name_long_user_id(self, docker_container_client):
         """Test container name generation with long user ID"""
         long_user_id = "a" * 20
-        name = docker_container_client._generate_container_name(
-            "test-service", "tenant123", long_user_id)
-        # Should only use first 8 characters of tenant_id and user_id
-        assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}"
+        with patch("nexent.container.docker_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = docker_container_client._generate_container_name(
+                "test-service", "tenant123", long_user_id)
+            # Should only use first 8 characters of tenant_id and user_id
+            assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}-a1b2c3d4"
 
     def test_generate_container_name_short_user_id(self, docker_container_client):
         """Test container name generation with short user ID"""
-        name = docker_container_client._generate_container_name(
-            "test-service", "tenant123", "user")
-        assert name == "mcp-test-service-tenant12-user"
+        with patch("nexent.container.docker_client.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value.hex = "a1b2c3d4"
+            name = docker_container_client._generate_container_name(
+                "test-service", "tenant123", "user")
+            assert name == "mcp-test-service-tenant12-user-a1b2c3d4"
 
 
 # ---------------------------------------------------------------------------
@@ -1619,10 +1627,10 @@ class TestEnsureNetwork:
         mock_network = MagicMock()
         docker_container_client.client.networks.get.return_value = mock_network
 
-        docker_container_client._ensure_network("nexent_nexent")
+        docker_container_client._ensure_network("nexent_network")
 
         docker_container_client.client.networks.get.assert_called_once_with(
-            "nexent_nexent")
+            "nexent_network")
         docker_container_client.client.networks.create.assert_not_called()
 
     def test_ensure_network_create_new(self, docker_container_client):
@@ -1632,12 +1640,12 @@ class TestEnsureNetwork:
         mock_network = MagicMock()
         docker_container_client.client.networks.create.return_value = mock_network
 
-        docker_container_client._ensure_network("nexent_nexent")
+        docker_container_client._ensure_network("nexent_network")
 
         docker_container_client.client.networks.get.assert_called_once_with(
-            "nexent_nexent")
+            "nexent_network")
         docker_container_client.client.networks.create.assert_called_once_with(
-            "nexent_nexent")
+            "nexent_network")
 
     def test_ensure_network_race_condition(self, docker_container_client):
         """Test ensuring network when race condition occurs (another process creates it)"""
@@ -1649,7 +1657,7 @@ class TestEnsureNetwork:
         docker_container_client.client.networks.create.side_effect = APIError(
             "Network already exists")
 
-        docker_container_client._ensure_network("nexent_nexent")
+        docker_container_client._ensure_network("nexent_network")
 
         assert docker_container_client.client.networks.get.call_count == 2
         docker_container_client.client.networks.create.assert_called_once()
@@ -1664,7 +1672,7 @@ class TestEnsureNetwork:
             "Create failed")
 
         with pytest.raises(ContainerError, match="Failed to create or get Docker network"):
-            docker_container_client._ensure_network("nexent_nexent")
+            docker_container_client._ensure_network("nexent_network")
 
     def test_ensure_network_get_api_error(self, docker_container_client):
         """Test ensuring network when get raises APIError"""
@@ -1672,7 +1680,7 @@ class TestEnsureNetwork:
             "API error")
 
         with pytest.raises(ContainerError, match="Failed to get Docker network"):
-            docker_container_client._ensure_network("nexent_nexent")
+            docker_container_client._ensure_network("nexent_network")
 
 
 # ---------------------------------------------------------------------------

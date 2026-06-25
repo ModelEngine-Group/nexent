@@ -6,6 +6,7 @@ from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 from database.model_management_db import get_model_by_model_id
 from nexent.core.models import OpenAIModel
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from utils.config_utils import get_model_name_from_config
 
 logger = logging.getLogger("llm_utils")
@@ -66,6 +67,14 @@ def call_llm_for_system_prompt(
     """
     llm_model_config = get_model_by_model_id(model_id=model_id, tenant_id=tenant_id)
 
+    display_name = llm_model_config.get("display_name", "") if llm_model_config else ""
+    if tenant_id:
+        set_monitoring_context(tenant_id=tenant_id)
+    set_monitoring_operation("system_prompt_generation",
+                             display_name=display_name or None)
+
+    timeout_seconds = llm_model_config.get("timeout_seconds") if llm_model_config else None
+
     llm = OpenAIModel(
         model_id=get_model_name_from_config(llm_model_config) if llm_model_config else "",
         api_base=llm_model_config.get("base_url", "") if llm_model_config else "",
@@ -74,6 +83,8 @@ def call_llm_for_system_prompt(
         top_p=0.95,
         model_factory=llm_model_config.get("model_factory") if llm_model_config else None,
         ssl_verify=llm_model_config.get("ssl_verify", True) if llm_model_config else True,
+        display_name=display_name or None,
+        timeout_seconds=timeout_seconds,
     )
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
@@ -92,9 +103,21 @@ def call_llm_for_system_prompt(
         reasoning_content_seen = False
         content_tokens_seen = 0
         for chunk in current_request:
-            delta = chunk.choices[0].delta
+            choices = getattr(chunk, "choices", None)
+            if choices is None:
+               logger.warning("Received non-standard chunk without choices during prompt generation.")
+               continue
+            if not choices:
+               logger.debug("Received empty choices chunk during prompt generation; skipping.")
+               continue
+
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                logger.debug("Skipping LLM stream chunk without delta")
+                continue
+ 
             reasoning_content = getattr(delta, "reasoning_content", None)
-            new_token = delta.content
+            new_token = getattr(delta, "content", None)
 
             # Note: reasoning_content is separate metadata and doesn't affect content filtering
             # We only filter content based on <think> tags in delta.content
