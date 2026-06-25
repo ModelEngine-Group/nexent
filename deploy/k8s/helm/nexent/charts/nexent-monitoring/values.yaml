@@ -165,5 +165,4 @@ persistence:
   accessModes:
     - ReadWriteOnce
   localPath: /var/lib/nexent-data
-  localNodeName: ""
   existingClaimPrefix: ""

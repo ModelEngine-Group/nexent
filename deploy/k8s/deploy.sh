@@ -52,6 +52,7 @@ STORAGE_CLASS_NAME=""
 LOCAL_PATH="/var/lib/nexent-data"
 LOCAL_NODE_NAME=""
 EXISTING_CLAIM_PREFIX=""
+K8S_WAIT_TIMEOUT_SECONDS="${NEXENT_K8S_WAIT_TIMEOUT_SECONDS:-600}"
 
 # Parse command line arguments. The optional "apply" command is kept as a deploy alias.
 COMMAND="apply"
@@ -102,7 +103,7 @@ while [[ $# -gt 0 ]]; do
       PERSISTENCE_MODE="$2"
       shift 2
       ;;
-    --storage-class)
+    --storage-class|--storageclass|--storage-class-name|--sc)
       STORAGE_CLASS_NAME="$2"
       shift 2
       ;;
@@ -116,6 +117,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --existing-claim-prefix)
       EXISTING_CLAIM_PREFIX="$2"
+      shift 2
+      ;;
+    --wait-timeout)
+      K8S_WAIT_TIMEOUT_SECONDS="$2"
       shift 2
       ;;
     --rotate-secrets|--refresh-es-key)
@@ -173,22 +178,6 @@ apply_deployment_common_config() {
     deployment_print_summary k8s
 }
 
-detect_local_node_name() {
-  if [ -n "$LOCAL_NODE_NAME" ]; then
-    return 0
-  fi
-  if [ "$PERSISTENCE_MODE" != "local" ]; then
-    return 0
-  fi
-  if command -v kubectl >/dev/null 2>&1; then
-    LOCAL_NODE_NAME="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-  fi
-  if [ -z "$LOCAL_NODE_NAME" ]; then
-    echo "Error: --persistence-mode local requires a Kubernetes node name for local PV nodeAffinity."
-    echo "Provide --local-node-name <node> or ensure kubectl can read the target cluster nodes."
-    exit 1
-  fi
-}
 
 persistence_existing_claim() {
   local component="$1"
@@ -214,11 +203,10 @@ render_one_persistence_values() {
     printf '    accessModes:\n'
     printf '      - ReadWriteOnce\n'
     printf '    localPath: "%s/%s"\n' "$LOCAL_PATH" "$component"
-    printf '    localNodeName: "%s"\n' "$LOCAL_NODE_NAME"
     printf '    existingClaim: "%s"\n' "$(persistence_existing_claim "$component")"
     printf '  storage:\n'
     printf '    size: "%s"\n' "$size"
-  } > "$output_file"
+  } >> "$output_file"
 }
 
 render_monitoring_persistence_values() {
@@ -236,8 +224,31 @@ render_monitoring_persistence_values() {
     printf '    accessModes:\n'
     printf '      - ReadWriteOnce\n'
     printf '    localPath: "%s"\n' "$LOCAL_PATH"
-    printf '    localNodeName: "%s"\n' "$LOCAL_NODE_NAME"
     printf '    existingClaimPrefix: "%s"\n' "$EXISTING_CLAIM_PREFIX"
+  } >> "$output_file"
+}
+
+render_shared_storage_persistence_values() {
+  local output_file="$1"
+  local storage_class="$STORAGE_CLASS_NAME"
+  [ -n "$storage_class" ] || storage_class="nexent-local"
+  [ "$PERSISTENCE_MODE" = "dynamic" ] && [ "$STORAGE_CLASS_NAME" = "" ] && storage_class=""
+
+  {
+    printf 'global:\n'
+    printf '  sharedStorage:\n'
+    printf '    mode: "%s"\n' "$PERSISTENCE_MODE"
+    printf '    storageClassName: "%s"\n' "$storage_class"
+    printf '    accessModes:\n'
+    printf '      - ReadWriteOnce\n'
+    printf '    workspace:\n'
+    printf '      size: "10Gi"\n'
+    printf '      localPath: "/var/lib/nexent"\n'
+    printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-workspace")"
+    printf '    skills:\n'
+    printf '      size: "5Gi"\n'
+    printf '      localPath: "%s/skills"\n' "$LOCAL_PATH"
+    printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-skills")"
   } >> "$output_file"
 }
 
@@ -252,11 +263,11 @@ render_persistence_values() {
       ;;
   esac
 
-  detect_local_node_name
   {
     echo "# Generated persistence overrides"
   } > "$output_file"
 
+  render_shared_storage_persistence_values "$output_file"
   render_one_persistence_values "$output_file" "nexent-elasticsearch" "nexent-elasticsearch" "20Gi"
   render_one_persistence_values "$output_file" "nexent-postgresql" "nexent-postgresql" "10Gi"
   render_one_persistence_values "$output_file" "nexent-redis" "nexent-redis" "5Gi"
@@ -301,6 +312,7 @@ render_yaml_literal_file() {
   content_padding="$(printf '%*s' "$content_indent" '')"
   printf '%s%s: |\n' "$key_padding" "$key"
   sed "s/^/${content_padding}/" "$file"
+  printf '\n'
 }
 
 render_k8s_runtime_config_values() {
@@ -344,7 +356,7 @@ render_k8s_runtime_config_values() {
     printf '      diskWatermarkFloodStage: %s\n' "$(yaml_quote "$(env_or_default ES_DISK_WATERMARK_FLOOD_STAGE "95%")")"
     printf '    skipProxy: %s\n' "$(yaml_quote "$(env_or_default skip_proxy "true")")"
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
-    printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent/skills")")"
+    printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
     printf '    marketBackend: %s\n' "$(yaml_quote "$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
@@ -591,6 +603,24 @@ helm_upgrade_release() {
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
+}
+
+wait_for_deployment_ready() {
+    local deployment="$1"
+    kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
+}
+
+recreate_legacy_nexent_secret_for_helm_management() {
+    local managers
+    if ! kubectl get secret nexent-secrets -n "$NAMESPACE" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    managers=$(kubectl get secret nexent-secrets -n "$NAMESPACE" -o jsonpath='{range .metadata.managedFields[*]}{.manager}{"\n"}{end}' 2>/dev/null || true)
+    if printf '%s\n' "$managers" | grep -qx 'kubectl-patch'; then
+        echo "Recreating legacy nexent-secrets so Helm owns all Secret fields..."
+        kubectl delete secret nexent-secrets -n "$NAMESPACE"
+    fi
 }
 
 # Select deployment version (speed or full)
@@ -932,7 +962,7 @@ apply() {
 
     # Step 6: Clean up stale PVs
     echo "Checking for stale PersistentVolumes..."
-    for pv in nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
+    for pv in nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
         pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
         if [ "$pv_status" = "Released" ]; then
             echo "  Cleaning up stale PV: $pv"
@@ -953,6 +983,7 @@ apply() {
 
     # Step 7: Deploy using Helm
     ensure_namespace
+    recreate_legacy_nexent_secret_for_helm_management
     echo "Deploying Helm chart..."
     helm_upgrade_release
 
@@ -963,10 +994,10 @@ apply() {
     echo "=========================================="
     local deploy_success=true
 
-    echo "Waiting for Elasticsearch pod to be ready..."
+    echo "Waiting for Elasticsearch deployment to be ready..."
     sleep 5
-    if kubectl wait --for=condition=ready pod -l app=nexent-elasticsearch -n $NAMESPACE --timeout=300s; then
-        echo "Elasticsearch pod is ready."
+    if wait_for_deployment_ready "nexent-elasticsearch"; then
+        echo "Elasticsearch deployment is ready."
 
         # Initialize Elasticsearch API key only when it is missing, invalid, or explicitly refreshed.
         INIT_ES_SCRIPT="$SCRIPT_DIR/init-elasticsearch.sh"
@@ -974,9 +1005,16 @@ apply() {
             echo "Running Elasticsearch initialization script..."
             local es_key_before
             local es_key_after
+            local es_key_output_file
             es_key_before="$(get_existing_secret_value "ELASTICSEARCH_API_KEY" || true)"
-            if DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" bash "$INIT_ES_SCRIPT"; then
-                es_key_after="$(get_existing_secret_value "ELASTICSEARCH_API_KEY" || true)"
+            es_key_output_file="$(mktemp "${TMPDIR:-/tmp}/nexent-es-key.XXXXXX")"
+            if ELASTICSEARCH_API_KEY_OUTPUT_FILE="$es_key_output_file" DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" bash "$INIT_ES_SCRIPT"; then
+                if [ -s "$es_key_output_file" ]; then
+                    es_key_after="$(cat "$es_key_output_file")"
+                else
+                    es_key_after="$es_key_before"
+                fi
+                rm -f "$es_key_output_file"
                 echo "Elasticsearch API key initialized successfully."
 
                 if [ "$es_key_before" != "$es_key_after" ]; then
@@ -994,10 +1032,10 @@ apply() {
                     sleep 5
                     for svc in $backend_services; do
                         echo "  Waiting for nexent-$svc..."
-                        if kubectl wait --for=condition=ready pod -l app=nexent-$svc -n $NAMESPACE --timeout=300s 2>/dev/null; then
+                        if wait_for_deployment_ready "nexent-$svc"; then
                             echo "  nexent-$svc is ready."
                         else
-                            echo "  Error: nexent-$svc did not become ready within timeout."
+                            echo "  Error: nexent-$svc did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
                             deploy_success=false
                         fi
                     done
@@ -1005,6 +1043,7 @@ apply() {
                     echo "ELASTICSEARCH_API_KEY unchanged; backend rollout is not needed."
                 fi
             else
+                rm -f "$es_key_output_file"
                 echo "Error: Elasticsearch initialization script failed."
                 deploy_success=false
             fi
@@ -1013,7 +1052,7 @@ apply() {
             deploy_success=false
         fi
     else
-        echo "Error: Elasticsearch pod did not become ready within timeout."
+        echo "Error: nexent-elasticsearch did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
         deploy_success=false
     fi
 
@@ -1070,10 +1109,11 @@ print_usage() {
     echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
-    echo "  --storage-class NAME       StorageClass for PVCs"
+    echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
     echo "  --local-path PATH          Base path for local PVs"
-    echo "  --local-node-name NAME     Node name for local PV nodeAffinity"
+    echo "  --local-node-name NAME     Deprecated; local mode uses hostPath and does not require nodeAffinity"
     echo "  --existing-claim-prefix P  Existing PVC prefix, rendered as P-<component>"
+    echo "  --wait-timeout SECONDS    Kubernetes deployment wait timeout (default: 600)"
     echo "  --rotate-secrets           Force rotation of deployment secrets"
     echo "  --refresh-es-key           Force recreation of ELASTICSEARCH_API_KEY"
     echo "  --help, -h                 Show this help message"

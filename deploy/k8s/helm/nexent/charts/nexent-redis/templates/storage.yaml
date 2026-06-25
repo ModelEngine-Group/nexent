@@ -5,7 +5,7 @@ kind: PersistentVolume
 metadata:
   name: nexent-redis-pv
   labels:
-    type: local
+    type: hostpath
     app: nexent-redis
   annotations:
     "helm.sh/hook-weight": "-3"
@@ -16,18 +16,9 @@ spec:
   accessModes:
 {{ toYaml .Values.persistence.accessModes | indent 4 }}
   persistentVolumeReclaimPolicy: Retain
-  local:
+  hostPath:
     path: {{ .Values.persistence.localPath | quote }}
-  {{- if .Values.persistence.localNodeName }}
-  nodeAffinity:
-    required:
-      nodeSelectorTerms:
-        - matchExpressions:
-            - key: kubernetes.io/hostname
-              operator: In
-              values:
-                - {{ .Values.persistence.localNodeName | quote }}
-  {{- end }}
+    type: DirectoryOrCreate
 ---
 {{- end }}
 {{- if ne $mode "existing" }}

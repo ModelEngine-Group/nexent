@@ -3,11 +3,11 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Activity } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 
-export default function MonitoringContent({}) {
+export default function SkillSpaceContent({}) {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   return (
@@ -26,9 +26,9 @@ export default function MonitoringContent({}) {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-sky-600 flex items-center justify-center shadow-lg"
+              className="w-24 h-24 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg"
             >
-              <Activity className="h-12 w-12 text-white" />
+              <Sparkles className="h-12 w-12 text-white" />
             </motion.div>
 
             <motion.h1
@@ -37,7 +37,7 @@ export default function MonitoringContent({}) {
               transition={{ delay: 0.3 }}
               className="text-3xl font-bold text-slate-800 dark:text-slate-100"
             >
-              {t("monitoring.comingSoon.title")}
+              {t("skillSpace.comingSoon.title")}
             </motion.h1>
 
             <motion.p
@@ -46,7 +46,7 @@ export default function MonitoringContent({}) {
               transition={{ delay: 0.4 }}
               className="text-lg text-slate-600 dark:text-slate-400"
             >
-              {t("monitoring.comingSoon.description")}
+              {t("skillSpace.comingSoon.description")}
             </motion.p>
 
             <motion.ul
@@ -56,21 +56,21 @@ export default function MonitoringContent({}) {
               className="text-left space-y-2 w-full"
             >
               <li className="flex items-start space-x-2">
-                <span className="text-emerald-500 mt-1">✓</span>
+                <span className="text-violet-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("monitoring.comingSoon.feature1")}
+                  {t("skillSpace.comingSoon.feature1")}
                 </span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-emerald-500 mt-1">✓</span>
+                <span className="text-violet-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("monitoring.comingSoon.feature2")}
+                  {t("skillSpace.comingSoon.feature2")}
                 </span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-emerald-500 mt-1">✓</span>
+                <span className="text-violet-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("monitoring.comingSoon.feature3")}
+                  {t("skillSpace.comingSoon.feature3")}
                 </span>
               </li>
             </motion.ul>
@@ -79,9 +79,9 @@ export default function MonitoringContent({}) {
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.6 }}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-sky-600 text-white rounded-full text-sm font-medium shadow-md"
+              className="px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-600 text-white rounded-full text-sm font-medium shadow-md"
             >
-              {t("monitoring.comingSoon.badge")}
+              {t("skillSpace.comingSoon.badge")}
             </motion.div>
           </div>
         </motion.div>

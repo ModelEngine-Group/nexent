@@ -69,6 +69,8 @@ cd deploy/k8s
 
 K8s deployments read runtime configuration from the project root `.env`, the same file used by Docker. The deploy script creates it from `.env.example`, or migrates an existing legacy `docker/.env` once when the root file is missing. Do not edit generated Helm values by hand; they are recreated from `.env` and deployment options.
 
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required.
+
 ## Deploy Options
 
 | Option | Description | Values |
@@ -84,6 +86,11 @@ K8s deployments read runtime configuration from the project root `.env`, the sam
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
 | `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
+| `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
+| `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
+| `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
+| `--local-node-name` | Deprecated compatibility option | Ignored; local mode uses hostPath and does not require nodeAffinity |
+| `--existing-claim-prefix` | Prefix for existing PVC names | Renders as `<prefix>-<component>` |
 
 ## Uninstall Options
 
@@ -93,7 +100,7 @@ K8s deployments read runtime configuration from the project root `.env`, the sam
 | `--delete-volumes` | Alias for `--delete-data` | `true` or `false` |
 | `--remove-volumes` | Alias for `--delete-data true` | Flag |
 | `--keep-volumes` | Alias for `--delete-data false` | Flag |
-| `--delete-local-data` | Delete local PV data under `/var/lib/nexent-data` after Helm uninstall | `true` or `false` |
+| `--delete-local-data` | Delete local PV data under `/var/lib/nexent` and `/var/lib/nexent-data` after Helm uninstall | `true` or `false` |
 | `--remove-local-data` | Alias for `--delete-local-data true` | Flag |
 | `--keep-local-data` | Alias for `--delete-local-data false` | Flag |
 | `--delete-namespace` | Delete the Kubernetes namespace after Helm uninstall | `true` or `false` |
@@ -172,6 +179,8 @@ By default, `./uninstall.sh` removes the Helm release and preserves local PV dat
 
 The following local PersistentVolumes can preserve data:
 
+- `nexent-workspace-pv` - Shared user workspace mounted at `/mnt/nexent`
+- `nexent-skills-pv` - Shared skills data mounted at `/mnt/nexent-data/skills`
 - `nexent-elasticsearch-pv` - Search index data
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
@@ -181,7 +190,7 @@ The following local PersistentVolumes can preserve data:
 
 ### Deleted Data
 
-Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
+Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
 
 ## Services
 
@@ -288,7 +297,11 @@ helm upgrade --install nexent nexent \
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `global.namespace` | Kubernetes namespace | `nexent` |
-| `global.dataDir` | Host path for persistent data | `/data/nexent` |
+| `global.dataDir` | Host path for persistent data | `/var/lib/nexent-data` |
+| `global.sharedStorage.workspace.size` | Shared `/mnt/nexent` PVC size | `10Gi` |
+| `global.sharedStorage.workspace.localPath` | Host path for shared workspace data | `/var/lib/nexent` |
+| `global.sharedStorage.skills.size` | Shared `/mnt/nexent-data/skills` PVC size | `5Gi` |
+| `global.sharedStorage.skills.localPath` | Host path for shared skills data | `/var/lib/nexent-data/skills` |
 | `deploymentVersion` | Deployment version | `speed` |
 
 #### Images
@@ -366,5 +379,5 @@ bash init-elasticsearch.sh
 Released PVs are automatically cleaned during deployment. To manually clean:
 
 ```bash
-kubectl delete pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
+kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```

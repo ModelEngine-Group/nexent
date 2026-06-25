@@ -211,7 +211,7 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
     environment:
       <<: [*proxy-vars, *es-vars, *minio-vars]
-      NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_STARTUP_MODE: off
       DOCKER_ENVIRONMENT: "true"
       DISABLE_RAY_DASHBOARD: ${DISABLE_RAY_DASHBOARD:-false}
       DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}

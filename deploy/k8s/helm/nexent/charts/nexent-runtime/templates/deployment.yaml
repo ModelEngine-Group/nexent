@@ -1,3 +1,7 @@
+{{- $global := default dict .Values.global -}}
+{{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $workspaceStorage := default dict $sharedStorage.workspace -}}
+{{- $skillsStorage := default dict $sharedStorage.skills -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,6 +46,11 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          volumeMounts:
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
+            - name: nexent-skills
+              mountPath: /mnt/nexent-data/skills
           resources:
             requests:
               memory: {{ .Values.resources.backend.requests.memory }}
@@ -49,3 +58,10 @@ spec:
             limits:
               memory: {{ .Values.resources.backend.limits.memory }}
               cpu: {{ .Values.resources.backend.limits.cpu }}
+      volumes:
+        - name: nexent-workspace
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
+        - name: nexent-skills
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-skills" $skillsStorage.existingClaim }}

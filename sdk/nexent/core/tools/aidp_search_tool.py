@@ -179,8 +179,8 @@ class AidpSearchTool(Tool):
 
         self._http_client = http_client_manager.get_sync_client(
             base_url=self.base_url,
-            timeout=30.0,
-            verify_ssl=True,
+            timeout=60.0,
+            verify_ssl=False,
         )
 
         self.record_ops = 1

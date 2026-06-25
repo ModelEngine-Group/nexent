@@ -837,7 +837,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
             # Verify metadata includes validate_url_access lambda
             assert "vlm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -881,7 +881,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
             assert mock_tool_instance.metadata["vlm_model"] == "mock_video_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])
@@ -916,7 +916,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
             # Verify metadata includes validate_url_access lambda
             assert "llm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata

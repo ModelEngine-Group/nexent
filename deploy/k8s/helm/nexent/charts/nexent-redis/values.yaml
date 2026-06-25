@@ -22,5 +22,4 @@ persistence:
   accessModes:
     - ReadWriteOnce
   localPath: "/var/lib/nexent-data/nexent-redis"
-  localNodeName: ""
   existingClaim: ""

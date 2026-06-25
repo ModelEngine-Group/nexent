@@ -159,6 +159,23 @@ clean_helm_state() {
   echo "Helm state cleaned."
 }
 
+helm_uninstall_release() {
+  local output
+  if output=$(helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE" 2>&1); then
+    [ -z "$output" ] || printf '%s\n' "$output"
+    return 0
+  fi
+
+  local status=$?
+  [ -z "$output" ] || printf '%s\n' "$output"
+  if printf '%s\n' "$output" | grep -qi 'not found'; then
+    echo "Helm release '$RELEASE_NAME' is already absent; continuing cleanup."
+    return 0
+  fi
+
+  return "$status"
+}
+
 delete_namespace_after_uninstall() {
   echo "Deleting namespace..."
   kubectl delete namespace "$NAMESPACE" --ignore-not-found=true || true
@@ -190,6 +207,8 @@ maybe_delete_namespace_after_uninstall() {
 
 local_volume_paths() {
   printf '%s\n' \
+    "/var/lib/nexent" \
+    "/var/lib/nexent-data/skills" \
     "/var/lib/nexent-data/nexent-elasticsearch" \
     "/var/lib/nexent-data/nexent-postgresql" \
     "/var/lib/nexent-data/nexent-redis" \
@@ -214,7 +233,7 @@ resolve_delete_local_data() {
   [ -t 0 ] || return 1
 
   echo ""
-  echo "Delete local PV data under /var/lib/nexent-data?"
+  echo "Delete local PV data under /var/lib/nexent and /var/lib/nexent-data?"
   local answer
   read -r -p "Delete local volume data? [y/N]: " answer
   answer="$(sanitize_input "$answer")"
@@ -227,7 +246,7 @@ delete_local_volume_data() {
   local path
   while IFS= read -r path; do
     case "$path" in
-      /var/lib/nexent-data/nexent-*)
+      /var/lib/nexent|/var/lib/nexent-data/skills|/var/lib/nexent-data/nexent-*)
         if [ -e "$path" ]; then
           echo "Removing $path"
           rm -rf -- "$path"
@@ -250,9 +269,23 @@ maybe_delete_local_volume_data() {
   fi
 }
 
+cleanup_leftover_data_process_resources() {
+  if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Cleaning up leftover nexent-data-process resources..."
+  kubectl delete deployment nexent-data-process -n "$NAMESPACE" --ignore-not-found=true 2>/dev/null || true
+  kubectl delete service nexent-data-process -n "$NAMESPACE" --ignore-not-found=true 2>/dev/null || true
+  kubectl delete rs,pod -n "$NAMESPACE" -l app=nexent-data-process --ignore-not-found=true 2>/dev/null || true
+}
+
 uninstall_preserve_data() {
   echo "Uninstalling Helm release..."
-  helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE"
+  if ! helm_uninstall_release; then
+    echo "Helm uninstall failed; continuing best-effort cleanup of nexent-data-process."
+  fi
+  cleanup_leftover_data_process_resources
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   echo "Cleanup completed. Helm-managed resources were removed."
@@ -265,10 +298,12 @@ uninstall_preserve_data() {
 
 delete_all_data() {
   echo "Deleting Helm release..."
-  if ! helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE"; then
+  if ! helm_uninstall_release; then
     echo "Helm uninstall failed. Namespace was not deleted."
+    cleanup_leftover_data_process_resources
     return 1
   fi
+  cleanup_leftover_data_process_resources
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   echo "Cleanup completed. Helm-managed PV/PVC resources were deleted with the release."
