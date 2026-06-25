@@ -1343,6 +1343,26 @@ class ContextManager:
         with self._lock:
             return list(self._components)
 
+    def replace_components(self, components: List) -> None:
+        """Atomically replace all registered components.
+        
+        Clears existing components and registers new ones under a single
+        lock acquisition, preventing race conditions when the ContextManager
+        is shared across concurrent runs (e.g., conversation-level CM reuse).
+        
+        Args:
+            components: List of ContextComponent instances to register.
+                       Pass empty list to clear all components.
+        """
+        with self._lock:
+            self._components.clear()
+            for component in components:
+                if component.token_estimate == 0:
+                    component.token_estimate = component.estimate_tokens(
+                        self.config.chars_per_token
+                    )
+                self._components.append(component)
+
     def _get_strategy(self):
         """Factory method to get strategy instance based on config."""
         from .agent_model import (

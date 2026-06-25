@@ -1,13 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Modal, Spin, message } from "antd";
+import { Modal, Spin, message, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import { CircleCheckBig, CircleOff, CircleDot, LoaderCircle } from "lucide-react";
 
 import { fetchOfficialSkillsWithStatus, installOfficialSkills } from "@/services/skillService";
 import { InstallableSkill } from "@/types/agentConfig";
-import { Tooltip } from "@/components/ui/tooltip";
 
 interface InstallOfficialSkillsModalProps {
   open: boolean;

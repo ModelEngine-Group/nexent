@@ -57,7 +57,7 @@ class ContainerConnectionError(Exception):
 class DockerContainerClient(ContainerClient):
     """Docker container client implementation"""
 
-    DEFAULT_NETWORK_NAME = "nexent_nexent"
+    DEFAULT_NETWORK_NAME = "nexent_network"
 
     def __init__(self, config: DockerContainerConfig):
         """

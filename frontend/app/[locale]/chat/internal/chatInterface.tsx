@@ -1275,17 +1275,10 @@ export function ChatInterface() {
   };
 
   // Handle message selection
-  const handleMessageSelect = (messageId: string) => {
-    if (messageId !== selectedMessageId) {
-      // If clicking on new message, set as selected and open right panel
-      setSelectedMessageId(messageId);
-      // Auto open right panel
-      setShowRightPanel(true);
-    } else {
-      // If clicking on already selected message, toggle panel state
-      toggleRightPanel();
-    }
-  };
+  const handleMessageSelect = useCallback((messageId: string) => {
+    setShowRightPanel(true);
+    setSelectedMessageId(messageId);
+  }, []);
 
   // Like/dislike handling
   const handleOpinionChange = async (

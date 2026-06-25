@@ -415,8 +415,9 @@ async def get_tool_from_remote_mcp_server(
                         input_schema["properties"][k]["type"] = "string"
 
                 sanitized_tool_name = _sanitize_function_name(tool.name)
+                tool_description = tool.description or ""
                 tool_info = ToolInfo(name=sanitized_tool_name,
-                                     description=tool.description,
+                                     description=tool_description,
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
@@ -782,6 +783,8 @@ def _validate_local_tool(
                 'embedding_model': embedding_model,
                 'rerank_model': rerank_model,
                 'display_name_to_index_map': display_name_to_index_map,
+                # Internal access control: restrict results to specific document paths (path_or_urls)
+                'document_paths': instantiation_params.get('document_paths'),
             }
             tool_instance = tool_class(**params)
         elif tool_name in ["dify_search", "datamate_search"]:
@@ -797,10 +800,12 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "haotian_search":
-            # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
-            # Must explicitly pass observer=None: if omitted, Python applies the FieldInfo default
-            # (not None), causing 'FieldInfo has no attr lang' errors in forward()
+        elif tool_name in ("haotian_search", "aidp_search"):
+            # Haotian and AIDP share the same instantiation shape: drop the
+            # backend-only rerank keys and explicitly set observer=None
+            # (otherwise Python falls back to the FieldInfo default, which
+            # later triggers "'FieldInfo' has no attribute 'lang'" in
+            # forward()).
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
@@ -810,7 +815,8 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-            image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            image_to_text_model = get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id)
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -827,7 +833,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id)
             model_display_name = getattr(
                 video_understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -844,7 +851,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            long_text_to_text_model = get_llm_model(tenant_id=tenant_id, model_id=selected_model_id)
             llm_display_name = getattr(
                 long_text_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)

@@ -8,6 +8,7 @@ from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, ConversationResponse, MessageRequest, MessageUnit
+from consts.exceptions import ConversationNotFoundError
 from database.conversation_db import (
     create_conversation,
     create_conversation_message,
@@ -126,7 +127,15 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                     # Parse image URL list
                     content_json = json.loads(unit_content)
                     if isinstance(content_json, dict) and 'images_url' in content_json:
+                        # Deduplicate image URLs before saving
+                        seen_urls = set()
+                        unique_urls = []
                         for image_url in content_json['images_url']:
+                            if image_url not in seen_urls:
+                                seen_urls.add(image_url)
+                                unique_urls.append(image_url)
+                        # Also deduplicate against any URLs already saved in this same message
+                        for image_url in unique_urls:
                             image_data = {'message_id': message_id, 'conversation_id': conversation_id,
                                           'image_url': image_url}
                             create_source_image(image_data)
@@ -226,7 +235,7 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
             message_list.append(message)
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2 + 1,
-                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=request.minio_files)
+                                      role=MESSAGE_ROLE["ASSISTANT"], message=message_list, minio_files=None)
     save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
 
 
@@ -298,7 +307,9 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     """
     success = rename_conversation(conversation_id, title, user_id)
     if not success:
-        raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
+        raise ConversationNotFoundError(
+            f"Conversation {conversation_id} does not exist or has been deleted"
+        )
     return success
 
 
@@ -456,13 +467,15 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 search_by_message[message_id] = []
             search_by_message[message_id].append(search_item)
 
-        # Collect image content - grouped by message_id
+        # Collect image content - grouped by message_id, with URL deduplication
         image_by_message = {}
         for record in history_data['image_records']:
             message_id = record['message_id']
             if message_id not in image_by_message:
                 image_by_message[message_id] = []
-            image_by_message[message_id].append(record['image_url'])
+            # Only add if not already present (by URL)
+            if record['image_url'] not in image_by_message[message_id]:
+                image_by_message[message_id].append(record['image_url'])
 
         # Sort by message index and build final message list, including images and search content
         messages = []

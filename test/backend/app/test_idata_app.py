@@ -5,6 +5,7 @@ Tests the FastAPI endpoints for iData knowledge space operations.
 """
 import sys
 import os
+import types
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -18,6 +19,57 @@ project_root = os.path.abspath(os.path.join(
 backend_dir = os.path.join(project_root, 'backend')
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
+
+# Stub the SDK modules used during import so tests do not load nexent.__init__ and
+# its optional runtime dependencies.
+nexent_module = types.ModuleType("nexent")
+nexent_module.__path__ = []
+nexent_storage_module = types.ModuleType("nexent.storage")
+nexent_storage_module.__path__ = []
+nexent_storage_factory_module = types.ModuleType("nexent.storage.storage_client_factory")
+nexent_minio_config_module = types.ModuleType("nexent.storage.minio_config")
+nexent_utils_module = types.ModuleType("nexent.utils")
+nexent_utils_module.__path__ = []
+nexent_http_client_manager_module = types.ModuleType("nexent.utils.http_client_manager")
+
+
+class MockMinIOStorageConfig:
+    def __init__(self, *args, **kwargs):
+        self.default_bucket = kwargs.get("default_bucket")
+
+    def validate(self):
+        return None
+
+
+nexent_storage_factory_module.create_storage_client_from_config = MagicMock()
+nexent_storage_factory_module.MinIOStorageConfig = MockMinIOStorageConfig
+nexent_minio_config_module.MinIOStorageConfig = MockMinIOStorageConfig
+nexent_http_client_manager_module.http_client_manager = MagicMock()
+nexent_module.storage = nexent_storage_module
+nexent_module.utils = nexent_utils_module
+nexent_storage_module.storage_client_factory = nexent_storage_factory_module
+nexent_storage_module.minio_config = nexent_minio_config_module
+nexent_utils_module.http_client_manager = nexent_http_client_manager_module
+
+sys.modules["nexent"] = nexent_module
+sys.modules["nexent.storage"] = nexent_storage_module
+sys.modules["nexent.storage.storage_client_factory"] = nexent_storage_factory_module
+sys.modules["nexent.storage.minio_config"] = nexent_minio_config_module
+sys.modules["nexent.utils"] = nexent_utils_module
+sys.modules["nexent.utils.http_client_manager"] = nexent_http_client_manager_module
+
+backend_module = sys.modules.get("backend") or types.ModuleType("backend")
+backend_module.__path__ = [backend_dir]
+backend_database_module = types.ModuleType("backend.database")
+backend_database_module.__path__ = [os.path.join(backend_dir, "database")]
+backend_database_client_module = types.ModuleType("backend.database.client")
+backend_database_client_module.MinioClient = MagicMock()
+backend_module.database = backend_database_module
+backend_database_module.client = backend_database_client_module
+
+sys.modules["backend"] = backend_module
+sys.modules["backend.database"] = backend_database_module
+sys.modules["backend.database.client"] = backend_database_client_module
 
 # Mock the storage client factory BEFORE importing any backend modules that depend on it.
 # This prevents MinIO connection attempts during module import.
@@ -517,29 +569,17 @@ class TestIdataAppRouter:
     def test_routes_registered(self):
         """Test that all routes are registered."""
         app = _build_app()
-        routes = [route.path for route in app.routes]
+        paths = app.openapi()["paths"]
 
-        assert "/idata/knowledge-space" in routes
-        assert "/idata/datasets" in routes
+        assert "/idata/knowledge-space" in paths
+        assert "/idata/datasets" in paths
 
     def test_router_methods(self):
         """Test that routes have correct HTTP methods."""
         app = _build_app()
+        paths = app.openapi()["paths"]
 
-        # Find routes by path
-        knowledge_space_route = None
-        datasets_route = None
-
-        for route in app.routes:
-            if hasattr(route, 'path'):
-                if route.path == "/idata/knowledge-space":
-                    knowledge_space_route = route
-                elif route.path == "/idata/datasets":
-                    datasets_route = route
-
-        assert knowledge_space_route is not None
-        assert datasets_route is not None
-
-        # Check HTTP methods
-        assert "GET" in [method for method in knowledge_space_route.methods]
-        assert "GET" in [method for method in datasets_route.methods]
+        assert "/idata/knowledge-space" in paths
+        assert "/idata/datasets" in paths
+        assert "get" in paths["/idata/knowledge-space"]
+        assert "get" in paths["/idata/datasets"]

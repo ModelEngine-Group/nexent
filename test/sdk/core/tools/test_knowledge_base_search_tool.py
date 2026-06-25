@@ -118,9 +118,67 @@ vector_pkg.base = vector_base_mod
 smolagents_mod = types.ModuleType("smolagents")
 smolagents_tools_mod = types.ModuleType("smolagents.tools")
 
+
 class Tool:
+    """Mock Tool class that properly handles Pydantic Field definitions."""
+
     def __init__(self, *args, **kwargs):
-        pass
+        from pydantic.fields import FieldInfo
+
+        # Set all provided kwargs as instance attributes
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+        # For any Pydantic Field attributes defined in class hierarchy that weren't provided,
+        # extract their default values
+        for cls in type(self).__mro__:
+            if cls is Tool:
+                continue
+            if hasattr(cls, '__annotations__'):
+                for name, hint in cls.__annotations__.items():
+                    # Skip if already set from kwargs
+                    if name in self.__dict__:
+                        continue
+                    # Check if there's a class attribute that's a FieldInfo
+                    if hasattr(cls, name):
+                        value = getattr(cls, name)
+                        # Unwrap FieldInfo to get the default
+                        if isinstance(value, FieldInfo):
+                            # Handle default_factory
+                            if value.default_factory is not None:
+                                value = value.default_factory()
+                            else:
+                                value = value.default
+                        setattr(self, name, value)
+
+    def __setattr__(self, name, value):
+        from pydantic.fields import FieldInfo
+        # Unwrap FieldInfo when it's set after __init__ completes (not from kwargs)
+        if isinstance(value, FieldInfo):
+            # Check if this is a class-level default by looking at the class
+            for cls in type(self).__mro__:
+                if cls is Tool:
+                    continue
+                if hasattr(cls, name):
+                    class_attr = getattr(cls, name)
+                    if class_attr is value:
+                        # This is a class-level FieldInfo default, unwrap it
+                        if value.default_factory is not None:
+                            value = value.default_factory()
+                        else:
+                            value = value.default
+                        break
+            else:
+                # Not found in class hierarchy, unwrap it anyway
+                if value.default_factory is not None:
+                    value = value.default_factory()
+                else:
+                    value = value.default
+        self.__dict__[name] = value
+
+    def __repr__(self):
+        return f"<MockTool _internal_document_paths={getattr(self, '_internal_document_paths', 'MISSING')}>"
+
 
 smolagents_tools_mod.Tool = Tool
 smolagents_mod.tools = smolagents_tools_mod
@@ -497,15 +555,10 @@ class TestKnowledgeBaseSearchToolRerank:
             observer=mock_observer,
         )
 
-        # smolagents Tool doesn't properly handle Field defaults, so we check FieldInfo.default
-        try:
-            from pydantic import FieldInfo
-        except ImportError:
-            from pydantic.fields import FieldInfo
-        assert isinstance(tool.rerank, FieldInfo)
-        assert tool.rerank.default is False
-        assert tool.rerank_model_name.default == ""
-        assert tool.rerank_model.default is None
+        # Mock Tool properly unwraps Field defaults, so we check the actual values
+        assert tool.rerank is False
+        assert tool.rerank_model_name == ""
+        assert tool.rerank_model is None
 
     def test_forward_with_rerank_enabled(self, mock_observer, mock_vdb_core, mock_embedding_model, mocker):
         """Test forward method when rerank is enabled and model is provided."""
@@ -1516,3 +1569,295 @@ class TestFieldInfoDefaultFactory:
         call_kwargs = mock_vdb_core.hybrid_search.call_args[1]
         # top_k from default is 3, multiplied by RERANK_OVERSEARCH_MULTIPLIER
         assert call_kwargs["top_k"] == 3 * RERANK_OVERSEARCH_MULTIPLIER
+
+
+class TestDocumentPathsAccessControl:
+    """Tests for document_paths access control functionality."""
+
+    def _create_mock_formatted_results_with_paths(self, paths: list) -> list:
+        """Create mock search results in FORMATTED format for _filter_by_document_paths tests.
+
+        After search_hybrid processes VDB results, the path_or_url is at the top level.
+        """
+        results = []
+        for path in paths:
+            results.append({
+                "path_or_url": path,
+                "title": f"Document {path}",
+                "content": f"Content for {path}",
+                "filename": f"{path}.txt",
+                "source_type": "file",
+                "create_time": "2024-01-01T12:00:00Z",
+                "score": 0.9,
+                "index": "test_index"
+            })
+        return results
+
+    def _create_mock_vdb_results_with_paths(self, paths: list) -> list:
+        """Create mock search results in VDB format for forward() tests.
+
+        VDB returns results with a nested 'document' object.
+        """
+        results = []
+        for path in paths:
+            results.append({
+                "document": {
+                    "path_or_url": path,
+                    "title": f"Document {path}",
+                    "content": f"Content for {path}",
+                    "filename": f"{path}.txt",
+                    "source_type": "file",
+                    "create_time": "2024-01-01T12:00:00Z",
+                },
+                "score": 0.9,
+                "index": "test_index"
+            })
+        return results
+        return results
+
+    def test_filter_by_document_paths_allows_matching(self, mock_vdb_core, mock_embedding_model):
+        """Test that results with path_or_url in the allowed list are returned."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"],
+        )
+
+        results = self._create_mock_formatted_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
+        filtered = tool._filter_by_document_paths(results)
+
+        # Only doc1 and doc2 should be returned
+        assert len(filtered) == 2
+        assert all(r.get("path_or_url") in ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"] for r in filtered)
+
+    def test_filter_by_document_paths_rejects_non_matching(self, mock_vdb_core, mock_embedding_model):
+        """Test that results with path_or_url NOT in the allowed list are filtered out."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=["s3://bucket/doc1.txt"],
+        )
+
+        results = self._create_mock_formatted_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
+        filtered = tool._filter_by_document_paths(results)
+
+        # Only doc1 should be returned
+        assert len(filtered) == 1
+        assert filtered[0].get("path_or_url") == "s3://bucket/doc1.txt"
+
+    def test_filter_by_document_paths_empty_list_returns_all(self, mock_vdb_core, mock_embedding_model):
+        """Test that empty document_paths list returns all results."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=[],
+        )
+
+        results = self._create_mock_formatted_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
+        filtered = tool._filter_by_document_paths(results)
+
+        # All results should be returned
+        assert len(filtered) == 3
+
+    def test_filter_by_document_paths_none_returns_all(self, mock_vdb_core, mock_embedding_model):
+        """Test that None document_paths (no filter) returns all results."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+
+        results = self._create_mock_formatted_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
+        filtered = tool._filter_by_document_paths(results)
+
+        # All results should be returned
+        assert len(filtered) == 3
+
+    def test_filter_by_document_paths_results_missing_path(self, mock_vdb_core, mock_embedding_model):
+        """Test that results without path_or_url field are filtered out when filter is active."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=["s3://bucket/doc1.txt"],
+        )
+
+        results = self._create_mock_formatted_results_with_paths(["s3://bucket/doc1.txt"])
+        # Add a result without path_or_url (flat format, no nested document)
+        results.append({
+            "title": "No Path",
+            "content": "This document has no path_or_url",
+            "filename": "no_path.txt",
+            "source_type": "file",
+            "score": 0.8,
+            "index": "test_index"
+        })
+
+        filtered = tool._filter_by_document_paths(results)
+
+        # Only doc1 should be returned
+        assert len(filtered) == 1
+        assert filtered[0].get("path_or_url") == "s3://bucket/doc1.txt"
+
+    def test_set_document_paths_method(self, mock_vdb_core, mock_embedding_model):
+        """Test the set_document_paths method updates the internal filter."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+
+        # Initially no filter
+        results = self._create_mock_formatted_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"])
+        assert len(tool._filter_by_document_paths(results)) == 2
+
+        # Set document_paths filter
+        tool.set_document_paths(["s3://bucket/doc1.txt"])
+        filtered = tool._filter_by_document_paths(results)
+
+        # Only doc1 should be returned
+        assert len(filtered) == 1
+        assert filtered[0].get("path_or_url") == "s3://bucket/doc1.txt"
+
+    def test_forward_with_document_paths_filter(self, mock_vdb_core, mock_embedding_model, mock_observer):
+        """Test that forward method applies document_paths filter to search results."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            document_paths=["s3://bucket/doc1.txt"],
+            top_k=5,
+        )
+
+        # Mock VDB returns 3 results, but only 1 matches the filter
+        # VDB returns nested 'document' format
+        mock_results = self._create_mock_vdb_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        result = tool.forward("test query")
+        search_results = json.loads(result)
+
+        # Only doc1 should be in the result
+        assert len(search_results) == 1
+        assert search_results[0].get("url") == "s3://bucket/doc1.txt"
+
+    def test_forward_with_document_paths_filter_no_results_after_filter(self, mock_vdb_core, mock_embedding_model, mock_observer):
+        """Test that forward raises exception when all results are filtered out."""
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            observer=mock_observer,
+            document_paths=["s3://bucket/nonexistent.txt"],
+            top_k=5,
+        )
+
+        # Mock VDB returns 3 results, none match the filter
+        mock_results = self._create_mock_vdb_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
+        mock_vdb_core.hybrid_search.return_value = mock_results
+
+        # Should raise exception because after filtering, no results remain
+        with pytest.raises(Exception) as excinfo:
+            tool.forward("test query")
+
+        assert "No results found" in str(excinfo.value)
+
+    def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
+        """Filter should tolerate a FieldInfo default instead of a concrete list.
+
+        Regression: smolagents' Tool wrapper does not expand FieldInfo defaults for
+        parameters declared with `exclude=True`, so `self._internal_document_paths`
+        may arrive as a FieldInfo. The filter must unwrap it instead of failing with
+        `TypeError: argument of type 'FieldInfo' is not iterable`.
+        """
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        field_info_default = FieldInfo(default=["s3://bucket/doc1.txt"])
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+        # Simulate a FieldInfo being assigned directly (e.g. from smolagents wrapper).
+        tool._internal_document_paths = field_info_default
+
+        results = self._create_mock_formatted_results_with_paths(
+            ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+        )
+        filtered = tool._filter_by_document_paths(results)
+
+        assert len(filtered) == 1
+        assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"
+    def test_filter_by_document_paths_unwraps_fieldinfo_default_factory(self, mock_vdb_core, mock_embedding_model):
+        """Filter should tolerate a FieldInfo with default_factory."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        field_info_factory = FieldInfo(
+            default_factory=lambda: ["s3://bucket/doc2.txt"]
+        )
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+        tool._internal_document_paths = field_info_factory
+
+        results = self._create_mock_formatted_results_with_paths(
+            ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+        )
+        filtered = tool._filter_by_document_paths(results)
+
+        assert len(filtered) == 1
+        assert filtered[0]["path_or_url"] == "s3://bucket/doc2.txt"
+
+    def test_set_document_paths_unwraps_fieldinfo(self, mock_vdb_core, mock_embedding_model):
+        """set_document_paths should also accept FieldInfo input defensively."""
+        try:
+            from pydantic import FieldInfo
+        except ImportError:
+            from pydantic.fields import FieldInfo
+
+        tool = KnowledgeBaseSearchTool(
+            index_names=["kb1"],
+            search_mode="hybrid",
+            vdb_core=mock_vdb_core,
+            embedding_model=mock_embedding_model,
+            document_paths=None,
+        )
+
+        field_info = FieldInfo(default=["s3://bucket/doc1.txt"])
+        tool.set_document_paths(field_info)
+
+        results = self._create_mock_formatted_results_with_paths(
+            ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+        )
+        filtered = tool._filter_by_document_paths(results)
+
+        assert len(filtered) == 1
+        assert filtered[0]["path_or_url"] == "s3://bucket/doc1.txt"

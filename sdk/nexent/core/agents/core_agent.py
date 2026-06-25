@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_context import ContextManager
+from .agent_model import AgentVerificationConfig
+from .verification import VerificationController, VerificationResult
 from ..utils.token_estimation import msg_token_count
 
 def parse_code_blobs(text: str) -> str:
@@ -213,9 +215,24 @@ def _build_final_answer_messages(task: str, agent_prompt_templates: Dict[str, An
 
 
 class CoreAgent(CodeAgent):
-    def __init__(self, observer: MessageObserver, prompt_templates: Dict[str, Any] | None = None, *args, **kwargs):
+    def __init__(
+        self,
+        observer: MessageObserver,
+        prompt_templates: Dict[str, Any] | None = None,
+        verification_config: AgentVerificationConfig | None = None,
+        *args,
+        **kwargs
+    ):
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.observer = observer
+        self.verification_config = verification_config or AgentVerificationConfig(enabled=False)
+        self.verification_controller = VerificationController(
+            config=self.verification_config,
+            observer=observer,
+            agent_name=self.agent_name,
+            model=self.model,
+            logger=self.logger,
+        )
         self.stop_event = threading.Event()
         self._history_step_count = 0  # For ContextManager, record boundary for compression
         self.context_manager: ContextManager = None
@@ -226,6 +243,78 @@ class CoreAgent(CodeAgent):
         # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
         # identifiers; omitting "python" and "py" ensures ```python blocks are not extracted.
         self.code_block_tags = ["", ""]
+
+    def _verification_tool_names(self) -> List[str]:
+        names = set()
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                names.update(str(name) for name in container.keys())
+            except AttributeError:
+                continue
+        names.add("final_answer")
+        return sorted(names)
+
+    def _append_verification_feedback(self, action_step: ActionStep, result: VerificationResult) -> None:
+        feedback = self.verification_controller.build_feedback_observation(result)
+        if action_step.observations:
+            action_step.observations += feedback
+        else:
+            action_step.observations = feedback
+
+    def _build_verification_memory_summary(
+        self,
+        current_step: ActionStep | None = None,
+        max_chars: int = 8000,
+    ) -> str:
+        summaries = []
+        steps = list(self.memory.steps[-8:])
+        if current_step is not None:
+            steps.append(current_step)
+        for step in steps:
+            if isinstance(step, TaskStep):
+                summaries.append(f"Task: {truncate_content(str(step.task), max_length=1200)}")
+            elif isinstance(step, ActionStep):
+                code = truncate_content(str(getattr(step, "code_action", "") or ""), max_length=1200)
+                observations = truncate_content(str(getattr(step, "observations", "") or ""), max_length=1800)
+                output = truncate_content(str(getattr(step, "action_output", "") or ""), max_length=1200)
+                summaries.append(
+                    f"Step {getattr(step, 'step_number', '?')}:\n"
+                    f"Code: {code}\n"
+                    f"Observation: {observations}\n"
+                    f"Output: {output}"
+                )
+        return truncate_content("\n\n".join(summaries), max_length=max_chars)
+
+    def _finalize_failed_verification_candidate(
+        self,
+        action_step: ActionStep,
+        verification_result: VerificationResult,
+        verification_round: int,
+        max_rounds: int,
+        candidate_answer: Any,
+    ) -> tuple[bool, Any]:
+        if verification_round < max_rounds:
+            verification_result.phase = "repair"
+            self.verification_controller.emit(
+                verification_result,
+                verification_round,
+            )
+            self._append_verification_feedback(action_step, verification_result)
+            action_step.is_final_answer = False
+            return False, None
+
+        verification_result.phase = "final_fail"
+        self.verification_controller.emit(
+            verification_result,
+            verification_round,
+        )
+        controlled_answer = self.verification_controller.build_controlled_failure_answer(
+            candidate_answer,
+            verification_result,
+        )
+        action_step.is_final_answer = True
+        action_step.action_output = controlled_answer
+        return True, controlled_answer
 
     def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
         """
@@ -349,7 +438,22 @@ Additional Args:
             # Record parsing results
             self.observer.add_message(
                 self.agent_name, ProcessType.PARSE, code_action)
+            verification_controller = getattr(self, "verification_controller", None)
+            if verification_controller:
+                precheck = verification_controller.verify_before_tool_call(
+                    code_action=code_action,
+                    step_number=memory_step.step_number,
+                    available_tool_names=self._verification_tool_names(),
+                )
+                if not precheck.passed and precheck.severity == "blocking":
+                    self._append_verification_feedback(memory_step, precheck)
+                    raise AgentExecutionError(
+                        precheck.repair_instruction or precheck.user_visible_note or "Action failed verification.",
+                        self.logger,
+                    )
 
+        except AgentExecutionError:
+            raise
         except Exception:
             self.logger.log_markdown(
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
@@ -431,6 +535,23 @@ Additional Args:
             observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
 
+        verification_controller = getattr(self, "verification_controller", None)
+        if verification_controller:
+            postcheck = verification_controller.verify_after_tool_call(
+                code_action=code_action,
+                observation=memory_step.observations,
+                step_number=memory_step.step_number,
+                is_final_answer=bool(code_output.is_final_answer),
+            )
+            if not postcheck.passed and postcheck.severity == "blocking":
+                self._append_verification_feedback(memory_step, postcheck)
+                raise AgentExecutionError(
+                    postcheck.repair_instruction or postcheck.user_visible_note or "Action result failed verification.",
+                    self.logger,
+                )
+            if postcheck.severity == "warning":
+                self._append_verification_feedback(memory_step, postcheck)
+
         # Pre-truncate observations when ContextManager is enabled. Keeps the
         # head + tail of long outputs around a truncation marker so downstream
         # compression sees bounded-length step records and the model can still
@@ -491,7 +612,12 @@ You have been provided with these additional arguments, that you can access usin
 {str(additional_args)}."""
 
         system_prompt_content = self.system_prompt
-        if self.context_manager and self.context_manager.get_registered_components():
+        registered = self.context_manager.get_registered_components() if self.context_manager else []
+        if registered:
+            self.logger.log(
+                f"ContextManager component path active: "
+                f"{[f'{c.component_type}(priority={c.priority},tokens={c.token_estimate})' for c in registered]}"
+            )
             component_messages = self.context_manager.build_system_prompt()
             if component_messages:
                 system_prompt_content = "\n\n".join(
@@ -602,6 +728,17 @@ You have been provided with these additional arguments, that you can access usin
         action_step = None
         self.step_number = 1
         returned_final_answer = False
+        final_verification_round = 0
+        verification_config = getattr(
+            self,
+            "verification_config",
+            AgentVerificationConfig(enabled=False),
+        )
+        max_final_verification_rounds = (
+            verification_config.max_final_rounds
+            if verification_config and verification_config.enabled
+            else 1
+        )
         while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
 
@@ -613,24 +750,73 @@ You have been provided with these additional arguments, that you can access usin
                     yield output
 
                 if isinstance(output, ActionOutput) and output.is_final_answer:
-                    final_answer = output.output
+                    candidate_answer = output.output
                     self.logger.log(
-                        Text(f"Final answer: {final_answer}", style=f"bold {YELLOW_HEX}"),
+                        Text(f"Final answer: {candidate_answer}", style=f"bold {YELLOW_HEX}"),
                         level=LogLevel.INFO,
                     )
 
-                    if self.final_answer_checks:
-                        self._validate_final_answer(final_answer)
-                    returned_final_answer = True
-                    action_step.is_final_answer = True
+                    if verification_config.enabled and verification_config.final_verification_enabled:
+                        final_verification_round += 1
+                        verification_result = self.verification_controller.verify_final_answer(
+                            task=task,
+                            candidate=candidate_answer,
+                            memory_summary=self._build_verification_memory_summary(action_step),
+                            round_number=final_verification_round,
+                        )
+                        if verification_result.passed:
+                            final_answer = candidate_answer
+                            if self.final_answer_checks:
+                                self._validate_final_answer(final_answer)
+                            returned_final_answer = True
+                            action_step.is_final_answer = True
+                        else:
+                            returned_final_answer, final_answer = self._finalize_failed_verification_candidate(
+                                action_step=action_step,
+                                verification_result=verification_result,
+                                verification_round=final_verification_round,
+                                max_rounds=max_final_verification_rounds,
+                                candidate_answer=candidate_answer,
+                            )
+                    else:
+                        final_answer = candidate_answer
+                        if self.final_answer_checks:
+                            self._validate_final_answer(final_answer)
+                        returned_final_answer = True
+                        action_step.is_final_answer = True
 
             except FinalAnswerError:
                 # When the model does not output code, directly treat the large model content as the final answer
-                final_answer = action_step.model_output
-                if isinstance(final_answer, str):
-                    final_answer = convert_code_format(final_answer)
-                returned_final_answer = True
-                action_step.is_final_answer = True
+                candidate_answer = action_step.model_output
+                if isinstance(candidate_answer, str):
+                    candidate_answer = convert_code_format(candidate_answer)
+
+                if verification_config.enabled and verification_config.final_verification_enabled:
+                    final_verification_round += 1
+                    verification_result = self.verification_controller.verify_final_answer(
+                        task=task,
+                        candidate=candidate_answer,
+                        memory_summary=self._build_verification_memory_summary(action_step),
+                        round_number=final_verification_round,
+                    )
+                    if verification_result.passed:
+                        final_answer = candidate_answer
+                        if self.final_answer_checks:
+                            self._validate_final_answer(final_answer)
+                        returned_final_answer = True
+                        action_step.is_final_answer = True
+                    else:
+                        returned_final_answer, final_answer = self._finalize_failed_verification_candidate(
+                            action_step=action_step,
+                            verification_result=verification_result,
+                            verification_round=final_verification_round,
+                            max_rounds=max_final_verification_rounds,
+                            candidate_answer=candidate_answer,
+                        )
+                else:
+                    final_answer = candidate_answer
+                    returned_final_answer = True
+                    action_step.is_final_answer = True
 
             except AgentError as e:
                 action_step.error = e
@@ -657,6 +843,19 @@ You have been provided with these additional arguments, that you can access usin
             # _handle_max_steps_reached already yields the final step internally
             # and sets action_step.error, so don't yield again to avoid duplicate error
             final_answer = self._handle_max_steps_reached(task)
+            if verification_config.enabled and verification_config.final_verification_enabled:
+                final_verification_round += 1
+                verification_result = self.verification_controller.verify_final_answer(
+                    task=task,
+                    candidate=final_answer,
+                    memory_summary=self._build_verification_memory_summary(),
+                    round_number=final_verification_round,
+                )
+                if not verification_result.passed:
+                    final_answer = self.verification_controller.build_controlled_failure_answer(
+                        final_answer,
+                        verification_result,
+                    )
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
 
 

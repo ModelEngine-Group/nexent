@@ -337,6 +337,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     is_new BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
     enable_context_manager BOOLEAN DEFAULT FALSE,
+    verification_config JSONB,
     version_no INTEGER DEFAULT 0 NOT NULL,
     current_version_no INTEGER NULL,
     ingroup_permission VARCHAR(30),
@@ -399,6 +400,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = dr
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to enable context management (compression) for this agent';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.verification_config IS 'Layered ReAct self-verification configuration';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.greeting_message IS 'Agent greeting message displayed on chat initial screen';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.example_questions IS 'List of example questions for starting a conversation with this agent';
 
@@ -910,7 +912,8 @@ CREATE TABLE IF NOT EXISTS nexent.role_permission_t (
     user_role VARCHAR(30) NOT NULL,
     permission_category VARCHAR(30),
     permission_type VARCHAR(30),
-    permission_subtype VARCHAR(30)
+    permission_subtype VARCHAR(30),
+    parent_key VARCHAR(50)
 );
 
 -- Add comments for role_permission_t table
@@ -920,14 +923,12 @@ COMMENT ON COLUMN nexent.role_permission_t.user_role IS 'User role: SU, ADMIN, D
 COMMENT ON COLUMN nexent.role_permission_t.permission_category IS 'Permission category';
 COMMENT ON COLUMN nexent.role_permission_t.permission_type IS 'Permission type';
 COMMENT ON COLUMN nexent.role_permission_t.permission_subtype IS 'Permission subtype';
+COMMENT ON COLUMN nexent.role_permission_t.parent_key IS 'Parent menu key for hierarchical menus, NULL for first-level menus';
 
 -- 6. Insert role permission data after clearing old data
 DELETE FROM nexent.role_permission_t;
 
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
-(1, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(2, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(3, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (4, 'SU', 'RESOURCE', 'AGENT', 'READ'),
 (5, 'SU', 'RESOURCE', 'AGENT', 'DELETE'),
 (6, 'SU', 'RESOURCE', 'KB', 'READ'),
@@ -965,19 +966,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (38, 'SU', 'RESOURCE', 'GROUP', 'READ'),
 (39, 'SU', 'RESOURCE', 'GROUP', 'UPDATE'),
 (40, 'SU', 'RESOURCE', 'GROUP', 'DELETE'),
-(41, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(42, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(43, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(44, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(45, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(46, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(47, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(48, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(49, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(50, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(51, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(52, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(53, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (54, 'ADMIN', 'RESOURCE', 'AGENT', 'CREATE'),
 (55, 'ADMIN', 'RESOURCE', 'AGENT', 'READ'),
 (56, 'ADMIN', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1016,18 +1004,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (89, 'ADMIN', 'RESOURCE', 'GROUP', 'READ'),
 (90, 'ADMIN', 'RESOURCE', 'GROUP', 'UPDATE'),
 (91, 'ADMIN', 'RESOURCE', 'GROUP', 'DELETE'),
-(92, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(93, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(94, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(95, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(96, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(97, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(98, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(99, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(100, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(101, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(102, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(103, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
 (104, 'DEV', 'RESOURCE', 'AGENT', 'CREATE'),
 (105, 'DEV', 'RESOURCE', 'AGENT', 'READ'),
 (106, 'DEV', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1053,10 +1029,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (126, 'DEV', 'RESOURCE', 'MODEL', 'READ'),
 (127, 'DEV', 'RESOURCE', 'TENANT.INFO', 'READ'),
 (128, 'DEV', 'RESOURCE', 'GROUP', 'READ'),
-(129, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(130, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(131, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(132, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
 (133, 'USER', 'RESOURCE', 'AGENT', 'READ'),
 (134, 'USER', 'RESOURCE', 'USER.ROLE', 'READ'),
 (135, 'USER', 'RESOURCE', 'MEM.SETTING', 'READ'),
@@ -1067,17 +1039,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (140, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
 (141, 'USER', 'RESOURCE', 'TENANT.INFO', 'READ'),
 (142, 'USER', 'RESOURCE', 'GROUP', 'READ'),
-(143, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(144, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(145, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(146, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(147, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(148, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(149, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(150, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(151, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(152, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(153, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
 (154, 'SPEED', 'RESOURCE', 'AGENT', 'CREATE'),
 (155, 'SPEED', 'RESOURCE', 'AGENT', 'READ'),
 (156, 'SPEED', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1108,6 +1069,86 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
 (187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE');
+
+-- SU Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1001, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1002, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage');
+
+-- ADMIN Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1101, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1102, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1103, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1104, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1105, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage'),
+(1106, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1107, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1108, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1109, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
+(1110, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1111, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1112, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1113, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+-- DEV Menus (NO /resource-manage, root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1201, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1202, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1203, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1204, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1205, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1206, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1207, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1208, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
+(1209, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1210, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1211, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1212, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+-- USER Menus (Minimal, all root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1301, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1302, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1303, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
+(1304, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users');
+
+-- SPEED Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1401, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1402, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1403, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1404, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1405, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-manage');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1406, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1407, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1408, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev'),
+(1409, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1410, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1411, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1412, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+-- ASSET_OWNER Menus (root level)
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
+(1501, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(1502, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(1503, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-dev'),
+(1504, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/resource-space'),
+(1505, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/owner-manage');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1506, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models', '/agent-dev'),
+(1507, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges', '/agent-dev'),
+(1508, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents', '/agent-dev');
+INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype, parent_key) VALUES
+(1509, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
+(1510, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
+(1511, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
@@ -1894,3 +1935,210 @@ COMMENT ON TABLE nexent.user_cas_session_t IS 'Server-side session records for C
 COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for revocation checks';
 COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
 COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';
+
+-- Rename params -> config_values, add config_schemas to ag_skill_info_t
+-- Add tenant_id column for multi-tenancy support
+ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
+
+-- Add config_values and config_schemas to ag_skill_info_t
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name   = 'ag_skill_info_t'
+          AND column_name  = 'params'
+    ) THEN
+        ALTER TABLE nexent.ag_skill_info_t RENAME COLUMN params TO config_values;
+    END IF;
+END $$;
+ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS config_schemas JSON;
+
+-- Comments for ag_skill_info_t columns
+COMMENT ON COLUMN nexent.ag_skill_info_t.tenant_id IS 'Tenant ID for multi-tenancy. NULL for pre-existing skills.';
+COMMENT ON COLUMN nexent.ag_skill_info_t.config_values IS 'Runtime parameter values from config/config.yaml';
+COMMENT ON COLUMN nexent.ag_skill_info_t.config_schemas IS 'Parameter metadata list from config/schema.yaml';
+
+-- Add config_values and config_schemas to ag_skill_instance_t
+ALTER TABLE nexent.ag_skill_instance_t ADD COLUMN IF NOT EXISTS config_values JSON;
+ALTER TABLE nexent.ag_skill_instance_t ADD COLUMN IF NOT EXISTS config_schemas JSON;
+
+-- Comments for ag_skill_instance_t columns
+COMMENT ON COLUMN nexent.ag_skill_instance_t.config_values IS 'Per-agent runtime parameter values from config/config.yaml';
+COMMENT ON COLUMN nexent.ag_skill_instance_t.config_schemas IS 'Per-agent parameter schema overrides from config/schema.yaml';
+
+-- Migration: ASSET_OWNER role permissions and invitation type comment
+-- Date: 2026-05-29
+-- Description: Add ASSET_OWNER role permissions, SU asset-owner invite permissions,
+--              update invitation code_type comment, and ensure ag_skill_info_t.tenant_id exists
+-- Source: commit 15cece97692db2372a978cbdf21b5d5316e79f30 (init.sql)
+
+SET search_path TO nexent;
+
+BEGIN;
+
+COMMENT ON COLUMN nexent.tenant_invitation_code_t.code_type IS
+    'Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE, ASSET_OWNER_INVITE';
+
+INSERT INTO nexent.role_permission_t
+    (role_permission_id, user_role, permission_category, permission_type, permission_subtype)
+VALUES
+    (188, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'CREATE'),
+    (189, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'READ'),
+    (190, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'UPDATE'),
+    (191, 'SU', 'RESOURCE', 'INVITE.ASSET_OWNER', 'DELETE'),
+    (192, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+    (193, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
+    (194, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
+    (195, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+    (196, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
+    (197, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
+    (198, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
+    (199, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'CREATE'),
+    (200, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'READ'),
+    (201, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'UPDATE'),
+    (202, 'ASSET_OWNER', 'RESOURCE', 'AGENT', 'DELETE'),
+    (203, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'CREATE'),
+    (204, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'READ'),
+    (205, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'UPDATE'),
+    (206, 'ASSET_OWNER', 'RESOURCE', 'SKILL', 'DELETE'),
+    (207, 'ASSET_OWNER', 'RESOURCE', 'KB', 'CREATE'),
+    (208, 'ASSET_OWNER', 'RESOURCE', 'KB', 'READ'),
+    (209, 'ASSET_OWNER', 'RESOURCE', 'KB', 'UPDATE'),
+    (210, 'ASSET_OWNER', 'RESOURCE', 'KB', 'DELETE'),
+    (211, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'CREATE'),
+    (212, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'READ'),
+    (213, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'UPDATE'),
+    (214, 'ASSET_OWNER', 'RESOURCE', 'MCP', 'DELETE'),
+    (215, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'CREATE'),
+    (216, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'READ'),
+    (217, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'UPDATE'),
+    (218, 'ASSET_OWNER', 'RESOURCE', 'MODEL', 'DELETE'),
+    (219, 'ASSET_OWNER', 'RESOURCE', 'USER.ROLE', 'READ'),
+    (220, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+    (221, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/asset-owner-resources')
+ON CONFLICT (role_permission_id) DO NOTHING;
+
+COMMIT;
+
+-- Migration: Add preserve_source_file to knowledge_record_t table
+-- Date: 2026-06-01
+-- Description: Whether to preserve uploaded source documents after vectorization (default: true)
+
+ALTER TABLE nexent.knowledge_record_t
+ADD COLUMN IF NOT EXISTS preserve_source_file BOOLEAN NOT NULL DEFAULT true;
+
+COMMENT ON COLUMN nexent.knowledge_record_t.preserve_source_file IS 'Whether to preserve uploaded source documents after vectorization';
+
+-- Migration: Add ag_agent_repository_t table
+-- Date: 2026-06-05
+-- Description: Agent marketplace repository for frozen shareable agent snapshots.
+
+SET search_path TO nexent;
+
+BEGIN;
+
+CREATE SEQUENCE IF NOT EXISTS nexent.ag_agent_repository_t_agent_repository_id_seq;
+
+CREATE TABLE IF NOT EXISTS nexent.ag_agent_repository_t (
+    agent_repository_id BIGINT NOT NULL DEFAULT nextval('nexent.ag_agent_repository_t_agent_repository_id_seq'),
+    publisher_tenant_id VARCHAR(100) NOT NULL,
+    publisher_user_id VARCHAR(100) NOT NULL,
+    agent_id INTEGER NOT NULL,
+    source_version_no INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    display_name VARCHAR(100),
+    description TEXT,
+    author VARCHAR(100),
+    category_id INTEGER,
+    tags TEXT[],
+    tool_count INTEGER,
+    version_label VARCHAR(100),
+    agent_info_json JSONB NOT NULL,
+    status VARCHAR(30) DEFAULT 'NOT_SHARED',
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    CONSTRAINT ag_agent_repository_t_pkey PRIMARY KEY (agent_repository_id)
+);
+
+ALTER SEQUENCE nexent.ag_agent_repository_t_agent_repository_id_seq
+    OWNED BY nexent.ag_agent_repository_t.agent_repository_id;
+
+ALTER TABLE nexent.ag_agent_repository_t OWNER TO root;
+
+COMMENT ON TABLE nexent.ag_agent_repository_t IS 'Agent marketplace repository for frozen shareable agent snapshots';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_repository_id IS 'Agent repository listing ID, unique primary key';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.publisher_tenant_id IS 'Publisher tenant ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.publisher_user_id IS 'Publisher user ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_id IS 'Root agent ID from ag_tenant_agent_t; upsert key with publisher_tenant_id';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.source_version_no IS 'Published version number frozen at share time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.name IS 'Root agent programmatic name for display and search';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.display_name IS 'Root agent display name';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.description IS 'Root agent description';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.author IS 'Agent author';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.category_id IS 'Optional marketplace category ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.tags IS 'Marketplace tags';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.tool_count IS 'Total tool count across all agents in the bundle (display only)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.version_label IS 'Repository entry version label for display (e.g. v1.0)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_info_json IS 'Frozen ExportAndImportDataFormat snapshot with optional skills';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.status IS 'Listing status: NOT_SHARED (未共享) / PENDING_REVIEW (待审核) / REJECTED (审核驳回) / SHARED (已共享)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.updated_by IS 'Updater ID';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.delete_flag IS 'Soft delete flag: Y/N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_repository_tenant_agent_active
+    ON nexent.ag_agent_repository_t (publisher_tenant_id, agent_id)
+    WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_publisher_delete
+    ON nexent.ag_agent_repository_t (publisher_tenant_id, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_status_delete
+    ON nexent.ag_agent_repository_t (status, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_name_delete
+    ON nexent.ag_agent_repository_t (name, delete_flag);
+
+CREATE INDEX IF NOT EXISTS idx_agent_repository_tags_gin
+    ON nexent.ag_agent_repository_t USING GIN (tags);
+
+CREATE OR REPLACE FUNCTION update_ag_agent_repository_update_time()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.update_time = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_ag_agent_repository_update_time() IS 'Auto-update update_time for ag_agent_repository_t';
+
+DROP TRIGGER IF EXISTS update_ag_agent_repository_update_time_trigger ON nexent.ag_agent_repository_t;
+CREATE TRIGGER update_ag_agent_repository_update_time_trigger
+BEFORE UPDATE ON nexent.ag_agent_repository_t
+FOR EACH ROW
+EXECUTE FUNCTION update_ag_agent_repository_update_time();
+
+COMMENT ON TRIGGER update_ag_agent_repository_update_time_trigger ON nexent.ag_agent_repository_t IS 'Trigger to maintain update_time';
+
+COMMIT;
+
+-- Migration: Add selected_agent_version_no to ag_agent_relation_t
+-- Date: 2026-06-09
+-- Description: Pin child agent version on parent-child relations at publish time.
+
+SET search_path TO nexent;
+
+BEGIN;
+
+ALTER TABLE nexent.ag_agent_relation_t
+    ADD COLUMN IF NOT EXISTS selected_agent_version_no INTEGER;
+
+COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_version_no IS
+    'Pinned version of selected_agent_id. NULL = use child current published version at runtime (legacy/draft).';
+
+COMMIT;
