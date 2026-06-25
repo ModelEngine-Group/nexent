@@ -112,7 +112,7 @@ export default function RepositoryMcpCard({
         </Tag>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
           <Download className="h-3.5 w-3.5 text-slate-400" />
           {installCount}
