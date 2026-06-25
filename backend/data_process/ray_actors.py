@@ -208,6 +208,16 @@ class DataProcessorRayActor:
             chunks, images_info = result
             return chunks or [], images_info or []
         return result or [], []
+    
+    def _convert_to_rgb(img: Image.Image) -> Image.Image:
+        """Convert images to RGB format uniformly"""
+        if img.mode == 'RGBA':
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[3])
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        return img
 
     def _append_image_chunks(
         self,
@@ -231,14 +241,8 @@ class DataProcessorRayActor:
             try:
                 # verify image size or dimension
                 img_obj = BytesIO(image_data["image_bytes"])
-                img = Image.open(img_obj)
                 # Convert RGBA to RGB if necessary
-                if img.mode == 'RGBA':
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    background.paste(img, mask=img.split()[3])
-                    img = background
-                elif img.mode != 'RGB':
-                    img = img.convert('RGB')
+                img = self._convert_to_rgb(Image.open(img_obj))
 
                 if img.width < 200 or img.height < 200:   
                     logger.info(
@@ -250,32 +254,34 @@ class DataProcessorRayActor:
                     file_name=f"{index}.{image_data['image_format']}",
                     prefix=MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET)
                 
-                if result.get("success"):
-                    image_url = build_s3_url(result.get("object_name", ""))
-                    image_data["source_file"] = source
-                    image_data["image_url"] = image_url
-
-                    chunks.append({
-                        "content": json.dumps({
-                            "source_file": source,
-                            "position": image_data["position"],
-                            "image_url": image_url,
-                        }),
-                        "filename": source,
-                        "metadata": {
-                            "chunk_index": len(chunks) + index,
-                            "process_source": "UniversalImageExtractor",
-                            "image_url": image_url,
-                        }
-                    })
-                else:
+                if not result.get("success"):
                     error_message = result.get("error") or "Upload failed"
                     logger.warning(
                         "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
                         f"{index}.{image_data['image_format']}",
                         filename,
                         error_message,
-                    )          
+                    )
+                    continue
+                
+                image_url = build_s3_url(result.get("object_name", ""))
+                image_data["source_file"] = source
+                image_data["image_url"] = image_url
+
+                chunks.append({
+                    "content": json.dumps({
+                        "source_file": source,
+                        "position": image_data["position"],
+                        "image_url": image_url,
+                    }),
+                    "filename": source,
+                    "metadata": {
+                        "chunk_index": len(chunks) + index,
+                        "process_source": "UniversalImageExtractor",
+                        "image_url": image_url,
+                    }
+                })
+         
             except Exception as exc:
                 logger.exception(
                     "Failed to upload image, image_name=%s  source_file_name=%s error=%s",

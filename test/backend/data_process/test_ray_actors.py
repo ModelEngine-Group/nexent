@@ -69,6 +69,7 @@ def stub_consts(monkeypatch):
     fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
     fake_consts_const.TABLE_TRANSFORMER_MODEL_PATH = "/models/table"
     fake_consts_const.UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = "/models/unstructured.json"
+    fake_consts_const.MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET = "mock-extracted-images-bucket"
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
     return fake_consts_const

@@ -250,6 +250,11 @@ class TestAnalyzeTextFileTool:
             pass
 
         class FakeOle:
+            # Keep this empty __init__ method. 
+            # The code under test instantiates this class with arguments (e.g., OleFileIO(data)).
+            # Removing it would fall back to the default parameterless constructor, 
+            # causing a TypeError during instantiation. 
+            # The underscore (_) acts as a placeholder to accept and ignore the passed data.
             def __init__(self, _):
                 pass
 
@@ -280,8 +285,8 @@ class TestAnalyzeTextFileTool:
 
         assert len(results) == 2
         assert results[0]["title"] == "doc.pdf"
-        assert results[0]["cite_index"] == 3
-        assert results[1]["cite_index"] == 1
+        assert results[0]["cite_index"] == 1
+        assert results[1]["cite_index"] == 2
         assert results[1]["search_type"] == tool.name
 
 

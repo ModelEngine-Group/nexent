@@ -1966,7 +1966,7 @@ class TestDataProcessService(unittest.TestCase):
         from consts.model import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[{
-                'source': 'http://example.com/doc1.pdf',
+                'source': 'http://example.com/doc1.pdf',  # NOSONAR
                 'source_type': 'url',
                 'chunking_strategy': 'semantic',
                 'index_name': 'test_index_1',
@@ -2108,7 +2108,7 @@ class TestDataProcessService(unittest.TestCase):
             chunking_strategy=chunking_strategy
         )
 
-        # Assert core call - matching the actual implementation
+        # 验证 file_process 被正确调用
         mock_instance.file_process.assert_called_once_with(
             file_data=file_bytes,
             filename=filename,
@@ -2123,7 +2123,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(result["filename"], filename)
         self.assertEqual(result["chunking_strategy"], chunking_strategy)
         self.assertEqual(result["chunks"], ["First chunk", "Second chunk"])
-        self.assertEqual(result["chunks_count"], 3)  # includes chunk without 'content'
+        self.assertEqual(result["text_chunks_count"], 2)
+        self.assertEqual(result["image_chunks_count"], 0)
         self.assertEqual(result["text"], "First chunk\nSecond chunk")
         self.assertEqual(result["text_length"], len("First chunk\nSecond chunk"))
 
@@ -2133,13 +2134,21 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_process_uploaded_text_file())
 
-    @patch('backend.services.data_process_service.upload_fileobj')
-    @patch('backend.services.data_process_service.build_s3_url')
+    @patch.object(DataProcessService, 'load_image', new_callable=AsyncMock)
     @patch('backend.services.data_process_service.DataProcessCore')
+    @patch('backend.services.data_process_service.build_s3_url')
+    @patch('backend.services.data_process_service.upload_fileobj')
     def test_process_uploaded_text_file_with_images_and_skipped_entries(
-        self, mock_data_process_core, mock_build_s3_url, mock_upload_fileobj
+        self, mock_upload_fileobj, mock_build_s3_url, mock_data_process_core, mock_load_image
     ):
         """Images are uploaded, described, and invalid image entries are skipped."""
+        # Mock load_image to return a valid image
+        mock_img = MagicMock()
+        mock_img.width = 300
+        mock_img.height = 300
+        mock_img.mode = 'RGB'
+        mock_load_image.return_value = mock_img
+
         mock_processor = MagicMock()
         mock_data_process_core.return_value = mock_processor
         mock_processor.file_process.return_value = (
@@ -2157,7 +2166,7 @@ class TestDataProcessService(unittest.TestCase):
                 },
             ],
         )
-        mock_upload_fileobj.return_value = {"object_name": "images/2.png"}
+        mock_upload_fileobj.return_value = {"success": True, "object_name": "images/2.png"}
         mock_build_s3_url.return_value = "s3://bucket/images/2.png"
 
         result = asyncio.run(
@@ -2166,16 +2175,24 @@ class TestDataProcessService(unittest.TestCase):
             )
         )
 
+        # Assertions
         self.assertTrue(result["success"])
         self.assertIn("text chunk", result["text"])
         self.assertIn("Image information for sample.docx", result["text"])
+        
+        # Check images_info
         self.assertEqual(result["images_info"][0], ["s3://bucket/images/2.png"])
         self.assertEqual(len(result["images_info"][1]), 1)
         self.assertEqual(result["images_info"][1][0]["page"], 2)
-        self.assertEqual(result["chunks_count"], 5)
+        self.assertEqual(result["text_chunks_count"], 2)
+        self.assertEqual(result["image_chunks_count"], 3)
+        self.assertEqual(len(result["chunks"]), 2)
+        
+        # Verify mocks
         mock_upload_fileobj.assert_called_once()
         mock_build_s3_url.assert_called_once_with("images/2.png")
-
+        mock_load_image.assert_called_once()
+        
     def test_convert_celery_states_to_custom(self):
         """
         Minimal branch coverage for convert_celery_states_to_custom.
