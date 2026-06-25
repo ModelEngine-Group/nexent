@@ -209,7 +209,7 @@ class DataProcessorRayActor:
             return chunks or [], images_info or []
         return result or [], []
     
-    def _convert_to_rgb(img: Image.Image) -> Image.Image:
+    def _convert_to_rgb(self, img: Image.Image) -> Image.Image:
         """Convert images to RGB format uniformly"""
         if img.mode == 'RGBA':
             background = Image.new('RGB', img.size, (255, 255, 255))
