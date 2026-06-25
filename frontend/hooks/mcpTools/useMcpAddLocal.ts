@@ -11,7 +11,7 @@ import {
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
-import { McpSource, McpTransportType } from "@/const/mcpTools";
+import { McpDeploymentType, McpSource } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
@@ -37,7 +37,8 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return false;
     }
 
-    const isContainer = draft.transportType === McpTransportType.CONTAINER;
+    const isContainer = draft.deploymentType === McpDeploymentType.CONTAINER;
+    const isApi = draft.deploymentType === McpDeploymentType.API;
     if (isContainer) {
       const available = await checkContainerPortAvailable(draft.containerPort);
       if (!available) {
@@ -55,6 +56,22 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
         customHeaders = JSON.parse(draft.customHeaders.trim());
       } catch {
         message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return false;
+      }
+    }
+
+    // Parse OpenAPI JSON for API type
+    let configJson: Record<string, unknown> | undefined;
+    if (isApi) {
+      const raw = (draft.openApiJson ?? "").trim();
+      if (!raw) {
+        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
+        return false;
+      }
+      try {
+        configJson = JSON.parse(raw);
+      } catch {
+        message.error(t("mcpConfig.openApiToMcp.message.invalidJson"));
         return false;
       }
     }
@@ -85,6 +102,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken?.trim() || undefined,
           custom_headers: customHeaders,
+          config_json: configJson,
           tags: draft.tags,
         });
       }

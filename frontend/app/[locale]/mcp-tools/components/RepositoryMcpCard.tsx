@@ -1,9 +1,8 @@
 import { Button, Dropdown, Tag, type MenuProps } from "antd";
-import { Circle, Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import {
-  formatRegistryVersion,
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
@@ -113,17 +112,11 @@ export default function RepositoryMcpCard({
         </Tag>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
+      <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
         <span className="inline-flex items-center gap-1">
-          <Circle className="h-3 w-3 fill-blue-500 text-white" />
-          {formatRegistryVersion(service.version || "")}
+          <Download className="h-3.5 w-3.5 text-slate-400" />
+          {installCount}
         </span>
-        <div className="ml-auto flex items-center gap-4">
-          <span className="inline-flex items-center gap-1">
-            <Download className="h-3.5 w-3.5 text-slate-400" />
-            {installCount}
-          </span>
-        </div>
       </div>
 
       <div className="mt-auto grid grid-cols-2 gap-2 pt-4">

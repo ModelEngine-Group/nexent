@@ -1195,6 +1195,7 @@ class AddMcpServiceRequest(BaseModel):
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")
+    config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)")
     version: Optional[str] = Field(None, description="MCP version")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
     enabled: Optional[bool] = Field(default=False, description="Whether the MCP is enabled after creation")

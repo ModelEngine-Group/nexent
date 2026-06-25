@@ -18,7 +18,8 @@
       "Bash(docker rm *)",
       "Bash(npm *)",
       "Bash(git diff *)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(npx next *)"
     ]
   }
 }

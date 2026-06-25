@@ -196,6 +196,7 @@ export interface AddMcpServicePayload {
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
+  config_json?: Record<string, unknown>;
   version?: string;
   registry_json?: Record<string, unknown>;
 }
@@ -245,10 +246,12 @@ export interface McpContainerConfigPayload {
 export interface LocalAddMcpDraft {
   name: string;
   description?: string;
+  deploymentType?: McpDeploymentType;
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
   customHeaders?: string;
+  openApiJson?: string;
   containerConfigJson: string;
   containerPort?: number;
   tags: string[];

@@ -35,10 +35,12 @@ const DEPLOYMENT_OPTIONS = [
 const createInitialDraft = (): LocalAddMcpDraft => ({
   name: "",
   description: "",
+  deploymentType: McpDeploymentType.REMOTE_LINK,
   transportType: McpTransportType.URL,
   serverUrl: "",
   authorizationToken: "",
   customHeaders: "",
+  openApiJson: "",
   containerConfigJson: "",
   containerPort: undefined,
   tags: [],
@@ -110,8 +112,8 @@ export default function AddMcpServiceLocalSection({
 
   const isRemoteLink = deploymentType === McpDeploymentType.REMOTE_LINK;
   const isContainer = deploymentType === McpDeploymentType.CONTAINER;
+  const isApi = deploymentType === McpDeploymentType.API;
   const isUnsupported =
-    deploymentType === McpDeploymentType.API ||
     deploymentType === McpDeploymentType.LOCAL_IMAGE;
 
   return (
@@ -140,7 +142,7 @@ export default function AddMcpServiceLocalSection({
                       value === McpDeploymentType.CONTAINER
                         ? McpTransportType.CONTAINER
                         : McpTransportType.URL;
-                    patchDraft({ transportType: nextTransport });
+                    patchDraft({ deploymentType: value, transportType: nextTransport });
                     form.setFieldValue("transportType", nextTransport);
                   }}
                   className={`flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm transition ${
@@ -267,6 +269,56 @@ export default function AddMcpServiceLocalSection({
                   />
                 </div>
               </Form.Item>
+            </div>
+          </div>
+        ) : null}
+
+        {isApi ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              {t("mcpTools.detail.serviceConfigTitle")}
+            </label>
+            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-normal text-slate-500">
+                  {t("mcpTools.addModal.serverUrl")}
+                </label>
+                <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0">
+                  <Input
+                    {...bindField("serverUrl")}
+                    className="w-full rounded-md"
+                    placeholder={t("mcpTools.addModal.serverUrl")}
+                  />
+                </Form.Item>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-normal text-slate-500">
+                  {t("mcpConfig.addServer.customHeaders")}
+                </label>
+                <Form.Item name="customHeaders" className="mb-0">
+                  <Input.TextArea
+                    {...bindField("customHeaders")}
+                    rows={2}
+                    className="w-full rounded-md"
+                    placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                  />
+                </Form.Item>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-normal text-slate-500">
+                  {t("mcpConfig.openapiService.form.openapiJson")}
+                </label>
+                <Form.Item name="openApiJson" className="mb-0">
+                  <Input.TextArea
+                    {...bindField("openApiJson")}
+                    rows={6}
+                    className="w-full rounded-md"
+                    placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                  />
+                </Form.Item>
+              </div>
             </div>
           </div>
         ) : null}

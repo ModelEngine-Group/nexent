@@ -6,7 +6,6 @@ import {
   mcpToolsModalChromeStyles,
 } from "@/const/mcpTools";
 import {
-  formatRegistryVersion,
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
@@ -98,14 +97,10 @@ export default function RepositoryMcpDetailModal({
 
         {/* Stats gray box */}
         <div className="mx-6 mb-5 rounded-xl bg-slate-50 border border-slate-200 px-6 py-5">
-          <div className="grid grid-cols-3 gap-y-5">
+          <div className="grid grid-cols-2 gap-y-5">
             <StatItem
               label={t("mcpTools.deploymentType.label")}
               value={deploymentLabel}
-            />
-            <StatItem
-              label={t("mcpTools.repository.version")}
-              value={formatRegistryVersion(service.version || "")}
             />
             <StatItem
               label={t("mcpTools.detail.tools")}

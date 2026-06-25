@@ -1,11 +1,10 @@
 import { Button, Dropdown, Tag, type MenuProps } from "antd";
-import { ArrowDownFromLine, CheckCircle, Circle, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, Upload, User } from "lucide-react";
+import { ArrowDownFromLine, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, Upload, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import {
   formatRegistryDate,
-  formatRegistryVersion,
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
@@ -18,7 +17,6 @@ export type MineMcpCardItem =
 interface MineMcpServiceCardProps {
   item: MineMcpCardItem;
   onlineService?: CommunityMcpCard;
-  onlineVersion?: string;
   toggling?: boolean;
   publishing?: boolean;
   unpublishing?: boolean;
@@ -40,7 +38,6 @@ interface MineMcpServiceCardProps {
 export default function MineMcpServiceCard({
   item,
   onlineService,
-  onlineVersion,
   toggling,
   publishing,
   unpublishing,
@@ -65,11 +62,6 @@ export default function MineMcpServiceCard({
   const isInRepository = isLocal
     ? Boolean(localService?.isListedInRepository) && onlineService?.reviewStatus === "approved"
     : reviewStatus === "approved";
-  const currentVersion = formatRegistryVersion(service.version || "");
-  const syncedOnlineVersion = formatRegistryVersion(
-    onlineVersion ||
-      (item.kind === "community" ? item.service.version || "" : "")
-  );
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
 
@@ -226,16 +218,6 @@ export default function MineMcpServiceCard({
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
-        <span className="inline-flex items-center gap-1">
-          <Circle className="h-3 w-3 fill-blue-500 text-white" />
-          {t("mcpTools.mine.currentVersion")}{currentVersion}
-        </span>
-        {isInRepository && syncedOnlineVersion !== "-" ? (
-          <span className="inline-flex items-center gap-1 text-green-600">
-            <CheckCircle className="h-3.5 w-3.5" />
-            {t("mcpTools.mine.onlineVersion")}{syncedOnlineVersion}
-          </span>
-        ) : null}
         <span className="inline-flex items-center gap-1">
           <Clock className="h-3.5 w-3.5 text-slate-400" />
           {updatedAt}

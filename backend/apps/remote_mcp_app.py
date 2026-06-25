@@ -125,6 +125,7 @@ async def add_mcp_service_endpoint(
             custom_headers=payload.custom_headers,
             container_config=payload.container_config,
             registry_json=payload.registry_json,
+            config_json=payload.config_json,
             version=payload.version,
             market_id=payload.market_id,
             enabled=payload.enabled if payload.enabled is not None else False,

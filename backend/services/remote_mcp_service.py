@@ -233,6 +233,7 @@ async def add_mcp_service(
     custom_headers: dict | None = None,
     container_config: dict | None,
     registry_json: dict | None,
+    config_json: dict | None = None,
     version: str | None = None,
     market_id: int | None = None,
     enabled: bool = False,
@@ -253,6 +254,7 @@ async def add_mcp_service(
         custom_headers: Custom HTTP headers
         container_config: Container configuration
         registry_json: Registry metadata JSON
+        config_json: MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)
         version: MCP version
         market_id: Linked market record ID
         enabled: Whether the MCP is enabled
@@ -262,7 +264,7 @@ async def add_mcp_service(
     status: bool | None = None
     normalized_container_id = container_id if isinstance(container_id, str) and container_id else None
     is_container = container_id is not None or container_config is not None
-    config_json = container_config if is_container and isinstance(container_config, dict) else None
+    resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
 
     if enabled:
         if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
@@ -290,7 +292,7 @@ async def add_mcp_service(
             "enabled": enabled,
             "tags": tags,
             "description": description,
-            "config_json": config_json,
+            "config_json": resolved_config_json,
         },
         tenant_id=tenant_id,
         user_id=user_id,
