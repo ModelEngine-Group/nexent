@@ -2,6 +2,33 @@
 -- Required for: upgraded deployments with existing model_record_t rows.
 -- Safe to skip when: fresh deployment, or operators will manually fill capacity fields.
 -- Reason: improves legacy model capacity completeness and reconciles the temporary max_tokens alias.
+--
+-- ------------------------------------------------------------
+-- Pre-run self-check (recommended before applying)
+-- ------------------------------------------------------------
+-- The reconcile block at the bottom of this file rewrites `max_tokens` to
+-- match the freshly backfilled `max_output_tokens`. If an operator
+-- previously tightened `max_tokens` below the catalog value on a row this
+-- migration touches (cost control, prompt-budget caps, etc.), that tighter
+-- value will be overwritten with the catalog value.
+--
+-- Run this query first to surface any such rows:
+--
+--   SELECT model_id, model_name, model_factory, max_tokens, max_output_tokens
+--     FROM nexent.model_record_t
+--    WHERE delete_flag = 'N'
+--      AND max_tokens IS NOT NULL
+--      AND (
+--        (LOWER(model_factory)='openai'    AND model_name IN ('gpt-4o','gpt-4.1'))
+--        OR (LOWER(model_factory)='dashscope' AND model_name IN ('qwen-plus','qwen-turbo','qwen3.7-max','glm-5.1'))
+--        OR (LOWER(model_factory)='silicon'  AND model_name IN ('Qwen/Qwen3.6-27B','Pro/moonshotai/Kimi-K2.6'))
+--        OR (LOWER(model_factory)='deepseek' AND model_name IN ('deepseek-v4-flash','deepseek-v4-pro'))
+--      );
+--
+-- If the result is empty: safe to apply the whole file.
+-- If the result has rows the operator deliberately tightened: run only the
+-- first `DO $$` block (catalog backfill) and skip the second (reconcile),
+-- or back up the affected rows before applying.
 
 -- ============================================================
 -- Backfill capacity columns on legacy model_record_t rows
