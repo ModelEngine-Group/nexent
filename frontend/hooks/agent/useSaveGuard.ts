@@ -223,6 +223,7 @@ export const useSaveGuard = () => {
 
         // Mark as saved (this will sync editedAgent to baselineAgent)
         useAgentConfigStore.getState().markAsSaved();
+        return true;
       } else {
         message.error(result.message || t("businessLogic.config.error.saveFailed") );
         return false;
