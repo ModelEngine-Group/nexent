@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, Sequence
 
 
+_UNCONFIGURED_RUNTIME_ERROR = "CoreAgent requires a context runtime from the agent factory"
+
+
 @dataclass(frozen=True)
 class ContextEvidence:
     selected_component_types: tuple[str, ...] = ()
@@ -75,16 +78,16 @@ class UnconfiguredContextRuntime:
     context_manager = None
 
     def prepare_run(self, *, memory: Any, fallback_system_prompt: str) -> None:
-        raise RuntimeError("CoreAgent requires a context runtime from the agent factory")
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def prepare_step(self, **kwargs: Any) -> FinalContext:
-        raise RuntimeError("CoreAgent requires a context runtime from the agent factory")
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def prepare_final_answer(self, **kwargs: Any) -> FinalContext:
-        raise RuntimeError("CoreAgent requires a context runtime from the agent factory")
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def truncate_observation(self, memory_step: Any) -> None:
-        raise RuntimeError("CoreAgent requires a context runtime from the agent factory")
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def compression_stats(self) -> dict:
         return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}

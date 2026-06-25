@@ -37,6 +37,7 @@ logger = logging.getLogger("openai_llm")
 
 
 class OpenAIModel(OpenAIServerModel):
+    # Public SDK constructor: keep the explicit kwargs for backward-compatible call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
 ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
@@ -46,7 +47,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
                  safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
                  capacity_snapshot: Optional[Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
-                 prompt_cache: Optional[Dict[str, Any]] = None, *args, **kwargs):
+                 prompt_cache: Optional[Dict[str, Any]] = None, *args, **kwargs):  # NOSONAR
         """
         Initialize OpenAI Model with observer and SSL verification option.
 

@@ -148,6 +148,8 @@ def _build_token_estimation_stub() -> ModuleType:
 
 # ── 3. Register stub package hierarchy ───────────────────────
 
+_CONTEXT_RUNTIME_PACKAGE = "sdk.nexent.core.context_runtime"
+
 def _register_stub_packages():
     """Create empty parent ModuleType entries so the dotted import chain resolves."""
     for name in [
@@ -155,7 +157,7 @@ def _register_stub_packages():
         "sdk.nexent",
         "sdk.nexent.core",
         "sdk.nexent.core.agents",
-        "sdk.nexent.core.context_runtime",
+        _CONTEXT_RUNTIME_PACKAGE,
         "sdk.nexent.core.utils",
         "sdk.nexent.core.utils.observer",
         "sdk.nexent.core.agents.a2a_agent_proxy",
@@ -167,7 +169,7 @@ def _register_stub_packages():
                 "sdk.nexent",
                 "sdk.nexent.core",
                 "sdk.nexent.core.agents",
-                "sdk.nexent.core.context_runtime",
+                _CONTEXT_RUNTIME_PACKAGE,
                 "sdk.nexent.core.utils",
             }:
                 m.__path__ = []
@@ -214,13 +216,13 @@ def _locate_core_module(relative_path: str) -> str:
 
 def _load_context_runtime_contracts():
     """Load context_runtime.contracts before agent_context.py imports it."""
-    full_name = "sdk.nexent.core.context_runtime.contracts"
+    full_name = f"{_CONTEXT_RUNTIME_PACKAGE}.contracts"
     if full_name in sys.modules:
         return sys.modules[full_name]
     target = _locate_core_module("context_runtime/contracts.py")
     spec = importlib.util.spec_from_file_location(full_name, target)
     module = importlib.util.module_from_spec(spec)
-    module.__package__ = "sdk.nexent.core.context_runtime"
+    module.__package__ = _CONTEXT_RUNTIME_PACKAGE
     sys.modules[full_name] = module
     spec.loader.exec_module(module)
     return module

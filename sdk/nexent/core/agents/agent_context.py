@@ -1440,7 +1440,7 @@ class ContextManager:
                 dynamic_message_count=len(messages) - len(stable_messages),
                 compression_records=tuple(self._step_local_log or ()),
                 stable_prefix_fingerprint=fingerprint,
-                prefix_change_reasons=reasons,
+                prefix_change_reasons=tuple(reasons),
             ),
         )
 
@@ -1487,7 +1487,7 @@ class ContextManager:
     @staticmethod
     def _canonical_tools(tools: Sequence[Any]) -> List[Any]:
         return sorted(
-            list(tools),
+            tools,
             key=lambda tool: json.dumps(
                 ContextManager._normalize_for_fingerprint(tool),
                 sort_keys=True,
@@ -1552,18 +1552,18 @@ class ContextManager:
 
     def _change_reasons(
         self, current: str, component_fingerprints: Dict[str, str]
-    ) -> Tuple[str, ...]:
+    ) -> List[str]:
         if self._previous_stable_fingerprint is None:
-            return ("initial_request",)
+            return ["initial_request"]
         if self._previous_stable_fingerprint == current:
-            return ()
+            return []
         if self._previous_stable_components.get("tools") != component_fingerprints.get("tools"):
-            return ("tool_schema_version",)
+            return ["tool_schema_version"]
         if self._previous_stable_components.get("purpose") != component_fingerprints.get("purpose"):
-            return ("context_purpose",)
+            return ["context_purpose"]
         if self._previous_stable_components != component_fingerprints:
-            return ("system_prompt_version",)
-        return ("unexpected_nondeterminism",)
+            return ["system_prompt_version"]
+        return ["unexpected_nondeterminism"]
 
     # ============================================================
     #  Context Component Management

@@ -24,6 +24,7 @@ class LegacyContextRuntime:
         current_run_start_idx: int,
         tools: Sequence[Any] | None = None,
     ) -> FinalContext:
+        del model, current_run_start_idx
         messages = self._messages_from_memory(memory)
         return FinalContext(
             messages=messages,
@@ -41,6 +42,7 @@ class LegacyContextRuntime:
         final_answer_templates: dict,
         tools: Sequence[Any] | None = None,
     ) -> FinalContext:
+        del model, current_run_start_idx
         from jinja2 import StrictUndefined, Template
         from smolagents.models import ChatMessage, MessageRole
 
@@ -72,6 +74,7 @@ class LegacyContextRuntime:
         )
 
     def truncate_observation(self, memory_step: Any) -> None:
+        del memory_step
         return None
 
     @staticmethod
