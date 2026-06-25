@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import List, Dict, Any, Optional
 
 from consts.const import (
@@ -73,6 +74,16 @@ try:
     )
 except Exception:  # pragma: no cover - OTel is optional at runtime
     _capacity_suggestion_coverage_errors_total = None
+
+
+# Per-process dedup for the warning log emitted when the catalog-matcher
+# raises during /capacity-coverage. The OTel counter still increments per
+# failure (no monitoring impact); only the log line is deduped, so a global
+# catalog bug surfaces once per (model_id, error_type) instead of flooding
+# logs on every endpoint call. Same pattern as
+# `_warn_missing_capacity_once` in `backend/agents/create_agent_info.py`.
+_CAPACITY_SUGGESTION_ERROR_EMITTED: set = set()
+_CAPACITY_SUGGESTION_ERROR_LOCK = threading.Lock()
 
 
 def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> None:
@@ -152,7 +163,19 @@ def _capacity_suggestion_available(model: Dict[str, Any]) -> bool:
         # the whole tenant view explode. We fall back to False and emit a
         # counter so a corrupt catalog is visible in metrics instead of
         # silently turning every row into "no suggestion available".
-        logger.debug("Capacity coverage suggestion check failed for model_id=%s: %s", model.get("model_id"), exc)
+        dedup_key = (model.get("model_id"), type(exc).__name__)
+        should_log = False
+        with _CAPACITY_SUGGESTION_ERROR_LOCK:
+            if dedup_key not in _CAPACITY_SUGGESTION_ERROR_EMITTED:
+                _CAPACITY_SUGGESTION_ERROR_EMITTED.add(dedup_key)
+                should_log = True
+        if should_log:
+            logger.warning(
+                "Capacity coverage suggestion check failed for model_id=%s: %s "
+                "(per-process dedup; OTel counter still increments per failure)",
+                model.get("model_id"),
+                exc,
+            )
         _record_capacity_coverage_error(model.get("model_id"), exc)
         return False
 
