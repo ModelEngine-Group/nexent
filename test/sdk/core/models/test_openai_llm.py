@@ -1403,5 +1403,84 @@ def test_call_context_length_exceeded_during_iteration(openai_model_instance):
             openai_model_instance.__call__(messages)
 
 
+def test_prompt_cache_plan_records_unknown_capability_without_payload_directive(openai_model_instance):
+    openai_model_instance.model_factory = "unrecognized-provider"
+    messages = [
+        {"role": "system", "content": "Stable system prompt"},
+        {"role": "user", "content": "Hello"},
+    ]
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 10
+    mock_chunk.usage.completion_tokens = 2
+
+    with patch.object(
+        openai_model_instance,
+        "_prepare_completion_kwargs",
+        return_value={"tools": [{"function": {"name": "search", "parameters": {"type": "object"}}}]},
+    ):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance.__call__(messages)
+
+    create_kwargs = openai_model_instance.client.chat.completions.create.call_args.kwargs
+    assert "cache_control" not in str(create_kwargs)
+    assert openai_model_instance.last_provider_cache_advice.supported is False
+    assert openai_model_instance.last_prompt_cache_usage.provider_cache_hit is False
+
+
+def test_prompt_cache_usage_extracts_openai_cached_tokens(openai_model_instance):
+    openai_model_instance.prompt_cache = {"mode": "openai_automatic", "enabled": True}
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 100
+    mock_chunk.usage.completion_tokens = 5
+    mock_chunk.usage.prompt_tokens_details = MagicMock()
+    mock_chunk.usage.prompt_tokens_details.cached_tokens = 40
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance.__call__([
+            {"role": "system", "content": "Stable"},
+            {"role": "user", "content": "Hello"},
+        ])
+
+    assert openai_model_instance.last_provider_cache_advice.supported is True
+    assert openai_model_instance.last_cached_input_token_count == 40
+    assert openai_model_instance.last_prompt_cache_usage.uncached_input_tokens == 60
+    assert openai_model_instance.last_prompt_cache_usage.provider_cache_hit is True
+    assert openai_model_instance.last_prompt_cache_usage.estimated_saved_input_tokens == 0
+
+
+def test_provider_adapter_preserves_context_manager_tool_order(openai_model_instance):
+    openai_model_instance.model_factory = "openai"
+    openai_model_instance.prompt_cache = {"mode": "openai_automatic", "enabled": True}
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = []
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    tools = [
+        {"type": "function", "function": {"name": "zebra"}},
+        {"type": "function", "function": {"name": "alpha"}},
+    ]
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={"tools": tools}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance.__call__([{"role": "system", "content": "Stable"}])
+
+    create_kwargs = openai_model_instance.client.chat.completions.create.call_args.kwargs
+    assert create_kwargs["tools"] == tools
+    assert create_kwargs["stream"] is True
+    assert openai_model_instance.last_provider_cache_advice.supported is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

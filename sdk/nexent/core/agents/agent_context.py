@@ -15,7 +15,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
 
 if TYPE_CHECKING:
     from .agent_model import ContextComponent, ContextStrategy
@@ -25,6 +25,7 @@ from smolagents.models import ChatMessage, MessageRole
 
 from .summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
 from .summary_config import ContextManagerConfig, StrategyType
+from ..context_runtime.contracts import ContextEvidence, FinalContext
 
 logger = logging.getLogger("agent_context")
 
@@ -272,6 +273,15 @@ class ContextManager:
         self._last_uncompressed_token_count: Optional[int] = None
         self._last_compressed_token_count: Optional[int] = None
 
+        # W3 prompt/KV-cache-aware assembly state.  This state is owned by
+        # ContextManager so managed runtime and CoreAgent do not infer context
+        # structure from the outside.
+        self._run_component_messages: List[dict] = []
+        self._run_stable_messages: List[dict] = []
+        self._run_dynamic_messages: List[dict] = []
+        self._previous_stable_fingerprint: Optional[str] = None
+        self._previous_stable_components: Dict[str, str] = {}
+
         if self.config.max_summary_input_tokens <= 0:
             self.config.max_summary_input_tokens = int(self.config.token_threshold * 1.2)
         if self.config.max_summary_reduce_tokens <= 0:
@@ -451,13 +461,18 @@ class ContextManager:
     # ============================================================
 
     def compress_if_needed(
-        self, model, memory, original_messages: List[ChatMessage], current_run_start_idx,
+        self,
+        model,
+        memory,
+        original_messages: List[ChatMessage],
+        current_run_start_idx,
+        context_overhead_tokens: int = 0,
     ) -> List[ChatMessage]:
         # G1
         if not self.config.enabled:
             return original_messages
 
-        if self._estimate_tokens(memory) <= self.config.token_threshold:
+        if self._estimate_tokens(memory) + context_overhead_tokens <= self.config.token_threshold:
             # No compression needed; record that compressed == uncompressed
             # so benchmark token_reduction reads as zero rather than stale.
             self._last_uncompressed_token_count = self._msg_token_count(original_messages)
@@ -475,7 +490,7 @@ class ContextManager:
             # original previous_run + current_run.
             # - previous_run: [(TaskStep, ActionStep), ...]
             # - current_run:  [TaskStep, ActionStep, ActionStep, ...]
-            if self._effective_tokens(memory, current_run_start_idx) <= self.config.token_threshold:
+            if self._effective_tokens(memory, current_run_start_idx) + context_overhead_tokens <= self.config.token_threshold:
                 # Stable-phase bypass: No LLM call; construct compressed messages directly from existing cache.
                 self._step_local_log.clear()
 
@@ -535,7 +550,7 @@ class ContextManager:
             compress_prev = prev_tokens > self.config.token_threshold * 0.6
             compress_curr = curr_tokens > self.config.token_threshold * 0.4
 
-            total_effective_tokens = prev_tokens + curr_tokens
+            total_effective_tokens = prev_tokens + curr_tokens + context_overhead_tokens
             if compress_prev or compress_curr:
                 logger.info(
                     f"Context compression triggered: total_tokens={total_effective_tokens}, "
@@ -1311,6 +1326,233 @@ class ContextManager:
             }
 
     # ============================================================
+    #  Managed Context Assembly (W3)
+    # ============================================================
+
+    def prepare_run_context(self, memory: AgentMemory, fallback_system_prompt: str) -> None:
+        """Initialize managed run context.
+
+        ContextManager owns the selected component messages and the stable prefix.
+        Runtime adapters must not split, reorder, or reinterpret these messages.
+        """
+        from smolagents.memory import SystemPromptStep
+
+        self._run_component_messages = self.build_context_messages()
+        self._run_stable_messages = [
+            message for message in self._run_component_messages
+            if self._message_role(message) in {"system", "developer"}
+        ]
+        self._run_dynamic_messages = [
+            message for message in self._run_component_messages
+            if self._message_role(message) not in {"system", "developer"}
+        ]
+
+        stable_text = "\n\n".join(
+            str(message.get("content", "")) for message in self._run_stable_messages
+        )
+        memory.system_prompt = SystemPromptStep(
+            system_prompt=stable_text or fallback_system_prompt
+        )
+
+    def assemble_final_context(
+        self,
+        *,
+        model: Any,
+        memory: AgentMemory,
+        current_run_start_idx: int,
+        tools: Sequence[Any] | None = None,
+        purpose: str = "step",
+        task: Optional[str] = None,
+        final_answer_templates: Optional[Dict[str, Any]] = None,
+    ) -> FinalContext:
+        """Return the only managed-path payload allowed to enter a model call.
+
+        This is the W3 boundary: component selection, stable-prefix preservation,
+        dynamic context insertion, compression budget compensation, final-answer
+        augmentation, tool canonicalization, and evidence generation all happen
+        here, inside ContextManager.
+        """
+        if not self._run_component_messages:
+            self.prepare_run_context(memory, fallback_system_prompt="")
+
+        tools = self._canonical_tools(tools or ())
+        purpose_stable, purpose_dynamic = self._purpose_messages(
+            purpose=purpose,
+            task=task,
+            final_answer_templates=final_answer_templates,
+        )
+
+        original_messages = self._messages_from_memory(memory)
+        stable_messages = [*self._run_stable_messages, *purpose_stable]
+        dynamic_messages = [*self._run_dynamic_messages, *purpose_dynamic]
+
+        context_overhead_tokens = (
+            self._msg_token_count(dynamic_messages)
+            + self._estimate_tools_tokens(tools)
+            + self._msg_token_count(purpose_stable)
+        )
+        compressed_messages = self.compress_if_needed(
+            model,
+            memory,
+            original_messages,
+            current_run_start_idx,
+            context_overhead_tokens=context_overhead_tokens,
+        )
+        history_messages = self._without_leading_stable_messages(compressed_messages)
+        messages = [
+            *stable_messages,
+            *dynamic_messages,
+            *history_messages,
+        ]
+
+        self._last_compressed_token_count = self._msg_token_count(messages) + self._estimate_tools_tokens(tools)
+
+        fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
+        component_fingerprints = self._stable_component_fingerprints(purpose_stable)
+        if tools:
+            component_fingerprints["tools"] = self._fingerprint(tools)
+        reasons = self._change_reasons(fingerprint, component_fingerprints)
+        self._previous_stable_fingerprint = fingerprint
+        self._previous_stable_components = component_fingerprints
+
+        return FinalContext(
+            messages=messages,
+            tools=tools,
+            evidence=ContextEvidence(
+                selected_component_types=tuple(
+                    getattr(component, "component_type", "unknown")
+                    for component in self.get_registered_components()
+                ),
+                stable_message_count=len(stable_messages),
+                dynamic_message_count=len(messages) - len(stable_messages),
+                compression_records=tuple(self._step_local_log or ()),
+                stable_prefix_fingerprint=fingerprint,
+                prefix_change_reasons=reasons,
+            ),
+        )
+
+    def _purpose_messages(
+        self,
+        *,
+        purpose: str,
+        task: Optional[str],
+        final_answer_templates: Optional[Dict[str, Any]],
+    ) -> Tuple[List[dict], List[dict]]:
+        if purpose != "final_answer":
+            return [], []
+        if not final_answer_templates:
+            raise ValueError("final_answer purpose requires final_answer_templates")
+        from jinja2 import StrictUndefined, Template
+
+        final_answer = final_answer_templates["final_answer"]
+        pre_messages = final_answer.get("pre_messages", "")
+        post_messages = Template(
+            final_answer.get("post_messages", ""),
+            undefined=StrictUndefined,
+        ).render(task=task or "")
+        return (
+            [{"role": "developer", "content": pre_messages}],
+            [{"role": "user", "content": post_messages}],
+        )
+
+    @staticmethod
+    def _messages_from_memory(memory: AgentMemory) -> List[Any]:
+        messages: List[Any] = []
+        if memory.system_prompt:
+            messages.extend(memory.system_prompt.to_messages())
+        for step in memory.steps:
+            messages.extend(step.to_messages())
+        return messages
+
+    @classmethod
+    def _without_leading_stable_messages(cls, messages: Sequence[Any]) -> List[Any]:
+        remaining = list(messages)
+        while remaining and cls._message_role(remaining[0]) in {"system", "developer"}:
+            remaining.pop(0)
+        return remaining
+
+    @staticmethod
+    def _canonical_tools(tools: Sequence[Any]) -> List[Any]:
+        return sorted(
+            list(tools),
+            key=lambda tool: json.dumps(
+                ContextManager._normalize_for_fingerprint(tool),
+                sort_keys=True,
+                default=str,
+            ),
+        )
+
+    def _estimate_tools_tokens(self, tools: Sequence[Any]) -> int:
+        if not tools:
+            return 0
+        return self._estimate_text_tokens(
+            json.dumps(self._normalize_for_fingerprint(tools), ensure_ascii=False, sort_keys=True, default=str)
+        )
+
+    @staticmethod
+    def _message_role(message: Any) -> Optional[str]:
+        if isinstance(message, dict):
+            return message.get("role")
+        role = getattr(message, "role", None)
+        return getattr(role, "value", role)
+
+    @staticmethod
+    def _normalize_for_fingerprint(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): ContextManager._normalize_for_fingerprint(item)
+                for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if isinstance(value, (list, tuple)):
+            return [ContextManager._normalize_for_fingerprint(item) for item in value]
+        if hasattr(value, "model_dump"):
+            return ContextManager._normalize_for_fingerprint(value.model_dump())
+        if hasattr(value, "__dict__"):
+            return ContextManager._normalize_for_fingerprint(vars(value))
+        return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)
+
+    def _fingerprint(self, messages: Sequence[Any]) -> str:
+        encoded = json.dumps(
+            self._normalize_for_fingerprint(messages),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _stable_component_fingerprints(self, purpose_stable: Sequence[Any] = ()) -> Dict[str, str]:
+        result: Dict[str, str] = {}
+        for component in self.get_registered_components():
+            to_messages = getattr(component, "to_messages", None)
+            if not callable(to_messages):
+                continue
+            stable = [
+                message for message in to_messages()
+                if self._message_role(message) in {"system", "developer"}
+            ]
+            if stable:
+                result[str(getattr(component, "component_type", "unknown"))] = self._fingerprint(stable)
+        if purpose_stable:
+            result["purpose"] = self._fingerprint(purpose_stable)
+        return result
+
+    def _change_reasons(
+        self, current: str, component_fingerprints: Dict[str, str]
+    ) -> Tuple[str, ...]:
+        if self._previous_stable_fingerprint is None:
+            return ("initial_request",)
+        if self._previous_stable_fingerprint == current:
+            return ()
+        if self._previous_stable_components.get("tools") != component_fingerprints.get("tools"):
+            return ("tool_schema_version",)
+        if self._previous_stable_components.get("purpose") != component_fingerprints.get("purpose"):
+            return ("context_purpose",)
+        if self._previous_stable_components != component_fingerprints:
+            return ("system_prompt_version",)
+        return ("unexpected_nondeterminism",)
+
+    # ============================================================
     #  Context Component Management
     # ============================================================
 
@@ -1382,8 +1624,8 @@ class ContextManager:
             return strategy_class(relevance_threshold=0.5)
         return strategy_class()
 
-    def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
-        """Build system prompt messages from registered components.
+    def build_context_messages(self, token_budget: Optional[int] = None) -> List:
+        """Build all selected component messages for the managed context path.
         
         Uses configured strategy to select components within token budget,
         then converts each to message format.
@@ -1393,7 +1635,10 @@ class ContextManager:
                           config.component_budgets total minus conversation_history.
         
         Returns:
-            List of message dicts with 'role' and 'content' keys.
+            List of message dicts with 'role' and 'content' keys.  Roles are
+            preserved: dynamic components such as Memory and KB are intentionally
+            returned as ``user`` messages rather than being coerced into a
+            system prompt.
         """
         if not self._components:
             return []
@@ -1414,6 +1659,15 @@ class ContextManager:
                     messages.append(msg)
         
         return messages
+
+    def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
+        """Compatibility alias for callers not yet migrated to managed assembly.
+
+        New code must call :meth:`build_context_messages`; this alias preserves
+        historical tests and external callers without reintroducing a
+        system-only filtering rule.
+        """
+        return self.build_context_messages(token_budget)
 
     def _calculate_component_budget(self) -> int:
         """Calculate total token budget for components (excluding conversation_history)."""

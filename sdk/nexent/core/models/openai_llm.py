@@ -19,6 +19,12 @@ from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from ..utils.observer import MessageObserver, ProcessType
+from .prompt_cache import (
+    apply_cache_directives,
+    cache_directive_advice,
+    extract_prompt_cache_usage,
+    resolve_prompt_cache_profile,
+)
 
 logger = logging.getLogger("openai_llm")
 
@@ -29,7 +35,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_tokens: Optional[int] = None,
-                 timeout_seconds: Optional[float] = None, *args, **kwargs):
+                 timeout_seconds: Optional[float] = None,
+                 prompt_cache: Optional[Dict[str, Any]] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -49,6 +56,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
                        production keeps the provider default (unbounded /
                        model max). Benchmarks set this explicitly (e.g. 4096)
                        to bound degenerate generation loops on long contexts.
+            prompt_cache: Selected prompt-cache capability profile. Unknown or
+                       absent capability disables provider cache directives.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -61,6 +70,10 @@ ssl_verify=True, model_factory: Optional[str] = None,
         self.display_name = display_name
         self.extra_body = extra_body or None
         self.max_tokens = max_tokens
+        self.prompt_cache = prompt_cache or None
+        self.last_provider_cache_advice = None
+        self.last_prompt_cache_usage = None
+        self.last_cached_input_token_count = 0
 
         # Create http_client based on ssl_verify parameter and timeout
         if not ssl_verify or timeout_seconds is not None:
@@ -183,8 +196,46 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if self.max_tokens is not None and "max_tokens" not in completion_kwargs:
             completion_kwargs["max_tokens"] = self.max_tokens
 
-        current_request = self.client.chat.completions.create(
-            stream=True, **completion_kwargs)
+        selected_cache_profile = resolve_prompt_cache_profile(
+            self.model_factory or "unknown", self.prompt_cache
+        )
+        # Provider protocol decisions depend only on the approved provider/model
+        # capability profile.  Context partitioning and ordering are owned by
+        # ContextManager and are intentionally opaque to this adapter.
+        cache_advice = cache_directive_advice(selected_cache_profile)
+        self.last_provider_cache_advice = cache_advice
+        dispatch_kwargs = apply_cache_directives(
+            completion_kwargs, cache_advice
+        )
+        dispatch_kwargs["stream"] = True
+        self._monitoring.set_span_attributes(
+            **{
+                "llm.prompt_cache.mode": cache_advice.mode,
+                "llm.prompt_cache.supported": cache_advice.supported,
+                "llm.prompt_cache.directive_reason": cache_advice.reason,
+            }
+        )
+        context_evidence = getattr(self, "last_context_evidence", None)
+        if context_evidence is not None:
+            self._monitoring.set_span_attributes(
+                **{
+                    "llm.prompt_cache.stable_prefix_fingerprint": getattr(
+                        context_evidence, "stable_prefix_fingerprint", None
+                    ),
+                    "llm.prompt_cache.prefix_change_reasons": json.dumps(
+                        list(getattr(context_evidence, "prefix_change_reasons", ())),
+                        ensure_ascii=False,
+                    ),
+                    "llm.prompt_cache.stable_message_count": getattr(
+                        context_evidence, "stable_message_count", 0,
+                    ),
+                    "llm.prompt_cache.dynamic_message_count": getattr(
+                        context_evidence, "dynamic_message_count", 0,
+                    ),
+                }
+            )
+
+        current_request = self.client.chat.completions.create(**dispatch_kwargs)
 
         # Validate response type: ensure we got a proper iterator, not error strings or dicts
         # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
@@ -262,6 +313,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
             # Extract token usage
             input_tokens = 0
             output_tokens = 0
+            usage = None
             if chunk_list and chunk_list[-1].usage is not None:
                 usage = chunk_list[-1].usage
                 input_tokens = usage.prompt_tokens
@@ -288,6 +340,23 @@ ssl_verify=True, model_factory: Optional[str] = None,
                     f"Token usage not returned by API, using estimation: "
                     f"input_tokens={input_tokens}, output_tokens={output_tokens}"
                 )
+
+            cache_usage = extract_prompt_cache_usage(
+                usage, input_tokens, capability_profile=selected_cache_profile
+            )
+            self.last_prompt_cache_usage = cache_usage
+            self.last_cached_input_token_count = cache_usage.cached_input_tokens
+            self._monitoring.set_span_attributes(
+                **{
+                    "llm.prompt_cache.cached_input_tokens": cache_usage.cached_input_tokens,
+                    "llm.prompt_cache.uncached_input_tokens": cache_usage.uncached_input_tokens,
+                    "llm.prompt_cache.provider_cache_hit": cache_usage.provider_cache_hit,
+                    "llm.prompt_cache.hit_ratio": cache_usage.hit_ratio,
+                    "llm.prompt_cache.metrics_source": cache_usage.metrics_source,
+                    "llm.prompt_cache.estimated_saved_input_tokens": cache_usage.estimated_saved_input_tokens,
+                    "llm.prompt_cache.estimated_input_savings_ratio": cache_usage.estimated_input_savings_ratio,
+                }
+            )
 
             # Record completion metrics
             if token_tracker:

@@ -19,7 +19,6 @@ from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .agent_context import ContextManager
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -182,9 +181,10 @@ class NexentAgent:
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
             model_factory=model_config.model_factory,
             display_name=model_config.cite_name,
-extra_body=model_config.extra_body,
+            extra_body=model_config.extra_body,
             max_tokens=model_config.max_tokens,
             timeout_seconds=model_config.timeout_seconds,
+            prompt_cache=model_config.prompt_cache,
         )
         model.stop_event = self.stop_event
         return model
@@ -425,6 +425,25 @@ extra_body=model_config.extra_body,
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
+            # Choose one context runtime at construction time.  The managed and
+            # legacy implementations do not call one another after this point.
+            ctx_config = getattr(agent_config, 'context_manager_config', None)
+            if ctx_config and ctx_config.enabled:
+                from .agent_context import ContextManager
+                from ..context_runtime.managed.runtime import ManagedContextRuntime
+
+                context_manager = ContextManager(
+                    config=ctx_config,
+                    max_steps=agent_config.max_steps,
+                )
+                for component in getattr(agent_config, 'context_components', None) or []:
+                    context_manager.register_component(component)
+                context_runtime = ManagedContextRuntime(context_manager)
+            else:
+                from ..context_runtime.legacy.runtime import LegacyContextRuntime
+
+                context_runtime = LegacyContextRuntime()
+
             # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
@@ -439,20 +458,9 @@ extra_body=model_config.extra_body,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
+                context_runtime=context_runtime,
             )
             agent.stop_event = self.stop_event
-
-            # Mount context manager if config provided and enabled
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config and ctx_config.enabled:
-                agent.context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps
-                )
-                context_components = getattr(agent_config, 'context_components', None)
-                if context_components:
-                    for component in context_components:
-                        agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:

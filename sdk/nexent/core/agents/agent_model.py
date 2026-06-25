@@ -19,8 +19,7 @@ from ..utils.observer import MessageObserver
 # TYPE_CHECKING to avoid circular import
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .agent_context import ContextManagerConfig
-    from .summary_config import ContextManagerConfig as SummaryConfig
+    from .summary_config import ContextManagerConfig
 
 
 class ModelConfig(BaseModel):
@@ -60,6 +59,14 @@ class ModelConfig(BaseModel):
     )
     concurrency_limit: Optional[int] = Field(
         description="Maximum concurrent requests for this model. If None, no limit.",
+        default=None,
+    )
+    prompt_cache: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Selected prompt-cache capability profile. Unknown or absent "
+            "capability disables provider cache directives while still allowing "
+            "deterministic prefix proxy metrics."
+        ),
         default=None,
     )
 
@@ -393,7 +400,10 @@ class MemoryComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, str]]:
         if self.formatted_content:
-            return [{"role": "system", "content": self.formatted_content}]
+            # Memory is user/session-specific dynamic context.  Keeping it out
+            # of the authoritative system prefix preserves cross-turn cache
+            # reuse without changing its content or selection semantics.
+            return [{"role": "user", "content": self.formatted_content}]
         return []
 
     def add_memory(self, content: str, memory_type: str = "user", metadata: Dict[str, Any] = None) -> None:
@@ -413,7 +423,10 @@ class KnowledgeBaseComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, str]]:
         if self.summary:
-            return [{"role": "system", "content": self.summary}]
+            # Retrieved knowledge is request-dependent evidence, not
+            # authoritative instruction.  Keeping it dynamic protects the
+            # stable cache prefix when retrieval results change between turns.
+            return [{"role": "user", "content": self.summary}]
         return []
 
 

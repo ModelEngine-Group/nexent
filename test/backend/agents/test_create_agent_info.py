@@ -195,6 +195,17 @@ sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
 )
+sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
+    "nexent.core.agents.summary_config",
+    ContextManagerConfig=MagicMock(),
+)
+sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
+    "nexent.core.models.prompt_cache",
+    resolve_prompt_cache_profile=lambda provider: (
+        {"mode": "openai_automatic", "enabled": True}
+        if (provider or "").lower() == "openai" else None
+    ),
+)
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
@@ -1627,6 +1638,107 @@ class TestCreateAgentConfig:
     """Tests for the create_agent_config function"""
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_managed_path_uses_raw_components_not_legacy_prompt(self):
+        """Managed path should build components and avoid rendering legacy system prompt."""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
+                patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch(
+                    'backend.agents.create_agent_info.ContextManagerConfig',
+                    side_effect=lambda **kwargs: Mock(**kwargs),
+                ):
+
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": False,
+                "enable_context_manager": True,
+            }
+            mock_get_template.return_value = {"system_prompt": "legacy {{duty}}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": ""}
+            mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
+            components = [Mock(component_type="system_prompt")]
+            mock_build_components.return_value = components
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            mock_build_components.assert_called_once()
+            mock_prepare_templates.assert_awaited_once()
+            assert mock_prepare_templates.call_args.kwargs["system_prompt"] == ""
+            assert mock_agent_config.call_args.kwargs["context_components"] is components
+            assert mock_agent_config.call_args.kwargs["context_manager_config"].enabled is True
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
+        """Legacy path should render the Jinja prompt and not build managed components."""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
+                patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch(
+                    'backend.agents.create_agent_info.ContextManagerConfig',
+                    side_effect=lambda **kwargs: Mock(**kwargs),
+                ):
+
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": False,
+                "enable_context_manager": False,
+            }
+            mock_get_template.return_value = {"system_prompt": "{{duty}} | {{constraint}}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "rendered"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            mock_build_components.assert_not_called()
+            assert mock_prepare_templates.call_args.kwargs["system_prompt"] == "test duty | test constraint"
+            assert mock_agent_config.call_args.kwargs["context_components"] == []
+            assert mock_agent_config.call_args.kwargs["context_manager_config"].enabled is False
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
@@ -2900,6 +3012,7 @@ class TestCreateModelConfigList:
             assert calls[0][1]['api_key'] == "gpt4_key"
             assert calls[0][1]['model_name'] == "openai/gpt-4"
             assert calls[0][1]['url'] == "https://api.openai.com"
+            assert calls[0][1]['prompt_cache'] is None
 
             # Second call: Claude model from database
             assert calls[1][1]['cite_name'] == "Claude"

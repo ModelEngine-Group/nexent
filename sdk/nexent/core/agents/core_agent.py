@@ -27,8 +27,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
-from .agent_context import ContextManager
 from .agent_model import AgentVerificationConfig
+from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import VerificationController, VerificationResult
 from ..utils.token_estimation import msg_token_count
 
@@ -182,38 +182,6 @@ class FinalAnswerError(Exception):
     pass
 
 
-def _build_final_answer_messages(task: str, agent_prompt_templates: Dict[str, Any], memory_messages: List) -> List[ChatMessage]:
-    """Build messages for final answer generation.
-
-    Args:
-        task: The original task prompt
-        agent_prompt_templates: Prompt templates from the agent
-        memory_messages: Messages from agent memory
-
-    Returns:
-        List of ChatMessage for final answer generation
-    """
-    from smolagents.models import MessageRole
-
-    messages = [
-        ChatMessage(
-            role=MessageRole.SYSTEM,
-            content=[{"type": "text", "text": agent_prompt_templates["final_answer"]["pre_messages"]}]
-        )
-    ]
-    messages += memory_messages[1:]
-    messages.append(
-        ChatMessage(
-            role=MessageRole.USER,
-            content=[{"type": "text", "text": Template(
-                agent_prompt_templates["final_answer"]["post_messages"],
-                undefined=StrictUndefined
-            ).render(task=task)}]
-        )
-    )
-    return messages
-
-
 class CoreAgent(CodeAgent):
     def __init__(
         self,
@@ -223,6 +191,7 @@ class CoreAgent(CodeAgent):
         *args,
         **kwargs
     ):
+        context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.observer = observer
         self.verification_config = verification_config or AgentVerificationConfig(enabled=False)
@@ -235,7 +204,12 @@ class CoreAgent(CodeAgent):
         )
         self.stop_event = threading.Event()
         self._history_step_count = 0  # For ContextManager, record boundary for compression
-        self.context_manager: ContextManager = None
+        # The factory injects exactly one independent runtime.  CoreAgent has
+        # no legacy/managed fallback branch and cannot assemble context itself.
+        self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
+        self.context_manager: Any = getattr(
+            self.context_runtime, "context_manager", None
+        )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -253,6 +227,21 @@ class CoreAgent(CodeAgent):
                 continue
         names.add("final_answer")
         return sorted(names)
+
+    def _context_tools(self) -> List[Any]:
+        """Return a stable tool list for ContextRuntime/ContextManager evidence.
+
+        Tool execution still uses smolagents' native tool registry.  This list is
+        the context-module view used for W3 ordering, budgeting, and evidence.
+        """
+        tools: List[Any] = []
+        for container in (getattr(self, "tools", {}) or {}, getattr(self, "managed_agents", {}) or {}):
+            try:
+                iterable = container.values()
+            except AttributeError:
+                iterable = container
+            tools.extend(list(iterable or ()))
+        return tools
 
     def _append_verification_feedback(self, action_step: ActionStep, result: VerificationResult) -> None:
         feedback = self.verification_controller.build_feedback_observation(result)
@@ -379,24 +368,18 @@ Additional Args:
         self.observer.add_message(
             self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
-        memory_messages = self.write_memory_to_messages()
-
-        chars_per_token = (
-            self.context_manager.config.chars_per_token
-            if self.context_manager
-            else 1.5
+        final_context = self.context_runtime.prepare_step(
+            model=self.model,
+            memory=self.memory,
+            current_run_start_idx=self._history_step_count,
+            tools=self._context_tools(),
         )
-        self._last_uncompressed_est = msg_token_count(
-            memory_messages, chars_per_token
-        )
-
-        input_messages = memory_messages.copy()
-        # import pdb; pdb.set_trace()
-        # Trigger context compression if needed before building messages
-        if self.context_manager and self.context_manager.config.enabled:
-            input_messages = self.context_manager.compress_if_needed(
-                self.model, self.memory, input_messages, self._history_step_count
-            )
+        input_messages = final_context.messages
+        # Provider adapters may report this opaque evidence, but they must not
+        # use it to choose cache protocol behavior or alter the payload.
+        setattr(self.model, "last_context_evidence", final_context.evidence)
+        chars_per_token = self.context_runtime.chars_per_token
+        self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["Observation:", "Calling tools:"]
@@ -556,16 +539,7 @@ Additional Args:
         # head + tail of long outputs around a truncation marker so downstream
         # compression sees bounded-length step records and the model can still
         # search/read for the elided portion.
-        if self.context_manager and self.context_manager.config.enabled:
-            max_obs = self.context_manager.config.max_observation_length
-            if max_obs > 0 and memory_step.observations and len(memory_step.observations) > max_obs:
-                obs_text = memory_step.observations
-                half = max_obs // 2
-                truncation_marker = (
-                    f"\n...[Output truncated to {max_obs} characters. "
-                    f"Use search or read tools to find specific results.]\n"
-                )
-                memory_step.observations = obs_text[:half] + truncation_marker + obs_text[-half:]
+        self.context_runtime.truncate_observation(memory_step)
 
         if not code_output.is_final_answer and truncated_output is not None:
             execution_outputs_console += [
@@ -611,24 +585,13 @@ Additional Args:
 You have been provided with these additional arguments, that you can access using the keys as variables in your python code:
 {str(additional_args)}."""
 
-        system_prompt_content = self.system_prompt
-        registered = self.context_manager.get_registered_components() if self.context_manager else []
-        if registered:
-            self.logger.log(
-                f"ContextManager component path active: "
-                f"{[f'{c.component_type}(priority={c.priority},tokens={c.token_estimate})' for c in registered]}"
-            )
-            component_messages = self.context_manager.build_system_prompt()
-            if component_messages:
-                system_prompt_content = "\n\n".join(
-                    msg.get("content", "") for msg in component_messages if msg.get("role") == "system"
-                )
-
-        self.memory.system_prompt = SystemPromptStep(
-            system_prompt=system_prompt_content)
         if reset:
             self.memory.reset()
             self.monitor.reset()
+        self.context_runtime.prepare_run(
+            memory=self.memory,
+            fallback_system_prompt=self.system_prompt,
+        )
 
         self.logger.log_task(content=self.task.strip(),
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
@@ -715,8 +678,14 @@ You have been provided with these additional arguments, that you can access usin
         })
         if self.provide_run_summary:
             answer += "\n\nFor more detail, find below a summary of this agent's work:\n<summary_of_work>\n"
-            for message in self.write_memory_to_messages(summary_mode=True):
-                content = message.content
+            summary_context = self.context_runtime.prepare_step(
+                model=self.model,
+                memory=self.memory,
+                current_run_start_idx=self._history_step_count,
+                tools=self._context_tools(),
+            )
+            for message in summary_context.messages:
+                content = message.get("content") if isinstance(message, dict) else message.content
                 answer += "\n" + truncate_content(str(content)) + "\n---"
             answer += "\n</summary_of_work>"
         return answer
@@ -889,26 +858,15 @@ You have been provided with these additional arguments, that you can access usin
             metric["main_llm"]["input_tokens"] = action_step.token_usage.input_tokens
             metric["main_llm"]["output_tokens"] = action_step.token_usage.output_tokens
 
-        # 2. Compression overhead (from ContextManager)
-        if self.context_manager and self.context_manager.config.enabled:
-            comp_stats = self.context_manager.get_step_compression_stats()
-            metric["compression"].update(comp_stats)
-            metric["cache_hit"] = comp_stats.get("cache_hits", 0) > 0
-            metric["cache_types"] = comp_stats.get("cache_types", [])
-        else:
-            metric["compression"] = {
-                "calls": 0, "input_tokens": 0, "output_tokens": 0,
-                "cache_hits": 0, "cache_types": [],
-            }
-            metric["cache_hit"] = False
-            metric["cache_types"] = []
+        # 2. Compression overhead is supplied by the active runtime; CoreAgent
+        # never branches on managed versus legacy context behavior.
+        comp_stats = self.context_runtime.compression_stats()
+        metric["compression"].update(comp_stats)
+        metric["cache_hit"] = comp_stats.get("cache_hits", 0) > 0
+        metric["cache_types"] = comp_stats.get("cache_types", [])
 
         # 3. Current memory estimated length
-        chars_per_token = (
-            self.context_manager.config.chars_per_token
-            if self.context_manager
-            else 1.5
-        )
+        chars_per_token = self.context_runtime.chars_per_token
         metric["memory_state"]["estimated_input_tokens"] = msg_token_count(
             action_step.model_input_messages, chars_per_token
         )
@@ -933,11 +891,7 @@ You have been provided with these additional arguments, that you can access usin
             metric["compression_ratio"] = 0.0
 
         self.step_metrics.append(metric)
-        token_threshold = (
-            self.context_manager.config.token_threshold
-            if self.context_manager and self.context_manager.config.enabled
-            else None
-        )
+        token_threshold = self.context_runtime.token_threshold
         get_monitoring_manager().record_agent_step_metrics(
             metric,
             token_threshold=token_threshold,
@@ -956,8 +910,6 @@ You have been provided with these additional arguments, that you can access usin
         Returns:
             The final answer content string
         """
-        from smolagents.models import MessageRole
-
         action_step_start_time = time.time()
 
         # Send STEP_COUNT to start a new step for the final answer thinking process
@@ -966,8 +918,16 @@ You have been provided with these additional arguments, that you can access usin
             self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
         # Build messages for final answer generation
-        memory_messages = self.write_memory_to_messages()
-        messages = _build_final_answer_messages(task, self.prompt_templates, memory_messages)
+        final_context = self.context_runtime.prepare_final_answer(
+            model=self.model,
+            memory=self.memory,
+            current_run_start_idx=self._history_step_count,
+            tools=self._context_tools(),
+            task=task,
+            final_answer_templates=self.prompt_templates,
+        )
+        messages = final_context.messages
+        setattr(self.model, "last_context_evidence", final_context.evidence)
 
         # Create the final memory step with error
         final_memory_step = ActionStep(

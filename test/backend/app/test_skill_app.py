@@ -2666,6 +2666,7 @@ class TestBuildModelConfigFromTenant:
                 assert config.top_p == 0.95
                 assert config.ssl_verify == True
                 assert config.model_factory == "openai"
+                assert config.prompt_cache["mode"] == "openai_automatic"
 
     def test_build_model_config_missing_quick_config(self, mocker):
         """Test error when tenant has no LLM model configured."""

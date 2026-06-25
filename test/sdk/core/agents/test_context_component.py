@@ -455,6 +455,7 @@ class TestMemoryComponent:
         comp = agent_model_module.MemoryComponent(formatted_content="Retrieved memories")
         messages = comp.to_messages()
         assert len(messages) == 1
+        assert messages[0]["role"] == "user"
 
     def test_to_messages_empty(self):
         comp = agent_model_module.MemoryComponent()
@@ -496,6 +497,7 @@ class TestKnowledgeBaseComponent:
         comp = agent_model_module.KnowledgeBaseComponent(summary="Knowledge base summary")
         messages = comp.to_messages()
         assert len(messages) == 1
+        assert messages[0]["role"] == "user"
 
     def test_to_messages_empty(self):
         comp = agent_model_module.KnowledgeBaseComponent()
