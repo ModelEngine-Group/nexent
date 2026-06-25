@@ -114,6 +114,9 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
     except ValueError as exc:
         logger.debug("Capacity suggestion unavailable for connectivity request: %s", exc)
         return None
+    except Exception as exc:
+        logger.warning("Capacity suggestion failed during connectivity request: %s", exc)
+        return None
 
 
 @router.post("/create")
