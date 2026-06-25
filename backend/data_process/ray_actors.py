@@ -3,10 +3,11 @@ import logging
 import json
 import time
 from typing import Any, Dict, List, Optional
-
+from PIL import Image
 import ray
 
 from consts.const import (
+    MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET,
     RAY_ACTOR_NUM_CPUS,
     REDIS_BACKEND_URL,
     DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -81,7 +82,7 @@ class DataProcessorRayActor:
         chunks, images_info = self._normalize_processor_result(result)
         if images_info:
             self._append_image_chunks(
-                source=filename, chunks=chunks, images_info=images_info)
+                source=filename, chunks=chunks, images_info=images_info, filename=filename)
         chunks = self._validate_chunks(chunks, filename)
         if not chunks:
             return []
@@ -213,8 +214,8 @@ class DataProcessorRayActor:
         source: str,
         chunks: List[Dict[str, Any]],
         images_info: List[Dict[str, Any]],
+        filename: str
     ) -> None:
-        folder = "images_in_attachments"
         for index, image_data in enumerate(images_info):
             if not isinstance(image_data, dict):
                 logger.warning(
@@ -226,30 +227,62 @@ class DataProcessorRayActor:
                     f"[RayActor] Skipping image entry at index {index}: missing image_bytes"
                 )
                 continue
+            
+            try:
+                # verify image size or dimension
+                img_obj = BytesIO(image_data["image_bytes"])
+                img = Image.open(img_obj)
+                # Convert RGBA to RGB if necessary
+                if img.mode == 'RGBA':
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3])
+                    img = background
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
 
-            img_obj = BytesIO(image_data["image_bytes"])
-            result = upload_fileobj(
-                file_obj=img_obj,
-                file_name=f"{index}.{image_data['image_format']}",
-                prefix=folder)
-            image_url = build_s3_url(result.get("object_name", ""))
+                if img.width < 200 or img.height < 200:   
+                    logger.info(
+                        f"Image extracted from {filename} not loaded or does not meet minimum size requirements (200x200 pixels)")
+                    continue
+                
+                result = upload_fileobj(
+                    file_obj=img_obj,
+                    file_name=f"{index}.{image_data['image_format']}",
+                    prefix=MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET)
+                
+                if result.get("success"):
+                    image_url = build_s3_url(result.get("object_name", ""))
+                    image_data["source_file"] = source
+                    image_data["image_url"] = image_url
 
-            image_data["source_file"] = source
-            image_data["image_url"] = image_url
-
-            chunks.append({
-                "content": json.dumps({
-                    "source_file": source,
-                    "position": image_data["position"],
-                    "image_url": image_url,
-                }),
-                "filename": source,
-                "metadata": {
-                    "chunk_index": len(chunks) + index,
-                    "process_source": "UniversalImageExtractor",
-                    "image_url": image_url,
-                }
-            })
+                    chunks.append({
+                        "content": json.dumps({
+                            "source_file": source,
+                            "position": image_data["position"],
+                            "image_url": image_url,
+                        }),
+                        "filename": source,
+                        "metadata": {
+                            "chunk_index": len(chunks) + index,
+                            "process_source": "UniversalImageExtractor",
+                            "image_url": image_url,
+                        }
+                    })
+                else:
+                    error_message = result.get("error") or "Upload failed"
+                    logger.warning(
+                        "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
+                        f"{index}.{image_data['image_format']}",
+                        filename,
+                        error_message,
+                    )          
+            except Exception as exc:
+                logger.exception(
+                    "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
+                        f"{index}.{image_data['image_format']}",
+                        filename,
+                        exc,
+                )
 
     def _validate_chunks(
         self, chunks: Any, source: str

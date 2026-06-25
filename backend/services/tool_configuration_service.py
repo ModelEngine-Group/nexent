@@ -691,6 +691,32 @@ def _get_tool_class_by_name(tool_name: str) -> Optional[type]:
         return None
 
 
+def _filter_runtime_inputs_for_forward(
+    tool_name: str,
+    tool_class: Any,
+    runtime_inputs: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Allow only runtime inputs declared by the local tool class."""
+    declared_inputs = getattr(tool_class, "inputs", None)
+    if not isinstance(declared_inputs, dict):
+        return runtime_inputs
+
+    allowed_input_names = set(declared_inputs.keys())
+    unexpected_input_names = sorted(set(runtime_inputs.keys()) - allowed_input_names)
+    if unexpected_input_names:
+        allowed_display = ", ".join(sorted(allowed_input_names)) or "none"
+        raise ToolExecutionException(
+            f"Unexpected input(s) for {tool_name}: {', '.join(unexpected_input_names)}. "
+            f"Allowed inputs: {allowed_display}"
+        )
+
+    return {
+        key: value
+        for key, value in runtime_inputs.items()
+        if key in allowed_input_names
+    }
+
+
 def _validate_local_tool(
     tool_name: str,
     inputs: Optional[Dict[str, Any]] = None,
@@ -861,18 +887,13 @@ def _validate_local_tool(
         else:
             tool_instance = tool_class(**instantiation_params)
 
-        # # Only pass declared runtime inputs to forward() to avoid unexpected kwargs.
-        # declared_inputs = getattr(tool_class, "inputs", {}) or {}
-        # allowed_input_names = (
-        #     set(declared_inputs.keys()) if isinstance(declared_inputs, dict) else set()
-        # )
-        # filtered_runtime_inputs = (
-        #     {k: v for k, v in runtime_inputs.items() if k in allowed_input_names}
-        #     if allowed_input_names
-        #     else runtime_inputs
-        # )
+        filtered_runtime_inputs = _filter_runtime_inputs_for_forward(
+            tool_name=tool_name,
+            tool_class=tool_class,
+            runtime_inputs=runtime_inputs,
+        )
 
-        result = tool_instance.forward(**(inputs or {}))
+        result = tool_instance.forward(**filtered_runtime_inputs)
         return result
     except Exception as e:
         logger.error(f"Local tool validation failed for {tool_name}: {e}")

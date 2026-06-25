@@ -2435,6 +2435,31 @@ class TestLoadLastToolConfigImpl:
             _validate_local_tool("test_tool", {"input": "value"}, {
                                  "param": "config"})
 
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_rejects_unexpected_runtime_inputs(self, mock_signature, mock_get_class):
+        """Local tool validation should not pass undeclared inputs to forward()."""
+        class TestToolClass:
+            inputs = {"query": {"type": "string"}}
+
+            def __init__(self, **kwargs):
+                self.forward = Mock(return_value="validation result")
+
+        mock_get_class.return_value = TestToolClass
+
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException, match="Unexpected input\\(s\\) for test_tool: extra"):
+            _validate_local_tool(
+                "test_tool",
+                {"query": "hello", "extra": "ignored"},
+                {},
+            )
+
     @patch('backend.services.tool_configuration_service.discover_langchain_modules')
     def test_validate_langchain_tool_success(self, mock_discover):
         """Test successful LangChain tool validation"""

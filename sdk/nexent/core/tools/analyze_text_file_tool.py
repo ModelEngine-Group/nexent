@@ -110,6 +110,7 @@ class AnalyzeTextFileTool(Tool):
             validate_url_access=validate_callback
         )
         self.time_out = 60 * 5
+        self.record_ops = 1
 
         self.running_prompt_zh = "正在分析文件..."
         self.running_prompt_en = "Analyzing file..."
@@ -151,6 +152,14 @@ class AnalyzeTextFileTool(Tool):
             analysis_results: List[str] = []
 
             for index, single_file in enumerate(file_url_list, start=1):
+                # add type check
+                if not isinstance(single_file, bytes):
+                    logger.error(
+                        f"Expected 'bytes' for file #{index}, but got {type(single_file).__name__}. "
+                        f"Please check the file_url_list."
+                    )
+                    continue
+                
                 logger.info(
                     f"Extracting text content and image info from file #{index}, query: {query}")
                 
@@ -226,6 +235,7 @@ class AnalyzeTextFileTool(Tool):
                     )
                 if image_info:
                     search_results_json = self._build_search_results(image_info)
+                    self.record_ops += len(image_info)
                     search_results_data = json.dumps(search_results_json, ensure_ascii=False)
                     self.observer.add_message("", ProcessType.SEARCH_CONTENT, search_results_data)
                 
@@ -315,7 +325,7 @@ class AnalyzeTextFileTool(Tool):
                 source_type=single_image.get("source_type", ""),
                 filename=single_image.get("filename", ""),
                 score_details={},
-                cite_index=single_image.get("page", 0) + index,
+                cite_index=self.record_ops + index,
                 search_type=self.name,
                 tool_sign=self.tool_sign,
             )

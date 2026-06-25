@@ -20,7 +20,7 @@ from celery import states
 from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL, TABLE_TRANSFORMER_MODEL_PATH, UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
+from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET, REDIS_BACKEND_URL, REDIS_URL, TABLE_TRANSFORMER_MODEL_PATH, UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
 from consts.exceptions import OfficeConversionException
 from consts.model import BatchTaskRequest
 from database.attachment_db import build_s3_url, delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file, upload_fileobj
@@ -623,7 +623,6 @@ class DataProcessService:
         images_list_urls = []
         image_info = []
         if images_chunks:
-            folder = "images_in_attachments"
             for idx, img_data in enumerate(images_chunks):
                 if not isinstance(img_data, dict):
                     logger.warning(f"Skipping image entry at index {idx}: unexpected type {type(img_data)}")
@@ -633,46 +632,73 @@ class DataProcessService:
                     logger.warning(f"Skipping image entry at index {idx}: missing image_bytes")
                     continue
                 
-                # upload image to MinIO
-                img_obj = io.BytesIO(img_data["image_bytes"])
-                result = upload_fileobj(
-                    file_obj=img_obj,
-                    file_name=f"{idx}.{img_data['image_format']}",
-                    prefix=folder
-                )
+                try:
+                    # verify image size or dimension
+                    base64_str = base64.b64encode(img_data["image_bytes"]).decode('utf-8')
+                    img = await self.load_image(f"data:image/jpeg;base64,{base64_str}")
+
+                    if img is None or not self.check_image_size(img.width, img.height):
+                        logger.info(
+                            f"Image extracted from {filename} not loaded or does not meet minimum size requirements (200x200 pixels)")
+                        continue
+                    
+                    # upload image to MinIO
+                    img_obj = io.BytesIO(img_data["image_bytes"])
+
+                    result = upload_fileobj(
+                        file_obj=img_obj,
+                        file_name=f"{idx}.{img_data['image_format']}",
+                        prefix=MINIO_DEFAULT_EXTRACTED_IMAGES_BUCKET
+                    )
+                    
+                    if result.get("success"):
+                        image_url = build_s3_url(result.get("object_name", ""))
+                        # create description string
+                        position = img_data["position"]
+                        coords = position["coordinates"]
+                        desc = (
+                            f"——————Image {idx+1}——————\n"
+                            f"Page {position.get('page_number', 'unknown')} | "
+                            f"Box: ({coords.get('x1', '')}, {coords.get('y1', '')}) -> ({coords.get('x2', '')}, {coords.get('y2', '')})\n"
+                            f"URL: {image_url}"
+                        )
+                        image_descriptions.append(desc)
+                        
+                        images_list_urls.append(image_url)
+                        
+                        image_info.append({
+                            "content": json.dumps({
+                                "source_file": filename, 
+                                "position": position, 
+                                "image_url": image_url}),
+                            "source_type": "minio",
+                            "image_url": image_url,
+                            "filename": filename,
+                            "page": position["page_number"]
+                        })
+                    else:
+                        error_message = result.get("error") or "Upload failed"
+                        logger.warning(
+                            "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
+                            f"{idx}.{img_data['image_format']}",
+                            filename,
+                            error_message,
+                        )         
+                    
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to upload image, image_name=%s  source_file_name=%s error=%s",
+                        f"{idx}.{img_data['image_format']}",
+                        filename,
+                        error_message,
+                    )       
                 
-                image_url = build_s3_url(result.get("object_name", ""))
-                 
-                # create description string
-                position = img_data["position"]
-                coords = position["coordinates"]
-                desc = (
-                    f"--- Image {idx+1}  ---\n"
-                    f"Page {position.get('page_number', 'unknown')} | "
-                    f"Box: ({coords.get('x1', '')}, {coords.get('y1', '')}) -> ({coords.get('x2', '')}, {coords.get('y2', '')})\n"
-                    f"URL: {image_url}"
-                )
-                image_descriptions.append(desc)
-                
-                images_list_urls.append(image_url)
-                
-                image_info.append({
-                    "content": json.dumps({
-                        "source_file": filename, 
-                        "position": position, 
-                        "image_url": image_url}),
-                    "source_type": "minio",
-                    "image_url": image_url,
-                    "filename": filename,
-                    "page": position["page_number"]
-                })
-            
             # Append image descriptions to the chunk list and full text
             if image_descriptions:
                 separator = f"\n\n=== Image information for {filename} ===\n\n"
                 full_text += separator + "\n\n".join(image_descriptions)
                 chunk_texts.extend(image_descriptions)    
-        
+            
         processing_time = time.time() - start_time
         logger.info(
             f"Successfully processed uploaded file: {filename}, extracted {len(full_text)} characters in {processing_time:.2f}s"
@@ -685,7 +711,8 @@ class DataProcessService:
             "text": full_text.strip(),
             "images_info": [images_list_urls, image_info],
             "chunks": chunk_texts,
-            "chunks_count": len(text_chunks) + len(images_chunks),
+            "text_chunks_count": len(text_chunks),
+            "image_chunks_count": len(images_chunks),
             "text_length": len(full_text.strip()),
             "processing_time": processing_time,
             "chunking_strategy": chunking_strategy
