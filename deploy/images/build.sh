@@ -19,7 +19,8 @@ COMPONENTS=""
 PLATFORM=""
 VERSION="$(deployment_read_version)"
 REGISTRY="general"
-VARIANT="full"
+DEPENDENCY_VARIANT="cpu"
+TERMINAL_VARIANT="slim"
 PUSH=false
 LOAD=false
 DRY_RUN=false
@@ -49,7 +50,10 @@ Options:
   --platform linux/amd64|linux/arm64|linux/amd64,linux/arm64
   --version VERSION          Image tag, for example v2.2.1 or latest. Defaults to root VERSION.
   --registry general|mainland
-  --variant full|slim        data-process image variant
+  --dependency-variant cpu|gpu
+                             data-process dependency variant. Defaults to cpu.
+  --terminal-variant slim|conda
+                             terminal image variant. Defaults to slim.
   --push
   --load
   --dry-run
@@ -72,7 +76,8 @@ while [ $# -gt 0 ]; do
     --platform) PLATFORM="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --registry) REGISTRY="$2"; shift 2 ;;
-    --variant) VARIANT="$2"; shift 2 ;;
+    --dependency-variant|--data-process-dependency-variant) DEPENDENCY_VARIANT="$2"; shift 2 ;;
+    --terminal-variant) TERMINAL_VARIANT="$2"; shift 2 ;;
     --push) PUSH=true; shift ;;
     --load) LOAD=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -271,9 +276,14 @@ case "$REGISTRY" in
   *) echo "Unsupported registry: $REGISTRY" >&2; exit 1 ;;
 esac
 
-case "$VARIANT" in
-  full|slim) ;;
-  *) echo "Unsupported data-process variant: $VARIANT" >&2; exit 1 ;;
+case "$DEPENDENCY_VARIANT" in
+  cpu|gpu) ;;
+  *) echo "Unsupported data-process dependency variant: $DEPENDENCY_VARIANT" >&2; exit 1 ;;
+esac
+
+case "$TERMINAL_VARIANT" in
+  slim|conda) ;;
+  *) echo "Unsupported terminal variant: $TERMINAL_VARIANT" >&2; exit 1 ;;
 esac
 
 run_cmd() {
@@ -283,6 +293,66 @@ run_cmd() {
   if [ "$DRY_RUN" != true ]; then
     "$@"
   fi
+}
+
+model_assets_complete() {
+  local model_assets_dir="$1"
+
+  [ -f "$model_assets_dir/clip-vit-base-patch32/config.json" ] && \
+    [ -d "$model_assets_dir/nltk_data" ] && \
+    [ -d "$model_assets_dir/table-transformer-structure-recognition" ] && \
+    [ -d "$model_assets_dir/yolox" ]
+}
+
+prepare_model_assets() {
+  [ "$DRY_RUN" = true ] && return 0
+
+  local project_model_assets="$PROJECT_ROOT/model-assets"
+  local home_model_assets="${HOME:-}/model-assets"
+  local model_assets_repo="${MODEL_ASSETS_REPO:-}"
+  local tmp_model_assets
+
+  if model_assets_complete "$project_model_assets"; then
+    echo "Using existing model-assets at $project_model_assets"
+    return 0
+  fi
+
+  if [ -n "${HOME:-}" ] && model_assets_complete "$home_model_assets"; then
+    echo "Copying cached model-assets from $home_model_assets"
+    mkdir -p "$project_model_assets"
+    cp -R "$home_model_assets"/. "$project_model_assets"/
+    return 0
+  fi
+
+  command -v git >/dev/null 2>&1 || {
+    echo "git is required to clone model-assets for data-process builds." >&2
+    exit 1
+  }
+  git lfs version >/dev/null 2>&1 || {
+    echo "git-lfs is required to pull model-assets for data-process builds." >&2
+    exit 1
+  }
+
+  if [ -z "$model_assets_repo" ]; then
+    if [ "$REGISTRY" = "mainland" ]; then
+      model_assets_repo="https://hf-mirror.com/Nexent-AI/model-assets"
+    else
+      model_assets_repo="https://huggingface.co/Nexent-AI/model-assets"
+    fi
+  fi
+
+  tmp_model_assets="$PROJECT_ROOT/model-assets.tmp.$$"
+  echo "Cloning model-assets from $model_assets_repo"
+  rm -rf "$tmp_model_assets"
+  GIT_LFS_SKIP_SMUDGE=1 git clone "$model_assets_repo" "$tmp_model_assets"
+  (
+    cd "$tmp_model_assets"
+    GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
+    rm -rf .git .gitattributes
+  )
+  mkdir -p "$project_model_assets"
+  cp -R "$tmp_model_assets"/. "$project_model_assets"/
+  rm -rf "$tmp_model_assets"
 }
 
 build_one() {
@@ -311,11 +381,18 @@ build_selected_image() {
     docs) build_one nexent-docs "$DOCKERFILE_DIR/docs/Dockerfile" "${WEB_MIRROR_ARGS[@]}" ;;
     data-process)
       local image_name="nexent-data-process"
-      [ "$VARIANT" = "slim" ] && image_name="nexent-data-process-slim"
-      build_one "$image_name" "$DOCKERFILE_DIR/data-process/Dockerfile" --build-arg DATA_PROCESS_VARIANT="$VARIANT" "${PY_MIRROR_ARGS[@]}"
+      [ "$DEPENDENCY_VARIANT" = "gpu" ] && image_name="${image_name}-gpu"
+      prepare_model_assets
+      build_one "$image_name" "$DOCKERFILE_DIR/data-process/Dockerfile" \
+        --build-arg DATA_PROCESS_DEPENDENCY_VARIANT="$DEPENDENCY_VARIANT" \
+        "${PY_MIRROR_ARGS[@]}"
       ;;
     mcp) build_one nexent-mcp "$DOCKERFILE_DIR/mcp/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
-    terminal) build_one nexent-ubuntu-terminal "$DOCKERFILE_DIR/terminal/Dockerfile" ;;
+    terminal)
+      local image_name="nexent-ubuntu-terminal"
+      [ "$TERMINAL_VARIANT" = "conda" ] && image_name="nexent-ubuntu-terminal-conda"
+      build_one "$image_name" "$DOCKERFILE_DIR/terminal/Dockerfile" --build-arg TERMINAL_VARIANT="$TERMINAL_VARIANT"
+      ;;
     *) echo "Unsupported image: $1" >&2; exit 1 ;;
   esac
 }

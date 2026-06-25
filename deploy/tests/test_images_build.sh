@@ -68,6 +68,11 @@ if bash "$BUILD_SCRIPT" --images main,unknown --dry-run >/tmp/nexent-image-build
 fi
 assert_contains "$(cat /tmp/nexent-image-build-invalid.log)" "Unsupported image: unknown" "unknown image should explain the error"
 
+if bash "$BUILD_SCRIPT" --data-process --variant slim --dry-run >/tmp/nexent-image-build-variant.log 2>&1; then
+  fail "deprecated data-process variant option should fail"
+fi
+assert_contains "$(cat /tmp/nexent-image-build-variant.log)" "Unknown option: --variant" "deprecated data-process variant option should be rejected"
+
 output="$(
   printf 'main,web,mcp,data-process\n1\n1\n' | \
     bash "$BUILD_SCRIPT" --interactive --dry-run

@@ -1,25 +1,42 @@
-# 使用 Node.js 18 作为基础镜像
-FROM node:18-alpine
+# syntax=docker/dockerfile:1.7
+
+FROM node:20-alpine AS builder
 ARG MIRROR
+ARG TARGETARCH
 
 WORKDIR /app
+COPY doc/package.json ./package.json
 
-# 复制文档项目
+RUN --mount=type=cache,id=nexent-docs-npm-${TARGETARCH},target=/root/.npm,sharing=locked \
+    if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
+    npm install --verbose
+
 COPY doc .
 
-# 安装系统依赖
-RUN apk add --no-cache wget
-
-# 安装依赖并构建
-RUN npm add -D vitepress && \
+RUN \
     npm run docs:build
 
-# 暴露端口
+FROM nginx:1.27-alpine
+ARG APK_MIRROR
+
+RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
+        echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/main" > /etc/apk/repositories && \
+        echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/community" >> /etc/apk/repositories; \
+    fi && \
+    printf '%s\n' \
+        'server {' \
+        '    listen 4173;' \
+        '    server_name _;' \
+        '    root /usr/share/nginx/html;' \
+        '    index index.html;' \
+        '    location / {' \
+        '        try_files $uri $uri/ /index.html;' \
+        '    }' \
+        '}' > /etc/nginx/conf.d/default.conf
+
+COPY --from=builder /app/docs/.vitepress/dist /usr/share/nginx/html
+
 EXPOSE 4173
 
-# 设置健康检查
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:4173/ || exit 1
-
-# 启动 VitePress 预览服务（服务构建后的静态文件）
-CMD ["npm", "run", "docs:preview", "--", "--host", "0.0.0.0", "--port", "4173"]
+    CMD wget -q --spider http://localhost:4173/ || exit 1

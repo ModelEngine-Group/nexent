@@ -1,56 +1,65 @@
+# syntax=docker/dockerfile:1.7
+
 FROM ubuntu:24.04
 
-# Set environment variables
+ARG TERMINAL_VARIANT=slim
+ARG TARGETARCH
+
 ENV CONDA_DIR=/opt/conda
 
-# Install base tools and dependencies with retry mechanism and network optimization
-RUN apt-get clean && \
+RUN --mount=type=cache,id=nexent-terminal-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=nexent-terminal-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
+    if [ "$TERMINAL_VARIANT" != "slim" ] && [ "$TERMINAL_VARIANT" != "conda" ]; then \
+        echo "Unsupported TERMINAL_VARIANT: ${TERMINAL_VARIANT}" >&2; \
+        exit 1; \
+    fi && \
     apt-get update --fix-missing && \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
         openssh-server \
         curl \
         wget \
         git \
-        vim \
-        build-essential \
         python3 \
         python3-pip \
-        python3-venv \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+        python3-venv && \
+    if [ "$TERMINAL_VARIANT" = "conda" ]; then \
+        apt-get install -y --no-install-recommends vim build-essential; \
+    fi
 
-# Using root user - no additional user creation needed
-
-# Configure SSH - enable root login + enable password authentication
+# Configure SSH - enable root login + enable password authentication.
 RUN mkdir /var/run/sshd && \
     sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-# Install Miniconda
-ARG TARGETARCH
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-$(if [ "$TARGETARCH" = "amd64" ]; then echo "x86_64"; elif [ "$TARGETARCH" = "arm64" ]; then echo "aarch64"; else echo "$TARGETARCH"; fi).sh -O /tmp/miniconda.sh && \
-    bash /tmp/miniconda.sh -b -p $CONDA_DIR && \
-    rm /tmp/miniconda.sh
+RUN --mount=type=cache,id=nexent-terminal-miniconda-${TARGETARCH},target=/var/cache/miniconda,sharing=locked \
+    if [ "$TERMINAL_VARIANT" = "conda" ]; then \
+        arch="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+        case "$arch" in \
+            amd64|x86_64) conda_arch="x86_64" ;; \
+            arm64|aarch64) conda_arch="aarch64" ;; \
+            *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+        esac && \
+        miniconda_installer="/var/cache/miniconda/Miniconda3-latest-Linux-${conda_arch}.sh" && \
+        if [ ! -f "$miniconda_installer" ]; then \
+            wget "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${conda_arch}.sh" -O "$miniconda_installer"; \
+        fi && \
+        bash "$miniconda_installer" -b -p "$CONDA_DIR" && \
+        "$CONDA_DIR/bin/conda" init; \
+    else \
+        mkdir -p "$CONDA_DIR"; \
+    fi
 
-# Conda permissions - root owns everything by default
-
-# Add conda to PATH and initialize
 ENV PATH="$CONDA_DIR/bin:$PATH"
-RUN conda init
 
-# Create .ssh directory for root
-RUN mkdir -p /root/.ssh && \
+RUN mkdir -p /root/.ssh /opt/terminal && \
     chmod 700 /root/.ssh
 
-# Create default working directory
-RUN mkdir -p /opt/terminal
-
-# Set working directory
 WORKDIR /opt
 
-# Entrypoint script
-COPY deploy/images/dockerfiles/terminal/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY --chmod=755 deploy/images/dockerfiles/terminal/entrypoint.sh /entrypoint.sh
 
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]

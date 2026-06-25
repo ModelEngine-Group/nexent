@@ -30,6 +30,12 @@ When run in a terminal without arguments, `deploy/images/build.sh` prompts for i
 
 `--platform` is command-line only. Omit it to build for the local architecture.
 
+Variant options:
+- `--dependency-variant cpu|gpu` controls data-process dependencies and defaults to `cpu`. `gpu` builds GPU/CUDA dependencies and uses the `-gpu` image-name suffix.
+- `--terminal-variant slim|conda` controls the terminal image and defaults to `slim`. `conda` keeps Miniconda, `vim`, and the compiler toolchain and uses the `-conda` image-name suffix.
+
+When building `data-process`, `deploy/images/build.sh` prepares `model-assets` automatically: it first uses an existing root `model-assets` directory, then tries `~/model-assets`, and otherwise clones the Hugging Face repository and runs `git lfs pull`. If you run `docker build` directly, prepare `model-assets` in the repository root first.
+
 Image options:
 - `--main` builds `nexent`
 - `--web` builds `nexent-web`
@@ -76,6 +82,9 @@ docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main
 # 📊 Build data process image (current architecture only)
 docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
 
+# 📊 Build GPU data process image (current architecture only)
+docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images/dockerfiles/data-process/Dockerfile --build-arg DATA_PROCESS_DEPENDENCY_VARIANT=gpu .
+
 # 🌐 Build web frontend image (current architecture only)
 docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
@@ -87,6 +96,9 @@ docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/
 
 # 💻 Build OpenSSH Server image (current architecture only)
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
+
+# 💻 Build OpenSSH Server image with Conda (current architecture only)
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/images/dockerfiles/terminal/Dockerfile --build-arg TERMINAL_VARIANT=conda .
 ```
 
 ### 🧹 Clean up Docker resources
@@ -124,28 +136,24 @@ docker builder prune -f && docker system prune -f
 - Provides MCP server functionality for AI model integration
 
 ##### Pre-installed Tools and Features
-- **Python Environment**: Python 3.10 + pip
+- **Python Environment**: Python 3.11 + pip
 - **MCP Proxy**: mcp-proxy package for protocol handling
 - **Node.js**: Node.js 20.17.0 with npm
 - **Architecture Support**: linux/amd64, linux/arm64
-- **Base Image**: python:3.10-slim
+- **Base Image**: python:3.11-slim
 
 #### OpenSSH Server Image (nexent/nexent-ubuntu-terminal)
 - Ubuntu 24.04-based SSH server container
 - Built from `deploy/images/dockerfiles/terminal/Dockerfile`
-- Pre-installed with Conda, Python, Git and other development tools
-- Supports SSH key authentication with username `linuxserver.io`
-- Provides complete development environment
+- Defaults to OpenSSH, Python, pip, venv, Git, Curl, and Wget
+- `TERMINAL_VARIANT=conda` also installs Miniconda, Vim, and the compiler toolchain
+- Runs as root and allows root login with password authentication
 
 ##### Pre-installed Tools and Features
-- **Python Environment**: Python 3 + pip + virtualenv
-- **Conda Management**: Miniconda3 environment management
-- **Development Tools**: Git, Vim, Nano, Curl, Wget
-- **Build Tools**: build-essential, Make
-- **SSH Service**: Port 2222, root login and password authentication disabled
-- **User Permissions**: `linuxserver.io` user has sudo privileges (no password required)
-- **Timezone Setting**: Asia/Shanghai
-- **Security Configuration**: SSH key authentication, 60-minute session timeout
+- **Python Environment**: Python 3 + pip + venv
+- **Conda Management**: Miniconda3 is included only in the `conda` variant
+- **Development Tools**: Git, Curl, Wget; the `conda` variant also includes Vim and build-essential
+- **SSH Service**: Container port 22, root login and password authentication enabled
 
 ### 🏷️ Tagging Strategy
 

@@ -34,6 +34,12 @@ bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
 
 `--platform` 仅支持命令行传入。不传时不会添加 `--platform` 参数，默认按本地架构构建。
 
+变体选项：
+- `--dependency-variant cpu|gpu` 控制数据处理依赖，默认 `cpu`。`gpu` 会构建带 GPU/CUDA 依赖的镜像，并使用 `-gpu` 镜像名后缀。
+- `--terminal-variant slim|conda` 控制终端镜像，默认 `slim`。`conda` 会保留 Miniconda、`vim` 和编译工具链，并使用 `-conda` 镜像名后缀。
+
+构建 `data-process` 时，`deploy/images/build.sh` 会自动准备 `model-assets`：优先使用仓库根目录已有的 `model-assets`，其次复用 `~/model-assets`，否则从 Hugging Face 仓库拉取并执行 `git lfs pull`。如果直接执行 `docker build`，需要先在仓库根目录准备好 `model-assets`。
+
 镜像选项：
 - `--main` 构建 `nexent`
 - `--web` 构建 `nexent-web`
@@ -80,6 +86,9 @@ docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main
 # 📊 构建数据处理镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
 
+# 📊 构建 GPU 数据处理镜像（仅当前架构）
+docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images/dockerfiles/data-process/Dockerfile --build-arg DATA_PROCESS_DEPENDENCY_VARIANT=gpu .
+
 # 🌐 构建前端镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
@@ -91,6 +100,9 @@ docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/
 
 # 💻 构建 OpenSSH Server 镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
+
+# 💻 构建带 Conda 的 OpenSSH Server 镜像（仅当前架构）
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/images/dockerfiles/terminal/Dockerfile --build-arg TERMINAL_VARIANT=conda .
 ```
 
 ## 🔧 镜像说明
@@ -121,28 +133,24 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/
 - 为 AI 模型集成提供 MCP 服务器功能
 
 #### 预装工具和特性
-- **Python 环境**: Python 3.10 + pip
+- **Python 环境**: Python 3.11 + pip
 - **MCP Proxy**: mcp-proxy 包用于协议处理
 - **Node.js**: Node.js 20.17.0 包含 npm
 - **架构支持**: linux/amd64, linux/arm64
-- **基础镜像**: python:3.10-slim
+- **基础镜像**: python:3.11-slim
 
 ### OpenSSH Server 镜像 (nexent/nexent-ubuntu-terminal)
 - 基于 Ubuntu 24.04 的 SSH 服务器容器
 - 基于 `deploy/images/dockerfiles/terminal/Dockerfile` 构建
-- 预装 Conda、Python、Git 等开发工具
-- 支持 SSH 密钥认证，用户名为 `linuxserver.io`
-- 提供完整的开发环境
+- 默认预装 OpenSSH、Python、pip、venv、Git、Curl、Wget
+- `TERMINAL_VARIANT=conda` 额外预装 Miniconda、Vim 和编译工具链
+- 以 root 用户运行，支持 root 登录和密码认证
 
 #### 预装工具和特性
-- **Python 环境**: Python 3 + pip + virtualenv
-- **Conda 管理**: Miniconda3 环境管理
-- **开发工具**: Git、Vim、Nano、Curl、Wget
-- **构建工具**: build-essential、Make
-- **SSH 服务**: 端口 2222，禁用 root 登录和密码认证
-- **用户权限**: `linuxserver.io` 用户具有 sudo 权限（无需密码）
-- **时区设置**: Asia/Shanghai
-- **安全配置**: SSH 密钥认证，会话超时 60 分钟
+- **Python 环境**: Python 3 + pip + venv
+- **Conda 管理**: 仅 `conda` 变体包含 Miniconda3
+- **开发工具**: Git、Curl、Wget；`conda` 变体额外包含 Vim 和 build-essential
+- **SSH 服务**: 容器端口 22，允许 root 登录和密码认证
 
 ## 🏷️ 标签策略
 
