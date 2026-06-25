@@ -1,4 +1,6 @@
 {{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
+{{- $global := default dict .Values.global -}}
+{{- $sqlFileNames := default dict $global.sqlFileNames -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -20,6 +22,7 @@ spec:
         app: nexent-supabase-db
       annotations:
         checksum/nexent-supabase: {{ dig "rolloutChecksums" "supabase" "" .Values.global | quote }}
+        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
       initContainers:
         - name: init-db
@@ -30,25 +33,22 @@ spec:
             - |
               echo "Copying init scripts into existing image script directory..."
               cp -r /docker-entrypoint-initdb.d/* /initdb.d/
-              cp /custom-init-scripts/98-webhooks.sql /initdb.d/init-scripts/
-              cp /custom-init-scripts/99-roles.sql /initdb.d/init-scripts/
-              cp /custom-init-scripts/99-jwt.sql /initdb.d/init-scripts/
+              cp /custom-supabase-sql/webhooks.sql /initdb.d/init-scripts/98-webhooks.sql
+              cp /custom-supabase-sql/roles.sql /initdb.d/init-scripts/99-roles.sql
+              cp /custom-supabase-sql/jwt.sql /initdb.d/init-scripts/99-jwt.sql
 
-              cp /custom-init-scripts/99-logs.sql /initdb.d/migrations/
-              cp /custom-init-scripts/99-realtime.sql /initdb.d/migrations/
-              cp /custom-init-scripts/97-_supabase.sql /initdb.d/migrations/
-              cp /custom-init-scripts/99-pooler.sql /initdb.d/migrations/
+              cp /custom-supabase-sql/logs.sql /initdb.d/migrations/99-logs.sql
+              cp /custom-supabase-sql/realtime.sql /initdb.d/migrations/99-realtime.sql
+              cp /custom-supabase-sql/_supabase.sql /initdb.d/migrations/97-_supabase.sql
+              cp /custom-supabase-sql/pooler.sql /initdb.d/migrations/99-pooler.sql
 
-              echo "Copying user-defined migration scripts..."
-              cp /custom-migrations/* /initdb.d/migrations/ || echo "Skip migrations"
               echo "Initialization scripts are ready"
           volumeMounts:
-            - mountPath: /custom-init-scripts
-              name: custom-init-scripts
+            - mountPath: /custom-supabase-sql
+              name: custom-supabase-sql
+              readOnly: true
             - mountPath: /initdb.d
               name: initdb-scripts-data
-            - mountPath: /custom-migrations
-              name: custom-migrations
       containers:
         - name: supabase-db
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -117,12 +117,16 @@ spec:
         - name: initdb-scripts-data
           emptyDir:
             medium: ""
-        - name: custom-init-scripts
+        - name: custom-supabase-sql
           configMap:
-            name: nexent-supabase-db-init
-        - name: custom-migrations
-          configMap:
-            name: nexent-supabase-db-migrations
+            name: nexent-sql-files
+            items:
+              - key: supabase-.keep
+                path: .keep
+{{ range $name := default (list) $sqlFileNames.supabase }}
+              - key: {{ printf "supabase-%s" $name | quote }}
+                path: {{ $name | quote }}
+{{ end }}
         - name: supabase-db-data
           persistentVolumeClaim:
             claimName: {{ default "nexent-supabase-db" .Values.persistence.existingClaim }}

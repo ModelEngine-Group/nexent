@@ -26,6 +26,15 @@ assert_file_contains() {
   fi
 }
 
+assert_file_not_contains() {
+  local file="$1"
+  local needle="$2"
+  local message="$3"
+  if grep -Fq "$needle" "$file"; then
+    fail "$message"
+  fi
+}
+
 create_fake_psql() {
   cat > "$BIN_DIR/psql" <<'SH'
 #!/bin/sh
@@ -68,20 +77,16 @@ SH
 create_fake_psql
 
 cat > "$SQL_DIR/v1_merged_migrations.sql" <<'SQL'
--- nexent-migration-source: v1_test.sql
--- nexent-migration-checksum: checksum-v1
--- nexent-migration-probe: SELECT to_regclass('nexent.test_table') IS NOT NULL;
 CREATE TABLE IF NOT EXISTS nexent.test_table(id int);
--- nexent-migration-source: v1_second.sql
--- nexent-migration-checksum: checksum-v1-second
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'test_table' AND column_name = 'name');
 ALTER TABLE nexent.test_table ADD COLUMN IF NOT EXISTS name text;
 SQL
 cat > "$SQL_DIR/v2_test.sql" <<'SQL'
--- nexent-migration-checksum: checksum-v2
--- nexent-migration-probe: SELECT to_regclass('nexent.test_table_v2') IS NOT NULL;
 CREATE TABLE IF NOT EXISTS nexent.test_table_v2(id int);
 SQL
+
+SYMLINK_SQL_DIR="$TMP_DIR/sql/migrations-link"
+ln -s "$SQL_DIR" "$SYMLINK_SQL_DIR" 2>/dev/null || cp -R "$SQL_DIR" "$SYMLINK_SQL_DIR"
+
 INIT_SQL_FILE="$TMP_DIR/init.sql"
 printf 'create schema if not exists nexent;\ncreate table if not exists nexent.model_record_t(id int);\ncreate table if not exists nexent.knowledge_record_t(id int);\ncreate table if not exists nexent.ag_tenant_agent_t(id int);\ncreate table if not exists nexent.conversation_record_t(id int);\ncreate table if not exists nexent.conversation_message_t(id int);\ncreate table if not exists nexent.ag_tool_info_t(id int);\n' > "$INIT_SQL_FILE"
 
@@ -97,7 +102,7 @@ PATH="$BIN_DIR:$PATH" \
 CAPTURE_PLAN="$PLAN_FILE" \
 CAPTURE_QUERY="" \
 NEXENT_SQL_INIT_FILE="$INIT_SQL_FILE" \
-NEXENT_SQL_MIGRATION_DIR="$SQL_DIR" \
+NEXENT_SQL_MIGRATION_DIR="$SYMLINK_SQL_DIR" \
 NEXENT_SQL_WAIT_TIMEOUT_SECONDS=1 \
 NEXENT_APP_VERSION="v-test" \
   bash "$MIGRATION_SCRIPT" --migrate >/tmp/nexent-sql-migration-test.log
@@ -108,31 +113,23 @@ assert_file_contains "$PLAN_FILE" "pg_advisory_unlock" "plan should release advi
 assert_file_contains "$PLAN_FILE" "status text NOT NULL DEFAULT 'applied'" "plan should create extended migration table status"
 assert_file_contains "$PLAN_FILE" "app_version text" "plan should create app_version field"
 assert_file_contains "$PLAN_FILE" "source_file text" "plan should create source_file field"
-assert_file_contains "$PLAN_FILE" "CHECK (status IN ('applied', 'baselined'))" "plan should constrain migration status"
-assert_file_contains "$PLAN_FILE" "CREATE TEMP TABLE _nexent_migration_probe_result(probe_result boolean);" "plan should keep probe temp table for the psql session"
-if grep -Fq "ON COMMIT DROP" "$PLAN_FILE"; then
-  fail "probe temp table should not be dropped on transaction commit"
-fi
+assert_file_contains "$PLAN_FILE" "CHECK (status IN ('applied', 'baselined'))" "plan should keep compatibility with prior baselined records"
+assert_file_not_contains "$PLAN_FILE" "_nexent_migration_probe_result" "plan should not use probe temp tables"
+assert_file_not_contains "$PLAN_FILE" "nexent-migration-probe" "plan should not require SQL marker comments"
 assert_file_contains "$PLAN_FILE" "\\i '$INIT_SQL_FILE'" "plan should always apply init SQL"
 assert_file_contains "$PLAN_FILE" "VALUES ('__init.sql'" "plan should record init SQL"
 assert_file_contains "$PLAN_FILE" "'applied', 'v-test'" "plan should record applied status and app version"
-assert_file_contains "$PLAN_FILE" "ON CONFLICT (migration_id) DO UPDATE SET" "plan should update init migration record after idempotent init SQL"
-if grep -Fq "base_objects_" "$PLAN_FILE"; then
-  fail "plan should not use required base object checks for init SQL"
-fi
-if grep -Fq "baseline __init.sql" "$PLAN_FILE"; then
-  fail "plan should not baseline init SQL"
-fi
-assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] probe v1_test.sql" "plan should probe bundle source migrations"
-assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] baseline v1_test.sql" "plan should baseline probed migrations"
-assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] apply v1_test.sql" "plan should apply unprobed-current migrations"
-assert_file_contains "$PLAN_FILE" "checksum-v1" "plan should preserve source migration checksum from bundle metadata"
-assert_file_contains "$PLAN_FILE" "checksum-v2" "plan should preserve standalone migration checksum metadata"
-assert_file_contains "$PLAN_FILE" "RAISE EXCEPTION 'checksum changed" "plan should fail on checksum changes"
+assert_file_contains "$PLAN_FILE" "ON CONFLICT (migration_id) DO UPDATE SET" "plan should update migration records after execution"
+assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] check v1_merged_migrations.sql" "plan should check migrations by file name"
+assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] skip v1_merged_migrations.sql" "plan should skip matching checksums"
+assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] apply v1_merged_migrations.sql" "plan should apply new migration files"
+assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] reapply v1_merged_migrations.sql" "plan should reapply changed migration files"
+assert_file_contains "$PLAN_FILE" "migration_checksum_matched" "plan should compare recorded checksum with current file checksum"
+assert_file_contains "$PLAN_FILE" "executed_at = now()" "plan should refresh execution time on reapply"
 assert_file_contains "$PLAN_FILE" "SET search_path TO \"nexent\", public;" "plan should set search path for legacy migrations"
 
 first_check="$(grep -nF '\echo [sql-migrations] check v' "$PLAN_FILE" | head -1 | cut -d: -f2-)"
-[ "$first_check" = "\\echo [sql-migrations] check v1_test.sql" ] || fail "migrations should be sorted before execution"
+[ "$first_check" = "\\echo [sql-migrations] check v1_merged_migrations.sql" ] || fail "migrations should be sorted before execution"
 
 WAIT_QUERY_FILE="$TMP_DIR/wait-query.sql"
 WAIT_TABLE_PLAN="$TMP_DIR/wait-table-plan.sql"
@@ -141,28 +138,27 @@ CAPTURE_PLAN="$WAIT_TABLE_PLAN" \
 CAPTURE_QUERY="$WAIT_QUERY_FILE" \
 FAKE_WAIT_STATUS="ready" \
 NEXENT_SQL_INIT_FILE="$INIT_SQL_FILE" \
-NEXENT_SQL_MIGRATION_DIR="$SQL_DIR" \
+NEXENT_SQL_MIGRATION_DIR="$SYMLINK_SQL_DIR" \
 NEXENT_SQL_WAIT_TIMEOUT_SECONDS=1 \
   bash "$MIGRATION_SCRIPT" --wait >/tmp/nexent-sql-migration-wait-test.log
 
 [ -f "$WAIT_TABLE_PLAN" ] || fail "wait mode should ensure migration table"
 [ -f "$WAIT_QUERY_FILE" ] || fail "wait mode should query migration target state"
 assert_file_contains "$WAIT_QUERY_FILE" "__init.sql" "wait query should include init migration target"
-assert_file_contains "$WAIT_QUERY_FILE" "v1_test.sql" "wait query should include bundle source target"
-assert_file_contains "$WAIT_QUERY_FILE" "v1_second.sql" "wait query should include all bundle sources"
-assert_file_contains "$WAIT_QUERY_FILE" "v2_test.sql" "wait query should include standalone migration target"
-assert_file_contains "$WAIT_QUERY_FILE" "checksum_mismatch" "wait query should fail fast on checksum mismatch"
-assert_file_contains "$WAIT_QUERY_FILE" "migration_id <> '__init.sql'" "wait query should allow init SQL checksum to be updated by migrator"
-assert_file_contains "$WAIT_QUERY_FILE" "status IN ('applied', 'baselined')" "wait query should accept applied and baselined records"
+assert_file_contains "$WAIT_QUERY_FILE" "v1_merged_migrations.sql" "wait query should include file-name migration target"
+assert_file_contains "$WAIT_QUERY_FILE" "v2_test.sql" "wait query should include all migration files"
+assert_file_contains "$WAIT_QUERY_FILE" "actual_checksum = expected_checksum" "wait query should wait for current checksums"
+assert_file_contains "$WAIT_QUERY_FILE" "status IN ('applied', 'baselined')" "wait query should accept applied and prior baselined records"
+assert_file_not_contains "$WAIT_QUERY_FILE" "checksum_mismatch" "wait mode should allow migrator to reapply checksum changes"
 
-SOURCE_COUNT="$(awk '/^-- nexent-migration-source: / {count++} END {print count + 0}' "$DEPLOY_ROOT"/sql/migrations/*.sql)"
-CHECKSUM_COUNT="$(awk '/^-- nexent-migration-checksum: / {count++} END {print count + 0}' "$DEPLOY_ROOT"/sql/migrations/*.sql)"
-PROBE_COUNT="$(awk '/^-- nexent-migration-probe: / {count++} END {print count + 0}' "$DEPLOY_ROOT"/sql/migrations/*.sql)"
-[ "$SOURCE_COUNT" -gt 0 ] || fail "real migration files should contain source markers"
-[ "$SOURCE_COUNT" = "$CHECKSUM_COUNT" ] || fail "every real migration source should have a checksum"
-[ "$SOURCE_COUNT" = "$PROBE_COUNT" ] || fail "every real migration source should have a probe"
+if grep -R -n '^-- nexent-migration-' "$DEPLOY_ROOT/sql/migrations" --include='*.sql' >/tmp/nexent-sql-marker-check.log; then
+  cat /tmp/nexent-sql-marker-check.log
+  fail "migration SQL files should not contain nexent-migration marker comments"
+fi
 
-DUPLICATE_SOURCE="$(awk '/^-- nexent-migration-source: / {source=$0; sub(/^-- nexent-migration-source: /, "", source); count[source]++} END {for (source in count) if (count[source] > 1) print source}' "$DEPLOY_ROOT"/sql/migrations/*.sql | head -1)"
-[ -z "$DUPLICATE_SOURCE" ] || fail "migration source should be unique: $DUPLICATE_SOURCE"
+if grep -R -n 'nexent-migration-' "$DEPLOY_ROOT/common/run-sql-migrations.sh" >/tmp/nexent-runner-marker-check.log; then
+  cat /tmp/nexent-runner-marker-check.log
+  fail "migration runner should not parse nexent-migration marker comments"
+fi
 
 echo "All SQL migration tests passed."

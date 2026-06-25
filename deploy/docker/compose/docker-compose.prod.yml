@@ -57,7 +57,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ${ROOT_DIR}/postgresql/data:/var/lib/postgresql/data
-      - ../../sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../../sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     restart: always
     logging:
       driver: "json-file"
@@ -73,6 +73,7 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
@@ -80,6 +81,7 @@ services:
     environment:
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: migrate
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -103,11 +105,13 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -131,10 +135,12 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -158,11 +164,13 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: 0022
     env_file:
@@ -209,9 +217,11 @@ services:
     privileged: true
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
     environment:
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: off
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
       DISABLE_RAY_DASHBOARD: ${DISABLE_RAY_DASHBOARD:-false}
       DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}

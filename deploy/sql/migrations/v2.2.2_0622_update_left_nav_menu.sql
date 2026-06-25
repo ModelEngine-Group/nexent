@@ -4,10 +4,12 @@
 -- ============================================================
 
 -- Step 1: Clear all existing LEFT_NAV_MENU permissions
+BEGIN;
+
 DELETE FROM nexent.role_permission_t
 WHERE permission_category = 'VISIBILITY' AND permission_type = 'LEFT_NAV_MENU';
 
-ALTER TABLE role_permission_t 
+ALTER TABLE nexent.role_permission_t
 ADD COLUMN IF NOT EXISTS parent_key VARCHAR(50);
 -- ============================================================
 -- New Menu Structure:
@@ -99,3 +101,5 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (1509, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/agent-space', '/resource-space'),
 (1510, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-space', '/resource-space'),
 (1511, 'ASSET_OWNER', 'VISIBILITY', 'LEFT_NAV_MENU', '/skill-space', '/resource-space');
+
+COMMIT;

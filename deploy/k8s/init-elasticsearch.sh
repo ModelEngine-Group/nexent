@@ -2,6 +2,16 @@
 # Script to initialize Elasticsearch API key for Nexent
 
 NAMESPACE=nexent
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_ENV_FILE="${ROOT_ENV_FILE:-$PROJECT_ROOT/.env}"
+DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+fi
 
 decode_base64() {
   if base64 --help 2>&1 | grep -q -- '--decode'; then
@@ -34,6 +44,30 @@ write_api_key_output() {
   else
     echo "ELASTICSEARCH_API_KEY=$api_key"
   fi
+}
+
+sync_api_key_to_root_env() {
+  local api_key="$1"
+
+  if [ "${NEXENT_SYNC_ES_KEY_TO_ENV:-true}" != "true" ]; then
+    return 0
+  fi
+
+  if command -v deployment_update_env_var_file >/dev/null 2>&1; then
+    deployment_update_env_var_file "$ROOT_ENV_FILE" "ELASTICSEARCH_API_KEY" "$api_key"
+  else
+    touch "$ROOT_ENV_FILE"
+    local escaped_value
+    escaped_value=$(printf '%s' "$api_key" | sed -e 's/\\/\\\\/g' -e 's/&/\\&/g')
+    if grep -q '^ELASTICSEARCH_API_KEY=' "$ROOT_ENV_FILE"; then
+      sed -i.bak "s~^ELASTICSEARCH_API_KEY=.*~ELASTICSEARCH_API_KEY=\"${escaped_value}\"~" "$ROOT_ENV_FILE"
+      rm -f "${ROOT_ENV_FILE}.bak"
+    else
+      printf 'ELASTICSEARCH_API_KEY="%s"\n' "$api_key" >> "$ROOT_ENV_FILE"
+    fi
+  fi
+
+  echo "ELASTICSEARCH_API_KEY synchronized to $ROOT_ENV_FILE."
 }
 
 # Get elastic password from secret
@@ -77,6 +111,7 @@ if [ -n "$ENCODED_KEY" ] && [ "$ENCODED_KEY" != "$API_KEY_JSON" ]; then
   echo "Generated ELASTICSEARCH_API_KEY: $ENCODED_KEY"
 
   write_api_key_output "$ENCODED_KEY"
+  sync_api_key_to_root_env "$ENCODED_KEY"
   echo "ELASTICSEARCH_API_KEY generated; Helm will update nexent-secrets."
 else
   echo "Failed to extract API key from response"

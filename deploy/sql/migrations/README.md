@@ -1,28 +1,19 @@
 # SQL Migration Layout
 
-Nexent keeps deployment SQL in merged version groups:
+Nexent keeps deployment SQL in versioned migration files under this directory.
+The migration runner uses the SQL file name as the migration ID and stores the
+current file checksum in `nexent.schema_migrations`.
 
-- `v1_merged_migrations.sql`: all 1.x migrations
-- `v2.0_merged_migrations.sql`: all 2.0.x migrations
-- `v2.1_merged_migrations.sql`: all 2.1.x migrations
-- `v2.2_merged_migrations.sql`: all 2.2.x migrations
+Execution rules:
 
-Each source section must keep these markers:
+- Files are discovered with `*.sql` and sorted by version-aware filename order.
+- A file with no migration record is executed and recorded as `applied`.
+- A file with the same recorded checksum is skipped.
+- A file with a different recorded checksum is executed again, then its checksum,
+  execution time, app version, and source file are updated.
 
-```sql
--- nexent-migration-source: v2.2.1_YYYY_description.sql
--- nexent-migration-checksum: <sha256 of the original section>
--- nexent-migration-probe: SELECT ...
-```
+Keep migration SQL idempotent because changing an existing file causes it to run
+again. Use patterns such as `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD
+COLUMN IF NOT EXISTS`, and conflict-safe inserts where possible.
 
-`deploy/common/run-sql-migrations.sh` records and skips migrations by
-`nexent-migration-source`, not by the merged file name. This preserves
-compatibility with databases that already recorded the historical per-file
-migration IDs.
-
-`deploy/sql/init.sql` is the initial baseline before
-`v1.1.0_0619_add_tenant_config_t.sql`. These merged files contain only
-incremental SQL after that baseline. When `schema_migrations` is missing on an
-existing database, the runner uses each source section probe to decide whether
-the section can be recorded as `baselined`; a missing or failing probe stops
-startup instead of guessing.
+`deploy/sql/init.sql` is the initial baseline before these incremental files.

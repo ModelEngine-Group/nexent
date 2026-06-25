@@ -15,12 +15,12 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/skills"
       existingClaim: "nexent-skills"
-  deploymentVersion: "speed"
+  deploymentVersion: "full"
   deploymentComponents:
     infrastructure: true
     application: true
-    data-process: false
-    supabase: false
+    data-process: true
+    supabase: true
     terminal: false
     monitoring: false
   portPolicy: "development"
@@ -99,13 +99,13 @@ nexent-northbound:
 nexent-web:
   enabled: true
 nexent-data-process:
-  enabled: false
+  enabled: true
 nexent-supabase-kong:
-  enabled: false
+  enabled: true
 nexent-supabase-auth:
-  enabled: false
+  enabled: true
 nexent-supabase-db:
-  enabled: false
+  enabled: true
 nexent-openssh:
   enabled: false
 nexent-monitoring:

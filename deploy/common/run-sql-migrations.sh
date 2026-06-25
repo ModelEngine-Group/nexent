@@ -6,6 +6,7 @@ MIGRATION_DIR="${NEXENT_SQL_MIGRATION_DIR:-/opt/nexent/sql/migrations}"
 INIT_SQL_FILE="${NEXENT_SQL_INIT_FILE:-/opt/nexent/sql/init.sql}"
 MIGRATION_TABLE="${NEXENT_SQL_MIGRATION_TABLE:-nexent.schema_migrations}"
 LOCK_KEY="${NEXENT_SQL_MIGRATION_LOCK_KEY:-nexent_sql_migrations}"
+MANIFEST_SEPARATOR=$'\037'
 
 POSTGRES_HOST="${POSTGRES_HOST:-nexent-postgresql}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
@@ -58,10 +59,6 @@ escape_sql_literal() {
   printf "%s" "$1" | sed "s/'/''/g"
 }
 
-strip_trailing_semicolon() {
-  printf "%s" "$1" | sed -E 's/[[:space:]]*;[[:space:]]*$//'
-}
-
 split_migration_table() {
   MIGRATION_SCHEMA="${MIGRATION_TABLE%.*}"
   MIGRATION_TABLE_NAME="${MIGRATION_TABLE##*.}"
@@ -99,124 +96,19 @@ wait_for_postgres() {
   done
 }
 
-ensure_bundle_segment_dir() {
-  if [ -z "${BUNDLE_SEGMENT_DIR:-}" ]; then
-    BUNDLE_SEGMENT_DIR="$(mktemp -d /tmp/nexent-sql-migration-segments.XXXXXX)"
-  fi
-}
-
-split_bundle_migration() {
-  local file="$1"
-  ensure_bundle_segment_dir
-  awk -v outdir="$BUNDLE_SEGMENT_DIR" '
-    function close_current() {
-      if (out != "") {
-        close(out)
-      }
-      out = ""
-    }
-    /^-- nexent-migration-source: / {
-      close_current()
-      id = $0
-      sub(/^-- nexent-migration-source: /, "", id)
-      sub(/\r$/, "", id)
-      out = outdir "/" id
-      next
-    }
-    /^-- nexent-migration-checksum: / { next }
-    /^-- nexent-migration-probe: / { next }
-    {
-      if (out != "") {
-        print $0 > out
-      }
-    }
-    END {
-      close_current()
-    }
-  ' "$file"
-}
-
-bundle_source_ids() {
-  awk '
-    /^-- nexent-migration-source: / {
-      id = $0
-      sub(/^-- nexent-migration-source: /, "", id)
-      sub(/\r$/, "", id)
-      print id
-    }
-  ' "$1"
-}
-
-bundle_source_marker() {
-  local file="$1"
-  local source_id="$2"
-  local marker="$3"
-  awk -v want="$source_id" -v marker="$marker" '
-    /^-- nexent-migration-source: / {
-      id = $0
-      sub(/^-- nexent-migration-source: /, "", id)
-      sub(/\r$/, "", id)
-      active = (id == want)
-      next
-    }
-    active && index($0, marker) == 1 {
-      value = $0
-      sub(marker, "", value)
-      sub(/\r$/, "", value)
-      print value
-      exit
-    }
-  ' "$file"
-}
-
-file_marker() {
-  local file="$1"
-  local marker="$2"
-  awk -v marker="$marker" '
-    index($0, marker) == 1 {
-      value = $0
-      sub(marker, "", value)
-      sub(/\r$/, "", value)
-      print value
-      exit
-    }
-  ' "$file"
-}
-
 append_manifest_entry() {
   local migration_id="$1"
   local checksum="$2"
-  local probe="$3"
-  local source_file="$4"
-  printf '%s\t%s\t%s\t%s\n' "$migration_id" "$checksum" "$probe" "$source_file" >> "$MIGRATION_MANIFEST_FILE"
+  local source_file="$3"
+  printf '%s%s%s%s%s\n' "$migration_id" "$MANIFEST_SEPARATOR" "$checksum" "$MANIFEST_SEPARATOR" "$source_file" >> "$MIGRATION_MANIFEST_FILE"
 }
 
 collect_one_migration() {
   local file="$1"
-  local source_id source_file source_checksum source_probe migration_id checksum probe
-
-  if grep -q '^-- nexent-migration-source: ' "$file"; then
-    split_bundle_migration "$file"
-    while IFS= read -r source_id; do
-      [ -n "$source_id" ] || continue
-      source_file="$BUNDLE_SEGMENT_DIR/$source_id"
-      source_checksum="$(bundle_source_marker "$file" "$source_id" "-- nexent-migration-checksum: ")"
-      source_probe="$(bundle_source_marker "$file" "$source_id" "-- nexent-migration-probe: ")"
-      if [ -z "$source_checksum" ]; then
-        source_checksum="$(sha256_file "$source_file")"
-      fi
-      append_manifest_entry "$source_id" "$source_checksum" "$source_probe" "$source_file"
-    done < <(bundle_source_ids "$file")
-    return 0
-  fi
-
+  local migration_id checksum
   migration_id="$(basename "$file")"
-  checksum="$(file_marker "$file" "-- nexent-migration-checksum: ")"
-  probe="$(file_marker "$file" "-- nexent-migration-probe: ")"
-  if [ -z "$checksum" ]; then
-    checksum="$(sha256_file "$file")"
-  fi
-  append_manifest_entry "$migration_id" "$checksum" "$probe" "$file"
+  checksum="$(sha256_file "$file")"
+  append_manifest_entry "$migration_id" "$checksum" "$file"
 }
 
 collect_manifest() {
@@ -228,7 +120,7 @@ collect_manifest() {
     while IFS= read -r file; do
       [ -n "$file" ] || continue
       collect_one_migration "$file"
-    done < <(find "$MIGRATION_DIR" -maxdepth 1 -type f -name 'v*.sql' -print | sort -V)
+    done < <(find -H "$MIGRATION_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
   else
     log "migration directory not found: $MIGRATION_DIR"
   fi
@@ -310,9 +202,8 @@ SQL
 append_one_migration_sql() {
   local migration_id="$1"
   local checksum="$2"
-  local probe="$3"
-  local source_file="$4"
-  local migration_id_escaped checksum_escaped source_file_escaped app_version_escaped probe_sql
+  local source_file="$3"
+  local migration_id_escaped checksum_escaped source_file_escaped app_version_escaped
 
   migration_id_escaped="$(escape_sql_literal "$migration_id")"
   checksum_escaped="$(escape_sql_literal "$checksum")"
@@ -321,67 +212,40 @@ append_one_migration_sql() {
 
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
 \echo [sql-migrations] check $migration_id
-DO \$\$
-DECLARE existing_checksum text;
-BEGIN
-  SELECT checksum INTO existing_checksum
-  FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
-  WHERE migration_id = '$migration_id_escaped';
-
-  IF existing_checksum IS NOT NULL AND existing_checksum <> '$checksum_escaped' THEN
-    RAISE EXCEPTION 'checksum changed for already executed migration %', '$migration_id_escaped';
-  END IF;
-END
-\$\$;
+SELECT CASE WHEN EXISTS (
+  SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
+  WHERE migration_id = '$migration_id_escaped' AND checksum = '$checksum_escaped'
+) THEN 'true' ELSE 'false' END AS migration_checksum_matched \gset
+\if :migration_checksum_matched
+\echo [sql-migrations] skip $migration_id
+\else
 SELECT CASE WHEN EXISTS (
   SELECT 1 FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
   WHERE migration_id = '$migration_id_escaped'
 ) THEN 'true' ELSE 'false' END AS migration_recorded \gset
 \if :migration_recorded
-\echo [sql-migrations] skip $migration_id
-\else
-SQL
-
-  if [ -z "$probe" ]; then
-    cat >> "$MIGRATION_PLAN_FILE" <<SQL
-DO \$\$
-BEGIN
-  RAISE EXCEPTION 'migration % is missing nexent-migration-probe; cannot safely baseline missing history', '$migration_id_escaped';
-END
-\$\$;
-SQL
-  else
-    probe_sql="$(strip_trailing_semicolon "$probe")"
-    cat >> "$MIGRATION_PLAN_FILE" <<SQL
-\echo [sql-migrations] probe $migration_id
-TRUNCATE TABLE _nexent_migration_probe_result;
-INSERT INTO _nexent_migration_probe_result(probe_result)
-$probe_sql;
-SELECT CASE WHEN COALESCE((SELECT probe_result FROM _nexent_migration_probe_result LIMIT 1), false)
-  THEN 'true' ELSE 'false' END AS probe_matched \gset
-\if :probe_matched
-\echo [sql-migrations] baseline $migration_id
-INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
-VALUES ('$migration_id_escaped', '$checksum_escaped', 'baselined', '$app_version_escaped', '$source_file_escaped');
+\echo [sql-migrations] reapply $migration_id
 \else
 \echo [sql-migrations] apply $migration_id
+\endif
 \i '$source_file_escaped'
 INSERT INTO "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME" (migration_id, checksum, status, app_version, source_file)
-VALUES ('$migration_id_escaped', '$checksum_escaped', 'applied', '$app_version_escaped', '$source_file_escaped');
-\endif
-SQL
-  fi
-
-  cat >> "$MIGRATION_PLAN_FILE" <<SQL
+VALUES ('$migration_id_escaped', '$checksum_escaped', 'applied', '$app_version_escaped', '$source_file_escaped')
+ON CONFLICT (migration_id) DO UPDATE SET
+  checksum = EXCLUDED.checksum,
+  status = EXCLUDED.status,
+  executed_at = now(),
+  app_version = EXCLUDED.app_version,
+  source_file = EXCLUDED.source_file;
 \endif
 SQL
 }
 
 append_all_migrations_sql() {
-  local migration_id checksum probe source_file
-  while IFS=$'\t' read -r migration_id checksum probe source_file; do
+  local migration_id checksum source_file
+  while IFS="$MANIFEST_SEPARATOR" read -r migration_id checksum source_file; do
     [ -n "${migration_id:-}" ] || continue
-    append_one_migration_sql "$migration_id" "$checksum" "$probe" "$source_file"
+    append_one_migration_sql "$migration_id" "$checksum" "$source_file"
   done < "$MIGRATION_MANIFEST_FILE"
 }
 
@@ -392,10 +256,10 @@ manifest_count() {
 }
 
 expected_values_sql() {
-  local init_checksum migration_id checksum probe source_file first=true
+  local init_checksum migration_id checksum source_file first=true
   init_checksum="$(sha256_file "$INIT_SQL_FILE")"
   printf "('__init.sql', '%s')" "$(escape_sql_literal "$init_checksum")"
-  while IFS=$'\t' read -r migration_id checksum probe source_file; do
+  while IFS="$MANIFEST_SEPARATOR" read -r migration_id checksum source_file; do
     [ -n "${migration_id:-}" ] || continue
     if [ "$first" = true ]; then
       first=false
@@ -424,7 +288,7 @@ run_wait_mode() {
   fi
 
   values="$(expected_values_sql)"
-  query="WITH expected(migration_id, checksum) AS (VALUES $values), joined AS (SELECT e.migration_id, e.checksum AS expected_checksum, m.checksum AS actual_checksum, m.status FROM expected e LEFT JOIN \"$MIGRATION_SCHEMA\".\"$MIGRATION_TABLE_NAME\" m ON m.migration_id = e.migration_id) SELECT CASE WHEN EXISTS (SELECT 1 FROM joined WHERE migration_id <> '__init.sql' AND actual_checksum IS NOT NULL AND actual_checksum <> expected_checksum) THEN 'checksum_mismatch' WHEN (SELECT count(*) FROM joined WHERE actual_checksum = expected_checksum AND status IN ('applied', 'baselined')) = (SELECT count(*) FROM expected) THEN 'ready' ELSE 'waiting' END;"
+  query="WITH expected(migration_id, checksum) AS (VALUES $values), joined AS (SELECT e.migration_id, e.checksum AS expected_checksum, m.checksum AS actual_checksum, m.status FROM expected e LEFT JOIN \"$MIGRATION_SCHEMA\".\"$MIGRATION_TABLE_NAME\" m ON m.migration_id = e.migration_id) SELECT CASE WHEN (SELECT count(*) FROM joined WHERE actual_checksum = expected_checksum AND status IN ('applied', 'baselined')) = (SELECT count(*) FROM expected) THEN 'ready' ELSE 'waiting' END;"
 
   ensure_migration_table
 
@@ -435,10 +299,6 @@ run_wait_mode() {
       ready)
         log "migration target is ready"
         return 0
-        ;;
-      checksum_mismatch)
-        log "ERROR: migration records contain a checksum mismatch"
-        return 1
         ;;
       waiting|"")
         ;;
@@ -463,7 +323,6 @@ run_migrate_mode() {
   } > "$MIGRATION_PLAN_FILE"
   append_migration_table_sql
   cat >> "$MIGRATION_PLAN_FILE" <<SQL
-CREATE TEMP TABLE _nexent_migration_probe_result(probe_result boolean);
 SET search_path TO $SQL_SEARCH_PATH;
 SQL
   append_init_sql
@@ -484,9 +343,6 @@ cleanup() {
   fi
   if [ -n "${MIGRATION_MANIFEST_FILE:-}" ]; then
     rm -f "$MIGRATION_MANIFEST_FILE"
-  fi
-  if [ -n "${BUNDLE_SEGMENT_DIR:-}" ]; then
-    rm -rf "$BUNDLE_SEGMENT_DIR"
   fi
 }
 

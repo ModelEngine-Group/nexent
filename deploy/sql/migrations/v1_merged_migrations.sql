@@ -1,11 +1,7 @@
 -- Nexent merged SQL migrations: v1
 -- This file is generated from historical migration files.
--- Keep each nexent-migration-source marker when editing.
 
--- nexent-migration-source: v1.1.0_0619_add_tenant_config_t.sql
--- nexent-migration-checksum: 2cd0813624dd184b0dc001da898fa53afb4d0456775c38d8b128a0a6497aa7bf
--- nexent-migration-probe: SELECT to_regclass('nexent.tenant_config_t') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'knowledge_sources') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'tenant_id');
--- 1. 为knowledge_record_t表添加knowledge_sources列
+-- 1. 为knowledge_record_t表添加knowledge_sources�?
 ALTER TABLE nexent.knowledge_record_t
 ADD COLUMN IF NOT EXISTS "knowledge_sources" varchar(100) COLLATE "pg_catalog"."default";
 
@@ -20,7 +16,7 @@ CREATE TABLE IF NOT EXISTS nexent.tenant_config_t (
     user_id VARCHAR(100),
     value_type VARCHAR(100),
     config_key VARCHAR(100),
-    config_value VARCHAR(10000),
+    config_value TEXT,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -44,7 +40,7 @@ COMMENT ON COLUMN nexent.tenant_config_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.tenant_config_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.tenant_config_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 
--- 创建更新update_time的函数
+-- 创建更新update_time的函�?
 CREATE OR REPLACE FUNCTION update_tenant_config_update_time()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -71,10 +67,7 @@ ALTER TABLE model_record_t
 ADD COLUMN IF NOT EXISTS tenant_id varchar(100) COLLATE pg_catalog.default DEFAULT 'tenant_id';
 COMMENT ON COLUMN "model_record_t"."tenant_id" IS 'Tenant ID for filtering';
 
--- nexent-migration-source: v1.2.0_0627_increase_config_value_length.sql
--- nexent-migration-checksum: f6aef520c0764bab205e02c40b63d3018a7facdc750719d611be3a7aa3327db1
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'tenant_config_t' AND column_name = 'config_value' AND (data_type = 'text' OR character_maximum_length >= 10000));
--- Incremental SQL to alter config_value column length in nexent.tenant_config_t table
+-- Incremental SQL to alter config_value column type in nexent.tenant_config_t table
 
 -- Check if the table exists before attempting to alter it
 DO $$
@@ -85,19 +78,16 @@ BEGIN
         WHERE table_schema = 'nexent'
         AND table_name = 'tenant_config_t'
     ) THEN
-        -- Alter the column length
-        EXECUTE 'ALTER TABLE nexent.tenant_config_t ALTER COLUMN config_value TYPE VARCHAR(10000)';
+        -- Use TEXT so existing large config values are preserved
+        EXECUTE 'ALTER TABLE nexent.tenant_config_t ALTER COLUMN config_value TYPE TEXT';
 
         -- Log the change
-        RAISE NOTICE 'Altered config_value column length from VARCHAR(100) to VARCHAR(10000) in nexent.tenant_config_t';
+        RAISE NOTICE 'Altered config_value column type to TEXT in nexent.tenant_config_t';
     ELSE
         RAISE NOTICE 'Table nexent.tenant_config_t does not exist, skipping alteration';
     END IF;
 END $$;
 
--- nexent-migration-source: v1.3.0_0630_add_mcp_record_t.sql
--- nexent-migration-checksum: 08f6843803e27f7ff4cc63000920fd920c2a3ab507c7141b0b18e79d8343b66e
--- nexent-migration-probe: SELECT to_regclass('nexent.mcp_record_t') IS NOT NULL;
 -- Migration: Add mcp_record_t table
 -- Date: 2024-06-30
 -- Description: Create MCP (Model Context Protocol) records table with audit fields
@@ -158,9 +148,6 @@ EXECUTE FUNCTION update_mcp_record_update_time();
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_mcp_record_update_time_trigger ON nexent.mcp_record_t IS 'Trigger to call update_mcp_record_update_time function before each update on mcp_record_t table';
 
--- nexent-migration-source: v1.4.0_0708_add_user_tenant_t.sql
--- nexent-migration-checksum: c710bbee0d1a556236760f767261f077f3a13161bfb4439705a912e8a8a16b6a
--- nexent-migration-probe: SELECT to_regclass('nexent.user_tenant_t') IS NOT NULL;
 -- Create user tenant relationship table
 CREATE TABLE IF NOT EXISTS nexent.user_tenant_t (
     user_tenant_id SERIAL PRIMARY KEY,
@@ -183,24 +170,15 @@ COMMENT ON COLUMN nexent.user_tenant_t.create_time IS 'Create time';
 COMMENT ON COLUMN nexent.user_tenant_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.user_tenant_t.created_by IS 'Created by';
 COMMENT ON COLUMN nexent.user_tenant_t.updated_by IS 'Updated by';
-COMMENT ON COLUMN nexent.user_tenant_t.delete_flag IS 'Delete flag, Y/N'; 
+COMMENT ON COLUMN nexent.user_tenant_t.delete_flag IS 'Delete flag, Y/N';
 
--- nexent-migration-source: v1.5.0_0715_add_knowledge_describe_length.sql
--- nexent-migration-checksum: fd98b1b413610f84045699b9d5981fcb4f3d0f489114f1866ad8c8b02f4264b3
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'knowledge_describe' AND (data_type = 'text' OR character_maximum_length >= 3000));
 ALTER TABLE nexent.knowledge_record_t
   ALTER COLUMN knowledge_describe TYPE varchar(3000);
 
--- nexent-migration-source: v1.5.0_0716_add_status_to_mcp_record_t.sql
--- nexent-migration-checksum: f7216276292394cb7eb05772c7ce3d29e367b224a073d8e1ff46f4fdaf0b20f5
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'mcp_record_t' AND column_name = 'status');
 ALTER TABLE nexent.mcp_record_t
 ADD COLUMN IF NOT EXISTS status BOOLEAN DEFAULT NULL;
-COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown'; 
+COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 
--- nexent-migration-source: v1.6.0_0722_modify_tenant_agent.sql
--- nexent-migration-checksum: 42481bedf6e3779cee601ee6bd9b6ea67fc6a2f664e3dbd0239449be047a8389
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'duty_prompt') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'constraint_prompt') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'few_shots_prompt');
 -- Migration script to add new prompt fields to ag_tenant_agent_t table
 -- Add three new columns for storing segmented prompt content
 
@@ -225,9 +203,6 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.duty_prompt IS 'Duty prompt content';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.constraint_prompt IS 'Constraint prompt content';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.few_shots_prompt IS 'Few shots prompt content';
 
--- nexent-migration-source: v1.6.0_0723_add_agent_relation_t.sql
--- nexent-migration-checksum: 55494d857f7ca64a801a144eb729ed9fec68fd37c7fd668061f66a32f49d43d1
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_agent_relation_t') IS NOT NULL;
 -- Migration script to add ag_agent_relation_t table for recording agent parent-child relationships
 -- This table is used to store the hierarchical relationships between agents
 
@@ -272,18 +247,12 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.create_time IS 'Creation time, audi
 COMMENT ON COLUMN nexent.ag_agent_relation_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.created_by IS 'Creator ID, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.updated_by IS 'Last updater ID, audit field';
-COMMENT ON COLUMN nexent.ag_agent_relation_t.delete_flag IS 'Delete flag, set to Y for soft delete, optional values Y/N'; 
+COMMENT ON COLUMN nexent.ag_agent_relation_t.delete_flag IS 'Delete flag, set to Y for soft delete, optional values Y/N';
 
--- nexent-migration-source: v1.7.1_0805_add_deep_thinking_to_model_record_t.sql
--- nexent-migration-checksum: 07d6db17e84c3528f14552e7a3e83c8732294a30d310d78910236f48e11b9807
--- nexent-migration-probe: SELECT to_regclass('nexent.model_record_t') IS NOT NULL;
 ALTER TABLE nexent.model_record_t
 ADD COLUMN IF NOT EXISTS is_deep_thinking BOOLEAN DEFAULT FALSE;
 COMMENT ON COLUMN nexent.model_record_t.is_deep_thinking IS 'deep thinking switch, true=open, false=close';
 
--- nexent-migration-source: v1.7.1_0806_add_memory_user_config.sql
--- nexent-migration-checksum: 3a4bdb67caeeb156efbe611dad276882af11f9cf10683c582e59b672fb714158
--- nexent-migration-probe: SELECT to_regclass('nexent.memory_user_config_t') IS NOT NULL;
 -- 创建序列
 CREATE SEQUENCE IF NOT EXISTS "nexent"."memory_user_config_t_config_id_seq"
 INCREMENT 1
@@ -339,10 +308,7 @@ BEFORE UPDATE ON "nexent"."memory_user_config_t"
 FOR EACH ROW
 EXECUTE FUNCTION "update_memory_user_config_update_time"();
 
--- nexent-migration-source: v1.7.2.2_0820_add_partner_mapping_id_t.sql
--- nexent-migration-checksum: 4b77e805ac98f99ced24ff6fe7d6d9197e84e1c841ebc868ef8c02982156e469
--- nexent-migration-probe: SELECT to_regclass('nexent.partner_mapping_id_t') IS NOT NULL;
-CREATE SEQUENCE IF NOT EXISTS "nexent"."partner_mapping_id_t_mapping_id_seq" 
+CREATE SEQUENCE IF NOT EXISTS "nexent"."partner_mapping_id_t_mapping_id_seq"
 INCREMENT 1
 MINVALUE  1
 MAXVALUE 2147483647
@@ -391,61 +357,43 @@ BEFORE UPDATE ON "nexent"."partner_mapping_id_t"
 FOR EACH ROW
 EXECUTE FUNCTION "update_partner_mapping_update_time"();
 
--- nexent-migration-source: v1.7.2_0809_add_name_zh_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: bdd15bd77c91f6857ebedf40496daa789377b750b4e690cb774035cc5501313d
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'display_name');
 ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS display_name VARCHAR(100);
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.display_name IS 'Agent展示名称';
 
--- nexent-migration-source: v1.7.2_0812_modify_model_record_t.sql
--- nexent-migration-checksum: 0b3946166ad74978239ba9b879dd22340639385315f4b18ab62c5265aa9fc57b
--- nexent-migration-probe: SELECT NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'is_deep_thinking');
 ALTER TABLE nexent.model_record_t
 DROP COLUMN IF EXISTS is_deep_thinking;
 
--- nexent-migration-source: v1.7.3.2_0902_add_model_name_to_knowledge_record_t.sql
--- nexent-migration-checksum: 510d050f49301eba295903ab9bab94cb312942f29cbf491addc55eed06b53006
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'embedding_model_name');
 -- Add model_name column to knowledge_record_t table, used to record the embedding model used by the knowledge base
 
 -- Switch to nexent schema
 SET search_path TO nexent;
 
 -- Add model_name column
-ALTER TABLE "knowledge_record_t" 
+ALTER TABLE "knowledge_record_t"
 ADD COLUMN IF NOT EXISTS "embedding_model_name" varchar(200) COLLATE "pg_catalog"."default";
 
 -- Add column comment
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_name" IS 'Embedding model name, used to record the embedding model used by the knowledge base';
 
--- nexent-migration-source: v1.7.4.1_1011_add_origin_tool_name_to_ag_tool_info.sql
--- nexent-migration-checksum: 354e0d7659ccb0b1d9901482881d31e8d339ccc2033c0bb566cc8ea4c449dc20
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tool_info_t' AND column_name = 'origin_name');
 -- Add origin_name column to ag_tool_info_t table
 -- This field stores the original tool name before any transformations
 
-ALTER TABLE nexent.ag_tool_info_t 
+ALTER TABLE nexent.ag_tool_info_t
 ADD COLUMN IF NOT EXISTS origin_name VARCHAR(100);
 
 -- Add comment to document the purpose of this field
 COMMENT ON COLUMN nexent.ag_tool_info_t.origin_name IS 'Original tool name before any transformations or mappings';
 
--- nexent-migration-source: v1.7.4.1_1013_add_tool_group_to_ag_tool_info.sql
--- nexent-migration-checksum: fe2cb00e045a554b9212e5872188db3374fb7deaead87d79adaa25eeceada892
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tool_info_t' AND column_name = 'category');
 -- Add category column to ag_tool_info_t table
 -- This field stores the tool category information (search, file, email, terminal)
 
-ALTER TABLE nexent.ag_tool_info_t 
+ALTER TABLE nexent.ag_tool_info_t
 ADD COLUMN IF NOT EXISTS category VARCHAR(100);
 
 -- Add comment to document the purpose of this field
 COMMENT ON COLUMN nexent.ag_tool_info_t.category IS 'Tool category information';
 
--- nexent-migration-source: v1.7.4_0928_add_model_id_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: 4a46cd27723def9ec446d1ed79ca7b34f9723fd2887c425484f7c4bde1985caa
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'model_id');
 -- Add model_id column to ag_tenant_agent_t table and deprecate model_name field
 -- Date: 2024-09-28
 -- Description: Add model_id field to ag_tenant_agent_t table and mark model_name as deprecated
@@ -454,7 +402,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.category IS 'Tool category information';
 SET search_path TO nexent;
 
 -- Add model_id column to ag_tenant_agent_t table
-ALTER TABLE ag_tenant_agent_t 
+ALTER TABLE ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS model_id INTEGER;
 
 -- Add comment for the new model_id column
@@ -464,13 +412,10 @@ COMMENT ON COLUMN ag_tenant_agent_t.model_id IS 'Model ID, foreign key reference
 COMMENT ON COLUMN ag_tenant_agent_t.model_name IS '[DEPRECATED] Name of the model used, use model_id instead';
 
 -- Optional: Add foreign key constraint (uncomment if needed)
--- ALTER TABLE ag_tenant_agent_t 
--- ADD CONSTRAINT fk_ag_tenant_agent_model_id 
+-- ALTER TABLE ag_tenant_agent_t
+-- ADD CONSTRAINT fk_ag_tenant_agent_model_id
 -- FOREIGN KEY (model_id) REFERENCES model_record_t(model_id);
 
--- nexent-migration-source: v1.7.5.1_1028_add_chunk_size_to_model_record_t.sql
--- nexent-migration-checksum: aa87ae542533f617d35f49291c07da8f6055b22f0daefb303aa3fc54e2ba91eb
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'expected_chunk_size') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'maximum_chunk_size');
 ALTER TABLE nexent.model_record_t
 ADD COLUMN IF NOT EXISTS expected_chunk_size INT4,
 ADD COLUMN IF NOT EXISTS maximum_chunk_size INT4;
@@ -479,39 +424,27 @@ COMMENT ON COLUMN nexent.model_record_t.expected_chunk_size IS 'Expected chunk s
 COMMENT ON COLUMN nexent.model_record_t.maximum_chunk_size IS 'Maximum chunk size for embedding models, used during document chunking';
 
 
--- nexent-migration-source: v1.7.5_1024_add_business_logic_model_fields.sql
--- nexent-migration-checksum: b17f01117f15444106cef77e83cdd243d509b69c7498af0c4c99469807a2fa69
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'business_logic_model_id') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'business_logic_model_name');
 -- Add business_logic_model_name and business_logic_model_id fields to ag_tenant_agent_t table
 -- These fields store the LLM model used for generating business logic prompts
 
-ALTER TABLE nexent.ag_tenant_agent_t 
+ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS business_logic_model_name VARCHAR(100);
 
-ALTER TABLE nexent.ag_tenant_agent_t 
+ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS business_logic_model_id INTEGER;
 
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_logic_model_name IS 'Model name used for business logic prompt generation';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.business_logic_model_id IS 'Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id';
 
 
--- nexent-migration-source: v1.7.5_1024_alter_tenant_config_t_config_value.sql
--- nexent-migration-checksum: 07625f3b0b375136d364fa8013a3ab008a7571a532d10ca8948a185bf6547645
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'tenant_config_t' AND column_name = 'config_value' AND data_type = 'text');
 ALTER TABLE nexent.tenant_config_t ALTER COLUMN config_value TYPE TEXT;
 
--- nexent-migration-source: v1.7.7_1129_add_ssl_verify_to_model_record_t.sql
--- nexent-migration-checksum: f88ce4c03ad6a9492283dd84990487a2484f1945e18797849a80a95db8416c68
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'ssl_verify');
 ALTER TABLE nexent.model_record_t
 ADD COLUMN IF NOT EXISTS ssl_verify BOOLEAN DEFAULT TRUE;
 
 COMMENT ON COLUMN nexent.model_record_t.ssl_verify IS 'Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.';
 
 
--- nexent-migration-source: v1.7.8_1204_add_knowledge_name_to_knowledge_record_t.sql
--- nexent-migration-checksum: 9579fb5530e561c9b55206a755e62bd73d7d5b35594686b4acf0dde6c344a03f
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'knowledge_name') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'chunk_batch');
 -- Add knowledge_name column if it does not exist
 ALTER TABLE nexent.knowledge_record_t
 ADD COLUMN IF NOT EXISTS knowledge_name varchar(100) COLLATE "pg_catalog"."default";
@@ -531,23 +464,17 @@ ADD COLUMN IF NOT EXISTS chunk_batch INT4;
 
 COMMENT ON COLUMN nexent.model_record_t.chunk_batch IS 'Batch size for concurrent embedding requests during document chunking';
 
--- nexent-migration-source: v1.7.8_add_author_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: 95dfc2bba5049c8f1c57836da36af40387973163a6ee4ecbbc12f8f759e19536
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'author');
 -- Add author column to ag_tenant_agent_t table
 -- This migration adds the author field to support agent author information
 
 -- Add author column with default NULL value for backward compatibility
-ALTER TABLE nexent.ag_tenant_agent_t 
+ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS author VARCHAR(100);
 
 -- Add comment to the column
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.author IS 'Agent author';
 
 
--- nexent-migration-source: v1.7.9.2_1226_add_invitation_and_group_system.sql
--- nexent-migration-checksum: f1dd95ef94a91918a4b910a47b9a996cb6919df0240bf410ba0075df697f5e45
--- nexent-migration-probe: SELECT to_regclass('nexent.tenant_invitation_code_t') IS NOT NULL AND to_regclass('nexent.tenant_group_info_t') IS NOT NULL AND to_regclass('nexent.role_permission_t') IS NOT NULL;
 -- Add invitation code and group management system
 -- This migration adds invitation codes, groups, and permission management features
 
@@ -909,9 +836,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (210, 'SPEED', 'RESOURCE', 'GROUP', 'DELETE')
 ON CONFLICT (role_permission_id) DO NOTHING;
 
--- nexent-migration-source: v1.7.9.3_0122_add_is_new_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: 4fff9e11091edef541ad7d366a6d8155dea4f87016efe984da4768e44d4947dd
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'is_new');
 -- Add is_new column to ag_tenant_agent_t table for new agent marking
 -- This migration adds a field to track whether an agent is marked as new for users
 
@@ -929,9 +853,6 @@ WHERE delete_flag = 'N';
 
 
 
--- nexent-migration-source: v1.7.9.3_0123_add_speed_user_tenant_t.sql
--- nexent-migration-checksum: d3eacf48c71804081e7355904646dd22482bd0978f9f5eedb013c9b756937550
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'user_tenant_t' AND column_name = 'user_email');
 -- Add user_email column to user_tenant_t table
 ALTER TABLE nexent.user_tenant_t
 ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
@@ -943,9 +864,6 @@ INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, cre
 VALUES ('user_id', 'tenant_id', 'SPEED', NULL, 'system', 'system')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;
 
--- nexent-migration-source: v1.7.9_1219_add_container_id_to_mcp_record_t.sql
--- nexent-migration-checksum: 82bf01bf53b57a831cb4ab92f0c0b2f9d7e43895aac261d5841d2b0ae9166a0b
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'mcp_record_t' AND column_name = 'container_id');
 ALTER TABLE nexent.mcp_record_t
 ADD COLUMN IF NOT EXISTS container_id VARCHAR(200);
 
@@ -953,19 +871,13 @@ COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for M
 
 
 
--- nexent-migration-source: v1.8.0.1_0224_init_agent_id_seq.sql
--- nexent-migration-checksum: 54ecb5a27df99384f4a4a59d970a065e4de7433bb7125fdad3d2a5b552c9c7b7
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_tenant_agent_t_agent_id_seq') IS NOT NULL;
-CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_tenant_agent_t_agent_id_seq" 
+CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_tenant_agent_t_agent_id_seq"
 INCREMENT 1
 MINVALUE  1
 MAXVALUE 2147483647
 START 1
 CACHE 1;
 
--- nexent-migration-source: v1.8.0.1_0225_delete_empty_tenant.sql
--- nexent-migration-checksum: 73918b41b296fcaaa5f1b078a0dfd766429191d9bc6fecb2a3dceeccd0e03738
--- nexent-migration-probe: SELECT NOT EXISTS (SELECT 1 FROM nexent.tenant_config_t WHERE tenant_id = '') AND NOT EXISTS (SELECT 1 FROM nexent.tenant_group_info_t WHERE tenant_id = '');
 -- Delete erroneous tenant with empty tenant_id and all related data
 -- This script removes records where tenant_id is empty string from tenant_config_t and tenant_group_info_t
 
@@ -977,9 +889,6 @@ WHERE tenant_id = '';
 DELETE FROM nexent.tenant_group_info_t
 WHERE tenant_id = '';
 
--- nexent-migration-source: v1.8.0.1_0226_add_authorization_token_to_mcp_record_t.sql
--- nexent-migration-checksum: f1e157033d1005ba344840e74662aa9889720707855d9b465da6be047588540d
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'mcp_record_t' AND column_name = 'authorization_token');
 -- Migration: Add authorization_token column to mcp_record_t table
 -- Date: 2025-03-01
 -- Description: Add authorization_token field to support MCP server authentication
@@ -991,9 +900,6 @@ ADD COLUMN IF NOT EXISTS authorization_token VARCHAR(500) DEFAULT NULL;
 -- Add comment to the column
 COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
 
--- nexent-migration-source: v1.8.0.2_0227_add_ingroup_permission_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: 8090c8ba6bab2a98b4f85e8938ddbaafdd1882fc3e9bc70c4ae28df9bbd92771
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'ingroup_permission');
 -- Migration: Add ingroup_permission column to ag_tenant_agent_t table
 -- Date: 2025-03-02
 -- Description: Add ingroup_permission field to support in-group permission control for agents
@@ -1005,27 +911,21 @@ ADD COLUMN IF NOT EXISTS ingroup_permission VARCHAR(30) DEFAULT NULL;
 -- Add comment to the column
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 
--- nexent-migration-source: v1.8.0.2_0302_add_tool_instance_id_seq_and_agent_relation_id_seq.sql
--- nexent-migration-checksum: 37c732cbbfba93886dd6390a7fbf9b21e11bd88e0fd0ad3a87c8dd534ccfdd0e
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_tool_instance_t_tool_instance_id_seq') IS NOT NULL AND to_regclass('nexent.ag_agent_relation_t_relation_id_seq') IS NOT NULL;
 -- Step 1: Create sequence for auto-increment
-CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_tool_instance_t_tool_instance_id_seq" 
+CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_tool_instance_t_tool_instance_id_seq"
 INCREMENT 1
 MINVALUE  1
 MAXVALUE 2147483647
 START 1
 CACHE 1;
 
-CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_agent_relation_t_relation_id_seq" 
+CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_agent_relation_t_relation_id_seq"
 INCREMENT 1
 MINVALUE  1
 MAXVALUE 2147483647
 START 1
 CACHE 1;
 
--- nexent-migration-source: v1.8.0_0204_init_tenant_group.sql
--- nexent-migration-checksum: bbdcd713511c821444b433a3083874ad145a5643e91d4a8c847d373db9cf9a39
--- nexent-migration-probe: SELECT NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM nexent.tenant_config_t c WHERE c.tenant_id = u.tenant_id AND c.config_key = 'TENANT_ID' AND c.delete_flag = 'N'));
 -- Initialize tenant group and default configuration for existing tenants
 -- This migration adds default group and basic config for tenants that lack them
 -- Trigger condition: tenant has no TENANT_ID config_key in tenant_config_t
@@ -1103,10 +1003,7 @@ BEGIN
     END LOOP;
 END $$;
 
--- nexent-migration-source: v1.8.0_0206_add_ag_tenant_agent_version_t .sql
--- nexent-migration-checksum: 66e3fcae02d51947cd2880ddf36aeda897661efbb8155b9452d6b50d4db1e42c
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_tenant_agent_version_t') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'current_version_no');
--- 步骤 1：添加 nullable 的 version_no 字段（不设默认值，让显式赋值）
+-- 步骤 1：添�?nullable �?version_no 字段（不设默认值，让显式赋值）
 ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS version_no INTEGER NULL;
 
@@ -1116,12 +1013,12 @@ ADD COLUMN IF NOT EXISTS version_no INTEGER NULL;
 ALTER TABLE nexent.ag_agent_relation_t
 ADD COLUMN IF NOT EXISTS version_no INTEGER NULL;
 
--- 步骤 2：更新所有历史数据的 version_no 为 0
+-- 步骤 2：更新所有历史数据的 version_no �?0
 UPDATE nexent.ag_tenant_agent_t SET version_no = 0 WHERE version_no IS NULL;
 UPDATE nexent.ag_tool_instance_t SET version_no = 0 WHERE version_no IS NULL;
 UPDATE nexent.ag_agent_relation_t SET version_no = 0 WHERE version_no IS NULL;
 
--- 步骤 3：将字段设为 NOT NULL，并设置默认值 0
+-- 步骤 3：将字段设为 NOT NULL，并设置默认�?0
 ALTER TABLE nexent.ag_tenant_agent_t ALTER COLUMN version_no SET NOT NULL;
 ALTER TABLE nexent.ag_tenant_agent_t ALTER COLUMN version_no SET DEFAULT 0;
 
@@ -1135,7 +1032,7 @@ ALTER TABLE nexent.ag_agent_relation_t ALTER COLUMN version_no SET DEFAULT 0;
 ALTER TABLE nexent.ag_tenant_agent_t
 ADD COLUMN IF NOT EXISTS current_version_no INTEGER NULL;
 
--- 步骤5：修改主键
+-- 步骤5：修改主�?
 ALTER TABLE nexent.ag_tenant_agent_t DROP CONSTRAINT IF EXISTS ag_tenant_agent_t_pkey;
 ALTER TABLE nexent.ag_tenant_agent_t ADD CONSTRAINT ag_tenant_agent_t_pkey PRIMARY KEY (agent_id, version_no);
 
@@ -1145,13 +1042,13 @@ ALTER TABLE nexent.ag_tool_instance_t ADD CONSTRAINT ag_tool_instance_t_pkey PRI
 ALTER TABLE nexent.ag_agent_relation_t DROP CONSTRAINT IF EXISTS ag_agent_relation_t_pkey;
 ALTER TABLE nexent.ag_agent_relation_t ADD CONSTRAINT ag_agent_relation_t_pkey PRIMARY KEY (relation_id, version_no);
 
--- 步骤6：新增agent版本管理表
+-- 步骤6：新增agent版本管理�?
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
     id BIGSERIAL PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL,
     agent_id INTEGER NOT NULL,
     version_no INTEGER NOT NULL,
-    version_name VARCHAR(100),                    -- 用户自定义版本名称
+    version_name VARCHAR(100),                    -- 用户自定义版本名�?
     release_note TEXT,                            -- 发布备注
 
     source_version_no INTEGER NULL,               -- 来源版本号（回滚时记录）
@@ -1191,9 +1088,6 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who 
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';
 
--- nexent-migration-source: v1.8.0_0206_init_role_permission_t.sql
--- nexent-migration-checksum: 3687dd9906bd25f91be8a13e5ee335b2d68cda4aa90c98634f36cfc515780d00
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM nexent.role_permission_t WHERE user_role = 'SPEED');
 DELETE FROM nexent.role_permission_t;
 
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
@@ -1382,9 +1276,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE')
 ON CONFLICT (role_permission_id) DO NOTHING;
 
--- nexent-migration-source: v1.8.1_0306_add_user_token_info.sql
--- nexent-migration-checksum: 032bdaf05034b90867f1de707852143898a25f02c86fd6a7e8955bbedf615f81
--- nexent-migration-probe: SELECT to_regclass('nexent.user_token_info_t') IS NOT NULL AND to_regclass('nexent.user_token_usage_log_t') IS NOT NULL;
 -- Migration: Add user_token_info_t and user_token_usage_log_t tables
 -- Date: 2026-03-06
 -- Description: Create user token (AK/SK) management tables with audit fields

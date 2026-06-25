@@ -28,15 +28,3 @@ config:
   postgresDb: "supabase"
   postgresPort: "5436"
   jwtExpiry: "3600"
-
-# SQL content is rendered by deploy/k8s/deploy.sh from deploy/sql/
-# directory. Keep these empty in chart defaults to avoid maintaining a second
-# SQL copy inside the chart.
-initScripts:
-  jwt: ""
-  pooler: ""
-  logs: ""
-  realtime: ""
-  roles: ""
-  supabase: ""
-  webhooks: ""

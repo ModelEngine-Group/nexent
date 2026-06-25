@@ -315,16 +315,73 @@ render_yaml_literal_file() {
   printf '\n'
 }
 
+sql_files_checksum() {
+  local payload=""
+  local file rel checksum
+  if [ -f "$SQL_INIT_FILE" ]; then
+    checksum="$(deployment_sha256_file "$SQL_INIT_FILE")"
+    payload="${payload}init.sql:${checksum}"$'\n'
+  fi
+  if [ -d "$DEPLOY_ROOT/sql/migrations" ]; then
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      rel="${file#"$DEPLOY_ROOT/sql/"}"
+      checksum="$(deployment_sha256_file "$file")"
+      payload="${payload}${rel}:${checksum}"$'\n'
+    done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
+  fi
+  if [ -d "$SUPABASE_SQL_DIR" ]; then
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      rel="${file#"$DEPLOY_ROOT/sql/"}"
+      checksum="$(deployment_sha256_file "$file")"
+      payload="${payload}${rel}:${checksum}"$'\n'
+    done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
+  fi
+  deployment_sha256_string "$payload"
+}
+
 render_k8s_runtime_config_values() {
   local output_file="$1"
+  local file
   if [ ! -f "$SQL_INIT_FILE" ]; then
     echo "Error: SQL init file not found: $SQL_INIT_FILE"
     exit 1
   fi
+  if [ ! -d "$DEPLOY_ROOT/sql/migrations" ]; then
+    echo "Error: SQL migrations directory not found: $DEPLOY_ROOT/sql/migrations"
+    exit 1
+  fi
+  if [ ! -d "$SUPABASE_SQL_DIR" ]; then
+    echo "Error: Supabase SQL directory not found: $SUPABASE_SQL_DIR"
+    exit 1
+  fi
   {
+    echo "global:"
+    echo "  sqlFileNames:"
+    echo "    migrations:"
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      printf '      - %s\n' "$(yaml_quote "$(basename "$file")")"
+    done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
+    echo "    supabase:"
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      printf '      - %s\n' "$(yaml_quote "$(basename "$file")")"
+    done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "nexent-common:"
-    echo "  initSql: |"
-    sed 's/^/    /' "$SQL_INIT_FILE"
+    echo "  sqlFiles:"
+    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
+    echo "    migrations:"
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      render_yaml_literal_file "$(basename "$file")" "$file" 6 8
+    done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
+    echo "    supabase:"
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      render_yaml_literal_file "$(basename "$file")" "$file" 6 8
+    done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "  config:"
     echo "    services:"
     printf '      configUrl: %s\n' "$(yaml_quote "$(env_or_default CONFIG_SERVICE_URL "http://nexent-config:5010")")"
@@ -471,15 +528,7 @@ render_k8s_runtime_config_values() {
     printf '      logoutUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_LOGOUT_URL "")")"
     printf '      sslVerify: %s\n' "$(yaml_quote "$(env_or_default CAS_SSL_VERIFY "true")")"
     printf '      caBundle: %s\n' "$(yaml_quote "$(env_or_default CAS_CA_BUNDLE "")")"
-    echo "nexent-supabase-db:"
-    echo "  initScripts:"
-    render_yaml_literal_file "jwt" "$SUPABASE_SQL_DIR/jwt.sql" 4 6
-    render_yaml_literal_file "pooler" "$SUPABASE_SQL_DIR/pooler.sql" 4 6
-    render_yaml_literal_file "logs" "$SUPABASE_SQL_DIR/logs.sql" 4 6
-    render_yaml_literal_file "realtime" "$SUPABASE_SQL_DIR/realtime.sql" 4 6
-    render_yaml_literal_file "roles" "$SUPABASE_SQL_DIR/roles.sql" 4 6
-    render_yaml_literal_file "supabase" "$SUPABASE_SQL_DIR/_supabase.sql" 4 6
-    render_yaml_literal_file "webhooks" "$SUPABASE_SQL_DIR/webhooks.sql" 4 6
+
   } > "$output_file"
 }
 
@@ -846,10 +895,12 @@ render_runtime_secret_values() {
     local supabase_checksum
     local web_checksum
     local ssh_checksum
+    local sql_checksum
 
     gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
     runtime_config_hash="$(deployment_sha256_file "$GENERATED_RUNTIME_VALUES")"
-    backend_checksum="$(deployment_sha256_string "runtime=${runtime_config_hash}|elastic=$(env_or_default ELASTICSEARCH_API_KEY "")|postgres=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")|minio=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
+    sql_checksum="$(sql_files_checksum)"
+    backend_checksum="$(deployment_sha256_string "runtime=${runtime_config_hash}|sql=${sql_checksum}|elastic=$(env_or_default ELASTICSEARCH_API_KEY "")|postgres=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")|minio=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
     minio_checksum="$(deployment_sha256_string "root=$(env_or_default MINIO_ROOT_USER "nexent"):$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")|client=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
     supabase_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|base=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|pg=$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")|db=${gotrue_db_url}")"
     web_checksum="$(deployment_sha256_string "market=$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")|model=$(env_or_default MODEL_ENGINE_ENABLED "false")")"
@@ -863,6 +914,7 @@ render_runtime_secret_values() {
         printf '    supabase: %s\n' "$(yaml_quote "$supabase_checksum")"
         printf '    web: %s\n' "$(yaml_quote "$web_checksum")"
         printf '    ssh: %s\n' "$(yaml_quote "$ssh_checksum")"
+        printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
         echo "nexent-common:"
         echo "  secrets:"
         printf '    elasticPassword: %s\n' "$(yaml_quote "$(env_or_default ELASTIC_PASSWORD "nexent@2025")")"
@@ -1008,7 +1060,7 @@ apply() {
             local es_key_output_file
             es_key_before="$(get_existing_secret_value "ELASTICSEARCH_API_KEY" || true)"
             es_key_output_file="$(mktemp "${TMPDIR:-/tmp}/nexent-es-key.XXXXXX")"
-            if ELASTICSEARCH_API_KEY_OUTPUT_FILE="$es_key_output_file" DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" bash "$INIT_ES_SCRIPT"; then
+            if ROOT_ENV_FILE="$ROOT_ENV_FILE" ELASTICSEARCH_API_KEY_OUTPUT_FILE="$es_key_output_file" DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" bash "$INIT_ES_SCRIPT"; then
                 if [ -s "$es_key_output_file" ]; then
                     es_key_after="$(cat "$es_key_output_file")"
                 else

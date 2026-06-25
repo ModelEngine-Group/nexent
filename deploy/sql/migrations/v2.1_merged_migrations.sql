@@ -1,10 +1,6 @@
 -- Nexent merged SQL migrations: v2.1
 -- This file is generated from historical migration files.
--- Keep each nexent-migration-source marker when editing.
 
--- nexent-migration-source: v2.1.0_0503_add_prompt_template_t.sql
--- nexent-migration-checksum: 4a8fbffb12d30bbaa83fff3e56631cd78ff7af97b8f41cf6f17389236078c116
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_prompt_template_t') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'prompt_template_id');
 -- Migration: Add prompt template table and agent prompt template fields
 -- Date: 2026-05-03
 -- Description: Add user-scoped prompt template storage and bind selected prompt template to agents
@@ -121,9 +117,6 @@ ON CONFLICT (template_id) DO UPDATE SET
     updated_by = EXCLUDED.updated_by,
     delete_flag = 'N';
 
--- nexent-migration-source: v2.1.1_0508_add_embedding_model_id_to_knowledge_record_t.sql
--- nexent-migration-checksum: 752a16ea56f96a371bc4abbabe7135036e76569a6a761285dde14bcb6415abe6
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'embedding_model_id');
 -- Add embedding_model_id column to knowledge_record_t table
 -- This field stores the ID of the embedding model used by the knowledge base
 
@@ -134,9 +127,6 @@ ADD COLUMN IF NOT EXISTS "embedding_model_id" INTEGER;
 -- Add column comment
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_id" IS 'Embedding model ID, foreign key reference to model_record_t.model_id';
 
--- nexent-migration-source: v2.1.1_0509_add_model_appid_token_to_model_record_t.sql
--- nexent-migration-checksum: 72fd3e2554dfa33ed22c319803da88ce9939d573be8da7f6d25ff21acabbf32f
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'model_appid') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'access_token');
 ALTER TABLE nexent.model_record_t
 ADD COLUMN IF NOT EXISTS model_appid VARCHAR(100) DEFAULT '';
 
@@ -146,4 +136,3 @@ ADD COLUMN IF NOT EXISTS access_token VARCHAR(100) DEFAULT '';
 
 COMMENT ON COLUMN nexent.model_record_t.model_appid IS 'Application ID for model authentication.';
 COMMENT ON COLUMN nexent.model_record_t.access_token IS 'Access token for model authentication.';
-

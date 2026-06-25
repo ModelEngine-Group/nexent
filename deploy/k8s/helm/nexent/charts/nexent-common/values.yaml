@@ -1,5 +1,5 @@
 # Nexent Common Chart - Shared resources configuration
-# This chart provides shared resources (ConfigMap, Secret, RBAC, init.sql)
+# This chart provides shared resources (ConfigMap, Secret, RBAC, SQL files)
 # that are required by other Nexent charts.
 
 # Images used by common templates
@@ -12,7 +12,10 @@ images:
 # SQL content is rendered by deploy/k8s/deploy.sh from deploy/sql/
 # directory. Keep this empty in chart defaults to avoid maintaining a second SQL
 # copy inside the chart.
-initSql: ""
+sqlFiles:
+  init: ""
+  migrations: {}
+  supabase: {}
 
 # ConfigMap data - this will be used by nexent-config ConfigMap
 config:

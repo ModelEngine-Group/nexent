@@ -1,10 +1,6 @@
 -- Nexent merged SQL migrations: v2.0
 -- This file is generated from historical migration files.
--- Keep each nexent-migration-source marker when editing.
 
--- nexent-migration-source: v2.0.0_0314_add_context_skill_t.sql
--- nexent-migration-checksum: efe07c8063bf76add73fd8516455a941080d807291d4d21aa656239f312faf3d
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_skill_info_t') IS NOT NULL AND to_regclass('nexent.ag_skill_instance_t') IS NOT NULL;
 -- Migration: Add ag_skill_info_t, ag_skill_tools_rel_t, and ag_skill_instance_t tables
 -- Date: 2026-03-14
 -- Description: Create skill management tables with skill content, tags, and tool relationships
@@ -111,9 +107,6 @@ COMMENT ON COLUMN nexent.ag_skill_instance_t.updated_by IS 'Last updater ID';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.update_time IS 'Last update timestamp';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 
--- nexent-migration-source: v2.0.1_0331_add_outer_api_tool_t.sql
--- nexent-migration-checksum: ac18655659eac2a8d155cd7188870f55aa27795f5e27a6f77a2b33fda5a005d5
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_outer_api_tools') IS NOT NULL OR to_regclass('nexent.ag_outer_api_services') IS NOT NULL;
 -- v2.0.1_0331_add_outer_api_tool_t.sql
 -- Create table for outer API tools (OpenAPI to MCP conversion)
 
@@ -186,9 +179,6 @@ CREATE INDEX IF NOT EXISTS idx_ag_outer_api_tools_name
 ON nexent.ag_outer_api_tools (name)
 WHERE delete_flag = 'N';
 
--- nexent-migration-source: v2.0.2_0410_add_columns_outer_api_tools.sql
--- nexent-migration-checksum: db16813121a1ba74ec3e7f2d925b4412e4026a986b2e66ce0cd3b11691ae3771
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_outer_api_services') IS NOT NULL OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_outer_api_tools' AND column_name = 'mcp_service_name');
 -- v2.0.2_0410_add_columns_outer_api_tools.sql
 -- Add MCP service-level columns to ag_outer_api_tools table
 -- These columns enable grouping tools from the same OpenAPI spec under a single MCP service
@@ -209,9 +199,6 @@ CREATE INDEX IF NOT EXISTS idx_ag_outer_api_tools_mcp_service_name
 ON nexent.ag_outer_api_tools (mcp_service_name)
 WHERE delete_flag = 'N' AND mcp_service_name IS NOT NULL;
 
--- nexent-migration-source: v2.0.2_0414_add_a2a_tables.sql
--- nexent-migration-checksum: a9e31d201a969ab358e75fd8c51153d11b1acddaab5171a80d9f0eefe10a5df5
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_a2a_nacos_config_t') IS NOT NULL AND to_regclass('nexent.ag_a2a_message_t') IS NOT NULL AND to_regclass('nexent.ag_a2a_artifact_t') IS NOT NULL;
 -- A2A Protocol Tables Migration
 -- Purpose: Support A2A (Agent-to-Agent) protocol with both Client (discover and call external agents) and Server (expose local agents) capabilities
 -- Tables created:
@@ -633,9 +620,6 @@ COMMENT ON COLUMN nexent.ag_a2a_artifact_t.meta_data IS 'Artifact metadata';
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.extensions IS 'Extension URI list';
 COMMENT ON COLUMN nexent.ag_a2a_artifact_t.create_time IS 'Artifact creation timestamp';
 
--- nexent-migration-source: v2.0.2_0414_migrate_outer_api_tools_to_services.sql
--- nexent-migration-checksum: cab21c537fe3341ef825eae574cc0c16797770e3d6a730c6bddd0fa1a306d0ab
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_outer_api_services') IS NOT NULL AND to_regclass('nexent.ag_outer_api_tools') IS NULL;
 -- Migration: Convert ag_outer_api_tools (tool-level) to ag_outer_api_services (service-level)
 -- Date: 2026-04-09
 -- Description: Each OpenAPI service now stores one record instead of one record per tool.
@@ -702,9 +686,6 @@ DROP TABLE IF EXISTS nexent.ag_outer_api_tools;
 -- Step 5: Drop the old sequence (no longer needed)
 DROP SEQUENCE IF EXISTS nexent.ag_outer_api_tools_id_seq;
 
--- nexent-migration-source: v2.0.2_0420_add_fk_to_ag_a2a_message_t.sql
--- nexent-migration-checksum: 1e90ca0f9ae7f6e3a6b0a14e09c80394742ed76f20a13081b51b205518495572
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ag_a2a_message_t_task_id_fk' AND conrelid = 'nexent.ag_a2a_message_t'::regclass) OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_a2a_external_agent_t' AND column_name = 'base_url');
 -- =============================================================================
 -- Add Foreign Key Constraint to ag_a2a_message_t
 -- =============================================================================
@@ -729,9 +710,6 @@ BEGIN
     END IF;
 END $$;
 
--- nexent-migration-source: v2.0.2_0425_add_is_a2a_to_ag_tenant_agent_version_t.sql
--- nexent-migration-checksum: 017977bb962a4612381fa0a0a1b14ae1c1a2a93d59a96f08f30ea667eee9b2c1
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_version_t' AND column_name = 'is_a2a');
 -- Add is_a2a column to ag_tenant_agent_version_t for tracking A2A Server agent publish status
 -- This field indicates whether this version was published as an A2A Server agent
 
@@ -740,9 +718,6 @@ ADD COLUMN IF NOT EXISTS is_a2a BOOLEAN DEFAULT FALSE;
 
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.is_a2a IS 'Whether this version is published as an A2A Server agent';
 
--- nexent-migration-source: v2.0.3_0423_create_model_monitoring_record_t.sql
--- nexent-migration-checksum: 3a97d2b04452e63c9a6ea38ebe49705099ee53a8cc63a3c976da4bfcf77ed089
--- nexent-migration-probe: SELECT to_regclass('nexent.model_monitoring_record_t') IS NOT NULL;
 -- Model Monitoring Record Table
 -- Stores per-request LLM performance metrics for the monitoring feature.
 -- Run this script against the 'nexent' schema in PostgreSQL.
@@ -786,9 +761,6 @@ CREATE INDEX IF NOT EXISTS ix_monitoring_model_type   ON nexent.model_monitoring
 -- Composite index for time-range queries per model
 CREATE INDEX IF NOT EXISTS ix_monitoring_model_time   ON nexent.model_monitoring_record_t (model_id, create_time);
 
--- nexent-migration-source: v2.0.3_0430_add_user_oauth_account_t.sql
--- nexent-migration-checksum: bab30b3520bead4840bc989936d3b5a91d06ff8c8187c550b3627b415d855e97
--- nexent-migration-probe: SELECT to_regclass('nexent.user_oauth_account_t') IS NOT NULL;
 -- Create user OAuth account table for third-party login (GitHub, WeChat, etc.)
 CREATE TABLE IF NOT EXISTS nexent.user_oauth_account_t (
     oauth_account_id SERIAL PRIMARY KEY,
@@ -843,9 +815,6 @@ COMMENT ON COLUMN nexent.user_oauth_account_t.delete_flag IS 'Whether it is dele
 CREATE INDEX IF NOT EXISTS idx_user_oauth_account_t_user_id
 ON nexent.user_oauth_account_t (user_id);
 
--- nexent-migration-source: v2.0.4_0427_add_enable_context_manager_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: 5afe76cd3e57ee935e3fc0f32c9dc1e568162f5dce344ce1eaea3b1d7489a9ed
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'enable_context_manager');
 -- Migration: Add enable_context_manager column to ag_tenant_agent_t table
 -- Date: 2025-04-27
 -- Description: Add enable_context_manager field to control context management (compression) per agent
@@ -857,9 +826,6 @@ ADD COLUMN IF NOT EXISTS enable_context_manager BOOLEAN DEFAULT FALSE;
 -- Add comment to the column
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enable_context_manager IS 'Whether to enable context management (compression) for this agent';
 
--- nexent-migration-source: v2.0.4_0506_add_base_url_in_external_agent.sql
--- nexent-migration-checksum: 8e4059abf919ffd7637712a39c6826678fd6c19aeb3f648ed558707ffc3e567b
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_a2a_external_agent_t' AND column_name = 'base_url');
 ALTER TABLE nexent.ag_a2a_external_agent_t
 ADD COLUMN IF NOT EXISTS base_url VARCHAR(512);
 
@@ -874,9 +840,6 @@ ALTER TABLE nexent.ag_a2a_external_agent_relation_t
 ALTER TABLE nexent.ag_a2a_artifact_t
     DROP CONSTRAINT IF EXISTS fk_artifact_task;
 
--- nexent-migration-source: v2.0.5_0511_add_auto_summary_fields_to_knowledge_record_t.sql
--- nexent-migration-checksum: e3507df5a3b37bb3b6b8b3bef1ecc1d3be1645679ad9ee4b4cc47bb297f35d60
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'summary_frequency') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'last_summary_time') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'last_doc_update_time');
 -- Migration: Add auto-summary fields to knowledge_record_t table
 -- Date: 2026-05-11
 -- Description: Add summary_frequency, last_summary_time, and last_doc_update_time fields for auto-summary feature

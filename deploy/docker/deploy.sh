@@ -814,6 +814,32 @@ create_dir_with_permission() {
   fi
 }
 
+sql_files_checksum() {
+  local payload=""
+  local file rel checksum
+
+  if [ ! -d "$SQL_DIR" ]; then
+    echo "Error: SQL directory not found: $SQL_DIR" >&2
+    return 1
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    rel="${file#"$SQL_DIR/"}"
+    checksum="$(deployment_sha256_file "$file")"
+    payload="${payload}${rel}:${checksum}"$'\n'
+  done < <(find "$SQL_DIR" -type f -name '*.sql' -print | sort -V)
+
+  deployment_sha256_string "$payload"
+}
+
+update_sql_files_checksum() {
+  NEXENT_SQL_FILES_CHECKSUM="$(sql_files_checksum)"
+  export NEXENT_SQL_FILES_CHECKSUM
+  update_env_var "NEXENT_SQL_FILES_CHECKSUM" "$NEXENT_SQL_FILES_CHECKSUM"
+  echo "   SQL files checksum: $NEXENT_SQL_FILES_CHECKSUM"
+}
+
 prepare_directory_and_data() {
   # Initialize the sql script permission
   chmod 644 "$SQL_DIR/init.sql"
@@ -828,13 +854,12 @@ prepare_directory_and_data() {
   chmod -R 775 $ROOT_DIR/volumes
   echo "   📁 Directory $ROOT_DIR/volumes has been created and permissions set to 775."
 
-  mkdir -p "$ROOT_DIR/volumes/db/init"
-  cp -f "$SQL_DIR/supabase/"*.sql "$ROOT_DIR/volumes/db/"
+  mkdir -p "$ROOT_DIR/volumes/db/data" "$ROOT_DIR/volumes/db/init"
   if [ -f "$SQL_DIR/supabase/init/data.sql" ]; then
     cp -f "$SQL_DIR/supabase/init/data.sql" "$ROOT_DIR/volumes/db/init/data.sql"
   fi
   chmod -R 775 "$ROOT_DIR/volumes/db"
-  echo "   📁 Supabase SQL initialized from $SQL_DIR/supabase."
+  echo "   Supabase data directory initialized; SQL files are mounted from $SQL_DIR/supabase."
 
   # Copy sync_user_supabase2pg.py to ROOT_DIR for container access
   cp -rn "$DOCKER_ASSETS_DIR/scripts" "$ROOT_DIR"
@@ -1435,6 +1460,7 @@ main_deploy() {
 
   # Add permission
   prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
+  update_sql_files_checksum || { echo "ERROR SQL checksum update failed"; exit 1; }
   generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
 
 

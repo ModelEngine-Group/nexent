@@ -37,6 +37,8 @@ spec:
               value: "http://nexent-runtime:5014"
             - name: MINIO_ENDPOINT
               value: "http://nexent-minio:9000"
+            - name: DEPLOYMENT_VERSION
+              value: {{ .Values.global.deploymentVersion | quote }}
             - name: MARKET_BACKEND
               value: {{ .Values.config.marketBackend | quote }}
             - name: MODEL_ENGINE_ENABLED

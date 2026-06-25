@@ -56,8 +56,6 @@ RUN python -c "import tiktoken; enc = tiktoken.get_encoding('cl100k_base')"
 # Layer 2: copy backend code
 COPY backend /opt/backend
 COPY VERSION /opt/nexent/VERSION
-COPY deploy/sql/init.sql /opt/nexent/sql/init.sql
-COPY deploy/sql/migrations /opt/nexent/sql/migrations
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
 

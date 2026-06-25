@@ -1,10 +1,6 @@
 -- Nexent merged SQL migrations: v2.2
 -- This file is generated from historical migration files.
--- Keep each nexent-migration-source marker when editing.
 
--- nexent-migration-source: v2.2.0_0514_skill_config_schema.sql
--- nexent-migration-checksum: 64c53d2efd1ac360cc791f5372bd2d9b50f3fe404bd49f6f825e7ba0a3206243
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_skill_info_t' AND column_name = 'config_schemas') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_skill_instance_t' AND column_name = 'config_schemas');
 -- Rename params -> config_values, add config_schemas to ag_skill_info_t
 -- Add tenant_id column for multi-tenancy support
 ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
@@ -17,10 +13,31 @@ BEGIN
         WHERE table_schema = 'nexent'
           AND table_name   = 'ag_skill_info_t'
           AND column_name  = 'params'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name   = 'ag_skill_info_t'
+          AND column_name  = 'config_values'
     ) THEN
         ALTER TABLE nexent.ag_skill_info_t RENAME COLUMN params TO config_values;
+    ELSIF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name   = 'ag_skill_info_t'
+          AND column_name  = 'params'
+    ) AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name   = 'ag_skill_info_t'
+          AND column_name  = 'config_values'
+    ) THEN
+        UPDATE nexent.ag_skill_info_t
+        SET config_values = params
+        WHERE config_values IS NULL
+          AND params IS NOT NULL;
     END IF;
 END $$;
+ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS config_values JSON;
 ALTER TABLE nexent.ag_skill_info_t ADD COLUMN IF NOT EXISTS config_schemas JSON;
 
 -- Comments for ag_skill_info_t columns
@@ -36,9 +53,6 @@ ALTER TABLE nexent.ag_skill_instance_t ADD COLUMN IF NOT EXISTS config_schemas J
 COMMENT ON COLUMN nexent.ag_skill_instance_t.config_values IS 'Per-agent runtime parameter values from config/config.yaml';
 COMMENT ON COLUMN nexent.ag_skill_instance_t.config_schemas IS 'Per-agent parameter schema overrides from config/schema.yaml';
 
--- nexent-migration-source: v2.2.0_0520_add_concurrency_and_timeout_to_model_record_t.sql
--- nexent-migration-checksum: 64a8bcd943d9fcbf7c7ca7059fd0772f515dd981223df82f43227cc240d134fe
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'concurrency_limit') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'model_record_t' AND column_name = 'timeout_seconds');
 -- Add concurrency_limit column to model_record_t table
 ALTER TABLE nexent.model_record_t
 ADD COLUMN IF NOT EXISTS concurrency_limit INTEGER DEFAULT NULL;
@@ -53,9 +67,6 @@ ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER DEFAULT 120;
 -- Add comment to the column
 COMMENT ON COLUMN nexent.model_record_t.timeout_seconds IS 'Request timeout in seconds for this model. Default is 120 seconds.';
 
--- nexent-migration-source: v2.2.0_0521_add_mcp_community_record_t.sql
--- nexent-migration-checksum: 7ac5bdd5b6b51f7c9dd4f1cb4d1c312585f1319128719f628c88b7f61a518938
--- nexent-migration-probe: SELECT to_regclass('nexent.mcp_community_record_t') IS NOT NULL;
 -- Migration: Add mcp_community_record_t table
 -- Date: 2026-03-26
 -- Description: Community MCP market table aligned with public-shareable fields from mcp_record_t.
@@ -140,9 +151,6 @@ COMMENT ON TRIGGER update_mcp_community_record_update_time_trigger ON nexent.mcp
 
 COMMIT;
 
--- nexent-migration-source: v2.2.0_0521_expand_mcp_record_t.sql
--- nexent-migration-checksum: aaec6eedf41e6d5bc1fe3ec2336aabeeea885388671f2056d71647476a662f30
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'mcp_record_t' AND column_name = 'registry_json') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'mcp_record_t' AND column_name = 'container_port');
 -- Migration: Extend mcp_record_t for MCP tools (direct schema)
 -- Date: 2026-03-18
 -- Description: One-step schema extension for mcp_record_t. No table merge, no data migration.
@@ -185,9 +193,6 @@ CREATE INDEX IF NOT EXISTS idx_mcp_record_t_tags_gin
 
 COMMIT;
 
--- nexent-migration-source: v2.2.0_0526_add_cas_session_t.sql
--- nexent-migration-checksum: c0e10c35e7bca1441744eb4cd8ade9b12e1d0f8d0bcf5a035259a1604828d7a9
--- nexent-migration-probe: SELECT to_regclass('nexent.user_cas_session_t') IS NOT NULL;
 CREATE TABLE IF NOT EXISTS nexent.user_cas_session_t (
     cas_session_id SERIAL PRIMARY KEY,
     session_id VARCHAR(100) NOT NULL UNIQUE,
@@ -216,9 +221,6 @@ COMMENT ON COLUMN nexent.user_cas_session_t.session_id IS 'JWT sid claim for rev
 COMMENT ON COLUMN nexent.user_cas_session_t.cas_user_id IS 'User identifier returned by CAS';
 COMMENT ON COLUMN nexent.user_cas_session_t.cas_session_index IS 'CAS SessionIndex or service ticket';
 
--- nexent-migration-source: v2.2.0_0527_add_custom_headers_to_mcp_record_t.sql
--- nexent-migration-checksum: 0e366aee7b557165759968db1273cf26d15801010fa66a358b087e28391b36d5
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'mcp_record_t' AND column_name = 'custom_headers');
 -- Migration: Add custom_headers column to mcp_record_t
 -- Date: 2026-05-26
 -- Description: Add custom_headers field to store custom HTTP headers for MCP server requests
@@ -236,9 +238,6 @@ COMMENT ON COLUMN nexent.mcp_record_t.custom_headers IS 'Custom HTTP headers as 
 
 COMMIT;
 
--- nexent-migration-source: v2.2.0_0529_add_asset_owner_role_permissions.sql
--- nexent-migration-checksum: d02ad5ae1aa9ad43c20d0f5fc7ca7ffbafb9f733b2c6300798109898a116e064
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM nexent.role_permission_t WHERE user_role = 'ASSET_OWNER') AND EXISTS (SELECT 1 FROM nexent.role_permission_t WHERE permission_type = 'INVITE.ASSET_OWNER');
 -- Migration: ASSET_OWNER role permissions and invitation type comment
 -- Date: 2026-05-29
 -- Description: Add ASSET_OWNER role permissions, SU asset-owner invite permissions,
@@ -293,9 +292,6 @@ ON CONFLICT (role_permission_id) DO NOTHING;
 
 COMMIT;
 
--- nexent-migration-source: v2.2.1_0601_add_agent_verification_config.sql
--- nexent-migration-checksum: 11773a4498dda1f28a1d7bbd3aae1a3eb19df44d4060da54a80d0dd75fa15ca8
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'verification_config');
 -- Migration: Add layered ReAct self-verification config to agents
 -- Description: Stores per-agent verification controls for step-level and final-answer validation.
 
@@ -304,9 +300,6 @@ ADD COLUMN IF NOT EXISTS verification_config JSONB;
 
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.verification_config IS 'Layered ReAct self-verification configuration';
 
--- nexent-migration-source: v2.2.1_0601_add_preserve_source_file_to_knowledge_record_t.sql
--- nexent-migration-checksum: 817eb15a47d2362ab1068c4f389757af6b240af8cefcfbf0cfda69a046ce1f4f
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'knowledge_record_t' AND column_name = 'preserve_source_file');
 -- Migration: Add preserve_source_file to knowledge_record_t table
 -- Date: 2026-06-01
 -- Description: Whether to preserve uploaded source documents after vectorization (default: true)
@@ -316,9 +309,6 @@ ADD COLUMN IF NOT EXISTS preserve_source_file BOOLEAN NOT NULL DEFAULT true;
 
 COMMENT ON COLUMN nexent.knowledge_record_t.preserve_source_file IS 'Whether to preserve uploaded source documents after vectorization';
 
--- nexent-migration-source: v2.2.1_0603_add_greeting_fields_to_ag_tenant_agent_t.sql
--- nexent-migration-checksum: 1f8d6646d1c9c6976f0837798bb0824bd988368ad53d991bedb2b1b49418ce6c
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'greeting_message') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'example_questions');
 -- Migration: Add greeting_message and example_questions columns to ag_tenant_agent_t table
 -- Date: 2026-06-03
 -- Description: Add greeting message and example questions fields for agent chat initial screen
@@ -335,9 +325,6 @@ ADD COLUMN IF NOT EXISTS example_questions JSONB;
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.greeting_message IS 'Agent greeting message displayed on chat initial screen';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.example_questions IS 'List of example questions for starting a conversation with this agent';
 
--- nexent-migration-source: v2.2.1_0605_add_ag_agent_repository_t.sql
--- nexent-migration-checksum: 56307a5438afd4acb8699dd50cb8ea4722cdee1143ba68b23f7578e666ea9844
--- nexent-migration-probe: SELECT to_regclass('nexent.ag_agent_repository_t') IS NOT NULL;
 -- Migration: Add ag_agent_repository_t table
 -- Date: 2026-06-05
 -- Description: Agent marketplace repository for frozen shareable agent snapshots.
@@ -435,9 +422,6 @@ COMMENT ON TRIGGER update_ag_agent_repository_update_time_trigger ON nexent.ag_a
 
 COMMIT;
 
--- nexent-migration-source: v2.2.1_0609_add_selected_agent_version_no_to_agent_relation_t.sql
--- nexent-migration-checksum: 5ac493d08e92c0551bdfe24676e759a2c182e6f89e0b82bf9e41924f76c94b79
--- nexent-migration-probe: SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_agent_relation_t' AND column_name = 'selected_agent_version_no');
 -- Migration: Add selected_agent_version_no to ag_agent_relation_t
 -- Date: 2026-06-09
 -- Description: Pin child agent version on parent-child relations at publish time.

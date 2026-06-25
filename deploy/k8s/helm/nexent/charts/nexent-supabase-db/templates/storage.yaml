@@ -44,34 +44,4 @@ spec:
   storageClassName: {{ .Values.persistence.storageClassName | quote }}
   {{- end }}
 {{- end }}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nexent-supabase-db-migrations
-data:
-
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nexent-supabase-db-init
-  namespace: {{ .Values.global.namespace }}
-  annotations:
-    "helm.sh/hook-weight": "-2"
-data:
-  99-jwt.sql: |
-{{ required "nexent-supabase-db.initScripts.jwt is required" .Values.initScripts.jwt | nindent 4 }}
-  99-pooler.sql: |
-{{ required "nexent-supabase-db.initScripts.pooler is required" .Values.initScripts.pooler | nindent 4 }}
-  99-logs.sql: |
-{{ required "nexent-supabase-db.initScripts.logs is required" .Values.initScripts.logs | nindent 4 }}
-  99-realtime.sql: |
-{{ required "nexent-supabase-db.initScripts.realtime is required" .Values.initScripts.realtime | nindent 4 }}
-  99-roles.sql: |
-{{ required "nexent-supabase-db.initScripts.roles is required" .Values.initScripts.roles | nindent 4 }}
-  97-_supabase.sql: |
-{{ required "nexent-supabase-db.initScripts.supabase is required" .Values.initScripts.supabase | nindent 4 }}
-  98-webhooks.sql: |
-{{ required "nexent-supabase-db.initScripts.webhooks is required" .Values.initScripts.webhooks | nindent 4 }}
 {{- end }}

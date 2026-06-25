@@ -5,7 +5,7 @@
 # install environments.
 
 DEPLOYMENT_SCHEMA_VERSION="1"
-DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application"
+DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process,supabase"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
@@ -387,8 +387,8 @@ deployment_apply_legacy_inputs() {
         DEPLOYMENT_COMPONENTS="infrastructure,application"
         ;;
       full)
-        deployment_warn "DEPLOYMENT_VERSION=full is deprecated; use --components infrastructure,application,supabase."
-        DEPLOYMENT_COMPONENTS="infrastructure,application,supabase"
+        deployment_warn "DEPLOYMENT_VERSION=full is deprecated; use --components infrastructure,application,data-process,supabase."
+        DEPLOYMENT_COMPONENTS="infrastructure,application,data-process,supabase"
         ;;
     esac
   fi

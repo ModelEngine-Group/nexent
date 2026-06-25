@@ -97,12 +97,14 @@ services:
     ports:
       - ${SUPABASE_POSTGRES_PORT}:${SUPABASE_POSTGRES_PORT}
     volumes:
-      - $ROOT_DIR/volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql
-      - $ROOT_DIR/volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql
-      - $ROOT_DIR/volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql
-      - $ROOT_DIR/volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql
+      - ../../sql/supabase/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro
+      - ../../sql/supabase/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:ro
+      - ../../sql/supabase/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:ro
+      - ../../sql/supabase/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro
+      - ../../sql/supabase/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ../../sql/supabase/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
       - $ROOT_DIR/volumes/db/data:/var/lib/postgresql/data
-      - $ROOT_DIR/volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql
+      - ../../sql/supabase/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:ro
       - $ROOT_DIR/volumes/logs:/var/log/postgresql
       - db-config:/etc/postgresql-custom
     networks:

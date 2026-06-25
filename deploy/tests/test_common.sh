@@ -62,6 +62,10 @@ write_full_config() {
 }
 
 APP_VERSION="latest"
+deployment_prepare_config --app-version latest
+assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and supabase"
+assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "default docker services should include data-process"
+assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase-db" "default helm charts should include supabase db"
 deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components should come from CLI"
 assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
