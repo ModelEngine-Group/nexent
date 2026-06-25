@@ -72,21 +72,26 @@ async def _execute_task(task_uuid, task_prompt, agent_id, conversation_id, tenan
     # Get current max message index to avoid collisions
     max_idx = get_max_message_index(conversation_id)
 
-    # Save user message with scheduling instruction
-    user_content = (
-        f"[定时任务触发] 以下是一条已到期的定时任务，请直接执行任务内容并回复用户。"
-        f"不要创建新的定时任务，不要调用 scheduled_task 工具。\n\n任务内容：{task_prompt}"
+    # The message shown to the user is a short, human-readable trigger line.
+    # The full instruction is passed only to the agent as the run query, so
+    # the internal prompt is never displayed in the chat bubble.
+    display_content = f"⏰ {task_prompt}"
+    agent_query = (
+        f"[定时任务触发] 一个定时任务到期了。请理解下面任务内容的意图，"
+        f"直接向用户输出对应的回复，不要复述任务原文，"
+        f"不要提问、不要追问、不要建议其他任务、不要调用任何工具。\n\n"
+        f"任务内容：{task_prompt}"
     )
     _save_simple_message(
         conversation_id, max_idx + 1, MESSAGE_ROLE["USER"],
-        user_content, user_id, tenant_id,
+        display_content, user_id, tenant_id,
     )
 
     # Create agent run info
     agent_run_info = await create_agent_run_info(
         agent_id=agent_id,
         minio_files=None,
-        query=user_content,
+        query=agent_query,
         history=[],
         tenant_id=tenant_id,
         user_id=user_id,
@@ -100,22 +105,66 @@ async def _execute_task(task_uuid, task_prompt, agent_id, conversation_id, tenan
             if t.class_name != "ScheduledTaskTool"
         ]
 
-    # Run agent and collect response chunks
+    # Run agent and collect response chunks (each chunk is a JSON string)
     chunks = []
     async for chunk in agent_run(agent_run_info):
         chunks.append(chunk)
 
-    # Build assistant response text from chunks
-    response_parts = [
-        c.get("content", "") if isinstance(c, dict) else str(c)
-        for c in chunks
-    ]
-    assistant_content = "".join(p for p in response_parts if p) or "(task completed with no output)"
+    # Parse and merge chunks into message units (same logic as
+    # save_conversation_assistant) so the frontend renders them correctly —
+    # thinking folded, final_answer shown as the answer — instead of dumping
+    # raw JSON. Only a final_answer / model_output units are kept; metadata
+    # chunks (step_count, token_count, agent_new_run) are dropped.
+    _save_assistant_chunks(conversation_id, max_idx + 2, chunks, user_id, tenant_id)
 
-    # Save assistant message
-    _save_simple_message(
-        conversation_id, max_idx + 2, MESSAGE_ROLE["ASSISTANT"],
-        assistant_content, user_id, tenant_id,
+
+def _save_assistant_chunks(conversation_id, msg_idx, chunks, user_id, tenant_id):
+    """Persist an assistant message from agent_run chunks.
+
+    Chunks are JSON strings like '{"type": "final_answer", "content": "..."}'.
+    They are parsed and merged (consecutive same-type units concatenated),
+    mirroring save_conversation_assistant so the frontend can render each
+    unit by type.
+    """
+    import json as _json
+    from services.conversation_management_service import save_message
+    from consts.model import MessageRequest, MessageUnit
+    from consts.const import MESSAGE_ROLE
+    from nexent.core.utils.observer import ProcessType
+
+    mergeable = {ProcessType.MODEL_OUTPUT_CODE.value, ProcessType.MODEL_OUTPUT_THINKING.value}
+    message_list = []
+    for item in chunks:
+        try:
+            message = _json.loads(item) if isinstance(item, str) else dict(item)
+        except (ValueError, TypeError):
+            continue
+        mtype = message.get("type")
+        content = message.get("content", "")
+        # Skip non-content metadata chunks
+        if mtype in ("step_count", "token_count", "agent_new_run", "parsing", "execution", "executing"):
+            continue
+        if not content:
+            continue
+        if mtype in mergeable and message_list and message_list[-1]["type"] == mtype:
+            message_list[-1]["content"] += content
+        else:
+            message_list.append({"type": mtype, "content": content})
+
+    # Fallback: if no content units were produced, store a plain placeholder
+    if not message_list:
+        message_list = [{"type": "string", "content": "(task completed with no output)"}]
+
+    save_message(
+        MessageRequest(
+            conversation_id=conversation_id,
+            message_idx=msg_idx,
+            role=MESSAGE_ROLE["ASSISTANT"],
+            message=[MessageUnit(**m) for m in message_list],
+            minio_files=None,
+        ),
+        user_id=user_id,
+        tenant_id=tenant_id,
     )
 
 

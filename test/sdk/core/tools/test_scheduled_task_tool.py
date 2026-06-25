@@ -241,3 +241,117 @@ def test_parse_records_day_restriction_flags():
     assert dow_only["day_of_month_restricted"] is False
     assert dow_only["day_of_week_restricted"] is True
 
+
+
+# ---------------------------------------------------------------------------
+# _resolve_task_type — task type inference from time fields
+# This guards against the failure mode where a caller passes
+# cron_expression without task_type and the task silently becomes oneshot.
+# ---------------------------------------------------------------------------
+
+def test_resolve_infers_cron_from_cron_expression():
+    # Passing cron_expression alone should infer 'cron', even without task_type
+    assert ScheduledTaskTool._resolve_task_type(None, "* * * * *", None) == "cron"
+    # Explicit task_type omitted entirely
+    assert ScheduledTaskTool._resolve_task_type(None, "0 9 * * *", None) == "cron"
+
+
+def test_resolve_infers_oneshot_from_delay():
+    assert ScheduledTaskTool._resolve_task_type(None, None, 60) == "oneshot"
+    assert ScheduledTaskTool._resolve_task_type(None, None, 3600) == "oneshot"
+
+
+def test_resolve_explicit_task_type_consistent():
+    # Explicit task_type matching the field is fine
+    assert ScheduledTaskTool._resolve_task_type("cron", "* * * * *", None) == "cron"
+    assert ScheduledTaskTool._resolve_task_type("oneshot", None, 60) == "oneshot"
+
+
+def test_resolve_prefers_field_when_task_type_omitted():
+    # The field is the source of truth; this is the key fix — previously
+    # leaving task_type unset defaulted to 'oneshot' even with cron_expression.
+    assert ScheduledTaskTool._resolve_task_type(None, "* * * * *", None) == "cron"
+
+
+def test_resolve_rejects_both_fields():
+    result = ScheduledTaskTool._resolve_task_type(None, "* * * * *", 60)
+    assert isinstance(result, str)
+    assert result.startswith("Error:")
+    assert "mutually exclusive" in result
+
+
+def test_resolve_rejects_neither_field():
+    result = ScheduledTaskTool._resolve_task_type(None, None, None)
+    assert result.startswith("Error:")
+
+
+def test_resolve_rejects_non_positive_delay():
+    # delay_seconds <= 0 does not count as a valid delay → treated as absent
+    result = ScheduledTaskTool._resolve_task_type(None, None, 0)
+    assert result.startswith("Error:")
+    result_neg = ScheduledTaskTool._resolve_task_type(None, None, -5)
+    assert result_neg.startswith("Error:")
+
+
+def test_resolve_rejects_invalid_task_type_value():
+    result = ScheduledTaskTool._resolve_task_type("hourly", "* * * * *", None)
+    assert result.startswith("Error:")
+    assert "invalid task_type" in result
+
+
+# ---------------------------------------------------------------------------
+# _handle_cancel — accepts task_uuid OR task_name (fallback lookup)
+# ---------------------------------------------------------------------------
+
+def _make_tool(**attrs):
+    """Instantiate ScheduledTaskTool with injected DB callbacks for testing."""
+    tool = ScheduledTaskTool()
+    # Defaults: no-op DB callbacks
+    tool.db_cancel = attrs.get("db_cancel", lambda *a, **k: False)
+    tool.db_list = attrs.get("db_list", lambda *a, **k: [])
+    tool.agent_id = attrs.get("agent_id", 1)
+    tool.tenant_id = attrs.get("tenant_id", "tenant_id")
+    tool.user_id = attrs.get("user_id", "user_id")
+    return tool
+
+
+def test_cancel_rejects_empty_identifier():
+    tool = _make_tool()
+    assert tool._handle_cancel(None).startswith("Error:")
+    assert tool._handle_cancel("").startswith("Error:")
+
+
+def test_cancel_by_uuid_when_db_matches():
+    cancelled = {}
+    def fake_cancel(uuid, *a, **k):
+        cancelled["uuid"] = uuid
+        return True
+    tool = _make_tool(db_cancel=fake_cancel)
+    result = tool._handle_cancel("abc-123")
+    assert "cancelled successfully" in result
+    assert cancelled["uuid"] == "abc-123"
+
+
+def test_cancel_falls_back_to_name_lookup():
+    """When uuid cancel misses, resolve by task_name then cancel that uuid."""
+    calls = []
+    def fake_cancel(uuid, *a, **k):
+        calls.append(uuid)
+        # Only the real uuid cancels; a bare name passed as uuid misses.
+        return uuid == "real-uuid"
+    def fake_list(*a, **k):
+        return [{"task_uuid": "real-uuid", "task_name": "喝水提醒"}]
+    tool = _make_tool(db_cancel=fake_cancel, db_list=fake_list)
+    result = tool._handle_cancel("喝水提醒")
+    assert "cancelled successfully" in result
+    # First call tried the name as uuid (missed), second used the resolved uuid
+    assert calls == ["喝水提醒", "real-uuid"]
+
+
+def test_cancel_not_found_after_name_lookup():
+    tool = _make_tool(
+        db_cancel=lambda *a, **k: False,
+        db_list=lambda *a, **k: [{"task_uuid": "x", "task_name": "other"}],
+    )
+    result = tool._handle_cancel("nonexistent")
+    assert "not found" in result

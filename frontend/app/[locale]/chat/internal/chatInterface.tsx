@@ -155,50 +155,26 @@ export function ChatInterface() {
   // Track the max message index per conversation for polling
   const pollingIndexRef = useRef<{[cid: number]: number}>({});
 
-  // Helper: format raw API messages into ChatMessageType[] for polling refresh
-  const formatApiMessages = useCallback((cid: number, rawMsgs: any[]): ChatMessageType[] => {
-    return rawMsgs.map((msg: any, idx: number) => {
-      if (msg.role === MESSAGE_ROLES.USER) {
-        return {
-          id: `msg-${cid}-${idx}`,
-          role: msg.role,
-          content: msg.message || "",
-          files: msg.minio_files || [],
-          timestamp: new Date().toLocaleTimeString(),
-        };
-      }
-      // assistant
-      let assistantContent = "";
-      if (typeof msg.message === "string") {
-        assistantContent = msg.message;
-      } else if (Array.isArray(msg.message)) {
-        const finalAnswer = msg.message.find((u: any) => u.type === "final_answer");
-        assistantContent = finalAnswer?.content || "";
-      }
-      return {
-        id: `msg-${cid}-${idx}`,
-        role: msg.role,
-        content: assistantContent,
-        files: msg.minio_files || [],
-        timestamp: new Date().toLocaleTimeString(),
-        search: msg.search,
-        picture: msg.picture,
-        searchByUnitId: msg.searchByUnitId,
-        messageId: msg.message_id,
-        opinionFlag: msg.opinion_flag,
-      };
-    });
-  }, []);
-
-  // Helper: refresh conversation messages from API and update sessionMessages
+  // Helper: refresh conversation messages from API and update sessionMessages.
+  // Reuses the same extractors as normal history loading so tool-call steps
+  // (thinking/code/execution) are preserved, not just the final answer.
   const refreshConversation = useCallback(async (cid: number, scroll: boolean = false) => {
     const detail = await conversationService.getDetail(cid);
-    if (detail?.data?.[0]?.message) {
-      const formatted = formatApiMessages(cid, detail.data[0].message);
+    if (detail?.code === 0 && detail.data?.[0]?.message) {
+      const conversationData = detail.data[0] as ApiConversationDetail;
+      const create_time = conversationData.create_time;
+      const formatted: ChatMessageType[] = [];
+      conversationData.message.forEach((dialog_msg, index) => {
+        if (dialog_msg.role === MESSAGE_ROLES.USER) {
+          formatted.push(extractUserMsgFromResponse(dialog_msg, index, create_time));
+        } else if (dialog_msg.role === MESSAGE_ROLES.ASSISTANT) {
+          formatted.push(extractAssistantMsgFromResponse(dialog_msg, index, create_time, t));
+        }
+      });
       setSessionMessages(prev => ({ ...prev, [cid]: formatted }));
       if (scroll) setShouldScrollToBottom(true);
     }
-  }, [formatApiMessages]);
+  }, [t]);
 
   // Layer 1 (5s): poll the currently active conversation
   useEffect(() => {
@@ -210,6 +186,14 @@ export function ChatInterface() {
         const sinceIdx = pollingIndexRef.current[cid] ?? -1;
         const result = await conversationService.checkNewMessages(cid, sinceIdx);
         if (result?.has_new) {
+          // While this conversation is actively streaming, do NOT overwrite the
+          // live messages with a full reload — that would wipe the in-progress
+          // tool-call rendering. Just advance the baseline; the stream itself
+          // updates the UI.
+          if (streamingConversations.has(cid)) {
+            pollingIndexRef.current[cid] = result.max_index;
+            return;
+          }
           pollingIndexRef.current[cid] = result.max_index;
           await refreshConversation(cid, true);
         }
@@ -219,7 +203,7 @@ export function ChatInterface() {
     }, 5000);
 
     return () => clearInterval(timer);
-  }, [conversationManagement.selectedConversationId, refreshConversation]);
+  }, [conversationManagement.selectedConversationId, refreshConversation, streamingConversations]);
 
   // Layer 2 (10s): batch-poll all other cached conversations for silent cache update
   useEffect(() => {

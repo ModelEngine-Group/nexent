@@ -12,58 +12,49 @@ logger = logging.getLogger("scheduled_task_tool")
 
 class ScheduledTaskTool(Tool):
     name = "scheduled_task"
-    description = (
-        "Create, list, or cancel scheduled tasks that will be executed "
-        "automatically at a specified time or on a recurring schedule. "
-        "Use this to set reminders, schedule periodic reports, or defer "
-        "actions to a future time."
-    )
-    description_zh = (
-        "创建、查看或取消定时任务。定时任务会在指定时间自动执行，"
-        "支持一次性延迟任务和周期性 cron 任务。可用于设置提醒、"
-        "定期报告或将操作推迟到未来执行。"
-    )
+    description = "Create, list, or cancel scheduled tasks."
+    description_zh = "创建、查看或取消定时任务。"
 
     inputs = {
         "action": {
             "type": "string",
-            "description": "Action to perform: 'create', 'list', or 'cancel'",
-            "description_zh": "操作类型：'create'（创建）、'list'（查看）或 'cancel'（取消）",
+            "description": "'create', 'list', or 'cancel'.",
+            "description_zh": "'create'（创建）、'list'（查看）或 'cancel'（取消）。",
         },
         "task_name": {
             "type": "string",
-            "description": "Name for the task (used in create)",
-            "description_zh": "任务名称（创建时使用）",
+            "description": "Human-readable task name. Used in create; accepted as identifier in cancel.",
+            "description_zh": "任务名称（人类可读）。创建时使用，取消时也可作为标识。",
             "nullable": True,
         },
         "task_prompt": {
             "type": "string",
-            "description": "The prompt content to execute when the task fires (used in create)",
-            "description_zh": "任务触发时要执行的提示内容（创建时使用）",
+            "description": "Instruction executed when the task fires. Used in create.",
+            "description_zh": "任务触发时要执行的指令。创建时使用。",
             "nullable": True,
         },
         "task_type": {
             "type": "string",
-            "description": "Type: 'oneshot' (run once after delay) or 'cron' (recurring). Default 'oneshot'",
-            "description_zh": "类型：'oneshot'（一次性延迟）或 'cron'（周期性）。默认 'oneshot'",
+            "description": "Auto-inferred from the time field; usually omit. 'cron' or 'oneshot'.",
+            "description_zh": "由时间字段自动推断，通常无需指定。取值 'cron' 或 'oneshot'。",
             "nullable": True,
         },
         "cron_expression": {
             "type": "string",
-            "description": "Standard 5-field cron expression for recurring tasks, e.g. '0 9 * * *' (daily at 9am), '*/15 * * * *' (every 15 min), '0 9 * * 1-5' (weekdays 9am), '0 9,18 * * *' (9am and 6pm). Required if task_type='cron'",
-            "description_zh": "周期性任务的标准 5 字段 cron 表达式，如 '0 9 * * *'（每天9点）、'*/15 * * * *'（每15分钟）、'0 9 * * 1-5'（工作日9点）、'0 9,18 * * *'（9点和18点）。task_type='cron' 时必填",
+            "description": "Standard 5-field cron expression for a recurring task. Mutually exclusive with delay_seconds.",
+            "description_zh": "标准 5 字段 cron 表达式，用于周期任务。与 delay_seconds 互斥。",
             "nullable": True,
         },
         "delay_seconds": {
             "type": "integer",
-            "description": "Delay in seconds for oneshot tasks. Required if task_type='oneshot'",
-            "description_zh": "一次性任务的延迟秒数。task_type='oneshot' 时必填",
+            "description": "Seconds to wait before a one-shot task fires. Must be positive. Mutually exclusive with cron_expression.",
+            "description_zh": "一次性任务触发前的等待秒数，必须为正数。与 cron_expression 互斥。",
             "nullable": True,
         },
         "task_uuid": {
             "type": "string",
-            "description": "UUID of the task to cancel (used in cancel)",
-            "description_zh": "要取消的任务 UUID（取消时使用）",
+            "description": "Task uuid returned by list. Used in cancel; task_name also accepted.",
+            "description_zh": "list 返回的任务 uuid。取消时使用，也可用 task_name。",
             "nullable": True,
         },
     }
@@ -93,7 +84,9 @@ class ScheduledTaskTool(Tool):
         elif action == "list":
             return self._handle_list()
         elif action == "cancel":
-            return self._handle_cancel(task_uuid)
+            # Accept either task_uuid or task_name — callers sometimes pass the
+            # task id via task_name. If a name (not a uuid) is given, look it up.
+            return self._handle_cancel(task_uuid or task_name)
         else:
             return f"Unknown action '{action}'. Use 'create', 'list', or 'cancel'."
 
@@ -101,21 +94,22 @@ class ScheduledTaskTool(Tool):
         if not task_prompt:
             return "Error: task_prompt is required for creating a task."
 
-        task_type = task_type or "oneshot"
+        # Infer the task type from which time field was provided, so callers
+        # don't need to set task_type explicitly (and can't accidentally leave
+        # it as the default 'oneshot' while passing cron_expression).
+        task_type = self._resolve_task_type(task_type, cron_expression, delay_seconds)
+        if isinstance(task_type, str) and task_type.startswith("Error:"):
+            return task_type
 
         # Compute next_fire_time
         now = datetime.now(timezone.utc)
         if task_type == "cron":
-            if not cron_expression:
-                return "Error: cron_expression is required for cron tasks."
             cron_parts = self._parse_cron(cron_expression)
             if cron_parts is None:
                 return f"Error: invalid cron expression '{cron_expression}'."
             next_fire = self._compute_next_fire(cron_parts, now)
         else:
-            # oneshot
-            if delay_seconds is None or delay_seconds <= 0:
-                return "Error: delay_seconds must be a positive integer for oneshot tasks."
+            # oneshot — delay_seconds is guaranteed present by _resolve_task_type
             next_fire = now + timedelta(seconds=delay_seconds)
 
         data = {
@@ -142,6 +136,40 @@ class ScheduledTaskTool(Tool):
             logger.error(f"Failed to create scheduled task: {e}")
             return f"Error creating scheduled task: {e}"
 
+    @staticmethod
+    def _resolve_task_type(task_type, cron_expression, delay_seconds):
+        """Resolve the effective task type from the provided fields.
+
+        Time fields are the source of truth: passing ``cron_expression`` means
+        a recurring task, passing ``delay_seconds`` means a one-shot task. The
+        optional ``task_type`` is honoured when consistent, and otherwise
+        inferred. Returns the resolved type string, or an ``"Error: ..."``
+        string when the inputs are missing or contradictory.
+        """
+        has_cron = bool(cron_expression)
+        has_delay = delay_seconds is not None and delay_seconds > 0
+
+        if has_cron and has_delay:
+            return (
+                "Error: cron_expression and delay_seconds are mutually "
+                "exclusive — provide exactly one of them."
+            )
+        if not has_cron and not has_delay:
+            return (
+                "Error: provide either cron_expression (recurring) or "
+                "delay_seconds (one-shot) to schedule a task."
+            )
+
+        # Infer from whichever field was provided; this lets callers skip the
+        # task_type argument entirely.
+        inferred = "cron" if has_cron else "oneshot"
+        if task_type and task_type not in ("cron", "oneshot"):
+            return f"Error: invalid task_type '{task_type}'. Use 'cron' or 'oneshot'."
+        # If task_type was explicitly given and contradicts the fields, prefer
+        # the fields (source of truth) but they can never actually disagree
+        # here because has_cron/has_delay already exclude each other.
+        return inferred
+
     def _handle_list(self):
         tasks = self._safe_call("list", lambda: self.db_list(self.agent_id, self.tenant_id, self.user_id))
         if isinstance(tasks, str):  # error message
@@ -155,13 +183,44 @@ class ScheduledTaskTool(Tool):
         ]
         return "Scheduled tasks:\n" + "\n".join(lines)
 
-    def _handle_cancel(self, task_uuid):
-        if not task_uuid:
-            return "Error: task_uuid is required for cancelling a task."
-        ok = self._safe_call("cancel", lambda: self.db_cancel(task_uuid, self.agent_id, self.tenant_id, self.user_id))
-        if isinstance(ok, str):  # error message
+    def _handle_cancel(self, task_identifier):
+        """Cancel a task by uuid or by name.
+
+        ``task_identifier`` may be a task uuid (preferred) or a task name. When
+        it does not match any task uuid directly, we look it up among the
+        caller's tasks by name, so callers that pass the name still succeed.
+        """
+        if not task_identifier:
+            return "Error: task_uuid or task_name is required for cancelling a task."
+
+        # First try cancelling directly by uuid.
+        ok = self._safe_call(
+            "cancel", lambda: self.db_cancel(task_identifier, self.agent_id, self.tenant_id, self.user_id)
+        )
+        if isinstance(ok, str):  # error message from _safe_call
             return ok
-        return f"Task {task_uuid} cancelled successfully." if ok else f"Task {task_uuid} not found or already cancelled."
+        if ok:
+            return f"Task {task_identifier} cancelled successfully."
+
+        # Direct uuid cancel matched nothing — try resolving the identifier as
+        # a task name to its uuid, then cancel that.
+        tasks = self._safe_call("list", lambda: self.db_list(self.agent_id, self.tenant_id, self.user_id))
+        if isinstance(tasks, str):
+            return tasks
+        matched = [t for t in tasks if t.get("task_name") == task_identifier]
+        if not matched:
+            return f"Task '{task_identifier}' not found or already cancelled."
+        cancelled = []
+        for t in matched:
+            uuid = t.get("task_uuid")
+            res = self._safe_call(
+                "cancel", lambda u=uuid: self.db_cancel(u, self.agent_id, self.tenant_id, self.user_id)
+            )
+            if not isinstance(res, str) and res:
+                cancelled.append(uuid)
+        if cancelled:
+            return f"Task '{task_identifier}' cancelled successfully (uuid={cancelled[0]})."
+        return f"Task '{task_identifier}' not found or already cancelled."
 
     def _safe_call(self, action: str, fn: Callable) -> Any:
         """Execute a DB call with unified error handling."""
