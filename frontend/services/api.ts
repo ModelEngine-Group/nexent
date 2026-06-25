@@ -260,6 +260,7 @@ export const API_ENDPOINTS = {
   },
   aidp: {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
+    knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
   config: {
     save: `${API_BASE_URL}/config/save_config`,

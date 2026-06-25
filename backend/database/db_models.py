@@ -417,6 +417,7 @@ class AgentInfo(TableBase):
             "inherit the resolved model-level default."
         ),
     )
+    enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")

@@ -105,7 +105,7 @@ class ContextManagerConfig:
     component_budgets: Dict[str, int] = field(default_factory=lambda: {
         "system_prompt": 4000,
         "tools": 3000,
-        "skills": 1000,
+        "skills": 4000,
         "memory": 2000,
         "knowledge_base": 1500,
         "managed_agents": 500,

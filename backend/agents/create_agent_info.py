@@ -371,7 +371,7 @@ def _get_skills_for_template(
             for s in enabled_skills
         ]
     except Exception as e:
-        logger.warning(f"Failed to get skills for template: {e}")
+        logger.error(f"Failed to get skills for agent {agent_id} (tenant={tenant_id}, version={version_no}): {e}", exc_info=True)
         return []
 
 
@@ -760,6 +760,7 @@ async def create_agent_config(
 
     # Build knowledge base summary
     knowledge_base_summary = ""
+    kb_ids = []
     try:
         for tool in tool_list:
             if "KnowledgeBaseSearchTool" == tool.class_name:
@@ -774,6 +775,7 @@ async def create_agent_config(
                             message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
                             knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
+                            kb_ids.append(index_name)
                         except Exception as e:
                             logger.warning(
                                 f"Failed to get summary for knowledge base {index_name}: {e}")
@@ -853,7 +855,7 @@ async def create_agent_config(
     # downstream runtime may prefer component-based prompt assembly over the
     # rendered system_prompt, causing the actual model input to diverge from the
     # template output.
-    enable_context_manager = agent_info.get("enable_context_manager", False)
+    enable_context_manager = agent_info.get("enable_context_manager", True)
     context_components = []
     if enable_context_manager:
         context_components = build_context_components(
@@ -872,6 +874,13 @@ async def create_agent_config(
             memory_list=memory_list,
             memory_search_query=last_user_query,
             knowledge_base_summary=knowledge_base_summary,
+            kb_ids=kb_ids,
+        )
+
+        logger.info(
+            f"Agent {agent_id} context assembly: "
+            f"skills_count={len(skills)}, "
+            f"components={[f'{type(c).__name__}(type={c.component_type},priority={c.priority})' for c in context_components]}"
         )
     cm_config = ContextManagerConfig(
         enabled=enable_context_manager,

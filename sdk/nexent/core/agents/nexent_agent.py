@@ -452,9 +452,9 @@ extra_body=model_config.extra_body,
             )
             agent.stop_event = self.stop_event
 
-            # Mount context manager if config provided
+            # Mount context manager if config provided and enabled
             ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config:
+            if ctx_config and ctx_config.enabled:
                 agent.context_manager = ContextManager(
                     config=ctx_config,
                     max_steps=agent_config.max_steps
