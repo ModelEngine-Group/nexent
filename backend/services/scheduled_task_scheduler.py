@@ -174,21 +174,20 @@ def _run_and_reschedule(task_dict: dict):
     Intended to run inside a worker thread of the scheduler's pool, so each
     task executes concurrently instead of blocking the polling loop.
     """
-    from database.scheduled_task_db import update_task_status
+    from database.scheduled_task_db import update_task_status, reschedule_if_active
 
     task_uuid = task_dict.get("task_uuid")
     try:
         _run_scheduled_task_from_db(task_dict)
 
-        # Update fire count and schedule next run for cron tasks
-        updates = {"fire_count": (task_dict.get("fire_count") or 0) + 1}
+        new_fire_count = (task_dict.get("fire_count") or 0) + 1
         task_type = task_dict.get("task_type")
         cron_expr = task_dict.get("cron_expression")
         max_fires = task_dict.get("max_fires")
 
         if task_type == "cron" and cron_expr:
-            if max_fires is not None and updates["fire_count"] >= max_fires:
-                updates["status"] = "completed"
+            if max_fires is not None and new_fire_count >= max_fires:
+                update_task_status(task_uuid, {"status": "completed", "fire_count": new_fire_count})
             else:
                 from nexent.core.tools.scheduled_task_tool import ScheduledTaskTool
                 cron_parts = ScheduledTaskTool._parse_cron(cron_expr)
@@ -196,13 +195,20 @@ def _run_and_reschedule(task_dict: dict):
                     next_fire = ScheduledTaskTool._compute_next_fire(
                         cron_parts, datetime.now(timezone.utc)
                     )
-                    updates["next_fire_time"] = next_fire.replace(tzinfo=None)
-                    updates["status"] = "pending"
+                    # Re-arm only if the task was not cancelled mid-run.
+                    re_armed = reschedule_if_active(
+                        task_uuid, new_fire_count, next_fire.replace(tzinfo=None)
+                    )
+                    if not re_armed:
+                        logger.info(
+                            "Task %s was cancelled mid-run; not rescheduling",
+                            task_uuid,
+                        )
                 else:
-                    updates["status"] = "error"
-        # oneshot tasks stay as "fired"
-
-        update_task_status(task_uuid, updates)
+                    update_task_status(task_uuid, {"status": "error"})
+        else:
+            # oneshot tasks stay as 'fired'; just persist the fire count
+            update_task_status(task_uuid, {"fire_count": new_fire_count})
     except Exception as e:
         logger.error(f"Failed to process task {task_uuid}: {e}", exc_info=True)
         try:

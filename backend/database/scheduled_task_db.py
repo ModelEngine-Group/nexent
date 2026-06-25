@@ -48,14 +48,18 @@ def query_pending_tasks_due(now: datetime) -> list[dict]:
 
 
 def cancel_task(task_uuid: str, agent_id: int, tenant_id: str, user_id: str = None) -> bool:
-    """Soft-cancel a task. Optionally restrict to a specific user for isolation."""
+    """Soft-cancel a task. Optionally restrict to a specific user for isolation.
+
+    Cancels tasks in the 'pending' or 'fired' state, so a task can be
+    cancelled even while it is currently executing.
+    """
     with get_db_session() as session:
         conditions = [
             ScheduledTaskRecord.task_uuid == task_uuid,
             ScheduledTaskRecord.agent_id == agent_id,
             ScheduledTaskRecord.tenant_id == tenant_id,
             ScheduledTaskRecord.delete_flag == "N",
-            ScheduledTaskRecord.status == "pending",
+            ScheduledTaskRecord.status.in_(["pending", "fired"]),
         ]
         if user_id:
             conditions.append(ScheduledTaskRecord.user_id == user_id)
@@ -63,6 +67,31 @@ def cancel_task(task_uuid: str, agent_id: int, tenant_id: str, user_id: str = No
             update(ScheduledTaskRecord)
             .where(*conditions)
             .values(status="cancelled")
+        )
+        result = session.execute(stmt)
+        return result.rowcount > 0
+
+
+def reschedule_if_active(task_uuid: str, fire_count: int, next_fire_time) -> bool:
+    """Re-arm a cron task for its next fire, unless it was cancelled mid-run.
+
+    Atomically sets status back to 'pending' (and advances fire_count /
+    next_fire_time) only when the task is still in the 'fired' state — i.e. it
+    has not been cancelled or marked errored while executing. Returns True if
+    the task was re-armed.
+    """
+    with get_db_session() as session:
+        stmt = (
+            update(ScheduledTaskRecord)
+            .where(
+                ScheduledTaskRecord.task_uuid == task_uuid,
+                ScheduledTaskRecord.status == "fired",
+            )
+            .values(
+                status="pending",
+                fire_count=fire_count,
+                next_fire_time=next_fire_time,
+            )
         )
         result = session.execute(stmt)
         return result.rowcount > 0

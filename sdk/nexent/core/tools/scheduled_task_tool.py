@@ -12,8 +12,20 @@ logger = logging.getLogger("scheduled_task_tool")
 
 class ScheduledTaskTool(Tool):
     name = "scheduled_task"
-    description = "Create, list, or cancel scheduled tasks."
-    description_zh = "创建、查看或取消定时任务。"
+    description = (
+        "Manage scheduled tasks via the 'action' parameter:\n"
+        "- 'create': schedule a new task (needs task_prompt + a time field).\n"
+        "- 'list': return all of the caller's pending tasks (no other params).\n"
+        "- 'cancel': delete a task. Call 'list' first, cancel by the task_uuid returned in "
+        "that result, then call 'list' again to confirm it is gone before reporting success."
+    )
+    description_zh = (
+        "通过 'action' 参数管理定时任务：\n"
+        "- 'create'：创建新任务（需要 task_prompt + 时间字段）。\n"
+        "- 'list'：返回调用者当前所有待执行任务（无需其他参数）。\n"
+        "- 'cancel'：删除任务。先调用 list，用返回结果里的 task_uuid 取消，"
+        "再调用 list 确认已删除后，才回报成功。"
+    )
 
     inputs = {
         "action": {
@@ -29,8 +41,8 @@ class ScheduledTaskTool(Tool):
         },
         "task_prompt": {
             "type": "string",
-            "description": "Instruction executed when the task fires. Used in create.",
-            "description_zh": "任务触发时要执行的指令。创建时使用。",
+            "description": "Instruction executed when the task fires. Required for create.",
+            "description_zh": "任务触发时要执行的指令，create 时必填。",
             "nullable": True,
         },
         "task_type": {
