@@ -809,6 +809,41 @@ def test_normalize_mcp_config_edge_cases():
     assert result.get("headers") == {"Authorization": ""}
 
 
+def test_mount_conversation_context_manager_updates_runtime_authority(basic_agent_run_info):
+    """Conversation-level ContextManager must replace the managed runtime CM."""
+    factory_context_manager = MagicMock(name="factory_context_manager")
+    conversation_context_manager = MagicMock(name="conversation_context_manager")
+    context_runtime = types.SimpleNamespace(context_manager=factory_context_manager)
+    agent = types.SimpleNamespace(
+        context_runtime=context_runtime,
+        context_manager=factory_context_manager,
+    )
+    components = [MagicMock(name="component")]
+    basic_agent_run_info.context_manager = conversation_context_manager
+    basic_agent_run_info.agent_config.context_components = components
+
+    run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
+
+    conversation_context_manager.replace_components.assert_called_once_with(components)
+    assert agent.context_runtime.context_manager is conversation_context_manager
+    assert agent.context_manager is conversation_context_manager
+
+
+def test_mount_conversation_context_manager_rejects_legacy_runtime(basic_agent_run_info):
+    """A reusable ContextManager is valid only when the active runtime is managed."""
+    conversation_context_manager = MagicMock(name="conversation_context_manager")
+    agent = types.SimpleNamespace(
+        context_runtime=types.SimpleNamespace(context_manager=None),
+        context_manager=None,
+    )
+    basic_agent_run_info.context_manager = conversation_context_manager
+
+    with pytest.raises(RuntimeError, match="managed context runtime"):
+        run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
+
+    conversation_context_manager.replace_components.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_agent_run_uses_copy_context(basic_agent_run_info, monkeypatch):
     """agent_run passes ctx.run as Thread target, preserving contextvars."""

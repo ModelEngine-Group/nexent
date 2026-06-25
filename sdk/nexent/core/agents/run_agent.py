@@ -55,6 +55,31 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
         logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
 
 
+def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo) -> None:
+    """Mount the reusable conversation-level ContextManager into the active runtime.
+
+    W3 made ``agent.context_runtime`` the execution authority for context
+    assembly.  ``agent.context_manager`` is kept only as a compatibility and
+    observability alias, so mounting a conversation-level ContextManager must
+    update the managed runtime first and then mirror the alias.
+    """
+    context_manager = getattr(agent_run_info, "context_manager", None)
+    if context_manager is None:
+        return
+
+    context_runtime = getattr(agent, "context_runtime", None)
+    if getattr(context_runtime, "context_manager", None) is None:
+        raise RuntimeError(
+            "Conversation-level ContextManager requires an active managed context runtime"
+        )
+
+    context_components = getattr(agent_run_info.agent_config, "context_components", None)
+    context_manager.replace_components(context_components or [])
+
+    context_runtime.context_manager = context_manager
+    agent.context_manager = context_manager
+
+
 def _detect_transport(url: str) -> str:
     """
     Auto-detect MCP transport type based on URL format.
@@ -135,10 +160,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
 
-            if getattr(agent_run_info, 'context_manager', None) is not None:
-                agent.context_manager = agent_run_info.context_manager
-                context_components = getattr(agent_run_info.agent_config, 'context_components', None)
-                agent.context_manager.replace_components(context_components or [])
+            _mount_conversation_context_manager(agent, agent_run_info)
 
             nexent.add_history_to_agent(agent_run_info.history)
             nexent.agent_run_with_observer(
@@ -158,10 +180,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)
 
-                if getattr(agent_run_info, 'context_manager', None) is not None:
-                    agent.context_manager = agent_run_info.context_manager
-                    context_components = getattr(agent_run_info.agent_config, 'context_components', None)
-                    agent.context_manager.replace_components(context_components or [])
+                _mount_conversation_context_manager(agent, agent_run_info)
 
                 nexent.add_history_to_agent(agent_run_info.history)
                 nexent.agent_run_with_observer(
