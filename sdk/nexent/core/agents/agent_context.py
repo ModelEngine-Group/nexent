@@ -450,6 +450,12 @@ class ContextManager:
     #  Mainly Entry Point
     # ============================================================
 
+    def _soft_input_budget_tokens(self) -> int:
+        return self.config.soft_input_budget_tokens or self.config.token_threshold
+
+    def _hard_input_budget_tokens(self) -> int:
+        return self.config.hard_input_budget_tokens or int(self.config.token_threshold * 1.1)
+
     def compress_if_needed(
         self, model, memory, original_messages: List[ChatMessage], current_run_start_idx,
     ) -> List[ChatMessage]:
@@ -457,7 +463,10 @@ class ContextManager:
         if not self.config.enabled:
             return original_messages
 
-        if self._estimate_tokens(memory) <= self.config.token_threshold:
+        soft_input_budget_tokens = self._soft_input_budget_tokens()
+        hard_input_budget_tokens = self._hard_input_budget_tokens()
+
+        if self._estimate_tokens(memory) <= soft_input_budget_tokens:
             # No compression needed; record that compressed == uncompressed
             # so benchmark token_reduction reads as zero rather than stale.
             self._last_uncompressed_token_count = self._msg_token_count(original_messages)
@@ -475,7 +484,7 @@ class ContextManager:
             # original previous_run + current_run.
             # - previous_run: [(TaskStep, ActionStep), ...]
             # - current_run:  [TaskStep, ActionStep, ActionStep, ...]
-            if self._effective_tokens(memory, current_run_start_idx) <= self.config.token_threshold:
+            if self._effective_tokens(memory, current_run_start_idx) <= soft_input_budget_tokens:
                 # Stable-phase bypass: No LLM call; construct compressed messages directly from existing cache.
                 self._step_local_log.clear()
 
@@ -532,14 +541,15 @@ class ContextManager:
             prev_tokens = self._effective_prev_tokens(prev_steps)
             curr_tokens = self._effective_curr_tokens(curr_steps)
 
-            compress_prev = prev_tokens > self.config.token_threshold * 0.6
-            compress_curr = curr_tokens > self.config.token_threshold * 0.4
+            compress_prev = prev_tokens > soft_input_budget_tokens * 0.6
+            compress_curr = curr_tokens > soft_input_budget_tokens * 0.4
 
             total_effective_tokens = prev_tokens + curr_tokens
             if compress_prev or compress_curr:
                 logger.info(
                     f"Context compression triggered: total_tokens={total_effective_tokens}, "
-                    f"threshold={self.config.token_threshold}, "
+                    f"soft_budget={soft_input_budget_tokens}, "
+                    f"hard_budget={hard_input_budget_tokens}, "
                     f"prev_tokens={prev_tokens} (compress={compress_prev}), "
                     f"curr_tokens={curr_tokens} (compress={compress_curr})"
                 )
@@ -625,9 +635,9 @@ class ContextManager:
             final_tokens = self._msg_token_count(final_messages)
             self._last_compressed_token_count = final_tokens
             # This situation is unlikely to occur unless the threshold itself is set unreasonably small
-            if final_tokens > int(self.config.token_threshold * 1.1):
+            if final_tokens > hard_input_budget_tokens:
                 logger.warning(
-                    f"Still exceeds threshold after compression: {final_tokens} > {self.config.token_threshold}. "
+                    f"Still exceeds hard input budget after compression: {final_tokens} > {hard_input_budget_tokens}. "
                     f"Consider reducing keep_recent_pairs ({self.config.keep_recent_pairs}) "
                     f"or keep_recent_steps({self.config.keep_recent_steps})"
                 )
