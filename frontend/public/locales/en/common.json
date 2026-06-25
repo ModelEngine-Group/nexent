@@ -860,7 +860,7 @@
   "model.dialog.capacity.source.legacy": "Legacy",
   "model.dialog.capacity.source.unknown": "Unknown",
   "model.dialog.capacity.suggestion.title": "Capacity suggestion",
-  "model.dialog.capacity.suggestion.hint": "Check the approved catalog and apply the result only when you choose to use it.",
+  "model.dialog.capacity.suggestion.hintAdd": "Suggested from the approved catalog after connectivity passes.",
   "model.dialog.capacity.suggestion.check": "Check",
   "model.dialog.capacity.suggestion.use": "Use suggestion",
   "model.dialog.capacity.suggestion.found": "Capacity suggestion found",

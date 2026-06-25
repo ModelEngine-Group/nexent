@@ -601,13 +601,8 @@ export const ModelEditDialog = ({
         {supportsCapacityFields && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-              <div>
-                <div className="text-sm font-medium text-gray-700">
-                  {t("model.dialog.capacity.suggestion.title")}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {t("model.dialog.capacity.suggestion.hint")}
-                </div>
+              <div className="text-sm font-medium text-gray-700">
+                {t("model.dialog.capacity.suggestion.title")}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Switch

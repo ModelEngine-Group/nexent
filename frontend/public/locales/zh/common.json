@@ -831,7 +831,7 @@
   "model.dialog.capacity.source.legacy": "旧字段",
   "model.dialog.capacity.source.unknown": "未知",
   "model.dialog.capacity.suggestion.title": "容量建议",
-  "model.dialog.capacity.suggestion.hint": "从已审核目录检查容量；只有点击使用后才会写入表单。",
+  "model.dialog.capacity.suggestion.hintAdd": "连通性测试通过后，自动从已审核目录给出容量建议。",
   "model.dialog.capacity.suggestion.check": "检查",
   "model.dialog.capacity.suggestion.use": "使用建议",
   "model.dialog.capacity.suggestion.found": "已找到容量建议",
