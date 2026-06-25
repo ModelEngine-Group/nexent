@@ -1708,6 +1708,28 @@ class TestMaxStepsReached:
 class TestRunStreamRealExecution:
     """Tests that actually execute the real _run_stream method for line coverage."""
 
+    @staticmethod
+    def _context_runtime_mock(
+        *,
+        calls=0,
+        input_tokens=0,
+        output_tokens=0,
+        cache_hits=0,
+        cache_types=None,
+        token_threshold=None,
+    ):
+        runtime = MagicMock()
+        runtime.compression_stats.return_value = {
+            "calls": calls,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_hits": cache_hits,
+            "cache_types": cache_types or [],
+        }
+        runtime.chars_per_token = 1.5
+        runtime.token_threshold = token_threshold
+        return runtime
+
     def _load_core_agent_in_isolation(self):
         """Load CoreAgent in isolation without the test's module mocks."""
         import importlib.util
@@ -1923,16 +1945,7 @@ class TestRunStreamRealExecution:
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
         agent.context_manager = None
-        agent.context_runtime = MagicMock()
-        agent.context_runtime.compression_stats.return_value = {
-            "calls": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_hits": 0,
-            "cache_types": [],
-        }
-        agent.context_runtime.chars_per_token = 1.5
-        agent.context_runtime.token_threshold = None
+        agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
         agent._step_stream = mock_step_stream
@@ -1967,16 +1980,14 @@ class TestRunStreamRealExecution:
         agent.context_manager.config.enabled = True
         agent.context_manager.config.token_threshold = 4096
         agent.context_manager.config.chars_per_token = 1.5
-        agent.context_runtime = MagicMock()
-        agent.context_runtime.compression_stats.return_value = {
-            "calls": 1,
-            "input_tokens": 80,
-            "output_tokens": 40,
-            "cache_hits": 1,
-            "cache_types": ["exact"],
-        }
-        agent.context_runtime.chars_per_token = 1.5
-        agent.context_runtime.token_threshold = 4096
+        agent.context_runtime = self._context_runtime_mock(
+            calls=1,
+            input_tokens=80,
+            output_tokens=40,
+            cache_hits=1,
+            cache_types=["exact"],
+            token_threshold=4096,
+        )
 
         action_step = MagicMock()
         action_step.step_number = 3
@@ -2210,16 +2221,7 @@ class TestRunStreamRealExecution:
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
         agent.context_manager = None
-        agent.context_runtime = MagicMock()
-        agent.context_runtime.compression_stats.return_value = {
-            "calls": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_hits": 0,
-            "cache_types": [],
-        }
-        agent.context_runtime.chars_per_token = 1.5
-        agent.context_runtime.token_threshold = None
+        agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
         agent._step_stream = mock_step_stream
