@@ -58,6 +58,48 @@ class TestSiliconModelProvider:
         assert result[0]["id"] == "gpt-4"
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
+        assert "capacity_source" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_get_models_llm_surfaces_capacity_hints(self, mocker: MockFixture):
+        """Provider token metadata is returned as advisory capacity hints."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+                    "name": "Qwen3 Coder",
+                    "context_length": "262144",
+                    "max_output_tokens": 8192,
+                    "tokenizer": "qwen",
+                },
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.silicon_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = SiliconModelProvider()
+        result = await provider.get_models({
+            "model_type": "llm",
+            "api_key": "test-api-key",
+        })
+
+        assert result[0]["context_window_tokens"] == 262144
+        assert result[0]["max_output_tokens"] == 8192
+        assert result[0]["tokenizer_family"] == "qwen"
+        assert result[0]["capacity_source"] == "provider_candidate"
 
     @pytest.mark.asyncio
     async def test_get_models_vlm_success(self, mocker: MockFixture):

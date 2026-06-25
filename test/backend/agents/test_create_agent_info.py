@@ -63,6 +63,10 @@ consts_model_module.HistoryItem = HistoryItem
 consts_model_module.AgentToolParamsRequest = MockAgentToolParamsRequest
 consts_model_module.ToolParamsRequest = MockToolParamsRequest
 sys.modules["consts.model"] = consts_model_module
+sys.modules["consts.capability_profiles"] = types.ModuleType(
+    "consts.capability_profiles"
+)
+sys.modules["consts.capability_profiles"].CATALOG = {}
 
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
@@ -77,6 +81,11 @@ consts_module = sys.modules.get("consts")
 if consts_module:
     setattr(consts_module, "model", consts_model_module)
     setattr(consts_module, "exceptions", consts_exceptions_module)
+    setattr(
+        consts_module,
+        "capability_profiles",
+        sys.modules["consts.capability_profiles"],
+    )
 
 # Also add model to consts module attributes (with AgentToolParamsRequest and ToolParamsRequest)
 consts_module = sys.modules.get("consts")
@@ -260,6 +269,93 @@ sys.modules['nexent'] = nexent_module
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
 sys.modules['nexent.core.agents'] = _create_stub_module("nexent.core.agents")
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")
+sys.modules['nexent.core.models'] = _create_stub_module("nexent.core.models")
+
+
+class MockProviderCapabilityUnknown(Exception):
+    pass
+
+
+class MockResolverError(Exception):
+    pass
+
+
+class MockModelCapacitySnapshot:
+    def __init__(self, **kwargs):
+        self.provider = kwargs.get("provider", "test")
+        self.model_name = kwargs.get("model_name", "test-model")
+        self.context_window_tokens = kwargs.get("context_window_tokens", 32768)
+        self.default_output_reserve_tokens = kwargs.get(
+            "default_output_reserve_tokens",
+            4096,
+        )
+        self.capability_profile_version = kwargs.get("capability_profile_version")
+        self.field_sources = kwargs.get("field_sources", {})
+        self.requested_output_tokens = kwargs.get("requested_output_tokens")
+        self.provider_input_limit_tokens = kwargs.get(
+            "provider_input_limit_tokens",
+            28672,
+        )
+        self.tokenizer_family = kwargs.get("tokenizer_family")
+        self.counting_mode = kwargs.get("counting_mode", "estimated")
+        self.unknown_capabilities = kwargs.get("unknown_capabilities", [])
+        self.fingerprint = kwargs.get("fingerprint", "test-fingerprint")
+
+    def model_dump(self):
+        return self.__dict__.copy()
+
+
+class MockRequestBudgetOverrides:
+    def __init__(self, requested_output_tokens=None):
+        self.requested_output_tokens = requested_output_tokens
+
+
+class MockSafeInputBudgetSnapshot:
+    def __init__(self, capacity_snapshot, requested_output_tokens=None):
+        self.model_name = capacity_snapshot.model_name
+        self.requested_output_tokens = requested_output_tokens or 4096
+        self.soft_input_budget_tokens = 24576
+        self.hard_input_budget_tokens = 28672
+        self.fingerprint = "safe-budget-fingerprint"
+        self.warnings = []
+
+    def model_dump(self):
+        return self.__dict__.copy()
+
+
+class MockSafeInputBudgetCalculator:
+    def calculate_safe_input_budget(
+        self,
+        capacity_snapshot,
+        reserve_policy=None,
+        request_overrides=None,
+        requested_output_tokens=None,
+        output_reserve_source="model_default",
+    ):
+        override_tokens = getattr(request_overrides, "requested_output_tokens", None)
+        return MockSafeInputBudgetSnapshot(
+            capacity_snapshot,
+            requested_output_tokens=override_tokens or requested_output_tokens,
+        )
+
+
+class MockUncertaintyReserveBasisUnknown(Exception):
+    """Mock W2 exception raised when context_window_tokens is missing."""
+
+
+sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
+    "nexent.core.models.capacity_resolver",
+    ModelCapacitySnapshot=MockModelCapacitySnapshot,
+    ProviderCapabilityUnknown=MockProviderCapabilityUnknown,
+    ResolverError=MockResolverError,
+    resolve_capacity=MagicMock(return_value=MockModelCapacitySnapshot()),
+)
+sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
+    "nexent.core.models.capacity_budget",
+    RequestBudgetOverrides=MockRequestBudgetOverrides,
+    SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
+    UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
+)
 
 # Create mock classes that might be imported
 mock_agent_config = MagicMock()
@@ -1788,12 +1884,15 @@ class TestCreateAgentConfig:
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
                 max_steps=5,
+                requested_output_tokens=None,
                 model_name="test_model",
                 provide_run_summary=True,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_components=ANY,
+                capacity_snapshot=ANY,
+                safe_input_budget_snapshot=ANY,
                 verification_config=ANY
             )
 
@@ -1860,12 +1959,15 @@ class TestCreateAgentConfig:
                         "system_prompt": "populated_system_prompt"},
                     tools=ANY,
                     max_steps=5,
+                    requested_output_tokens=None,
                     model_name="test_model",
                     provide_run_summary=True,
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
                     context_components=ANY,
+                    capacity_snapshot=ANY,
+                    safe_input_budget_snapshot=ANY,
                     verification_config=ANY
                 )
 
@@ -2119,12 +2221,15 @@ class TestCreateAgentConfig:
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
                 max_steps=5,
+                requested_output_tokens=None,
                 model_name="main_model",
                 provide_run_summary=True,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_components=ANY,
+                capacity_snapshot=None,
+                safe_input_budget_snapshot=None,
                 verification_config=ANY
             )
 
@@ -3257,7 +3362,9 @@ class TestCreateAgentRunInfo:
                     "transport": "streamable-http"
                 }],
                 history=[],
-                stop_event="stop_event"
+                stop_event="stop_event",
+                capacity_snapshot=None,
+                safe_input_budget_snapshot=None
             )
 
             # Verify that other functions were called correctly

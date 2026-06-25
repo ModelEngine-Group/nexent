@@ -784,6 +784,21 @@ class TestExtendedContextManagerConfig:
         assert config.token_threshold == 5000
         assert config.keep_recent_steps == 3
 
+    def test_w2_budget_fields_default_to_legacy_threshold_mode(self):
+        config = summary_config_module.ContextManagerConfig()
+        assert config.soft_input_budget_tokens == 0
+        assert config.hard_input_budget_tokens == 0
+
+    def test_w2_budget_fields_can_be_set(self):
+        config = summary_config_module.ContextManagerConfig(
+            token_threshold=8000,
+            soft_input_budget_tokens=7000,
+            hard_input_budget_tokens=9000,
+        )
+        assert config.token_threshold == 8000
+        assert config.soft_input_budget_tokens == 7000
+        assert config.hard_input_budget_tokens == 9000
+
 
 class TestAgentConfigWithContextComponents:
     """Tests for AgentConfig with context_components field."""

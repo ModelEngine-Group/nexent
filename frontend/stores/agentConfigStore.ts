@@ -34,6 +34,7 @@ export type EditableAgent = Pick<
   | "model"
   | "model_id"
   | "max_step"
+  | "requested_output_tokens"
   | "provide_run_summary"
   | "tools"
   | "duty_prompt"
@@ -166,6 +167,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     model: llmConfig?.name || "",
     model_id: llmConfig?.id || 0,
     max_step: 15,
+    requested_output_tokens: null,
     provide_run_summary: false,
     tools: [],
     skills: [],
@@ -198,6 +200,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         model: agent.model,
         model_id: agent.model_id || 0,
         max_step: agent.max_step,
+        requested_output_tokens: agent.requested_output_tokens ?? null,
         provide_run_summary: agent.provide_run_summary,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
@@ -318,6 +321,7 @@ const isDirty = (
       editedAgent.model !== "" ||
       editedAgent.model_id !== 0 ||
       editedAgent.max_step !== 0 ||
+      editedAgent.requested_output_tokens != null ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
@@ -348,6 +352,8 @@ const isDirty = (
     baselineAgent.model !== editedAgent.model ||
     baselineAgent.model_id !== editedAgent.model_id ||
     baselineAgent.max_step !== editedAgent.max_step ||
+    (baselineAgent.requested_output_tokens ?? null) !==
+      (editedAgent.requested_output_tokens ?? null) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||

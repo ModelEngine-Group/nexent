@@ -154,6 +154,15 @@ export default function AgentGenerateDetail({}) {
     }));
   }, [filteredGroups]);
 
+  const selectedMainAgentModel = useMemo(() => {
+    return availableLlmModels.find(
+      (model) =>
+        model.id === editedAgent.model_id ||
+        model.displayName === editedAgent.model ||
+        model.name === editedAgent.model
+    );
+  }, [availableLlmModels, editedAgent.model, editedAgent.model_id]);
+
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
@@ -164,6 +173,7 @@ export default function AgentGenerateDetail({}) {
       mainAgentModel: editedAgent.model,
       mainAgentModelId: editedAgent.model_id,
       mainAgentMaxStep: editedAgent.max_step || 15,
+      requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -181,6 +191,15 @@ export default function AgentGenerateDetail({}) {
     form.setFieldsValue(initialAgentInfo);
 
   }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
+
+  // Re-validate requested output tokens when the selected model's max changes,
+  // so switching to a model with a lower cap surfaces the violation immediately
+  // instead of waiting until save.
+  useEffect(() => {
+    if (form.getFieldValue("requestedOutputTokens") != null) {
+      form.validateFields(["requestedOutputTokens"]).catch(() => {});
+    }
+  }, [form, selectedMainAgentModel?.maxOutputTokens]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -947,6 +966,53 @@ export default function AgentGenerateDetail({}) {
                                     ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
                                     enabled: value,
                                   },
+                                });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <Form.Item
+                            name="requestedOutputTokens"
+                            label={t("agent.requestedOutputTokens")}
+                            tooltip={t("agent.requestedOutputTokens.tooltip")}
+                            rules={[
+                              {
+                                type: "number",
+                                min: 1,
+                                message: t("agent.requestedOutputTokens.error"),
+                              },
+                              ...(selectedMainAgentModel?.maxOutputTokens
+                                ? [
+                                    {
+                                      type: "number" as const,
+                                      max: selectedMainAgentModel.maxOutputTokens,
+                                      message: t(
+                                        "agent.requestedOutputTokens.maxError",
+                                        { max: selectedMainAgentModel.maxOutputTokens }
+                                      ),
+                                    },
+                                  ]
+                                : []),
+                            ]}
+                          >
+                            <InputNumber
+                              min={1}
+                              max={selectedMainAgentModel?.maxOutputTokens}
+                              precision={0}
+                              placeholder={
+                                selectedMainAgentModel?.defaultOutputReserveTokens
+                                  ? String(selectedMainAgentModel.defaultOutputReserveTokens)
+                                  : undefined
+                              }
+                              style={{ width: "100%" }}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  requested_output_tokens:
+                                    typeof value === "number" ? value : null,
                                 });
                               }}
                             />
