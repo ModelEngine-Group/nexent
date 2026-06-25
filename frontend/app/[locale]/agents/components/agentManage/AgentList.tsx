@@ -246,6 +246,7 @@ export default function AgentList({
         model_name: detail.model,
         model_id: detail.model_id ?? undefined,
         max_steps: detail.max_step,
+        requested_output_tokens: detail.requested_output_tokens ?? null,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,

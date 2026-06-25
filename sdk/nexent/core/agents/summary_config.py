@@ -19,6 +19,8 @@ class ContextManagerConfig:
     # === Compression Settings (existing) ===
     enabled: bool = False
     token_threshold: int = 10000
+    soft_input_budget_tokens: int = 0
+    hard_input_budget_tokens: int = 0
     keep_recent_steps: int = 4
     keep_recent_pairs: int = 2
     max_chunk_count: int = 0

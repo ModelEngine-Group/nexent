@@ -7,7 +7,7 @@
 DELETE FROM nexent.role_permission_t
 WHERE permission_category = 'VISIBILITY' AND permission_type = 'LEFT_NAV_MENU';
 
-ALTER TABLE role_permission_t 
+ALTER TABLE nexent.role_permission_t
 ADD COLUMN IF NOT EXISTS parent_key VARCHAR(50);
 -- ============================================================
 -- New Menu Structure:
