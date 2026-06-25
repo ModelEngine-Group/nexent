@@ -37,7 +37,8 @@ logger = logging.getLogger("openai_llm")
 
 
 class OpenAIModel(OpenAIServerModel):
-    # Public SDK constructor: keep the explicit kwargs for backward-compatible call sites.
+    # Public SDK constructor: keep common kwargs explicit and read extension
+    # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
 ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
@@ -45,9 +46,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
                  safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
-                 capacity_snapshot: Optional[Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
-                 prompt_cache: Optional[Dict[str, Any]] = None, *args, **kwargs):  # NOSONAR
+                 *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -71,11 +71,17 @@ ssl_verify=True, model_factory: Optional[str] = None,
             max_tokens: DEPRECATED alias for max_output_tokens retained during
                        the W1 migration. If max_output_tokens is supplied it
                        wins; otherwise max_tokens is copied into it.
-            prompt_cache: Selected prompt-cache capability profile. Unknown or
-                       absent capability disables provider cache directives.
+            capacity_snapshot: Optional model capacity snapshot accepted via
+                       kwargs for backward-compatible keyword call sites.
+            prompt_cache: Selected prompt-cache capability profile accepted via
+                       kwargs. Unknown or absent capability disables provider
+                       cache directives.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
+        capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
+        prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
+
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
