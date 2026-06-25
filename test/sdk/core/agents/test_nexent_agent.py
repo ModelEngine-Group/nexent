@@ -1,5 +1,6 @@
 import sys
 import types
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from unittest.mock import MagicMock, patch, ANY
@@ -118,6 +119,12 @@ class _MockProcessType:
     ERROR = "error"
 
 
+@dataclass
+class _MockAgentRunMetadata:
+    agent_name: str | None = None
+    query: str | None = None
+
+
 MessageObserver = _MockMessageObserver
 ProcessType = _MockProcessType
 
@@ -138,6 +145,38 @@ mock_sdk_nexent_core_utils_observer_module = types.ModuleType(
 )
 mock_sdk_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
 mock_sdk_nexent_core_utils_observer_module.ProcessType = _MockProcessType
+mock_sdk_nexent_monitor_module = types.ModuleType("sdk.nexent.monitor")
+mock_sdk_nexent_monitor_module.__path__ = []
+mock_sdk_nexent_monitor_module.AgentRunMetadata = _MockAgentRunMetadata
+mock_sdk_nexent_monitor_module.get_agent_monitoring_context = MagicMock(return_value=None)
+mock_sdk_nexent_monitor_module.get_monitoring_manager = MagicMock()
+mock_sdk_nexent_monitor_monitoring_module = types.ModuleType("sdk.nexent.monitor.monitoring")
+mock_sdk_nexent_monitor_monitoring_module.record_model_call = MagicMock()
+
+
+class _MockLegacyContextRuntime:
+    context_manager = None
+
+
+class _MockManagedContextRuntime:
+    def __init__(self, context_manager):
+        self.context_manager = context_manager
+
+
+mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
+mock_sdk_context_runtime_module.__path__ = []
+mock_sdk_context_runtime_legacy_module = types.ModuleType("sdk.nexent.core.context_runtime.legacy")
+mock_sdk_context_runtime_legacy_module.__path__ = []
+mock_sdk_context_runtime_legacy_runtime_module = types.ModuleType(
+    "sdk.nexent.core.context_runtime.legacy.runtime"
+)
+mock_sdk_context_runtime_legacy_runtime_module.LegacyContextRuntime = _MockLegacyContextRuntime
+mock_sdk_context_runtime_managed_module = types.ModuleType("sdk.nexent.core.context_runtime.managed")
+mock_sdk_context_runtime_managed_module.__path__ = []
+mock_sdk_context_runtime_managed_runtime_module = types.ModuleType(
+    "sdk.nexent.core.context_runtime.managed.runtime"
+)
+mock_sdk_context_runtime_managed_runtime_module.ManagedContextRuntime = _MockManagedContextRuntime
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -251,8 +290,15 @@ module_mocks = {
     "sdk.nexent": mock_sdk_nexent_module,
     "sdk.nexent.core": mock_sdk_nexent_core_module,
     "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
+    "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
+    "sdk.nexent.core.context_runtime.legacy": mock_sdk_context_runtime_legacy_module,
+    "sdk.nexent.core.context_runtime.legacy.runtime": mock_sdk_context_runtime_legacy_runtime_module,
+    "sdk.nexent.core.context_runtime.managed": mock_sdk_context_runtime_managed_module,
+    "sdk.nexent.core.context_runtime.managed.runtime": mock_sdk_context_runtime_managed_runtime_module,
     "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
+    "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
+    "sdk.nexent.monitor.monitoring": mock_sdk_nexent_monitor_monitoring_module,
     "nexent.core.utils.prompt_template_utils": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
@@ -295,6 +341,27 @@ with patch.dict("sys.modules", module_mocks):
 
     # Clean up after import
     sys.modules.pop("nexent.utils.http_client_manager", None)
+
+
+# Keep the lightweight runtime modules available for create_single_agent()
+# tests.  They exercise runtime selection after the import-time patch.dict
+# context has restored sys.modules, while nexent_agent now performs runtime
+# imports inside create_single_agent().
+sys.modules.setdefault("sdk", mock_sdk_module)
+sys.modules.setdefault("sdk.nexent", mock_sdk_nexent_module)
+sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
+sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
+sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
+sys.modules.setdefault("sdk.nexent.core.context_runtime.legacy", mock_sdk_context_runtime_legacy_module)
+sys.modules.setdefault(
+    "sdk.nexent.core.context_runtime.legacy.runtime",
+    mock_sdk_context_runtime_legacy_runtime_module,
+)
+sys.modules.setdefault("sdk.nexent.core.context_runtime.managed", mock_sdk_context_runtime_managed_module)
+sys.modules.setdefault(
+    "sdk.nexent.core.context_runtime.managed.runtime",
+    mock_sdk_context_runtime_managed_runtime_module,
+)
 
 
 # ----------------------------------------------------------------------------
@@ -473,6 +540,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         extra_body=mock_model_config.extra_body,
         max_tokens=mock_model_config.max_tokens,
         timeout_seconds=mock_model_config.timeout_seconds,
+        prompt_cache=mock_model_config.prompt_cache,
     )
 
     # Verify stop_event was set
@@ -505,6 +573,7 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         extra_body=mock_deep_thinking_model_config.extra_body,
         max_tokens=mock_deep_thinking_model_config.max_tokens,
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
+        prompt_cache=mock_deep_thinking_model_config.prompt_cache,
     )
 
     # Verify stop_event was set
