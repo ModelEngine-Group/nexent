@@ -91,28 +91,22 @@ export const ModelEditDialog = ({
     message: "",
   });
 
-  // Monotonic request token for /suggest-capacity. Incremented on every
-  // new call, dialog close, and model change; the async handler compares
-  // its captured token against the current ref before committing
-  // setState, so a stale qwen-for-row-A response cannot win over a fresh
-  // glm-for-row-B response when the user cancels A and immediately edits
-  // B (the original bug -- previous request was racing the new one and
-  // sometimes overwriting it after navigation).
+  // Monotonic request token for /suggest-capacity. Used by manual Check
+  // clicks: when the operator clicks twice quickly with different inputs,
+  // the slower response must not overwrite the faster newer one. The
+  // navigation race (open A, cancel, open B) is handled by the
+  // key-based remount on the parent (ModelDeleteDialog), so we no longer
+  // need a separate "reset on close" effect here.
   const suggestionRequestRef = useRef(0);
 
-  // Reset capacity-related state every time the dialog closes. Without
-  // this, the next open render briefly shows the previous model's
-  // suggestion before the [model] effect overwrites it, and a slow
-  // in-flight response from the previous model can also overwrite the
-  // fresh model's correct result. The ref bump tells any pending
-  // handleSuggestCapacity to drop its response.
-  useEffect(() => {
-    if (isOpen) return;
-    suggestionRequestRef.current += 1;
-    setCapacitySuggestion(null);
-    setAcceptedCapacitySuggestion(null);
-    setCheckingCapacitySuggestion(false);
-  }, [isOpen]);
+  // Auto-suggest fires at most once per dialog instance. With the parent's
+  // key remount, "per instance" == "per model", which is the desired
+  // semantic. The fired-once guard is needed because the auto-suggest
+  // effect depends on `form.name` and `form.url`, which change as the
+  // [model] effect populates the form on first mount AND every time the
+  // operator types in those inputs -- only the populate transition
+  // should trigger an API call.
+  const autoSuggestFiredRef = useRef(false);
 
   useEffect(() => {
     if (model) {
@@ -248,19 +242,36 @@ export const ModelEditDialog = ({
   // click, badge click, future gear-icon shortcut) gets the same
   // affordance. No-op if the model already has capacity, the suggestion
   // switch is off, or required form fields are missing at open time.
+  //
+  // form.name and form.url are in the dependency list because the
+  // [model] effect above populates them asynchronously after this
+  // component mounts. With the parent's key remount, the first render
+  // here has form.name == "" / form.url == "", so canSuggestCapacity()
+  // is false and we cannot fire yet. The [model] effect's setForm
+  // then re-renders with populated values, this effect re-runs, and
+  // canSuggestCapacity() finally returns true. The autoSuggestFiredRef
+  // guards against re-firing later when the operator types into name
+  // or url -- only the populate transition should kick off auto-suggest.
   const isBareCapacityModel = Boolean(
     model &&
       supportsCapacityFields &&
       (!model.contextWindowTokens || !model.maxOutputTokens)
   );
   useEffect(() => {
+    if (autoSuggestFiredRef.current) return;
     if (!isOpen || !isBareCapacityModel) return;
     if (!capacitySuggestionEnabled) return;
     if (!canSuggestCapacity()) return;
+    autoSuggestFiredRef.current = true;
     handleSuggestCapacity();
-    // Fire once per open; do not re-fire on re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, isBareCapacityModel]);
+  }, [
+    isOpen,
+    isBareCapacityModel,
+    capacitySuggestionEnabled,
+    form.name,
+    form.url,
+  ]);
 
   const isFormValid = () => {
     if (

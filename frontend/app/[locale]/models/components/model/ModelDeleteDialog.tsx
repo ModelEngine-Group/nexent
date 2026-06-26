@@ -1718,7 +1718,13 @@ export const ModelDeleteDialog = ({
         </div>
       )}
       {/* Edit model dialog */}
+      {/* key forces full unmount/remount when model changes, preventing
+          stale capacitySuggestion state from flashing on the first render
+          before the [model] effect clears it. Without key, the component
+          returns null (line 559) but never unmounts, so useState keeps
+          the previous model's suggestion alive for one render cycle. */}
       <ModelEditDialog
+        key={editModel?.displayName || "__none__"}
         isOpen={!!editModel}
         model={editModel}
         onClose={() => setEditModel(null)}
