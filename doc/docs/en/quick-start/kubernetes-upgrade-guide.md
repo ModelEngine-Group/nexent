@@ -28,15 +28,14 @@ git pull
 **Code downloaded via ZIP package or other means**
 
 1. Re-download the latest code from GitHub and extract it.
-2. Copy the `deploy.options` file from the `k8s/helm` directory of your previous deployment to the new code directory. (If the file doesn't exist, you can ignore this step).
+2. Copy the `deploy.options` file from the `deploy/k8s` directory of your previous deployment to the same directory in the new code. (If the file does not exist, you can ignore this step).
 
 ## 🔄 Step 2: Execute the Upgrade
 
-Navigate to the k8s/helm directory of the updated code and run the deployment script:
+From the repository root of the updated code, run the Kubernetes deployment entrypoint:
 
 ```bash
-cd deploy/k8s
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 The script will detect your saved deployment settings (components, port policy, image source, etc.) from `deploy.options`. If the file is missing, you will be prompted to enter configuration details.
@@ -57,9 +56,9 @@ After deployment:
 
 ## 🗄️ Database Migrations
 
-SQL migrations are no longer executed manually. In Kubernetes, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies merged migration files from `deploy/sql/migrations/`, such as `v1_merged_migrations.sql`, `v2.0_merged_migrations.sql`, `v2.1_merged_migrations.sql`, and `v2.2_merged_migrations.sql`; the other backend services only wait for migration records to reach the target state.
+SQL migrations are no longer executed manually. In Kubernetes, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies `*.sql` files from `deploy/sql/migrations/` in filename order; the other backend services only wait for migration records to reach the target state. The deploy script renders `deploy/sql` into the shared SQL ConfigMap mounted at `/opt/nexent/sql`, so SQL-only changes require rerunning deployment, not rebuilding images.
 
-The migration runner records each source section in `nexent.schema_migrations`. If records are missing but business tables already exist, probes safely backfill `baselined` records; ambiguous cases fail instead of being skipped.
+The migration runner uses each SQL filename as the migration ID in `nexent.schema_migrations`. If a recorded file has the same checksum, it is skipped; if the checksum changes, the same file is rerun and the checksum, execution time, app version, and source file are updated.
 
 > 💡 Tips
 > - Create a backup before running migrations:
@@ -99,6 +98,5 @@ kubectl rollout restart deployment/nexent-runtime -n nexent
 ### Re-initialize Elasticsearch (if needed)
 
 ```bash
-cd deploy/k8s
-bash init-elasticsearch.sh
+bash deploy/k8s/init-elasticsearch.sh
 ```

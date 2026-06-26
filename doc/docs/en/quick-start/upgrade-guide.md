@@ -32,16 +32,16 @@ git pull
 
 ## 🔄 Step 2: Execute the Upgrade
 
-Navigate to the docker directory of the updated code and run the upgrade script:
+From the repository root of the updated code, run the Docker deployment entrypoint:
 
 ```bash
-bash upgrade.sh
+bash deploy.sh docker
 ```
 
 If deploy.options is missing, the script will prompt you to select deployment settings again, such as components, port policy, and image source. Choose the same options you used for the previous deployment.
 
 >💡 Tip
-> If `.env` is missing, the deploy script automatically copies it from `.env.example`.
+> Existing `.env` is kept as-is. If it is missing, the deploy script first reuses an existing `docker/.env`, then falls back to `.env.example` or `docker/.env.example`.
 > If you need to configure voice models (STT/TTS), add the relevant variables to `.env`. We will provide a front-end configuration interface as soon as possible.
 
 
@@ -84,9 +84,9 @@ docker system prune -af
 
 ## 🗄️ Database Migrations
 
-SQL migrations are no longer executed manually. In Docker, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies merged migration files from `deploy/sql/migrations/`, such as `v1_merged_migrations.sql`, `v2.0_merged_migrations.sql`, `v2.1_merged_migrations.sql`, and `v2.2_merged_migrations.sql`; the other backend containers only wait for migration records to reach the target state.
+SQL migrations are no longer executed manually. In Docker, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies `*.sql` files from `deploy/sql/migrations/` in filename order; the other backend containers only wait for migration records to reach the target state. SQL is mounted from `deploy/sql` into `/opt/nexent/sql`, so SQL-only changes require rerunning deployment, not rebuilding images.
 
-The migration runner records each source section in `nexent.schema_migrations`. If records are missing but business tables already exist, probes safely backfill `baselined` records; ambiguous cases fail instead of being skipped.
+The migration runner uses each SQL filename as the migration ID in `nexent.schema_migrations`. If a recorded file has the same checksum, it is skipped; if the checksum changes, the same file is rerun and the checksum, execution time, app version, and source file are updated.
 
 > 💡 Tips
 > - Always back up the database before upgrading, especially in production.

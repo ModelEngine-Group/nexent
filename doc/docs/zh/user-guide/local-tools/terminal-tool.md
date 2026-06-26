@@ -44,8 +44,7 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/
 
 ```bash
 # 运行部署脚本
-cd docker
-bash deploy.sh
+bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
 
 # 在脚本执行过程中选择：
 # 1. 部署模式：选择开发/生产/基础设施模式

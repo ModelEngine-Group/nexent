@@ -209,8 +209,32 @@ docker rm nexent-docs
 构建完成后，可以进入 `docker` 目录使用部署脚本启动本地镜像：
 
 ```bash
-cd docker
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
 > `local-latest` 会使用本地 `latest` Nexent 应用镜像并避免重新拉取这些镜像，无需修改 `deploy/docker/deploy.sh`。
+
+### 将本地镜像打包为离线部署包
+
+构建本地 `latest` 镜像后，可以使用离线打包脚本把镜像和部署资源打包：
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target docker \
+  --version latest \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest \
+  --compress true \
+  --output-dir offline-package/docker-local
+```
+
+使用 `--version latest` 或 `--image-source local-latest` 时，脚本会使用本地 Nexent 应用镜像，并跳过这些 `latest` 标签的拉取。将包复制到目标机器后，可加载镜像并部署：
+
+```bash
+cd offline-package/docker-local
+bash deploy.sh --load-images docker \
+  --version latest \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest
+```
