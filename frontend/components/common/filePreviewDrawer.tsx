@@ -77,6 +77,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const isLocalSource = props.source === "local";
   const localFile = isLocalSource ? props.file : null;
   const objectName = !isLocalSource ? props.objectName : "";
+  const providedPreviewUrl =
+    !isLocalSource && "previewUrl" in props ? props.previewUrl : undefined;
+  const providedDownloadUrl =
+    !isLocalSource && "downloadUrl" in props ? props.downloadUrl : undefined;
   const fileName =
     isLocalSource && localFile
       ? localFile.name
@@ -664,7 +668,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   );
 
   useEffect(() => {
-    if (!open || (!isLocalSource && !objectName)) {
+    if (!open || (!isLocalSource && !objectName && !providedPreviewUrl)) {
       return;
     }
 
@@ -749,7 +753,9 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           return;
         }
 
-        const url = storageService.getPreviewUrl(objectName, fileName);
+        const url =
+          providedPreviewUrl ||
+          storageService.getPreviewUrl(objectName, fileName);
 
         if (["markdown", "csv", "text", "html"].includes(detectedFileType)) {
           if (cancelled) return;
@@ -816,6 +822,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   }, [
     open,
     objectName,
+    providedPreviewUrl,
     fileName,
     detectedFileType,
     t,
@@ -905,6 +912,14 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         link.download = fileName;
         link.click();
         URL.revokeObjectURL(url);
+        return;
+      }
+
+      if (providedDownloadUrl) {
+        const link = document.createElement("a");
+        link.href = providedDownloadUrl;
+        link.download = fileName;
+        link.click();
         return;
       }
 

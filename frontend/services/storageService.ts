@@ -107,6 +107,10 @@ export function extractObjectNameFromUrl(url: string): string | null {
 export function convertImageUrlToApiUrl(url: string): string {
   const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
 
+  if (url.startsWith("/api/share/")) {
+    return url;
+  }
+
   // For localhost URLs in development, return original URL directly to avoid proxy issues
   if (isHttpUrl && /localhost|127\.0\.0\.1/i.test(url)) {
     return url;

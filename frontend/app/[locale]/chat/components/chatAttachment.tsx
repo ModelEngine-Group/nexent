@@ -28,6 +28,8 @@ interface SelectedFileState {
   fileName: string;
   fileType?: string;
   fileSize?: number;
+  previewUrl?: string;
+  downloadUrl?: string;
 }
 
 // Get file extension
@@ -57,9 +59,7 @@ const getFileIcon = (name: string, contentType?: string) => {
     return <FilePdfFilled size={iconSize} color="#e74c3c" />;
   }
   if (chatConfig.fileIcons.word.includes(extension)) {
-    return (
-      <FileWordFilled size={iconSize} color="#3498db" />
-    );
+    return <FileWordFilled size={iconSize} color="#3498db" />;
   }
   if (chatConfig.fileIcons.text.includes(extension)) {
     return <FileTextFilled size={iconSize} color="#7f8c8d" />;
@@ -88,10 +88,16 @@ const getFileIcon = (name: string, contentType?: string) => {
   }
 
   // Audio and video files are uploaded as regular attachments for multimodal tools.
-  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
+  if (
+    chatConfig.fileIcons.audio.includes(extension) ||
+    fileType.startsWith("audio/")
+  ) {
     return <FileTextFilled size={iconSize} color="#16a085" />;
   }
-  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
+  if (
+    chatConfig.fileIcons.video.includes(extension) ||
+    fileType.startsWith("video/")
+  ) {
     return <FileTextFilled size={iconSize} color="#8e44ad" />;
   }
 
@@ -116,7 +122,9 @@ export function ChatAttachment({
   onImageClick,
   className = "",
 }: ChatAttachmentProps) {
-  const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(
+    null
+  );
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
@@ -125,21 +133,23 @@ export function ChatAttachment({
   //Handle file click
   const handleFileClick = (attachment: AttachmentItem) => {
     let objectName = attachment.object_name;
-    
+
     if (!objectName && attachment.url) {
       objectName = extractObjectNameFromUrl(attachment.url) || undefined;
     }
-    
-    if (!objectName) {
+
+    if (!objectName && !attachment.preview_url) {
       message.warning(t("filePreview.previewFailed"));
       return;
     }
 
     setSelectedFile({
-      objectName,
+      objectName: objectName || "",
       fileName: attachment.name,
       fileType: attachment.contentType,
       fileSize: attachment.size,
+      previewUrl: attachment.preview_url,
+      downloadUrl: attachment.download_url,
     });
 
     // Also call external callback if provided (for compatibility with images)
@@ -150,7 +160,7 @@ export function ChatAttachment({
         (attachment.contentType &&
           attachment.contentType.startsWith("image/")) ||
         chatConfig.imageExtensions.includes(extension);
-      
+
       if (isImage) {
         onImageClick(attachment.url);
       }
@@ -183,7 +193,10 @@ export function ChatAttachment({
                   <div className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md">
                     {attachment.url && (
                       <img
-                        src={convertImageUrlToApiUrl(attachment.url)}
+                        src={
+                          attachment.preview_url ||
+                          convertImageUrlToApiUrl(attachment.url)
+                        }
                         alt={attachment.name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -233,6 +246,8 @@ export function ChatAttachment({
           fileName={selectedFile.fileName}
           fileType={selectedFile.fileType}
           fileSize={selectedFile.fileSize}
+          previewUrl={selectedFile.previewUrl}
+          downloadUrl={selectedFile.downloadUrl}
           onClose={() => setSelectedFile(null)}
         />
       )}

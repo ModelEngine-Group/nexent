@@ -145,6 +145,62 @@ class ConversationSourceSearch(TableBase):
         30), doc="Simple tool identifier used to distinguish the index source in the summary text output by the large model")
 
 
+class ConversationShare(TableBase):
+    """
+    Public read-only snapshot of selected Q&A pairs from a conversation.
+    """
+    __tablename__ = "conversation_share_t"
+    __table_args__ = (
+        Index("idx_conversation_share_token", "share_token"),
+        Index("idx_conversation_share_conversation_id", "conversation_id"),
+        {"schema": SCHEMA},
+    )
+
+    share_id = Column(Integer, Sequence(
+        "conversation_share_t_share_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    share_token = Column(String(64), nullable=False, unique=True,
+                         doc="Opaque public share token")
+    conversation_id = Column(Integer, nullable=False,
+                             doc="Original conversation ID")
+    tenant_id = Column(String(100), doc="Tenant that created the share")
+    title = Column(String(200), doc="Snapshot title")
+    mode = Column(String(30), default="selected",
+                  doc="Share mode: all or selected")
+    selected_message_ids = Column(JSONB, doc="Selected original message IDs")
+    snapshot_json = Column(JSONB, nullable=False,
+                           doc="Frozen frontend-compatible conversation payload")
+    status = Column(String(30), default="active",
+                    doc="active or revoked")
+    expire_time = Column(TIMESTAMP(timezone=False),
+                         doc="Optional expiration time")
+
+
+class ConversationShareAsset(TableBase):
+    """
+    File objects allowed to be accessed through a public share token.
+    """
+    __tablename__ = "conversation_share_asset_t"
+    __table_args__ = (
+        Index("idx_conversation_share_asset_token", "share_token"),
+        Index("idx_conversation_share_asset_id", "asset_id"),
+        {"schema": SCHEMA},
+    )
+
+    share_asset_id = Column(Integer, Sequence(
+        "conversation_share_asset_t_share_asset_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    asset_id = Column(String(64), nullable=False, unique=True,
+                      doc="Opaque public asset token")
+    share_token = Column(String(64), nullable=False,
+                         doc="Parent share token")
+    object_name = Column(String(1000), nullable=False,
+                         doc="Original MinIO object name")
+    filename = Column(String(500), doc="Display/download filename")
+    content_type = Column(String(200), doc="Content type")
+    size = Column(BigInteger, doc="File size in bytes")
+    source_kind = Column(String(50), doc="attachment, source, image, markdown")
+    metadata_json = Column(JSONB, doc="Original reference metadata")
+
+
 class ModelRecord(TableBase):
     """
     Model list defined by the user on the configuration page
