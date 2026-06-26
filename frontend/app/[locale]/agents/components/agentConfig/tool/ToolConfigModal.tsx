@@ -13,6 +13,20 @@ import {
   Skeleton,
   App,
 } from "antd";
+import type { FormInstance } from "antd";
+
+// Delay setFieldValue to the next microtask so the form is guaranteed to be mounted.
+// Otherwise React Strict Mode or modal close cycles can call it before the Form
+// element is re-inserted into the DOM, triggering the "not connected" warning.
+function safeSetFieldValue(
+  form: FormInstance,
+  field: string,
+  value: unknown
+) {
+  queueMicrotask(() => {
+    form.setFieldValue(field, value);
+  });
+}
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
@@ -210,6 +224,11 @@ export default function ToolConfigModal({
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
+
+  // Independent KB selection state for test panel (separate from config's selectedKbIds)
+  const [testPanelKbIds, setTestPanelKbIds] = useState<string[]>([]);
+  const [testPanelKbDisplayNames, setTestPanelKbDisplayNames] = useState<string[]>([]);
+
   // Track if user has attempted to submit the form
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
@@ -281,6 +300,18 @@ export default function ToolConfigModal({
     if (name === "aidp_search") return "aidp_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
+
+  // Sync selectedKbIds → testPanelKbIds when modal re-opens for aidp_search.
+  // testPanelKbIds starts as [] on every open; we restore it from the config's
+  // selectedKbIds so the test panel pre-fills the same kds_list the user saved.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (toolKbType !== "aidp_search") return;
+    if (selectedKbIds.length > 0) {
+      setTestPanelKbIds(selectedKbIds);
+      setTestPanelKbDisplayNames(selectedKbDisplayNames);
+    }
+  }, [isOpen, toolKbType, selectedKbIds, selectedKbDisplayNames]);
 
   // Haotian configuration state
   const [haotianConfig, setHaotianConfig] = useState<{
@@ -711,7 +742,7 @@ export default function ToolConfigModal({
     setCurrentParams(updatedParams);
 
     const fieldName = `param_${index}`;
-    form.setFieldValue(fieldName, forcedMultimodalValue);
+    safeSetFieldValue(form, fieldName, forcedMultimodalValue);
   }, [tool?.name, forcedMultimodalValue, currentParams, form]);
 
   const isMultimodalConstraintMismatch = useCallback(
@@ -1405,7 +1436,38 @@ export default function ToolConfigModal({
     setKbSelectorVisible(true);
   };
 
-  // Apply the user's KB selection (shared by Dify / Haotian / AIDP flows).
+  // Track if KB selection is from test panel (for aidp_search)
+  const [isTestPanelKbSelection, setIsTestPanelKbSelection] = useState(false);
+
+  // Handle test panel KB selection for aidp_search (only updates test panel state, not config's selectedKbIds)
+  const handleTestPanelKbSelect = (ids: string[], displayNames: string[]) => {
+    setTestPanelKbIds(ids);
+    setTestPanelKbDisplayNames(displayNames);
+  };
+
+  // Handle test panel KB removal for aidp_search (only updates test panel state, not config's selectedKbIds/currentParams)
+  const handleTestPanelKbRemove = (index: number) => {
+    const newIds = testPanelKbIds.filter((_, i) => i !== index);
+    const newDisplayNames = testPanelKbDisplayNames.filter((_, i) => i !== index);
+    setTestPanelKbIds(newIds);
+    setTestPanelKbDisplayNames(newDisplayNames);
+    // Note: do NOT update currentParams here - test panel kds_list is independent from config
+  };
+
+  // Sync kds_list from manual JSON back to testPanelKbIds when switching mode.
+  const handleTestPanelKbIdsChange = (ids: string[], _displayNames: string[]) => {
+    // Resolve display names from knowledgeBases by ID
+    const resolvedDisplayNames = ids.map((id) => {
+      const kb = knowledgeBases.find(
+        (k) => String(k.id).trim() === String(id).trim()
+      );
+      return kb?.display_name || kb?.name || id;
+    });
+    setTestPanelKbIds(ids);
+    setTestPanelKbDisplayNames(resolvedDisplayNames);
+  };
+
+  // Apply the user's KB selection (shared by Dify / Haotian flows).
   // Each tool's selector passes a slightly different payload shape; we
   // normalize here so the rest of the state update stays identical.
   const applyKbConfirm = (ids: string[], displayNames: string[]) => {
@@ -1417,7 +1479,7 @@ export default function ToolConfigModal({
       const param = currentParams[currentKbParamIndex];
       if (param) {
         const formFieldName = `param_${currentKbParamIndex}`;
-        form.setFieldValue(formFieldName, ids);
+        safeSetFieldValue(form, formFieldName, ids);
 
         // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
         const updatedParams = [...currentParams];
@@ -1452,7 +1514,40 @@ export default function ToolConfigModal({
     datasetIds: string[];
     displayNames: string[];
   }) => {
-    applyKbConfirm(payload.datasetIds || [], payload.displayNames || []);
+    const ids = payload.datasetIds || [];
+    const displayNames = payload.displayNames || [];
+
+    if (isTestPanelKbSelection) {
+      // From test panel: only update test panel state
+      // Note: do NOT update currentParams - test panel kds_list is independent from config
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setIsTestPanelKbSelection(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+    } else {
+      // From config panel: update selectedKbIds and sync to testPanelKbIds
+      setSelectedKbIds(ids);
+      setSelectedKbDisplayNames(displayNames);
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setHasSubmitted(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+
+      // Update currentParams for kds_list using functional update to avoid stale closure
+      setCurrentParams((prevParams) => {
+        const kdsListFieldIndex = prevParams.findIndex(p => p.name === "kds_list");
+        if (kdsListFieldIndex === -1) return prevParams;
+        const updatedParams = [...prevParams];
+        updatedParams[kdsListFieldIndex] = {
+          ...updatedParams[kdsListFieldIndex],
+          value: ids,
+        };
+        safeSetFieldValue(form, `param_${kdsListFieldIndex}`, ids);
+        return updatedParams;
+      });
+    }
   };
 
   // Remove a single knowledge base from selection
@@ -1467,17 +1562,16 @@ export default function ToolConfigModal({
     // Reset submit state when user modifies selection
     setHasSubmitted(false);
 
-    // Update form value
-    const formFieldName = `param_${paramIndex}`;
-    form.setFieldValue(formFieldName, newIds);
-
-    // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
-    const updatedParams = [...currentParams];
-    updatedParams[paramIndex] = {
-      ...updatedParams[paramIndex],
-      value: newIds,
-    };
-    setCurrentParams(updatedParams);
+    // Update form value and currentParams using functional update to avoid stale closure
+    safeSetFieldValue(form, `param_${paramIndex}`, newIds);
+    setCurrentParams((prevParams) => {
+      const updatedParams = [...prevParams];
+      updatedParams[paramIndex] = {
+        ...updatedParams[paramIndex],
+        value: newIds,
+      };
+      return updatedParams;
+    });
   };
 
   // Get tool type for knowledge base selector
@@ -1698,7 +1792,7 @@ export default function ToolConfigModal({
                 knowledgeSpaceId: value || "",
               }));
               // Also update form value
-              form.setFieldValue(fieldName, value);
+              safeSetFieldValue(form, fieldName, value);
             }}
           />
         );
@@ -2097,23 +2191,40 @@ export default function ToolConfigModal({
                 kbLoading={kbLoading}
                 selectedKbIds={selectedKbIds}
                 selectedKbDisplayNames={selectedKbDisplayNames}
-                onOpenKbSelector={(paramIndex) => openKbSelector(paramIndex === -1 ? 0 : paramIndex)}
+                onOpenKbSelector={(paramIndex) => {
+                  // For aidp_search, mark that KB selection is from test panel
+                  if (toolKbType === "aidp_search") {
+                    setIsTestPanelKbSelection(true);
+                  }
+                  openKbSelector(paramIndex === -1 ? 0 : paramIndex);
+                }}
                 onKbSelectionChange={(ids, displayNames) => {
-                  setSelectedKbIds(ids);
-                  setSelectedKbDisplayNames(displayNames);
+                  // For aidp_search, this is handled by onTestPanelKbSelect
+                  if (toolKbType !== "aidp_search") {
+                    setSelectedKbIds(ids);
+                    setSelectedKbDisplayNames(displayNames);
+                  }
                 }}
                 onRemoveKb={(index, paramIndex) => {
                   if (paramIndex === -1) {
-                    // Called from test panel - remove from selectedKbIds
-                    const newIds = selectedKbIds.filter((_, i) => i !== index);
-                    const newDisplayNames = selectedKbDisplayNames.filter((_, i) => i !== index);
-                    setSelectedKbIds(newIds);
-                    setSelectedKbDisplayNames(newDisplayNames);
+                    // Called from test panel - for aidp_search, this is handled by onTestPanelKbRemove
+                    // For other tools, this updates selectedKbIds (needed for knowledge_base_search)
+                    if (toolKbType !== "aidp_search") {
+                      const newIds = selectedKbIds.filter((_, i) => i !== index);
+                      const newDisplayNames = selectedKbDisplayNames.filter((_, i) => i !== index);
+                      setSelectedKbIds(newIds);
+                      setSelectedKbDisplayNames(newDisplayNames);
+                    }
                   } else {
                     // Called from config panel
                     removeKbFromSelection(index, paramIndex);
                   }
                 }}
+                onTestPanelKbSelect={handleTestPanelKbSelect}
+                onTestPanelKbRemove={handleTestPanelKbRemove}
+                onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
+                testPanelKbIds={testPanelKbIds}
+                testPanelKbDisplayNames={testPanelKbDisplayNames}
                 toolKbType={toolKbType}
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />
@@ -2138,7 +2249,7 @@ export default function ToolConfigModal({
           isOpen={kbSelectorVisible}
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleAidpKbConfirm}
-          selectedDatasetIds={selectedKbIds}
+          selectedDatasetIds={isTestPanelKbSelection ? testPanelKbIds : selectedKbIds}
           serverUrl={aidpConfig.serverUrl}
           apiKey={aidpConfig.apiKey}
         />

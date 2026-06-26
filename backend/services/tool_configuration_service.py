@@ -521,13 +521,20 @@ async def list_all_tools(tenant_id: str):
             inputs_str = tool.get("inputs", "{}")
             try:
                 inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                sdk_inputs = sdk_info.get("inputs", {})
+
                 if isinstance(inputs, dict):
+                    # Merge description_zh for existing inputs
                     for key, value in inputs.items():
-                        if isinstance(value, dict) and not value.get("description_zh"):
-                            # Find matching input in SDK
-                            sdk_inputs = sdk_info.get("inputs", {})
-                            if key in sdk_inputs:
+                        if isinstance(value, dict):
+                            if key in sdk_inputs and sdk_inputs[key].get("description_zh"):
                                 value["description_zh"] = sdk_inputs[key].get("description_zh")
+
+                    # Add new inputs from SDK that don't exist in DB
+                    for key, sdk_value in sdk_inputs.items():
+                        if key not in inputs:
+                            inputs[key] = sdk_value
+
                     inputs_str = json.dumps(inputs, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError):
                 pass
