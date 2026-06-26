@@ -713,3 +713,54 @@ async def admin_create_user(email: str, password: str, role: str, tenant_id: str
         "role": role,
         "tenant_id": tenant_id,
     }
+
+
+async def admin_reset_password(user_id: str, new_password: str) -> Dict[str, Any]:
+    """
+    Reset a user's password using admin privileges.
+
+    This bypasses old-password verification and directly sets a new password
+    via the Supabase admin client. Intended for administrative use only.
+
+    Args:
+        user_id: The Supabase user ID of the target user.
+        new_password: The new password (min 8 characters, validated here).
+
+    Returns:
+        Dict containing user_id and email of the affected user.
+
+    Raises:
+        AppException (PROFILE_PASSWORD_WEAK): If password does not meet requirements.
+        AdminCreateUserException: If user not found or update fails.
+    """
+    from utils.auth_utils import get_supabase_admin_client
+    from database.user_tenant_db import get_user_tenant_by_user_id
+    from consts.exceptions import AppException, AdminCreateUserException
+    from consts.error_code import ErrorCode
+    from services.user_management_service import validate_password_strength
+
+    if not validate_password_strength(new_password):
+        raise AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
+
+    admin_client = get_supabase_admin_client()
+    if not admin_client:
+        raise AdminCreateUserException("Admin client not available")
+
+    user_tenant = get_user_tenant_by_user_id(user_id)
+    if not user_tenant:
+        raise AdminCreateUserException(f"User {user_id} not found in local database")
+    user_email = user_tenant.get("user_email", "")
+
+    try:
+        admin_client.auth.admin.update_user_by_id(
+            user_id,
+            {"password": new_password}
+        )
+    except Exception as e:
+        raise AdminCreateUserException(f"Failed to reset password: {str(e)}")
+
+    logger.info(f"Admin reset password for user {user_id} ({user_email})")
+    return {
+        "user_id": user_id,
+        "email": user_email,
+    }

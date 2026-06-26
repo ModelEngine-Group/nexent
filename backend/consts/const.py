@@ -89,6 +89,10 @@ OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
 
+# Keycloak OAuth Configuration
+KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "")
+KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "")
+
 # SSO Auto-Login Configuration (for third-party OAuth providers like GDE)
 SSO_ENABLED = os.getenv("SSO_ENABLED", "false").lower() == "true"
 SSO_PROVIDER = os.getenv("SSO_PROVIDER", "gde")  # Default provider for SSO

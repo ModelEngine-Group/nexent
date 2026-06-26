@@ -2,6 +2,7 @@ import os
 from typing import Dict
 
 from consts.model import OAuthProviderDefinition
+from consts.const import KEYCLOAK_URL, KEYCLOAK_REALM
 
 GITHUB_PROVIDER = OAuthProviderDefinition(
     name="github",
@@ -111,11 +112,39 @@ WECHAT_PROVIDER = OAuthProviderDefinition(
     enabled_check="ENABLE_WECHAT_OAUTH",
 )
 
+KEYCLOAK_PROVIDER = OAuthProviderDefinition(
+    name="keycloak",
+    display_name="Keycloak",
+    icon="keycloak",
+    authorize_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/auth",
+    authorize_params={"response_type": "code", "scope": "openid email profile"},
+    token_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token",
+    token_params_map={
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
+    },
+    token_error_key="error",
+    token_error_message_key="error_description",
+    token_content_type="application/x-www-form-urlencoded",
+    userinfo_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
+    userinfo_field_map={
+        "id": "email",
+        "email": "email",
+        "username": "preferred_username",
+    },
+    client_id_env="KEYCLOAK_OAUTH_CLIENT_ID",
+    client_secret_env="KEYCLOAK_OAUTH_CLIENT_SECRET",
+)
+
 OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
     "github": GITHUB_PROVIDER,
     "wechat": WECHAT_PROVIDER,
     "gde": GDE_PROVIDER,
     "link_app": LINK_APP_PROVIDER,
+    "keycloak": KEYCLOAK_PROVIDER,
 }
 
 

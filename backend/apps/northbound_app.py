@@ -23,6 +23,7 @@ from services.northbound_service import (
     update_conversation_title,
     upload_files_for_northbound,
     admin_create_user,
+    admin_reset_password,
 )
 from services.tenant_service import create_tenant
 from services.user_management_service import create_token
@@ -61,6 +62,11 @@ class TenantProvisionSpec(BaseModel):
 class ProvisionTenantRequest(BaseModel):
     """Request model for bulk tenant provisioning via internal API."""
     tenants: List[TenantProvisionSpec]
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request model for admin password reset via internal API."""
+    new_password: str
 
 
 def _resolve_proxy_download_filename(presigned_url: str, content_disposition: str) -> str:
@@ -741,3 +747,77 @@ async def _provision_single_tenant(spec: TenantProvisionSpec) -> Dict[str, Any]:
         "users": user_results,
     }
 
+
+@router.post("/internal/users/{user_id}/password")
+async def reset_user_password_internal(
+    request: Request,
+    user_id: str,
+    payload: ResetPasswordRequest,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
+    """
+    Reset a user's password using admin privileges.
+
+    Authentication: X-Internal-Key header must match SERVICE_ROLE_KEY configured
+    on the server side. This endpoint is intended for offline scripts and
+    administrative tools only.
+
+    Args:
+        user_id: The Supabase user ID of the target user.
+        payload: New password to set (min 8 characters, validated by service layer).
+
+    Returns:
+        JSONResponse with the affected user_id and email.
+    """
+    if not SERVICE_ROLE_KEY:
+        logging.error("SERVICE_ROLE_KEY not configured on server")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal password reset not configured"
+        )
+
+    if x_internal_key != SERVICE_ROLE_KEY:
+        logging.warning("Invalid X-Internal-Key provided for password reset")
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid internal key"
+        )
+
+    if not user_id or not user_id.strip():
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="user_id is required"
+        )
+
+    try:
+        result = await admin_reset_password(
+            user_id=user_id.strip(),
+            new_password=payload.new_password
+        )
+        logging.info(f"Password reset for user {user_id} via internal API")
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "Password reset successfully",
+                "data": result
+            }
+        )
+    except AdminCreateUserException as exc:
+        error_msg = str(exc)
+        logging.warning(f"Password reset failed for {user_id}: {error_msg}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=error_msg
+        )
+    except Exception as exc:
+        from consts.exceptions import AppException
+        if isinstance(exc, AppException):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=str(exc)
+            )
+        logging.error(f"Password reset failed for {user_id}: {str(exc)}", exc_info=exc)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )

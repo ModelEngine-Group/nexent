@@ -155,6 +155,14 @@ def _http_get_json(url: str, headers: Optional[dict] = None) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _http_post_form(url: str, data: dict) -> dict:
+    req_data = urlencode(data).encode("utf-8")
+    req_headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
+    req = urllib.request.Request(url, data=req_data, headers=req_headers, method="POST")
+    with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]:
     try:
         definition = get_provider_definition(provider)
@@ -183,7 +191,10 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
         if param_map.get("redirect_uri", "") == "redirect_uri":
             body["redirect_uri"] = redirect_uri
 
-        resp = _http_post_json(definition.token_url, data=body)
+        if definition.token_content_type == "application/x-www-form-urlencoded":
+            resp = _http_post_form(definition.token_url, body)
+        else:
+            resp = _http_post_json(definition.token_url, data=body)
     else:
         params = dict(definition.token_extra_params)
         params[param_map.get("client_id", "client_id")] = client_id

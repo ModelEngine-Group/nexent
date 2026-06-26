@@ -96,6 +96,7 @@ class OAuthProviderDefinition(BaseModel):
     token_error_key: Optional[str] = None
     token_error_message_key: Optional[str] = None
     token_response_id_key: Optional[str] = None
+    token_content_type: str = "application/json"
 
     userinfo_url: str
     userinfo_auth_scheme: str = "Bearer"
