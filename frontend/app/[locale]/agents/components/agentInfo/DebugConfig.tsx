@@ -3,26 +3,13 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Paperclip, X, AlertCircle } from "lucide-react";
-import {
-  FileImageFilled,
-  FilePdfFilled,
-  FileWordFilled,
-  FileExcelFilled,
-  FilePptFilled,
-  FileTextFilled,
-  FileMarkdownFilled,
-  Html5Filled,
-  CodeFilled,
-  FileUnknownFilled,
-} from "@ant-design/icons";
 
 import { Input, Select, Switch, message as antMessage } from "antd";
 
 import { conversationService } from "@/services/conversationService";
 import { ChatMessageType, FilePreview } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
-import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { chatConfig } from "@/const/chatConfig";
+import { MESSAGE_ROLES, chatConfig } from "@/const/chatConfig";
 import log from "@/lib/logger";
 import {
   getCachedDebugError,
@@ -33,67 +20,17 @@ import {
   cleanupAttachmentUrls,
   buildMinioFilePayload,
 } from "@/lib/chat/chatAttachmentUtils";
+import {
+  getFileExtension,
+  getFileIcon,
+  MAX_FILE_COUNT,
+  MAX_FILE_SIZE,
+} from "@/lib/chat/fileIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import DebugMessageList from "./DebugMessageList";
 import DebugOptimizeModal from "./DebugOptimizeModal";
 import { useCompareStream } from "./useCompareStream";
-
-// File limit constants from config
-const MAX_FILE_COUNT = chatConfig.maxFileCount;
-const MAX_FILE_SIZE = chatConfig.maxFileSize;
-
-// Get file extension
-const getFileExtension = (filename: string): string => {
-  return filename
-    .slice(((filename.lastIndexOf(".") - 1) >>> 0) + 2)
-    .toLowerCase();
-};
-
-// Get compact file icon for debug attachment preview (16px)
-const getCompactFileIcon = (file: File) => {
-  const extension = getFileExtension(file.name);
-  const fileType = file.type;
-  const iconSize = 16;
-
-  if (fileType.startsWith("image/")) {
-    return <FileImageFilled size={iconSize} color="#8e44ad" />;
-  }
-  if (chatConfig.fileIcons.pdf.includes(extension)) {
-    return <FilePdfFilled size={iconSize} color="#e74c3c" />;
-  }
-  if (chatConfig.fileIcons.word.includes(extension)) {
-    return <FileWordFilled size={iconSize} color="#3498db" />;
-  }
-  if (chatConfig.fileIcons.text.includes(extension)) {
-    return <FileTextFilled size={iconSize} color="#7f8c8d" />;
-  }
-  if (chatConfig.fileIcons.markdown.includes(extension)) {
-    return <FileMarkdownFilled size={iconSize} color="#34495e" />;
-  }
-  if (chatConfig.fileIcons.excel.includes(extension)) {
-    return <FileExcelFilled size={iconSize} color="#27ae60" />;
-  }
-  if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    return <FilePptFilled size={iconSize} color="#e67e22" />;
-  }
-  if (chatConfig.fileIcons.html.includes(extension)) {
-    return <Html5Filled size={iconSize} color="#e67e22" />;
-  }
-  if (chatConfig.fileIcons.code.includes(extension)) {
-    return <CodeFilled size={iconSize} color="#f39c12" />;
-  }
-  if (chatConfig.fileIcons.json.includes(extension)) {
-    return <CodeFilled size={iconSize} color="#f1c40f" />;
-  }
-  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
-    return <FileTextFilled size={iconSize} color="#16a085" />;
-  }
-  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
-    return <FileTextFilled size={iconSize} color="#8e44ad" />;
-  }
-  return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
-};
 
 // Check if a file type is supported
 const isSupportedFile = (extension: string, fileType: string): boolean => {
@@ -218,7 +155,7 @@ function AgentDebugging({
                   />
                 ) : (
                   <span className="flex-shrink-0">
-                    {getCompactFileIcon(attachment.file)}
+                    {getFileIcon(attachment.file.name, attachment.file.type, 16)}
                   </span>
                 )}
                 <span
@@ -262,7 +199,7 @@ function AgentDebugging({
             ref={fileInputRef}
             className="hidden"
             onChange={handleFileInputChange}
-            accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+            accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => '.' + ext).join(',')}`}
             multiple
           />
         </button>
@@ -881,7 +818,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         return;
       }
 
-      const fileId = Math.random().toString(36).substring(7);
+      const fileId = crypto.randomUUID();
       const extension = getFileExtension(file.name);
 
       const isImage = file.type.startsWith("image/") || chatConfig.imageExtensions.includes(extension);
