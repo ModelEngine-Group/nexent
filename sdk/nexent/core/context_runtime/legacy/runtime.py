@@ -6,6 +6,9 @@ from typing import Any, Sequence
 from ..contracts import ContextEvidence, FinalContext
 
 
+LEGACY_MAX_OBSERVATION_LENGTH = 100_000
+
+
 class LegacyContextRuntime:
     """Fallback path deliberately independent from ContextManager and W3."""
 
@@ -74,8 +77,15 @@ class LegacyContextRuntime:
         )
 
     def truncate_observation(self, memory_step: Any) -> None:
-        del memory_step
-        return None
+        observation = getattr(memory_step, "observations", None)
+        if not observation or len(observation) <= LEGACY_MAX_OBSERVATION_LENGTH:
+            return
+        half = LEGACY_MAX_OBSERVATION_LENGTH // 2
+        marker = (
+            f"\n...[Output truncated to {LEGACY_MAX_OBSERVATION_LENGTH} characters by legacy context runtime. "
+            "Enable ContextManager for budget-aware compression.]\n"
+        )
+        memory_step.observations = observation[:half] + marker + observation[-half:]
 
     @staticmethod
     def _messages_from_memory(memory: Any) -> list[Any]:
@@ -85,6 +95,10 @@ class LegacyContextRuntime:
         for step in memory.steps:
             messages.extend(step.to_messages())
         return messages
+
+    def render_summary_messages(self, *, memory: Any) -> list[Any]:
+        """Return display-only memory messages without compression side effects."""
+        return self._messages_from_memory(memory)
 
     def compression_stats(self) -> dict:
         return {

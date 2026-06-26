@@ -446,9 +446,10 @@ class NexentAgent:
                     config=ctx_config,
                     max_steps=agent_config.max_steps,
                 )
-                for component in getattr(agent_config, 'context_components', None) or []:
-                    context_manager.register_component(component)
-                context_runtime = ManagedContextRuntime(context_manager)
+                context_runtime = ManagedContextRuntime(
+                    context_manager,
+                    components=getattr(agent_config, 'context_components', None) or [],
+                )
             else:
                 from ..context_runtime.legacy.runtime import LegacyContextRuntime
 

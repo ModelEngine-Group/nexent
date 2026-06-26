@@ -73,10 +73,15 @@ def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo
             "Conversation-level ContextManager requires an active managed context runtime"
         )
 
-    context_components = getattr(agent_run_info.agent_config, "context_components", None)
-    context_manager.replace_components(context_components or [])
-
     context_runtime.context_manager = context_manager
+    context_components = getattr(agent_run_info.agent_config, "context_components", None)
+    replace_runtime_components = getattr(context_runtime, "replace_components", None)
+    if callable(replace_runtime_components):
+        replace_runtime_components(context_components or [])
+    else:
+        raise RuntimeError(
+            "Managed context runtime does not support run-local component replacement"
+        )
     agent.context_manager = context_manager
 
 

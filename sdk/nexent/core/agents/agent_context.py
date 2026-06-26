@@ -50,6 +50,17 @@ class SummaryTaskStep(TaskStep):
         return [ChatMessage(role=MessageRole.USER, content=content)]
 
 
+@dataclass(frozen=True)
+class ManagedRunContext:
+    """Run-local component partition owned by ManagedContextRuntime."""
+
+    component_messages: Tuple[dict, ...] = ()
+    stable_messages: Tuple[dict, ...] = ()
+    dynamic_messages: Tuple[dict, ...] = ()
+    selected_component_types: Tuple[str, ...] = ()
+    components: Tuple[Any, ...] = ()
+
+
 # ============================================================
 #  Standalone utilities (no ContextManager state required)
 # ============================================================
@@ -273,12 +284,10 @@ class ContextManager:
         self._last_uncompressed_token_count: Optional[int] = None
         self._last_compressed_token_count: Optional[int] = None
 
-        # W3 prompt/KV-cache-aware assembly state.  This state is owned by
-        # ContextManager so managed runtime and CoreAgent do not infer context
-        # structure from the outside.
-        self._run_component_messages: List[dict] = []
-        self._run_stable_messages: List[dict] = []
-        self._run_dynamic_messages: List[dict] = []
+        # W3 stable-prefix fingerprint cache is conversation-level.  Per-run
+        # component message partitions are held by ManagedContextRuntime, not
+        # here, so concurrent runs sharing a ContextManager cannot overwrite
+        # each other's dynamic context.
         self._previous_stable_fingerprint: Optional[str] = None
         self._previous_stable_components: Dict[str, str] = {}
 
@@ -1342,29 +1351,48 @@ class ContextManager:
     #  Managed Context Assembly (W3)
     # ============================================================
 
-    def prepare_run_context(self, memory: AgentMemory, fallback_system_prompt: str) -> None:
-        """Initialize managed run context.
+    def prepare_run_context(
+        self,
+        memory: AgentMemory,
+        fallback_system_prompt: str,
+        components: Optional[Sequence[Any]] = None,
+    ) -> ManagedRunContext:
+        """Initialize and return a run-local managed context snapshot.
 
         ContextManager owns the selected component messages and the stable prefix.
-        Runtime adapters must not split, reorder, or reinterpret these messages.
+        Runtime adapters must not reorder or reinterpret these messages, but the
+        run-scoped partition itself must stay outside shared ContextManager
+        state to avoid cross-run interference.
         """
         from smolagents.memory import SystemPromptStep
 
-        self._run_component_messages = self.build_context_messages()
-        self._run_stable_messages = [
-            message for message in self._run_component_messages
+        component_messages = self.build_context_messages(components=components)
+        stable_messages = [
+            message for message in component_messages
             if self._message_role(message) in {"system", "developer"}
         ]
-        self._run_dynamic_messages = [
-            message for message in self._run_component_messages
+        dynamic_messages = [
+            message for message in component_messages
             if self._message_role(message) not in {"system", "developer"}
         ]
 
         stable_text = "\n\n".join(
-            str(message.get("content", "")) for message in self._run_stable_messages
+            str(message.get("content", "")) for message in stable_messages
         )
         memory.system_prompt = SystemPromptStep(
             system_prompt=stable_text or fallback_system_prompt
+        )
+        source_components = tuple(self._component_source(components))
+        selected_component_types = tuple(
+            str(getattr(component, "component_type", "unknown"))
+            for component in source_components
+        )
+        return ManagedRunContext(
+            component_messages=tuple(component_messages),
+            stable_messages=tuple(stable_messages),
+            dynamic_messages=tuple(dynamic_messages),
+            selected_component_types=selected_component_types,
+            components=source_components,
         )
 
     def assemble_final_context(
@@ -1377,16 +1405,19 @@ class ContextManager:
         purpose: str = "step",
         task: Optional[str] = None,
         final_answer_templates: Optional[Dict[str, Any]] = None,
+        run_context: Optional[ManagedRunContext] = None,
     ) -> FinalContext:
         """Return the only managed-path payload allowed to enter a model call.
 
         This is the W3 boundary: component selection, stable-prefix preservation,
         dynamic context insertion, compression budget compensation, final-answer
         augmentation, tool canonicalization, and evidence generation all happen
-        here, inside ContextManager.
+        here, inside ContextManager.  Provider adapters must not reorder
+        ``messages``; cache protocol behavior is decided later from provider
+        capabilities only.
         """
-        if not self._run_component_messages:
-            self.prepare_run_context(memory, fallback_system_prompt="")
+        if run_context is None:
+            run_context = self.prepare_run_context(memory, fallback_system_prompt="")
 
         tools = self._canonical_tools(tools or ())
         purpose_stable, purpose_dynamic = self._purpose_messages(
@@ -1396,8 +1427,8 @@ class ContextManager:
         )
 
         original_messages = self._messages_from_memory(memory)
-        stable_messages = [*self._run_stable_messages, *purpose_stable]
-        dynamic_messages = [*self._run_dynamic_messages, *purpose_dynamic]
+        stable_messages = [*run_context.stable_messages, *purpose_stable]
+        dynamic_messages = [*run_context.dynamic_messages, *purpose_dynamic]
 
         context_overhead_tokens = (
             self._msg_token_count(dynamic_messages)
@@ -1421,7 +1452,10 @@ class ContextManager:
         self._last_compressed_token_count = self._msg_token_count(messages) + self._estimate_tools_tokens(tools)
 
         fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
-        component_fingerprints = self._stable_component_fingerprints(purpose_stable)
+        component_fingerprints = self._stable_component_fingerprints(
+            purpose_stable,
+            components=run_context.components,
+        )
         if tools:
             component_fingerprints["tools"] = self._fingerprint(tools)
         reasons = self._change_reasons(fingerprint, component_fingerprints)
@@ -1432,10 +1466,7 @@ class ContextManager:
             messages=messages,
             tools=tools,
             evidence=ContextEvidence(
-                selected_component_types=tuple(
-                    getattr(component, "component_type", "unknown")
-                    for component in self.get_registered_components()
-                ),
+                selected_component_types=run_context.selected_component_types,
                 stable_message_count=len(stable_messages),
                 dynamic_message_count=len(messages) - len(stable_messages),
                 compression_records=tuple(self._step_local_log or ()),
@@ -1458,13 +1489,15 @@ class ContextManager:
         from jinja2 import StrictUndefined, Template
 
         final_answer = final_answer_templates["final_answer"]
-        pre_messages = final_answer.get("pre_messages", "")
+        if "pre_messages" not in final_answer or "post_messages" not in final_answer:
+            raise ValueError("final_answer template requires pre_messages and post_messages")
+        pre_messages = final_answer["pre_messages"]
         post_messages = Template(
-            final_answer.get("post_messages", ""),
+            final_answer["post_messages"],
             undefined=StrictUndefined,
         ).render(task=task or "")
         return (
-            [{"role": "developer", "content": pre_messages}],
+            [{"role": "system", "content": pre_messages}],
             [{"role": "user", "content": post_messages}],
         )
 
@@ -1486,14 +1519,23 @@ class ContextManager:
 
     @staticmethod
     def _canonical_tools(tools: Sequence[Any]) -> List[Any]:
-        return sorted(
-            tools,
-            key=lambda tool: json.dumps(
-                ContextManager._normalize_for_fingerprint(tool),
-                sort_keys=True,
-                default=str,
-            ),
-        )
+        indexed_tools = [
+            (index, tool, ContextManager._normalize_for_fingerprint(tool))
+            for index, tool in enumerate(tools)
+        ]
+        return [
+            tool for _, tool, _ in sorted(
+                indexed_tools,
+                key=lambda item: (
+                    json.dumps(
+                        item[2],
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    ),
+                    item[0],
+                ),
+            )
+        ]
 
     def _estimate_tools_tokens(self, tools: Sequence[Any]) -> int:
         if not tools:
@@ -1520,9 +1562,21 @@ class ContextManager:
             return [ContextManager._normalize_for_fingerprint(item) for item in value]
         if hasattr(value, "model_dump"):
             return ContextManager._normalize_for_fingerprint(value.model_dump())
+        name = getattr(value, "name", None)
+        if isinstance(name, str) and name:
+            return {"__class__": value.__class__.__name__, "name": name}
         if hasattr(value, "__dict__"):
-            return ContextManager._normalize_for_fingerprint(vars(value))
-        return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)
+            public_attrs = {
+                key: item for key, item in vars(value).items()
+                if not key.startswith("_")
+            }
+            if public_attrs:
+                return ContextManager._normalize_for_fingerprint(public_attrs)
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return {
+            "__class__": f"{value.__class__.__module__}.{value.__class__.__qualname__}",
+        }
 
     def _fingerprint(self, messages: Sequence[Any]) -> str:
         encoded = json.dumps(
@@ -1534,9 +1588,13 @@ class ContextManager:
         )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-    def _stable_component_fingerprints(self, purpose_stable: Sequence[Any] = ()) -> Dict[str, str]:
+    def _stable_component_fingerprints(
+        self,
+        purpose_stable: Sequence[Any] = (),
+        components: Optional[Sequence[Any]] = None,
+    ) -> Dict[str, str]:
         result: Dict[str, str] = {}
-        for component in self.get_registered_components():
+        for component in self._component_source(components):
             to_messages = getattr(component, "to_messages", None)
             if not callable(to_messages):
                 continue
@@ -1557,13 +1615,25 @@ class ContextManager:
             return ["initial_request"]
         if self._previous_stable_fingerprint == current:
             return []
+        reasons: List[str] = []
         if self._previous_stable_components.get("tools") != component_fingerprints.get("tools"):
-            return ["tool_schema_version"]
+            reasons.append("tool_schema_version")
         if self._previous_stable_components.get("purpose") != component_fingerprints.get("purpose"):
-            return ["context_purpose"]
-        if self._previous_stable_components != component_fingerprints:
-            return ["system_prompt_version"]
-        return ["unexpected_nondeterminism"]
+            reasons.append("context_purpose")
+        previous_components = {
+            key: value for key, value in self._previous_stable_components.items()
+            if key not in {"tools", "purpose"}
+        }
+        current_components = {
+            key: value for key, value in component_fingerprints.items()
+            if key not in {"tools", "purpose"}
+        }
+        if previous_components != current_components:
+            reasons.append("system_prompt_version")
+        return reasons or ["unexpected_nondeterminism"]
+
+    def _component_source(self, components: Optional[Sequence[Any]]) -> List[Any]:
+        return list(components) if components is not None else self.get_registered_components()
 
     # ============================================================
     #  Context Component Management
@@ -1637,7 +1707,11 @@ class ContextManager:
             return strategy_class(relevance_threshold=0.5)
         return strategy_class()
 
-    def build_context_messages(self, token_budget: Optional[int] = None) -> List:
+    def build_context_messages(
+        self,
+        token_budget: Optional[int] = None,
+        components: Optional[Sequence[Any]] = None,
+    ) -> List:
         """Build all selected component messages for the managed context path.
 
         Uses configured strategy to select components within token budget,
@@ -1653,7 +1727,8 @@ class ContextManager:
             returned as ``user`` messages rather than being coerced into a
             system prompt.
         """
-        if not self._components:
+        source_components = self._component_source(components)
+        if not source_components:
             return []
 
         from .agent_model import SystemPromptComponent
@@ -1661,7 +1736,7 @@ class ContextManager:
         budget = token_budget or self._calculate_component_budget()
         strategy = self._get_strategy()
         selected = strategy.select_components(
-            self._components, budget, self.config.component_budgets
+            source_components, budget, self.config.component_budgets
         )
 
         messages = []

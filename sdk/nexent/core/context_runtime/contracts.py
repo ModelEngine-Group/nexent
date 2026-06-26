@@ -30,7 +30,7 @@ class FinalContext:
 class ContextRuntime(Protocol):
     """Runtime protocol; implementations must not depend on one another."""
 
-    context_manager: Any
+    context_manager: Any | None
 
     def prepare_run(self, *, memory: Any, fallback_system_prompt: str) -> None:
         """Initialize the run's system state before a TaskStep is appended."""
@@ -60,6 +60,9 @@ class ContextRuntime(Protocol):
     def truncate_observation(self, memory_step: Any) -> None:
         """Apply path-specific observation controls without exposing mode checks."""
 
+    def render_summary_messages(self, *, memory: Any) -> list[Any]:
+        """Return display-only messages without triggering compression."""
+
     def compression_stats(self) -> dict:
         """Return this step's compression metrics in the common shape."""
 
@@ -87,6 +90,9 @@ class UnconfiguredContextRuntime:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def truncate_observation(self, memory_step: Any) -> None:
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
+
+    def render_summary_messages(self, *, memory: Any) -> list[Any]:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def compression_stats(self) -> dict:

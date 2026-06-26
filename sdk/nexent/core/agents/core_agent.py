@@ -375,9 +375,6 @@ Additional Args:
             tools=self._context_tools(),
         )
         input_messages = final_context.messages
-        # Provider adapters may report this opaque evidence, but they must not
-        # use it to choose cache protocol behavior or alter the payload.
-        setattr(self.model, "last_context_evidence", final_context.evidence)
         chars_per_token = self.context_runtime.chars_per_token
         self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
@@ -678,13 +675,7 @@ You have been provided with these additional arguments, that you can access usin
         })
         if self.provide_run_summary:
             answer += "\n\nFor more detail, find below a summary of this agent's work:\n<summary_of_work>\n"
-            summary_context = self.context_runtime.prepare_step(
-                model=self.model,
-                memory=self.memory,
-                current_run_start_idx=self._history_step_count,
-                tools=self._context_tools(),
-            )
-            for message in summary_context.messages:
+            for message in self.context_runtime.render_summary_messages(memory=self.memory):
                 content = message.get("content") if isinstance(message, dict) else message.content
                 answer += "\n" + truncate_content(str(content)) + "\n---"
             answer += "\n</summary_of_work>"
@@ -927,7 +918,6 @@ You have been provided with these additional arguments, that you can access usin
             final_answer_templates=self.prompt_templates,
         )
         messages = final_context.messages
-        setattr(self.model, "last_context_evidence", final_context.evidence)
 
         # Create the final memory step with error
         final_memory_step = ActionStep(

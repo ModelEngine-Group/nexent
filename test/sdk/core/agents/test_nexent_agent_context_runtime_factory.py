@@ -48,7 +48,8 @@ def test_create_single_agent_injects_managed_runtime_and_registers_components():
 
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
-    assert runtime.context_manager.get_registered_components() == [component]
+    assert runtime.components == [component]
+    assert runtime.context_manager.get_registered_components() == []
 
 
 def test_create_single_agent_injects_legacy_runtime_when_context_manager_disabled():

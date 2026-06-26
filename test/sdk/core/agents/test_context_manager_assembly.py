@@ -77,7 +77,7 @@ def test_context_manager_owns_final_answer_assembly():
 
     assert [message["role"] for message in final.messages] == [
         "system",
-        "developer",
+        "system",
         "user",
         "user",
         "assistant",
@@ -115,3 +115,32 @@ def test_context_manager_attributes_tool_schema_change():
 
     assert first.evidence.prefix_change_reasons == ("initial_request",)
     assert second.evidence.prefix_change_reasons == ("tool_schema_version",)
+
+
+def test_context_manager_reports_multiple_stable_change_reasons():
+    manager = ContextManager(ContextManagerConfig(enabled=True, token_threshold=10000))
+    manager.register_component(SystemPromptComponent(content="stable policy"))
+    memory = _Memory()
+
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
+    manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        tools=[{"name": "search"}],
+        run_context=run_context,
+    )
+
+    manager.clear_components()
+    manager.register_component(SystemPromptComponent(content="new stable policy"))
+    new_run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="legacy")
+    second = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        tools=[{"name": "browse"}],
+        run_context=new_run_context,
+    )
+
+    assert "tool_schema_version" in second.evidence.prefix_change_reasons
+    assert "system_prompt_version" in second.evidence.prefix_change_reasons

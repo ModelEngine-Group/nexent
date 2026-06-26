@@ -85,10 +85,16 @@ class _ContextManager:
     def __init__(self):
         self.calls = []
 
-    def prepare_run_context(self, *, memory, fallback_system_prompt):
-        self.calls.append(("prepare_run_context", fallback_system_prompt))
+    def prepare_run_context(self, *, memory, fallback_system_prompt, components=None):
+        self.calls.append(("prepare_run_context", fallback_system_prompt, components))
         memory.system_prompt = types.SimpleNamespace(
             to_messages=lambda: [{"role": "system", "content": "managed stable"}]
+        )
+        return types.SimpleNamespace(
+            stable_messages=({"role": "system", "content": "managed stable"},),
+            dynamic_messages=(),
+            selected_component_types=tuple(getattr(component, "component_type", "unknown") for component in components or ()),
+            components=tuple(components or ()),
         )
 
     def assemble_final_context(self, **kwargs):
@@ -108,7 +114,8 @@ def test_managed_runtime_is_thin_context_manager_adapter():
     _, managed_module, snapshot = _bootstrap()
     try:
         manager = _ContextManager()
-        runtime = managed_module.ManagedContextRuntime(manager)
+        component = types.SimpleNamespace(component_type="system_prompt")
+        runtime = managed_module.ManagedContextRuntime(manager, components=[component])
         memory = _Memory()
 
         runtime.prepare_run(memory=memory, fallback_system_prompt="fallback")
@@ -127,12 +134,41 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         )
 
         assert manager.calls == [
-            ("prepare_run_context", "fallback"),
+            ("prepare_run_context", "fallback", [component]),
             ("assemble_final_context", "step", [{"name": "z"}]),
             ("assemble_final_context", "final_answer", None),
         ]
         assert final.messages == [{"role": "system", "content": "step"}]
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
+    finally:
+        _restore(snapshot)
+
+
+def test_managed_runtime_replaces_components_without_mutating_context_manager():
+    _, managed_module, snapshot = _bootstrap()
+    try:
+        manager = _ContextManager()
+        runtime = managed_module.ManagedContextRuntime(manager)
+        component = types.SimpleNamespace(component_type="memory")
+
+        runtime.replace_components([component])
+        runtime.prepare_run(memory=_Memory(), fallback_system_prompt="fallback")
+
+        assert manager.calls[0] == ("prepare_run_context", "fallback", [component])
+    finally:
+        _restore(snapshot)
+
+
+def test_managed_runtime_uses_component_snapshot_without_explicit_prepare_run():
+    _, managed_module, snapshot = _bootstrap()
+    try:
+        manager = _ContextManager()
+        component = types.SimpleNamespace(component_type="knowledge")
+        runtime = managed_module.ManagedContextRuntime(manager, components=[component])
+
+        runtime.prepare_step(model=None, memory=_Memory(), current_run_start_idx=0)
+
+        assert manager.calls[0] == ("prepare_run_context", "", [component])
     finally:
         _restore(snapshot)
 
@@ -151,5 +187,19 @@ def test_legacy_runtime_does_not_require_context_manager():
 
         assert runtime.context_manager is None
         assert final.messages == [{"role": "system", "content": "legacy prompt"}]
+    finally:
+        _restore(snapshot)
+
+
+def test_legacy_runtime_truncates_large_observations():
+    legacy_module, _, snapshot = _bootstrap()
+    try:
+        runtime = legacy_module.LegacyContextRuntime()
+        step = types.SimpleNamespace(observations="x" * 120_000)
+
+        runtime.truncate_observation(step)
+
+        assert len(step.observations) > 100_000
+        assert "Output truncated to 100000 characters" in step.observations
     finally:
         _restore(snapshot)
