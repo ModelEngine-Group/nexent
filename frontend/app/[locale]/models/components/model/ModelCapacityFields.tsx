@@ -1,7 +1,40 @@
-import { Alert, Button, Input, Tag, Tooltip } from "antd";
+import { Alert, AutoComplete, Button, Input, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { CapacitySuggestion } from "@/types/modelConfig";
+
+// W11 spec L767-790. Common token-count presets surfaced as a fallback
+// preset selector when no catalog suggestion populates the field. The
+// values mirror MAX_TOKEN_OPTIONS in ModelMaxTokensInput so the two
+// surfaces (legacy max_tokens batch input and capacity panel) offer
+// the same dropdown choices. Operators can still type a custom value;
+// AutoComplete accepts free numeric input.
+const CONTEXT_WINDOW_PRESET_OPTIONS = [
+  { value: "4096", label: "4K / 4,096" },
+  { value: "8192", label: "8K / 8,192" },
+  { value: "16384", label: "16K / 16,384" },
+  { value: "32768", label: "32K / 32,768" },
+  { value: "65536", label: "64K / 65,536" },
+  { value: "131072", label: "128K / 131,072" },
+  { value: "204800", label: "200K / 204,800" },
+  { value: "262144", label: "256K / 262,144" },
+  { value: "1048576", label: "1M / 1,048,576" },
+];
+
+// Shared by both default_output_reserve_tokens and max_output_tokens. The
+// reserve list maps to spec L782-790 verbatim; reusing it for max_output
+// gives operators the same dropdown choices they already see for the
+// reserve field. Values above 16K (e.g. GPT-4.1's 32K cap, GLM-5.1's
+// 131K cap) still work via free-text typing through AutoComplete.
+const OUTPUT_RESERVE_PRESET_OPTIONS = [
+  { value: "256", label: "256" },
+  { value: "512", label: "512" },
+  { value: "1024", label: "1K / 1,024" },
+  { value: "2048", label: "2K / 2,048" },
+  { value: "4096", label: "4K / 4,096" },
+  { value: "8192", label: "8K / 8,192" },
+  { value: "16384", label: "16K / 16,384" },
+];
 
 export type CapacitySource =
   | "operator"
@@ -276,18 +309,45 @@ export const ModelCapacityFields = ({
       }
     : {};
 
+  // Per W11 spec L762-765, the context-window and output-reserve fields
+  // expose a preset selector when no catalog suggestion is available. The
+  // suggestion-set check is per-field: if the suggestion populated this
+  // exact field, plain numeric input avoids burying the suggested value
+  // behind dropdown chrome. Otherwise show the preset list to help
+  // operators avoid typos like "1280000" instead of "128000".
+  const suggestionFields = suggestion?.suggestions ?? null;
+  const fieldHasSuggestion = (
+    field: keyof ModelCapacityFormState
+  ): boolean => {
+    if (!suggestionFields) return false;
+    const suggested = (suggestionFields as Record<string, unknown>)[field];
+    return suggested != null && suggested !== "";
+  };
+
   const renderNumberInput = (
     field: keyof ModelCapacityFormState,
     labelKey: string,
-    tooltipKey: string
-  ) => (
-    <div>
-      <label className="block mb-1 text-sm font-medium text-gray-700">
-        <Tooltip title={t(tooltipKey)}>
-          <span>{t(labelKey)}</span>
-        </Tooltip>
-        {requiredSet.has(field) && <span className="text-red-500 ml-1">*</span>}
-      </label>
+    tooltipKey: string,
+    presetOptions?: { value: string; label: string }[]
+  ) => {
+    const showPreset = presetOptions && !fieldHasSuggestion(field);
+    const inputControl = showPreset ? (
+      <AutoComplete
+        className="w-full"
+        value={value[field]}
+        options={presetOptions}
+        placeholder={defaultPlaceholders[field]}
+        onChange={(next) => onChange(field, String(next ?? ""))}
+        filterOption={(input, option) =>
+          String(option?.label ?? "")
+            .toLowerCase()
+            .includes(input.toLowerCase()) ||
+          String(option?.value ?? "").includes(input)
+        }
+      >
+        <Input inputMode="numeric" pattern="[0-9]*" />
+      </AutoComplete>
+    ) : (
       <Input
         type="number"
         min="1"
@@ -295,8 +355,19 @@ export const ModelCapacityFields = ({
         placeholder={defaultPlaceholders[field]}
         onChange={(event) => onChange(field, event.target.value)}
       />
-    </div>
-  );
+    );
+    return (
+      <div>
+        <label className="block mb-1 text-sm font-medium text-gray-700">
+          <Tooltip title={t(tooltipKey)}>
+            <span>{t(labelKey)}</span>
+          </Tooltip>
+          {requiredSet.has(field) && <span className="text-red-500 ml-1">*</span>}
+        </label>
+        {inputControl}
+      </div>
+    );
+  };
 
   const content = (
     <div className="space-y-3">
@@ -421,7 +492,8 @@ export const ModelCapacityFields = ({
         {renderNumberInput(
           "contextWindowTokens",
           "model.dialog.capacity.contextWindowTokens",
-          "model.dialog.capacity.contextWindowTokens.tooltip"
+          "model.dialog.capacity.contextWindowTokens.tooltip",
+          CONTEXT_WINDOW_PRESET_OPTIONS
         )}
         {renderNumberInput(
           "maxInputTokens",
@@ -431,7 +503,8 @@ export const ModelCapacityFields = ({
         {renderNumberInput(
           "maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens",
-          "model.dialog.capacity.maxOutputTokens.tooltip"
+          "model.dialog.capacity.maxOutputTokens.tooltip",
+          OUTPUT_RESERVE_PRESET_OPTIONS
         )}
         {/* defaultOutputReserveTokens is rendered in both add and edit modes
             so newly added rows do not silently fall back to the SDK default at
@@ -440,7 +513,8 @@ export const ModelCapacityFields = ({
         {renderNumberInput(
           "defaultOutputReserveTokens",
           "model.dialog.capacity.defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens.tooltip"
+          "model.dialog.capacity.defaultOutputReserveTokens.tooltip",
+          OUTPUT_RESERVE_PRESET_OPTIONS
         )}
       </div>
 

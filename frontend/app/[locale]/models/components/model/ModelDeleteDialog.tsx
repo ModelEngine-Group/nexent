@@ -1504,20 +1504,10 @@ export const ModelDeleteDialog = ({
                           {String(providerModel.model_tag)}
                         </span>
                       )}
-                      {isBareCapacity && (
-                        <Tooltip
-                          title={
-                            hasSuggestion
-                              ? t(
-                                  "model.dialog.capacityCoverage.warningWithSuggestion"
-                                )
-                              : t("model.dialog.capacityCoverage.warning")
-                          }
-                        >
-                          <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
-                            {t("model.dialog.capacityCoverage.tag")}
-                          </span>
-                        </Tooltip>
+                      {isBareCapacity && existingModel && (
+                        <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
+                          {t("model.list.capacityWarning.tag")}
+                        </span>
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
@@ -1650,19 +1640,9 @@ export const ModelDeleteDialog = ({
                           {model.displayName || model.name} ({model.name})
                         </div>
                         {isBareCapacity && (
-                          <Tooltip
-                            title={
-                              hasSuggestion
-                                ? t(
-                                    "model.dialog.capacityCoverage.warningWithSuggestion"
-                                  )
-                                : t("model.dialog.capacityCoverage.warning")
-                            }
-                          >
-                            <span className="mt-1 inline-flex w-fit px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
-                              {t("model.dialog.capacityCoverage.tag")}
-                            </span>
-                          </Tooltip>
+                          <span className="mt-1 inline-flex w-fit px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
+                            {t("model.list.capacityWarning.tag")}
+                          </span>
                         )}
                       </div>
                       <button

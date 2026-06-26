@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Modal, Select, Input, Button, Switch, App } from "antd";
@@ -90,6 +90,29 @@ export const ModelEditDialog = ({
     status: null,
     message: "",
   });
+
+  // Monotonic request token for /suggest-capacity. Incremented on every
+  // new call, dialog close, and model change; the async handler compares
+  // its captured token against the current ref before committing
+  // setState, so a stale qwen-for-row-A response cannot win over a fresh
+  // glm-for-row-B response when the user cancels A and immediately edits
+  // B (the original bug -- previous request was racing the new one and
+  // sometimes overwriting it after navigation).
+  const suggestionRequestRef = useRef(0);
+
+  // Reset capacity-related state every time the dialog closes. Without
+  // this, the next open render briefly shows the previous model's
+  // suggestion before the [model] effect overwrites it, and a slow
+  // in-flight response from the previous model can also overwrite the
+  // fresh model's correct result. The ref bump tells any pending
+  // handleSuggestCapacity to drop its response.
+  useEffect(() => {
+    if (isOpen) return;
+    suggestionRequestRef.current += 1;
+    setCapacitySuggestion(null);
+    setAcceptedCapacitySuggestion(null);
+    setCheckingCapacitySuggestion(false);
+  }, [isOpen]);
 
   useEffect(() => {
     if (model) {
@@ -184,6 +207,13 @@ export const ModelEditDialog = ({
       message.warning(t("model.dialog.capacity.suggestion.missingInput"));
       return;
     }
+    // Capture a token for this call. The [isOpen] reset effect and any
+    // subsequent handleSuggestCapacity invocation will bump the ref;
+    // when we receive our response we check the ref hasn't moved on. If
+    // it has -- the user cancelled and reopened a different model, or
+    // they clicked "Check" again with different inputs -- silently drop
+    // the response so it cannot overwrite the newer state.
+    const myToken = (suggestionRequestRef.current += 1);
     setCheckingCapacitySuggestion(true);
     try {
       const suggestion = await modelService.suggestCapacity({
@@ -193,18 +223,44 @@ export const ModelEditDialog = ({
         apiKey: form.apiKey.trim() || undefined,
         modelType: connectivityModelType,
       });
+      if (myToken !== suggestionRequestRef.current) return;
       setCapacitySuggestion(suggestion);
       if (!suggestion.suggestions) {
         setAcceptedCapacitySuggestion(null);
       }
     } catch (error) {
+      if (myToken !== suggestionRequestRef.current) return;
       setCapacitySuggestion(null);
       setAcceptedCapacitySuggestion(null);
       message.error(t("model.dialog.capacity.suggestion.failed"));
     } finally {
-      setCheckingCapacitySuggestion(false);
+      if (myToken === suggestionRequestRef.current) {
+        setCheckingCapacitySuggestion(false);
+      }
     }
   };
+
+  // W11 V1.5: when the dialog opens on a bare-capacity LLM/VLM row
+  // (per-row badge condition: context_window_tokens or max_output_tokens
+  // is null), auto-fire /suggest-capacity once so the operator does not
+  // have to also click "Check". The trigger is derived from `model`
+  // itself rather than a caller-supplied flag, so any entry path (row
+  // click, badge click, future gear-icon shortcut) gets the same
+  // affordance. No-op if the model already has capacity, the suggestion
+  // switch is off, or required form fields are missing at open time.
+  const isBareCapacityModel = Boolean(
+    model &&
+      supportsCapacityFields &&
+      (!model.contextWindowTokens || !model.maxOutputTokens)
+  );
+  useEffect(() => {
+    if (!isOpen || !isBareCapacityModel) return;
+    if (!capacitySuggestionEnabled) return;
+    if (!canSuggestCapacity()) return;
+    handleSuggestCapacity();
+    // Fire once per open; do not re-fire on re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isBareCapacityModel]);
 
   const isFormValid = () => {
     if (
