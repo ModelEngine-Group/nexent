@@ -822,7 +822,6 @@
   "model.dialog.capacity.error.inputExceedsWindow": "最大输入Token数不能超过上下文窗口（超出部分会被自动忽略，请直接调整数值）。",
   "model.dialog.capacity.error.reserveExceedsOutput": "输出预留Token数不能超过最大输出Token数。",
   "model.dialog.capacity.error.requiredMissing": "上下文窗口和最大输入Token数为必填项。",
-  "model.dialog.capacity.deprecatedMaxTokens": "max_tokens 已废弃，请使用 max_output_tokens。",
   "model.dialog.capacity.legacyMaxTokens.applyAsContext": "填入「上下文窗口」",
   "model.dialog.capacity.legacyMaxTokens.applyAsOutput": "填入「最大输出」",
   "model.dialog.capacity.source.operator": "人工配置",

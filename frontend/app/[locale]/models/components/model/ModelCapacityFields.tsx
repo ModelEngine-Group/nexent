@@ -60,7 +60,6 @@ interface ModelCapacityFieldsProps {
   validationError?: string | null;
   capacitySource?: CapacitySource | null;
   capabilityProfileVersion?: string | null;
-  showDeprecatedMaxTokensWarning?: boolean;
   /**
    * 'add' shows a flat panel with the four user-facing fields
    * (context_window, max_input, max_output, tokenizer) and supports required
@@ -272,7 +271,6 @@ export const ModelCapacityFields = ({
   validationError,
   capacitySource,
   capabilityProfileVersion,
-  showDeprecatedMaxTokensWarning,
   formMode = "edit",
   requiredFields = [],
   suggestion,
@@ -450,12 +448,6 @@ export const ModelCapacityFields = ({
               })}
             </Space>
           }
-        />
-      ) : showDeprecatedMaxTokensWarning ? (
-        <Alert
-          type="warning"
-          showIcon
-          message={t("model.dialog.capacity.deprecatedMaxTokens")}
         />
       ) : null}
 

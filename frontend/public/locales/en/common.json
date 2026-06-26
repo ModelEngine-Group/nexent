@@ -851,7 +851,6 @@
   "model.dialog.capacity.error.inputExceedsWindow": "Max input tokens cannot exceed the context window (any excess is silently clipped, so please adjust the value directly).",
   "model.dialog.capacity.error.reserveExceedsOutput": "Output reserve cannot exceed max output tokens.",
   "model.dialog.capacity.error.requiredMissing": "Context window and max input tokens are required.",
-  "model.dialog.capacity.deprecatedMaxTokens": "max_tokens is deprecated; use max_output_tokens.",
   "model.dialog.capacity.legacyMaxTokens.applyAsContext": "Fill into Context Window",
   "model.dialog.capacity.legacyMaxTokens.applyAsOutput": "Fill into Max Output",
   "model.dialog.capacity.source.operator": "Operator",

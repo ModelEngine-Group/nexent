@@ -733,11 +733,6 @@ export const ModelEditDialog = ({
               // whole alert disappears once both are filled. The plain
               // deprecation banner only kicks in if both targets are filled
               // but the legacy column still has a value.
-              showDeprecatedMaxTokensWarning={
-                Boolean(model.maxTokens) &&
-                Boolean(model.contextWindowTokens || form.contextWindowTokens) &&
-                Boolean(model.maxOutputTokens || form.maxOutputTokens)
-              }
               legacyMaxTokensCandidate={
                 model.contextWindowTokens && model.maxOutputTokens
                   ? undefined
@@ -1117,11 +1112,6 @@ export const ProviderConfigEditDialog = ({
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
             // context_window/max_output optional; DEFAULT_* substitute at save.
-            showDeprecatedMaxTokensWarning={
-              Boolean(initialMaxTokens) &&
-              Boolean(initialCapacity?.contextWindowTokens || capacityForm.contextWindowTokens) &&
-              Boolean(initialCapacity?.maxOutputTokens || capacityForm.maxOutputTokens)
-            }
             legacyMaxTokensCandidate={
               initialCapacity?.contextWindowTokens && initialCapacity?.maxOutputTokens
                 ? undefined
