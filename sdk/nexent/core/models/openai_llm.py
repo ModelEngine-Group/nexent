@@ -26,11 +26,19 @@ from .capacity_budget import (
     compute_w2_fingerprint,
 )
 from ..utils.observer import MessageObserver, ProcessType
+from .prompt_cache import (
+    apply_cache_directives,
+    cache_directive_advice,
+    extract_prompt_cache_usage,
+    resolve_prompt_cache_profile,
+)
 
 logger = logging.getLogger("openai_llm")
 
 
 class OpenAIModel(OpenAIServerModel):
+    # Public SDK constructor: keep common kwargs explicit and read extension
+    # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
 ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
@@ -38,8 +46,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
                  safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
-                 capacity_snapshot: Optional[Dict[str, Any]] = None,
-                 timeout_seconds: Optional[float] = None, *args, **kwargs):
+                 timeout_seconds: Optional[float] = None,
+                 *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
@@ -63,9 +71,17 @@ ssl_verify=True, model_factory: Optional[str] = None,
             max_tokens: DEPRECATED alias for max_output_tokens retained during
                        the W1 migration. If max_output_tokens is supplied it
                        wins; otherwise max_tokens is copied into it.
+            capacity_snapshot: Optional model capacity snapshot accepted via
+                       kwargs for backward-compatible keyword call sites.
+            prompt_cache: Selected prompt-cache capability profile accepted via
+                       kwargs. Unknown or absent capability disables provider
+                       cache directives.
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
+        capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
+        prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
+
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
@@ -74,6 +90,10 @@ ssl_verify=True, model_factory: Optional[str] = None,
         self.model_factory = (model_factory or "").lower()
         self.display_name = display_name
         self.extra_body = extra_body or None
+        self.prompt_cache = prompt_cache or None
+        self.last_provider_cache_advice = None
+        self.last_prompt_cache_usage = None
+        self.last_cached_input_token_count = 0
         self.safe_input_budget_snapshot = safe_input_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
@@ -230,11 +250,49 @@ ssl_verify=True, model_factory: Optional[str] = None,
         ):
             completion_kwargs["max_tokens"] = self.max_output_tokens
 
+        selected_cache_profile = resolve_prompt_cache_profile(
+            self.model_factory or "unknown", self.prompt_cache
+        )
+        # Provider protocol decisions depend only on the approved provider/model
+        # capability profile.  Context partitioning and ordering are owned by
+        # ContextManager and are intentionally opaque to this adapter.
+        cache_advice = cache_directive_advice(selected_cache_profile)
+        self.last_provider_cache_advice = cache_advice
+        dispatch_kwargs = apply_cache_directives(
+            completion_kwargs, cache_advice
+        )
+        self._monitoring.set_span_attributes(
+            **{
+                "llm.prompt_cache.mode": cache_advice.mode,
+                "llm.prompt_cache.supported": cache_advice.supported,
+                "llm.prompt_cache.directive_reason": cache_advice.reason,
+            }
+        )
+        context_evidence = getattr(self, "last_context_evidence", None)
+        if context_evidence is not None:
+            self._monitoring.set_span_attributes(
+                **{
+                    "llm.prompt_cache.stable_prefix_fingerprint": getattr(
+                        context_evidence, "stable_prefix_fingerprint", None
+                    ),
+                    "llm.prompt_cache.prefix_change_reasons": json.dumps(
+                        list(getattr(context_evidence, "prefix_change_reasons", ())),
+                        ensure_ascii=False,
+                    ),
+                    "llm.prompt_cache.stable_message_count": getattr(
+                        context_evidence, "stable_message_count", 0,
+                    ),
+                    "llm.prompt_cache.dynamic_message_count": getattr(
+                        context_evidence, "dynamic_message_count", 0,
+                    ),
+                }
+            )
+
         current_request = self._dispatch_chat_completion(
             safe_input_budget_snapshot=trusted_budget_snapshot,
             capacity_snapshot=self.capacity_snapshot,
             stream=True,
-            **completion_kwargs,
+            **dispatch_kwargs,
         )
 
         # Validate response type: ensure we got a proper iterator, not error strings or dicts
@@ -313,6 +371,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
             # Extract token usage
             input_tokens = 0
             output_tokens = 0
+            usage = None
             if chunk_list and chunk_list[-1].usage is not None:
                 usage = chunk_list[-1].usage
                 input_tokens = usage.prompt_tokens
@@ -339,6 +398,23 @@ ssl_verify=True, model_factory: Optional[str] = None,
                     f"Token usage not returned by API, using estimation: "
                     f"input_tokens={input_tokens}, output_tokens={output_tokens}"
                 )
+
+            cache_usage = extract_prompt_cache_usage(
+                usage, input_tokens, capability_profile=selected_cache_profile
+            )
+            self.last_prompt_cache_usage = cache_usage
+            self.last_cached_input_token_count = cache_usage.cached_input_tokens
+            self._monitoring.set_span_attributes(
+                **{
+                    "llm.prompt_cache.cached_input_tokens": cache_usage.cached_input_tokens,
+                    "llm.prompt_cache.uncached_input_tokens": cache_usage.uncached_input_tokens,
+                    "llm.prompt_cache.provider_cache_hit": cache_usage.provider_cache_hit,
+                    "llm.prompt_cache.hit_ratio": cache_usage.hit_ratio,
+                    "llm.prompt_cache.metrics_source": cache_usage.metrics_source,
+                    "llm.prompt_cache.estimated_saved_input_tokens": cache_usage.estimated_saved_input_tokens,
+                    "llm.prompt_cache.estimated_input_savings_ratio": cache_usage.estimated_input_savings_ratio,
+                }
+            )
 
             # Record completion metrics
             if token_tracker:

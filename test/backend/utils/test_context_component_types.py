@@ -471,7 +471,7 @@ class TestComponentToMessages:
 
         comp = KnowledgeBaseComponent(summary="KB summary")
         messages = comp.to_messages()
-        assert messages == [{"role": "system", "content": "KB summary"}]
+        assert messages == [{"role": "user", "content": "KB summary"}]
 
     def test_knowledge_base_component_empty_summary_no_messages(self):
         from nexent.core.agents.agent_model import KnowledgeBaseComponent
@@ -485,7 +485,7 @@ class TestComponentToMessages:
 
         comp = MemoryComponent(formatted_content="memory text")
         messages = comp.to_messages()
-        assert messages == [{"role": "system", "content": "memory text"}]
+        assert messages == [{"role": "user", "content": "memory text"}]
 
     def test_tools_component_to_messages(self):
         from nexent.core.agents.agent_model import ToolsComponent
@@ -505,7 +505,7 @@ class TestFullPromptAssembly:
             all_messages.extend(comp.to_messages())
         assert len(all_messages) > 0
         for msg in all_messages:
-            assert msg["role"] == "system"
+            assert msg["role"] in {"system", "user"}
             assert msg["content"]
 
     def test_full_assembly_contains_key_sections(self):
