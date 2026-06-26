@@ -146,6 +146,12 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
+    # the frontend when the operator clicks "Use suggestion" and saves; the
+    # app layer pops them before the dict reaches the service/DB layer and
+    # forwards them to model_capacity_suggestion_accept_total.
+    accepted_suggestion_match_kind: Optional[str] = None
+    accepted_capability_profile_version: Optional[str] = None
 
 
 class CapacitySuggestionFields(BaseModel):

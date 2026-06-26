@@ -55,6 +55,8 @@ from services.model_management_service import (
     list_llm_models_for_tenant,
     list_models_for_admin,
     get_capacity_coverage,
+    pop_capacity_accept_signal,
+    _record_capacity_suggestion_accept,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -136,9 +138,14 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         model_data = request.model_dump()
+        accept_signal = pop_capacity_accept_signal(model_data)
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
         await create_model_for_tenant(user_id, tenant_id, model_data)
+        if accept_signal is not None:
+            _record_capacity_suggestion_accept(
+                accept_signal["match_kind"], request.model_factory
+            )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model created successfully"
         })
@@ -301,7 +308,12 @@ async def update_single_model(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        accept_signal = pop_capacity_accept_signal(request)
         await update_single_model_for_tenant(user_id, tenant_id, display_name, request)
+        if accept_signal is not None:
+            _record_capacity_suggestion_accept(
+                accept_signal["match_kind"], request.get("model_factory")
+            )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully"
         })
