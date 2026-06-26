@@ -45,7 +45,7 @@ on:
 jobs:
   build-offline-package:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
@@ -60,17 +60,17 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      
+
       - name: Set version and platform variables
         id: set-vars
         run: |
           PLATFORM="${{ inputs.platform }}"
           REF_TYPE="${{ github.ref_type }}"
           REF_NAME="${{ github.ref_name }}"
-          
+
           if [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
           elif [ "$REF_TYPE" = "tag" ]; then
@@ -84,15 +84,15 @@ jobs:
           else
             VERSION="latest"
           fi
-          
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
           echo "package-name=nexent-offline-${{ inputs.target }}-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
-      
+
       - name: Build offline package
         run: |
           chmod +x deploy/offline/build_offline_package.sh
-          
+
           ./deploy/offline/build_offline_package.sh \
             --version "${{ steps.set-vars.outputs.version }}" \
             --platform "${{ steps.set-vars.outputs.platform }}" \
@@ -101,26 +101,26 @@ jobs:
             --image-source "${{ inputs.image_source }}" \
             --components "${{ inputs.components }}" \
             --target "${{ inputs.target }}"
-      
-      
-      
-      - name: Create tar.gz package
+
+
+
+      - name: Create zip package
         run: |
           PACKAGE_NAME="${{ steps.set-vars.outputs.package-name }}"
-          
-          tar -czf "${PACKAGE_NAME}.tar.gz" -C offline-output .
-          
-          echo "Package created: ${PACKAGE_NAME}.tar.gz"
-          
-          ls -lh "${PACKAGE_NAME}.tar.gz"
-      
+
+          (cd offline-output && zip -r "../${PACKAGE_NAME}.zip" .)
+
+          echo "Package created: ${PACKAGE_NAME}.zip"
+
+          ls -lh "${PACKAGE_NAME}.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.set-vars.outputs.package-name }}
-          path: ${{ steps.set-vars.outputs.package-name }}.tar.gz
+          path: ${{ steps.set-vars.outputs.package-name }}.zip
           retention-days: 30
-      
+
       - name: Summary
         run: |
           echo ""
@@ -129,7 +129,7 @@ jobs:
           echo "========================================"
           echo "Version: ${{ steps.set-vars.outputs.version }}"
           echo "Platform: ${{ steps.set-vars.outputs.platform }}"
-          echo "Package: ${{ steps.set-vars.outputs.package-name }}.tar.gz"
+          echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
           echo "Target: ${{ inputs.target }}"
           echo "Components: ${{ inputs.components }}"
           echo "Image source: ${{ inputs.image_source }}"
@@ -137,5 +137,5 @@ jobs:
           echo "Ref Name: ${{ github.ref_name }}"
           echo "========================================"
           echo ""
-          echo "Package contents:"
-          tar -tzf "${{ steps.set-vars.outputs.package-name }}.tar.gz" | head -50
+          echo "Package directory:"
+          ls -l .
