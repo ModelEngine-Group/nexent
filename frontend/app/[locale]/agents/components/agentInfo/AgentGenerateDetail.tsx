@@ -33,6 +33,8 @@ import { useAgentGeneration } from "@/hooks/agent/useAgentGeneration";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
+import { canManageModels } from "@/lib/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
@@ -71,6 +73,8 @@ export default function AgentGenerateDetail({}) {
 
   const { defaultLlmModelConfig } = useConfig();
   const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
+  const { bareModelIds: bareCapacityModelIds } = useCapacityCoverage();
+  const userCanManageModels = canManageModels(user?.role, isSpeedMode);
   const {
     templates: promptTemplates,
     isLoading: loadingPromptTemplates,
@@ -537,11 +541,52 @@ export default function AgentGenerateDetail({}) {
   };
 
   // Select options for available models
-  const modelSelectOptions = availableLlmModels.map((model) => ({
-    value: model.displayName || model.name,
-    label: model.displayName || model.name,
-    disabled: model.connect_status !== "available",
-  }));
+  // Bare-capacity rows (`context_window_tokens IS NULL OR max_output_tokens IS
+  // NULL`) stay selectable per W11 spec; the warning is the inline subtitle
+  // and the non-blocking form notice below.
+  const modelSelectOptions = availableLlmModels.map((model) => {
+    const isBare = bareCapacityModelIds.has(model.id);
+    const displayLabel = model.displayName || model.name;
+    return {
+      value: displayLabel,
+      label: isBare ? (
+        <Flex vertical gap={0}>
+          <span>{displayLabel}</span>
+          <span className="text-[11px] text-yellow-700">
+            {t("agent.modelSelector.bareCapacity.subtitle")}
+          </span>
+        </Flex>
+      ) : (
+        displayLabel
+      ),
+      disabled: model.connect_status !== "available",
+    };
+  });
+
+  const isSelectedMainModelBare = Boolean(
+    selectedMainAgentModel && bareCapacityModelIds.has(selectedMainAgentModel.id)
+  );
+
+  const selectedBusinessLogicModel = useMemo(() => {
+    const businessName =
+      form.getFieldValue("businessLogicModelName") ||
+      editedAgent.business_logic_model_name ||
+      "";
+    if (!businessName) return undefined;
+    return availableLlmModels.find(
+      (m) => m.displayName === businessName || m.name === businessName
+    );
+  }, [
+    availableLlmModels,
+    editedAgent.business_logic_model_name,
+    form,
+    forceRefreshKey,
+  ]);
+
+  const isSelectedBusinessLogicModelBare = Boolean(
+    selectedBusinessLogicModel &&
+      bareCapacityModelIds.has(selectedBusinessLogicModel.id)
+  );
 
   const promptTemplateSelectOptions = useMemo(() => {
     const options = promptTemplates.map((template) => ({
@@ -688,6 +733,23 @@ export default function AgentGenerateDetail({}) {
                       </span>
                     </Button>
                   </Flex>
+                  {(isSelectedMainModelBare || isSelectedBusinessLogicModelBare) && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={t(
+                        userCanManageModels
+                          ? "agent.modelSelector.bareCapacity.formNotice"
+                          : "agent.modelSelector.bareCapacity.formNoticeNoPermission",
+                        {
+                          modelName:
+                            (isSelectedMainModelBare && selectedMainAgentModel?.displayName) ||
+                            (isSelectedBusinessLogicModelBare && selectedBusinessLogicModel?.displayName) ||
+                            "",
+                        }
+                      )}
+                    />
+                  )}
                 </Flex>
               </Form>
             </Card>
@@ -879,15 +941,27 @@ export default function AgentGenerateDetail({}) {
                                 });
                               }}
                             >
-                              {availableLlmModels.map((model) => (
-                                <Select.Option
-                                  key={model.id}
-                                  value={model.displayName}
-                                  disabled={model.connect_status !== "available"}
-                                >
-                                  {model.displayName}
-                                </Select.Option>
-                              ))}
+                              {availableLlmModels.map((model) => {
+                                const isBare = bareCapacityModelIds.has(model.id);
+                                return (
+                                  <Select.Option
+                                    key={model.id}
+                                    value={model.displayName}
+                                    disabled={model.connect_status !== "available"}
+                                  >
+                                    {isBare ? (
+                                      <Flex vertical gap={0}>
+                                        <span>{model.displayName}</span>
+                                        <span className="text-[11px] text-yellow-700">
+                                          {t("agent.modelSelector.bareCapacity.subtitle")}
+                                        </span>
+                                      </Flex>
+                                    ) : (
+                                      model.displayName
+                                    )}
+                                  </Select.Option>
+                                );
+                              })}
                             </Select>
                           </Form.Item>
                         </Col>

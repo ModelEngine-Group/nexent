@@ -1,4 +1,4 @@
-import { Alert, AutoComplete, Button, Input, Tag, Tooltip } from "antd";
+import { Alert, AutoComplete, Button, Input, Space, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { CapacitySuggestion } from "@/types/modelConfig";
@@ -281,13 +281,30 @@ export const ModelCapacityFields = ({
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
-  // Show the actionable legacy-value prompt only while the input is still
-  // empty -- once the user applies (or types their own value), the prompt
-  // disappears so we don't keep nagging.
+  // Legacy max_tokens can mean either thing -- before W1 split capacity,
+  // operators sometimes typed the provider context window there
+  // (128000, 32768, ...) and sometimes the per-call output cap (4096,
+  // 8192, ...). We can't tell from the value alone, so we surface both
+  // target fields and let the operator pick. The button order is the
+  // only heuristic: values >= LEGACY_CONTEXT_WINDOW_THRESHOLD are
+  // far more likely to be context windows (no real model caps output
+  // at 32K+ in practice), so the "Apply as Context Window" button leads;
+  // below the threshold the "Apply as Max Output" button leads.
+  //
+  // Each button is independently gated by its target field being empty
+  // -- once the operator commits a value to that column we stop nagging
+  // about it. When both fields are filled the whole alert hides.
+  const LEGACY_CONTEXT_WINDOW_THRESHOLD = 16_384;
+  const legacyValuePositive =
+    legacyMaxTokensCandidate !== undefined && legacyMaxTokensCandidate > 0;
+  const canApplyAsContextWindow =
+    legacyValuePositive && value.contextWindowTokens.trim() === "";
+  const canApplyAsMaxOutput =
+    legacyValuePositive && value.maxOutputTokens.trim() === "";
   const showLegacyMaxTokensPrompt =
-    legacyMaxTokensCandidate !== undefined &&
-    legacyMaxTokensCandidate > 0 &&
-    value.maxOutputTokens.trim() === "";
+    canApplyAsContextWindow || canApplyAsMaxOutput;
+  const contextWindowIsRecommended =
+    (legacyMaxTokensCandidate ?? 0) >= LEGACY_CONTEXT_WINDOW_THRESHOLD;
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
@@ -392,25 +409,43 @@ export const ModelCapacityFields = ({
         <Alert
           type="warning"
           showIcon
-          message={t("model.dialog.capacity.legacyMaxTokensDetected", {
-            value: legacyMaxTokensCandidate,
-            defaultValue: `Detected legacy max_tokens = ${legacyMaxTokensCandidate}. Apply it as max_output_tokens?`,
+          message={t("model.dialog.capacity.legacyMaxTokensHint", {
+            maxTokens: legacyMaxTokensCandidate,
           })}
           action={
-            <Button
-              size="small"
-              type="primary"
-              onClick={() =>
-                onChange(
-                  "maxOutputTokens",
-                  String(legacyMaxTokensCandidate)
-                )
-              }
-            >
-              {t("model.dialog.capacity.legacyMaxTokens.apply", {
-                defaultValue: "Apply",
+            <Space size={6} wrap>
+              {(contextWindowIsRecommended
+                ? ["context", "output"]
+                : ["output", "context"]
+              ).map((target, idx) => {
+                if (target === "context" && !canApplyAsContextWindow) {
+                  return null;
+                }
+                if (target === "output" && !canApplyAsMaxOutput) {
+                  return null;
+                }
+                const labelKey =
+                  target === "context"
+                    ? "model.dialog.capacity.legacyMaxTokens.applyAsContext"
+                    : "model.dialog.capacity.legacyMaxTokens.applyAsOutput";
+                const fieldName =
+                  target === "context"
+                    ? "contextWindowTokens"
+                    : "maxOutputTokens";
+                return (
+                  <Button
+                    key={target}
+                    size="small"
+                    type={idx === 0 ? "primary" : "default"}
+                    onClick={() =>
+                      onChange(fieldName, String(legacyMaxTokensCandidate))
+                    }
+                  >
+                    {t(labelKey)}
+                  </Button>
+                );
               })}
-            </Button>
+            </Space>
           }
         />
       ) : showDeprecatedMaxTokensWarning ? (

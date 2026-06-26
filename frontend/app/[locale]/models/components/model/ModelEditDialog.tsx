@@ -459,6 +459,18 @@ export const ModelEditDialog = ({
                 : undefined
               : undefined,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(acceptedCapacitySuggestion
+            ? {
+                acceptedSuggestionMatchKind:
+                  acceptedCapacitySuggestion.matchKind,
+                ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                  ? {
+                      acceptedCapabilityProfileVersion:
+                        acceptedCapacitySuggestion.capabilityProfileVersion,
+                    }
+                  : {}),
+              }
+            : {}),
         });
       } else {
         await modelService.updateSingleModel({
@@ -504,6 +516,18 @@ export const ModelEditDialog = ({
               }
             : {}),
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(acceptedCapacitySuggestion
+            ? {
+                acceptedSuggestionMatchKind:
+                  acceptedCapacitySuggestion.matchKind,
+                ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                  ? {
+                      acceptedCapabilityProfileVersion:
+                        acceptedCapacitySuggestion.capabilityProfileVersion,
+                    }
+                  : {}),
+              }
+            : {}),
         });
       }
 
@@ -701,17 +725,22 @@ export const ModelEditDialog = ({
                 applyCapacitySuggestion(capacitySuggestion)
               }
               // Legacy max_tokens is now surfaced via the actionable
-              // legacyMaxTokensCandidate prompt (no more silent promote in
-              // capacityFormFromModel). Keep the plain deprecation banner
-              // fallback for the rare case where the record has neither
-              // column populated, so users still see the migration nudge.
+              // legacyMaxTokensCandidate prompt with two-target buttons
+              // (Context Window vs Max Output). The prompt is offered while
+              // EITHER target field is still empty -- ModelCapacityFields
+              // hides individual buttons once that column is filled, and the
+              // whole alert disappears once both are filled. The plain
+              // deprecation banner only kicks in if both targets are filled
+              // but the legacy column still has a value.
               showDeprecatedMaxTokensWarning={
                 Boolean(model.maxTokens) &&
-                !model.maxOutputTokens &&
-                !form.maxOutputTokens
+                Boolean(model.contextWindowTokens || form.contextWindowTokens) &&
+                Boolean(model.maxOutputTokens || form.maxOutputTokens)
               }
               legacyMaxTokensCandidate={
-                model.maxOutputTokens ? undefined : model.maxTokens
+                model.contextWindowTokens && model.maxOutputTokens
+                  ? undefined
+                  : model.maxTokens
               }
             />
           </div>
@@ -1089,11 +1118,11 @@ export const ProviderConfigEditDialog = ({
             // context_window/max_output optional; DEFAULT_* substitute at save.
             showDeprecatedMaxTokensWarning={
               Boolean(initialMaxTokens) &&
-              !initialCapacity?.maxOutputTokens &&
-              !capacityForm.maxOutputTokens
+              Boolean(initialCapacity?.contextWindowTokens || capacityForm.contextWindowTokens) &&
+              Boolean(initialCapacity?.maxOutputTokens || capacityForm.maxOutputTokens)
             }
             legacyMaxTokensCandidate={
-              initialCapacity?.maxOutputTokens
+              initialCapacity?.contextWindowTokens && initialCapacity?.maxOutputTokens
                 ? undefined
                 : initialCapacity?.maxTokens
             }

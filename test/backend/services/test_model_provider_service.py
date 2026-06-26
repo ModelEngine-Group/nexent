@@ -574,11 +574,12 @@ async def test_prepare_model_dict_persists_operator_capacity():
             "model_type": "llm",
             "max_tokens": 31920,
             "context_window_tokens": 200000,
-            "max_input_tokens": None,
+            "max_input_tokens": 180000,
             "max_output_tokens": 31920,
             "default_output_reserve_tokens": 4096,
             "tokenizer_family": "qwen",
             "capacity_source": "operator",
+            "capability_profile_version": "dashscope/glm-5.2@1",
         }
 
         await prepare_model_dict(
@@ -589,15 +590,25 @@ async def test_prepare_model_dict_persists_operator_capacity():
         )
 
         _, kwargs = mock_model_request.call_args
+        # W11 spec L721-727: pin every capacity field the constructor must
+        # thread for the accepted-suggestion save path. Missing any of these
+        # silently drops the field on the DB row and reproduces CM-031.
         assert kwargs["context_window_tokens"] == 200000
+        assert kwargs["max_input_tokens"] == 180000
         assert kwargs["max_output_tokens"] == 31920
         assert kwargs["default_output_reserve_tokens"] == 4096
         assert kwargs["tokenizer_family"] == "qwen"
+        assert kwargs["capability_profile_version"] == "dashscope/glm-5.2@1"
         # capacity_source is forced to "operator" by the prepare_model_dict
         # contract: only operator-marked values reach the row, and the
         # marker itself is normalized to the canonical value rather than
         # echoing whatever the caller sent.
         assert kwargs["capacity_source"] == "operator"
+        # Canonical provider/model values land via constructor kwargs too,
+        # so model_factory + model_name are pinned to catch regressions
+        # in split_repo_name plumbing.
+        assert kwargs["model_factory"] == "dashscope"
+        assert kwargs["model_name"] == "glm-5.2"
 
 
 @pytest.mark.asyncio

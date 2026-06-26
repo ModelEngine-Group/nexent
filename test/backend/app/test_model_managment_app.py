@@ -291,6 +291,66 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
 
 
 @pytest.mark.asyncio
+async def test_create_model_records_accept_signal_when_present(client, auth_header, user_credentials, sample_model_data, mocker):
+    """End-to-end SLO data-flow check: when the frontend ships the W11 accept
+    signal on a successful save, the app layer must (1) strip the audit-only
+    fields before the DB write, and (2) call the metric recorder so
+    model_capacity_suggestion_accept_total increments. Spec L709-710.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def _create(*args, **kwargs):
+        return None
+
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
+
+    payload = {
+        **sample_model_data,
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+    response = client.post("/model/create", json=payload, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+
+    # Audit fields must NOT reach the service layer.
+    create_args = mock_create.await_args
+    sent = create_args.args[2]
+    assert "accepted_suggestion_match_kind" not in sent
+    assert "accepted_capability_profile_version" not in sent
+    # Real capacity fields ARE forwarded.
+    assert sent["context_window_tokens"] == 128000
+    assert sent["max_output_tokens"] == 16384
+
+    # Metric recorder called with the labels the SLO dashboard expects.
+    mock_record.assert_called_once_with("catalog_exact", payload["provider"])
+
+
+@pytest.mark.asyncio
+async def test_create_model_skips_accept_recorder_without_match_kind(client, auth_header, user_credentials, sample_model_data, mocker):
+    """Ordinary saves (no Use-suggestion click) must NOT fire the recorder.
+    Otherwise accept_total inflates and the SLO ratio against
+    dispatch_profile_hit_total becomes meaningless.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def _create(*args, **kwargs):
+        return None
+
+    mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
+
+    response = client.post("/model/create", json=sample_model_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    mock_record.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_model_conflict(client, auth_header, user_credentials, sample_model_data, mocker):
     """Test model creation with name conflict."""
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)

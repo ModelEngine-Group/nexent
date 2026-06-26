@@ -1145,6 +1145,22 @@ export const ModelAddDialog = ({
         maxTokensValue = 0;
       }
 
+      // W11 accept-signal: pop the audit fields from acceptedCapacitySuggestion
+      // so the app layer can label model_capacity_suggestion_accept_total.
+      // Emitting once per save keeps the counter aligned with the
+      // dispatch_profile_hit_total denominator (spec L709-710).
+      const acceptSignalKwargs = acceptedCapacitySuggestion
+        ? {
+            acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
+            ...(acceptedCapacitySuggestion.capabilityProfileVersion
+              ? {
+                  acceptedCapabilityProfileVersion:
+                    acceptedCapacitySuggestion.capabilityProfileVersion,
+                }
+              : {}),
+          }
+        : {};
+
       // Add to the backend service - use manage interface if tenantId is provided
       if (tenantId) {
         const modelParams: any = {
@@ -1157,6 +1173,7 @@ export const ModelAddDialog = ({
           displayName: form.displayName || form.name,
           modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...acceptSignalKwargs,
         };
 
         // Add STT specific fields
@@ -1199,6 +1216,7 @@ export const ModelAddDialog = ({
           displayName: form.displayName || form.name,
           modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...acceptSignalKwargs,
         };
 
         // Add STT specific fields

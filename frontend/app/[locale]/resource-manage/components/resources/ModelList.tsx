@@ -15,6 +15,7 @@ import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
+import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
 import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
 
 interface UnifiedModelRow extends ModelOption {
@@ -361,6 +362,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <ModelCapacityCoverageWidget />
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Segmented
