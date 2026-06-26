@@ -1,0 +1,98 @@
+{{- $global := default dict .Values.global }}
+{{- $shared := default dict $global.sharedStorage }}
+{{- $mode := default "local" $shared.mode }}
+{{- $storageClassName := default "" $shared.storageClassName }}
+{{- $accessModes := default (list "ReadWriteOnce") $shared.accessModes }}
+{{- $workspace := default dict $shared.workspace }}
+{{- $workspaceSize := default "10Gi" $workspace.size }}
+{{- $workspaceLocalPath := default "/var/lib/nexent" $workspace.localPath }}
+{{- if eq $mode "local" }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-workspace-pv
+  labels:
+    type: hostpath
+    app: nexent-workspace
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ $storageClassName | quote }}
+  capacity:
+    storage: {{ $workspaceSize }}
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ $workspaceLocalPath | quote }}
+    type: DirectoryOrCreate
+---
+{{- end }}
+{{- if ne $mode "existing" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-workspace
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $workspaceSize }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-workspace-pv
+  {{- end }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
+  {{- end }}
+---
+{{- end }}
+{{- $skills := default dict $shared.skills }}
+{{- $skillsSize := default "5Gi" $skills.size }}
+{{- $skillsLocalPath := default "/var/lib/nexent-data/skills" $skills.localPath }}
+{{- if eq $mode "local" }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexent-skills-pv
+  labels:
+    type: hostpath
+    app: nexent-skills
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  storageClassName: {{ $storageClassName | quote }}
+  capacity:
+    storage: {{ $skillsSize }}
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: {{ $skillsLocalPath | quote }}
+    type: DirectoryOrCreate
+---
+{{- end }}
+{{- if ne $mode "existing" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexent-skills
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+spec:
+  accessModes:
+{{ toYaml $accessModes | indent 4 }}
+  resources:
+    requests:
+      storage: {{ $skillsSize }}
+  {{- if eq $mode "local" }}
+  volumeName: nexent-skills-pv
+  {{- end }}
+  {{- if $storageClassName }}
+  storageClassName: {{ $storageClassName | quote }}
+  {{- end }}
+{{- end }}

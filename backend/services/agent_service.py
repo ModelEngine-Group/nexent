@@ -1109,6 +1109,7 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
             "model_name": agent_info["model_name"],
             "model_id": agent_info.get("model_id"),
             "max_steps": agent_info["max_steps"],
+            "requested_output_tokens": agent_info.get("requested_output_tokens"),
             "business_description": agent_info["business_description"],
             "duty_prompt": agent_info.get("duty_prompt"),
             "constraint_prompt": agent_info.get("constraint_prompt"),
@@ -1116,11 +1117,51 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
             "sub_agent_id_list": query_sub_agents_id_list(main_agent_id=sub_agent_id, tenant_id=tenant_id)}
 
 
+def _validate_requested_output_tokens_for_agent(
+    request: AgentInfoRequest,
+    tenant_id: str,
+) -> None:
+    requested_output_tokens = request.requested_output_tokens
+    if requested_output_tokens is None:
+        return
+
+    model_id = request.model_id
+    if model_id is None and request.agent_id is not None:
+        try:
+            existing_agent = search_agent_info_by_agent_id(
+                agent_id=request.agent_id,
+                tenant_id=tenant_id,
+                version_no=request.version_no,
+            )
+            model_id = existing_agent.get("model_id")
+        except Exception as exc:
+            logger.warning(
+                "Could not resolve existing agent model for requested_output_tokens validation: %s",
+                exc,
+            )
+
+    if model_id is None:
+        return
+
+    model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+    max_output_tokens = model_info.get("max_output_tokens") if model_info else None
+    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            (
+                "requested_output_tokens cannot exceed the selected model "
+                f"max_output_tokens ({max_output_tokens})"
+            ),
+        )
+
+
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "example_questions cannot exceed 6 items")
+
+    _validate_requested_output_tokens_for_agent(request, tenant_id)
 
     prompt_template_id, prompt_template_name = get_prompt_template_summary(
         template_id=request.prompt_template_id,
@@ -1147,6 +1188,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_id": prompt_template_id,
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
+                "requested_output_tokens": request.requested_output_tokens,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
                 "duty_prompt": request.duty_prompt,
@@ -1199,7 +1241,9 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                      if inst.get("tool_id") == tool_id),
                     None
                 )
-                params = (existing_instance or {}).get("params", {})
+                # Safely get params, default to empty dict if None or not present
+                raw_params = (existing_instance or {}).get("params")
+                params = raw_params if raw_params is not None else {}
                 create_or_update_tool_by_tool_info(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,
@@ -1673,6 +1717,7 @@ async def export_agent_by_agent_id(
                                           business_description=agent_info["business_description"],
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
+                                          requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
                                           duty_prompt=agent_info.get(
@@ -1828,6 +1873,7 @@ async def import_agent_by_agent_id(
                                          "prompt_template_id": import_agent_info.prompt_template_id or SYSTEM_PROMPT_TEMPLATE_ID,
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
+                                         "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
@@ -2197,6 +2243,7 @@ async def prepare_agent_run(
         is_debug=agent_request.is_debug,
         override_version_no=agent_request.version_no,
         override_model_id=agent_request.model_id,
+        requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
     )
 

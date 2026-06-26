@@ -8,7 +8,12 @@ import { ExclamationCircleFilled } from "@ant-design/icons";
 import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
-import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
+import {
+  CapacityCoverage,
+  ModelOption,
+  ModelType,
+  ModelSource,
+} from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import { ModelEditDialog, ProviderConfigEditDialog } from "./ModelEditDialog";
@@ -23,6 +28,7 @@ interface ModelDeleteDialogProps {
   onClose: () => void;
   onSuccess: () => Promise<void>;
   models: ModelOption[];
+  capacityCoverage?: CapacityCoverage | null;
 }
 
 export const ModelDeleteDialog = ({
@@ -30,6 +36,7 @@ export const ModelDeleteDialog = ({
   onClose,
   onSuccess,
   models,
+  capacityCoverage,
 }: ModelDeleteDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -53,7 +60,8 @@ export const ModelDeleteDialog = ({
   const [maxTokens, setMaxTokens] = useState<number>(0);
 
   // Single model settings modal state
-  const [isSingleModelSettingsOpen, setIsSingleModelSettingsOpen] = useState<boolean>(false);
+  const [isSingleModelSettingsOpen, setIsSingleModelSettingsOpen] =
+    useState<boolean>(false);
   const [selectedSingleModel, setSelectedSingleModel] = useState<any>(null);
   const [providerModelSearchTerm, setProviderModelSearchTerm] = useState("");
 
@@ -68,6 +76,22 @@ export const ModelDeleteDialog = ({
   ]);
   const [chunkingBatchSize, setChunkingBatchSize] = useState("10");
   const [savingEmbeddingConfig, setSavingEmbeddingConfig] = useState(false);
+  const bareCapacityModelIds = useMemo(
+    () =>
+      new Set(
+        (capacityCoverage?.bareModels || []).map((model) => model.modelId)
+      ),
+    [capacityCoverage]
+  );
+  const suggestionAvailableModelIds = useMemo(
+    () =>
+      new Set(
+        (capacityCoverage?.bareModels || [])
+          .filter((model) => model.suggestionAvailable)
+          .map((model) => model.modelId)
+      ),
+    [capacityCoverage]
+  );
 
   // Get model color scheme
   const getModelColorScheme = (
@@ -284,13 +308,9 @@ export const ModelDeleteDialog = ({
           </span>
         );
       case MODEL_SOURCES.DASHSCOPE:
-        return (
-          <img src="/aliyuncs.png" alt="DashScope" className="w-5 h-5" />
-        );
+        return <img src="/aliyuncs.png" alt="DashScope" className="w-5 h-5" />;
       case MODEL_SOURCES.TOKENPONY:
-        return (
-          <img src="/tokenpony.png" alt="TokenPony" className="w-5 h-5" />
-        );
+        return <img src="/tokenpony.png" alt="TokenPony" className="w-5 h-5" />;
       case MODEL_SOURCES.VOLCENGINE:
         return (
           <img src="/volcengine.png" alt="VolcEngine" className="w-5 h-5" />
@@ -326,7 +346,8 @@ export const ModelDeleteDialog = ({
     if (bySilicon?.apiKey) return bySilicon.apiKey;
 
     const byModelEngine = models.find(
-      (m) => m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiKey
+      (m) =>
+        m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiKey
     );
     if (byModelEngine?.apiKey) return byModelEngine.apiKey;
 
@@ -346,11 +367,14 @@ export const ModelDeleteDialog = ({
   };
 
   // Get provider base URL by model type (prefer ModelEngine entries)
-  const getProviderBaseUrlByType = (type: ModelType | null): string | undefined => {
+  const getProviderBaseUrlByType = (
+    type: ModelType | null
+  ): string | undefined => {
     if (!type) return undefined;
     // Prefer provider entries (ModelEngine) first, then explicit modelConfig, then any model
     const engineModel = models.find(
-      (m) => m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiUrl
+      (m) =>
+        m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiUrl
     );
     if (engineModel?.apiUrl) return engineModel.apiUrl;
 
@@ -477,7 +501,10 @@ export const ModelDeleteDialog = ({
   };
 
   // Handle model deletion
-  const handleDeleteModel = async (displayName: string, provider?: ModelSource) => {
+  const handleDeleteModel = async (
+    displayName: string,
+    provider?: ModelSource
+  ) => {
     setDeletingModels((prev) => new Set(prev).add(displayName));
     try {
       // Prefer explicit provider passed in, fall back to selectedSource
@@ -622,17 +649,66 @@ export const ModelDeleteDialog = ({
     });
   }, [providerModels, providerModelSearchTerm]);
 
-  // Handle provider config save
+  // Per-row required capacity gate for the provider-management batch confirm.
+  // Unlike ModelAddDialog this dialog has no top-level "batch default capacity"
+  // panel, so each enabled row must itself carry positive context_window_tokens
+  // and max_output_tokens (set via the per-row gear modal). Without this gate
+  // the user could batch-confirm an LLM/VLM row whose catalog supplied no W2
+  // metadata, persisting context_window_tokens=NULL, max_output_tokens=NULL,
+  // and only the backend's DEFAULT_LLM_MAX_TOKENS=4096 legacy sentinel -- the
+  // exact glm-5.2 production incident we just root-caused.
+  //
+  // We deliberately don't fall back to model.max_tokens here: per the W1/W2
+  // plan the legacy column is unconditionally seeded by the provider
+  // adapters, so treating it as a stand-in would mask every missing W2 row.
+  const requiresW2Capacity = (modelType?: ModelType): boolean => {
+    if (!modelType) return false;
+    if (
+      modelType === MODEL_TYPES.EMBEDDING ||
+      modelType === MODEL_TYPES.MULTI_EMBEDDING
+    )
+      return false;
+    if (modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS)
+      return false;
+    if (modelType === MODEL_TYPES.RERANK) return false;
+    return true;
+  };
+  const hasUnconfiguredSelectedRow = useMemo(() => {
+    if (!requiresW2Capacity(deletingModelType as ModelType)) return false;
+    return providerModels.some((m: any) => {
+      if (!pendingSelectedProviderIds.has(m.id)) return false;
+      return !m.context_window_tokens || !m.max_output_tokens;
+    });
+  }, [providerModels, pendingSelectedProviderIds, deletingModelType]);
+
+  // Handle provider config save. In addition to the shared API key /
+  // timeoutSeconds / concurrencyLimit, the "modify config" dialog now also
+  // exposes a top-level capacity panel (Tokenizer hidden) as a per-provider
+  // bulk-apply default, mirroring the batch-add UX. Any filled capacity
+  // field is forwarded to every model under (provider, model_type) so the
+  // user can fix glm-5.x style rows with NULL W2 columns from one place
+  // instead of opening N gear modals.
   const handleProviderConfigSave = async ({
     apiKey,
     maxTokens,
     timeoutSeconds,
     concurrencyLimit,
+    contextWindowTokens,
+    maxInputTokens,
+    maxOutputTokens,
+    defaultOutputReserveTokens,
+    capacitySource,
   }: {
     apiKey?: string;
     maxTokens: number;
     timeoutSeconds?: number;
     concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
   }) => {
     setMaxTokens(maxTokens);
     if (
@@ -667,6 +743,17 @@ export const ModelDeleteDialog = ({
             maxTokens: maxTokens || m.maxTokens,
             ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
             ...(concurrencyLimit !== undefined ? { concurrencyLimit } : {}),
+            // Only forward capacity fields the user actually filled in the
+            // bulk panel; omitted fields keep each model's existing value.
+            ...(contextWindowTokens !== undefined
+              ? { contextWindowTokens }
+              : {}),
+            ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+            ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined ? { capacitySource } : {}),
           }));
 
         await modelService.updateBatchModel(
@@ -677,13 +764,32 @@ export const ModelDeleteDialog = ({
         // Show success message since no exception was thrown
         message.success(t("model.dialog.success.updateSuccess"));
 
-        // Synchronize providerModels state with the updated maxTokens
+        // Synchronize providerModels state with the bulk values that landed,
+        // so the row gear modals show the new defaults next time they open.
         setProviderModels((prev) =>
           prev.map((model) => ({
             ...model,
             max_tokens: maxTokens || model.max_tokens,
             timeout_seconds: timeoutSeconds || model.timeout_seconds,
-            concurrency_limit: concurrencyLimit !== undefined ? concurrencyLimit : model.concurrency_limit,
+            concurrency_limit:
+              concurrencyLimit !== undefined
+                ? concurrencyLimit
+                : model.concurrency_limit,
+            ...(contextWindowTokens !== undefined
+              ? { context_window_tokens: contextWindowTokens }
+              : {}),
+            ...(maxInputTokens !== undefined
+              ? { max_input_tokens: maxInputTokens }
+              : {}),
+            ...(maxOutputTokens !== undefined
+              ? { max_output_tokens: maxOutputTokens }
+              : {}),
+            ...(defaultOutputReserveTokens !== undefined
+              ? { default_output_reserve_tokens: defaultOutputReserveTokens }
+              : {}),
+            ...(capacitySource !== undefined
+              ? { capacity_source: capacitySource }
+              : {}),
           }))
         );
       } catch (e) {
@@ -770,7 +876,9 @@ export const ModelDeleteDialog = ({
         selectedEmbeddingModel.apiKey ||
         getApiKeyByType(
           deletingModelType,
-          (selectedEmbeddingModel?.source as ModelSource) || selectedSource || undefined
+          (selectedEmbeddingModel?.source as ModelSource) ||
+            selectedSource ||
+            undefined
         );
 
       await modelService.updateSingleModel({
@@ -816,227 +924,274 @@ export const ModelDeleteDialog = ({
         selectedSource &&
           selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE &&
           deletingModelType && (
-            <Button
-              key="confirm"
-              type="primary"
-              loading={isConfirmLoading}
-              onClick={async () => {
-                setIsConfirmLoading(true);
-                try {
-                  // Handle changes for both silicon and openai sources
-                  if (
-                    selectedSource === MODEL_SOURCES.SILICON &&
-                    deletingModelType
-                  ) {
-                    try {
-                      // Get all currently enabled models (including originally enabled and newly enabled ones)
-                      const allEnabledModels = providerModels.filter(
-                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
-                      );
-
-                      if (allEnabledModels) {
-                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.SILICON);
-                        const isEmbeddingType =
-                          deletingModelType === MODEL_TYPES.EMBEDDING ||
-                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
-                        // Pass all currently enabled models
-                        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
-                      await modelService.addBatchCustomModel({
-                        api_key:
-                          apiKey && apiKey.trim() !== ""
-                            ? apiKey
-                            : "sk-no-api-key",
-                        provider: MODEL_SOURCES.SILICON,
-                        type: deletingModelType,
-                        models: allEnabledModels.map((model) => {
-                          if (isEmbeddingType) {
-                            const { max_tokens, ...modelWithoutMaxTokens } =
-                              model;
-                            return modelWithoutMaxTokens;
-                          } else {
-                            return {
-                              ...model,
-                              max_tokens: model.max_tokens,
-                            };
-                          }
-                        }),
-                      });
-                      }
-
-                      // Refresh list
-                      await onSuccess();
-                      // Re-fetch provider models and sync switch states
-                      await prefetchProviderModels(selectedSource, deletingModelType);
-                      message.success(t("model.dialog.success.updateSuccess"));
-                      // Close dialog
-                      handleClose();
-                    } catch (e) {
-                      log.error("Failed to apply model updates", e);
-                      message.error(
-                        t("model.dialog.error.addFailed", { error: e as any })
-                      );
-                    }
-                  } else if (
-                    selectedSource === MODEL_SOURCES.MODELENGINE &&
-                    deletingModelType
-                  ) {
-                    try {
-                      const allEnabledModels = providerModels.filter(
-                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
-                      );
-
-                      if (allEnabledModels) {
-                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.MODELENGINE);
-                        const isEmbeddingType =
-                          deletingModelType === MODEL_TYPES.EMBEDDING ||
-                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
-                        await modelService.addBatchCustomModel({
-                          api_key:
-                            apiKey && apiKey.trim() !== ""
-                              ? apiKey
-                              : "sk-no-api-key",
-                          provider: MODEL_SOURCES.MODELENGINE,
-                          type: deletingModelType,
-                          models: allEnabledModels.map((model) => {
-                            if (isEmbeddingType) {
-                              const { max_tokens, ...modelWithoutMaxTokens } =
-                                model;
-                              return modelWithoutMaxTokens;
-                            } else {
-                              return {
-                                ...model,
-                                max_tokens: model.max_tokens,
-                              };
-                            }
-                          }),
-                        });
-                      }
-
-                      await onSuccess();
-                      await prefetchProviderModels(selectedSource, deletingModelType);
-                      message.success(t("model.dialog.success.updateSuccess"));
-                      handleClose();
-                    } catch (e) {
-                      log.error("Failed to apply ModelEngine model updates", e);
-                      message.error(
-                        t("model.dialog.error.addFailed", { error: e as any })
-                      );
-                    }
-                  } else if (
-                    selectedSource === MODEL_SOURCES.DASHSCOPE &&
-                    deletingModelType
-                  ) {
-                    try {
-                      const allEnabledModels = providerModels.filter(
-                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
-                      );
-
-                      if (allEnabledModels) {
-                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.DASHSCOPE);
-                        const isEmbeddingType =
-                          deletingModelType === MODEL_TYPES.EMBEDDING ||
-                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
-                        await modelService.addBatchCustomModel({
-                          api_key:
-                            apiKey && apiKey.trim() !== ""
-                              ? apiKey
-                              : "sk-no-api-key",
-                          provider: MODEL_SOURCES.DASHSCOPE,
-                          type: deletingModelType,
-                          models: allEnabledModels.map((model) => {
-                            if (isEmbeddingType) {
-                              const { max_tokens, ...modelWithoutMaxTokens } =
-                                model;
-                              return modelWithoutMaxTokens;
-                            } else {
-                              return {
-                                ...model,
-                                max_tokens: model.max_tokens,
-                              };
-                            }
-                          }),
-                        });
-                      }
-
-                      await onSuccess();
-                      await prefetchProviderModels(selectedSource, deletingModelType);
-                      message.success(t("model.dialog.success.updateSuccess"));
-                      handleClose();
-                    } catch (e) {
-                      log.error("Failed to apply DashScope model updates", e);
-                      message.error(
-                        t("model.dialog.error.addFailed", { error: e as any })
-                      );
-                    }
-                  } else if (
-                    selectedSource === MODEL_SOURCES.TOKENPONY &&
-                    deletingModelType
-                  ) {
-                    try {
-                      const allEnabledModels = providerModels.filter(
-                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
-                      );
-
-                      if (allEnabledModels) {
-                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.TOKENPONY);
-                        const isEmbeddingType =
-                          deletingModelType === MODEL_TYPES.EMBEDDING ||
-                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
-                        await modelService.addBatchCustomModel({
-                          api_key:
-                            apiKey && apiKey.trim() !== ""
-                              ? apiKey
-                              : "sk-no-api-key",
-                          provider: MODEL_SOURCES.TOKENPONY,
-                          type: deletingModelType,
-                          models: allEnabledModels.map((model) => {
-                            if (isEmbeddingType) {
-                              const { max_tokens, ...modelWithoutMaxTokens } =
-                                model;
-                              return modelWithoutMaxTokens;
-                            } else {
-                              return {
-                                ...model,
-                                max_tokens: model.max_tokens,
-                              };
-                            }
-                          }),
-                        });
-                      }
-
-                      await onSuccess();
-                      await prefetchProviderModels(selectedSource, deletingModelType);
-                      message.success(t("model.dialog.success.updateSuccess"));
-                      handleClose();
-                    } catch (e) {
-                      log.error("Failed to apply TokenPony model updates", e);
-                      message.error(
-                        t("model.dialog.error.addFailed", { error: e as any })
-                      );
-                    }
-                  } else if (
-                    selectedSource === MODEL_SOURCES.OPENAI &&
-                    deletingModelType
-                  ) {
-                    try {
-                      // For OpenAI source, just refresh the list and close dialog
-                      await onSuccess();
-                      message.success(t("model.dialog.success.updateSuccess"));
-                      handleClose();
-                    } catch (e) {
-                      log.error("Failed to apply OpenAI model updates", e);
-                      message.error(
-                        t("model.dialog.error.addFailed", { error: e as any })
-                      );
-                    }
-                  }
-                } finally {
-                  setIsConfirmLoading(false);
-                }
-              }}
+            <Tooltip
+              key="confirm-tooltip"
+              title={
+                hasUnconfiguredSelectedRow
+                  ? t("model.dialog.batch.requireRowCapacity")
+                  : ""
+              }
             >
-              {t("common.confirm")}
-            </Button>
+              <Button
+                key="confirm"
+                type="primary"
+                loading={isConfirmLoading}
+                disabled={hasUnconfiguredSelectedRow}
+                onClick={async () => {
+                  setIsConfirmLoading(true);
+                  try {
+                    // Handle changes for both silicon and openai sources
+                    if (
+                      selectedSource === MODEL_SOURCES.SILICON &&
+                      deletingModelType
+                    ) {
+                      try {
+                        // Get all currently enabled models (including originally enabled and newly enabled ones)
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.SILICON
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          // Pass all currently enabled models
+                          // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.SILICON,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        // Refresh list
+                        await onSuccess();
+                        // Re-fetch provider models and sync switch states
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        // Close dialog
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.MODELENGINE &&
+                      deletingModelType
+                    ) {
+                      try {
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.MODELENGINE
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.MODELENGINE,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        await onSuccess();
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error(
+                          "Failed to apply ModelEngine model updates",
+                          e
+                        );
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.DASHSCOPE &&
+                      deletingModelType
+                    ) {
+                      try {
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.DASHSCOPE
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.DASHSCOPE,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        await onSuccess();
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply DashScope model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.TOKENPONY &&
+                      deletingModelType
+                    ) {
+                      try {
+                        const allEnabledModels = providerModels.filter(
+                          (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                        );
+
+                        if (allEnabledModels) {
+                          const apiKey = getApiKeyByType(
+                            deletingModelType,
+                            MODEL_SOURCES.TOKENPONY
+                          );
+                          const isEmbeddingType =
+                            deletingModelType === MODEL_TYPES.EMBEDDING ||
+                            deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                          await modelService.addBatchCustomModel({
+                            api_key:
+                              apiKey && apiKey.trim() !== ""
+                                ? apiKey
+                                : "sk-no-api-key",
+                            provider: MODEL_SOURCES.TOKENPONY,
+                            type: deletingModelType,
+                            models: allEnabledModels.map((model) => {
+                              if (isEmbeddingType) {
+                                const { max_tokens, ...modelWithoutMaxTokens } =
+                                  model;
+                                return modelWithoutMaxTokens;
+                              } else {
+                                return {
+                                  ...model,
+                                  max_tokens: model.max_tokens,
+                                };
+                              }
+                            }),
+                          });
+                        }
+
+                        await onSuccess();
+                        await prefetchProviderModels(
+                          selectedSource,
+                          deletingModelType
+                        );
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply TokenPony model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    } else if (
+                      selectedSource === MODEL_SOURCES.OPENAI &&
+                      deletingModelType
+                    ) {
+                      try {
+                        // For OpenAI source, just refresh the list and close dialog
+                        await onSuccess();
+                        message.success(
+                          t("model.dialog.success.updateSuccess")
+                        );
+                        handleClose();
+                      } catch (e) {
+                        log.error("Failed to apply OpenAI model updates", e);
+                        message.error(
+                          t("model.dialog.error.addFailed", { error: e as any })
+                        );
+                      }
+                    }
+                  } finally {
+                    setIsConfirmLoading(false);
+                  }
+                }}
+              >
+                {t("common.confirm")}
+              </Button>
+            </Tooltip>
           ),
       ]}
       width={520}
@@ -1319,6 +1474,12 @@ export const ModelDeleteDialog = ({
                     m.source === selectedSource
                 );
                 const canEditEmbedding = isEmbeddingModel && existingModel;
+                const isBareCapacity = existingModel
+                  ? bareCapacityModelIds.has(existingModel.id)
+                  : false;
+                const hasSuggestion = existingModel
+                  ? suggestionAvailableModelIds.has(existingModel.id)
+                  : false;
 
                 return (
                   <div
@@ -1343,6 +1504,21 @@ export const ModelDeleteDialog = ({
                           {String(providerModel.model_tag)}
                         </span>
                       )}
+                      {isBareCapacity && (
+                        <Tooltip
+                          title={
+                            hasSuggestion
+                              ? t(
+                                  "model.dialog.capacityCoverage.warningWithSuggestion"
+                                )
+                              : t("model.dialog.capacityCoverage.warning")
+                          }
+                        >
+                          <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
+                            {t("model.dialog.capacityCoverage.tag")}
+                          </span>
+                        </Tooltip>
+                      )}
                     </div>
                     <div className="flex items-center space-x-2">
                       {deletingModelType !== MODEL_TYPES.EMBEDDING &&
@@ -1357,7 +1533,43 @@ export const ModelDeleteDialog = ({
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent switch toggle
-                                handleSingleModelSettingsClick(providerModel);
+                                // The provider catalog entry carries snake_case
+                                // ids and (sometimes) a default max_tokens, but
+                                // never the user's saved capacity columns. When
+                                // the model has already been added, overlay the
+                                // saved ModelOption (camelCase) onto the catalog
+                                // row in snake_case so the edit dialog
+                                // pre-fills context_window_tokens etc. instead
+                                // of showing empty fields.
+                                const settingsTarget = existingModel
+                                  ? {
+                                      ...providerModel,
+                                      max_tokens:
+                                        existingModel.maxTokens ??
+                                        providerModel.max_tokens,
+                                      timeout_seconds:
+                                        existingModel.timeoutSeconds ??
+                                        providerModel.timeout_seconds,
+                                      concurrency_limit:
+                                        existingModel.concurrencyLimit ??
+                                        providerModel.concurrency_limit,
+                                      context_window_tokens:
+                                        existingModel.contextWindowTokens,
+                                      max_input_tokens:
+                                        existingModel.maxInputTokens,
+                                      max_output_tokens:
+                                        existingModel.maxOutputTokens,
+                                      default_output_reserve_tokens:
+                                        existingModel.defaultOutputReserveTokens,
+                                      tokenizer_family:
+                                        existingModel.tokenizerFamily,
+                                      capacity_source:
+                                        existingModel.capacitySource,
+                                      capability_profile_version:
+                                        existingModel.capabilityProfileVersion,
+                                    }
+                                  : providerModel;
+                                handleSingleModelSettingsClick(settingsTarget);
                               }}
                             />
                           </Tooltip>
@@ -1410,6 +1622,10 @@ export const ModelDeleteDialog = ({
                     selectedSource === MODEL_SOURCES.OPENAI_API_COMPATIBLE;
                   const isClickable =
                     isBatchImportedEmbedding || isCustomModelClickable;
+                  const isBareCapacity = bareCapacityModelIds.has(model.id);
+                  const hasSuggestion = suggestionAvailableModelIds.has(
+                    model.id
+                  );
 
                   return (
                     <div
@@ -1433,6 +1649,21 @@ export const ModelDeleteDialog = ({
                         >
                           {model.displayName || model.name} ({model.name})
                         </div>
+                        {isBareCapacity && (
+                          <Tooltip
+                            title={
+                              hasSuggestion
+                                ? t(
+                                    "model.dialog.capacityCoverage.warningWithSuggestion"
+                                  )
+                                : t("model.dialog.capacityCoverage.warning")
+                            }
+                          >
+                            <span className="mt-1 inline-flex w-fit px-1.5 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700 border border-yellow-200">
+                              {t("model.dialog.capacityCoverage.tag")}
+                            </span>
+                          </Tooltip>
+                        )}
                       </div>
                       <button
                         onClick={(e) => {
@@ -1526,7 +1757,10 @@ export const ModelDeleteDialog = ({
       <ProviderConfigEditDialog
         isOpen={isProviderConfigOpen}
         onClose={() => setIsProviderConfigOpen(false)}
-        initialApiKey={getApiKeyByType(deletingModelType, selectedSource || undefined)}
+        initialApiKey={getApiKeyByType(
+          deletingModelType,
+          selectedSource || undefined
+        )}
         initialMaxTokens={
           models
             .find(
@@ -1536,21 +1770,26 @@ export const ModelDeleteDialog = ({
             )
             ?.maxTokens?.toString() || ""
         }
-        initialTimeoutSeconds={(
-          models.find(
-            (m) =>
-              m.type === deletingModelType &&
-              m.source === (selectedSource || MODEL_SOURCES.SILICON)
-          )?.timeoutSeconds?.toString() || "120"
-        )}
-        initialConcurrencyLimit={(
-          models.find(
-            (m) =>
-              m.type === deletingModelType &&
-              m.source === (selectedSource || MODEL_SOURCES.SILICON)
-          )?.concurrencyLimit?.toString() || ""
-        )}
+        initialTimeoutSeconds={
+          models
+            .find(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource || MODEL_SOURCES.SILICON)
+            )
+            ?.timeoutSeconds?.toString() || "120"
+        }
+        initialConcurrencyLimit={
+          models
+            .find(
+              (m) =>
+                m.type === deletingModelType &&
+                m.source === (selectedSource || MODEL_SOURCES.SILICON)
+            )
+            ?.concurrencyLimit?.toString() || ""
+        }
         modelType={deletingModelType || undefined}
+        hideCapacityFields={true}
         onSave={handleProviderConfigSave}
       />
 
@@ -1562,20 +1801,66 @@ export const ModelDeleteDialog = ({
           setSelectedSingleModel(null);
         }}
         initialMaxTokens={selectedSingleModel?.max_tokens?.toString() || ""}
-        initialTimeoutSeconds={selectedSingleModel?.timeout_seconds?.toString() || "120"}
-        initialConcurrencyLimit={selectedSingleModel?.concurrency_limit?.toString() || ""}
+        initialTimeoutSeconds={
+          selectedSingleModel?.timeout_seconds?.toString() || "120"
+        }
+        initialConcurrencyLimit={
+          selectedSingleModel?.concurrency_limit?.toString() || ""
+        }
+        initialCapacity={
+          selectedSingleModel
+            ? {
+                contextWindowTokens: selectedSingleModel.context_window_tokens,
+                maxInputTokens: selectedSingleModel.max_input_tokens,
+                maxOutputTokens: selectedSingleModel.max_output_tokens,
+                // Legacy max_tokens is promoted to maxOutputTokens by
+                // capacityFormFromModel; pass it through so the deprecation
+                // warning auto-resolves when the user opens the dialog.
+                maxTokens: selectedSingleModel.max_tokens,
+                defaultOutputReserveTokens:
+                  selectedSingleModel.default_output_reserve_tokens,
+                tokenizerFamily: selectedSingleModel.tokenizer_family,
+                capacitySource: selectedSingleModel.capacity_source,
+                capabilityProfileVersion:
+                  selectedSingleModel.capability_profile_version,
+              }
+            : undefined
+        }
         modelType={deletingModelType || undefined}
         showApiKeyField={false}
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {
-            const modelName = selectedSingleModel.model_name || selectedSingleModel.id;
+            // batch_update_models_for_tenant looks the row up by either a
+            // numeric model_id or a "model_factory/model_name" composite key
+            // (it splits on "/" and passes the prefix as model_factory).
+            // Sending just `model_name` here matched no row in production
+            // because DB rows have model_factory="dashscope" (etc.) and the
+            // missing prefix made get_model_by_name_factory return None --
+            // the gear modal's capacity edits became silent no-ops, which
+            // contributed to the glm-5.x / glm-4.7 soft-delete incident.
+            const baseName =
+              selectedSingleModel.model_name || selectedSingleModel.id;
+            const provider =
+              selectedSingleModel.model_factory || selectedSource;
+            const qualifiedId =
+              baseName && typeof baseName === "string" && baseName.includes("/")
+                ? baseName
+                : provider
+                  ? `${provider}/${baseName}`
+                  : baseName;
 
             const updatePayload: any = {
-              model_id: modelName,
+              model_id: qualifiedId,
               maxTokens: config.maxTokens,
               timeoutSeconds: config.timeoutSeconds,
               concurrencyLimit: config.concurrencyLimit,
+              contextWindowTokens: config.contextWindowTokens,
+              maxInputTokens: config.maxInputTokens,
+              maxOutputTokens: config.maxOutputTokens,
+              defaultOutputReserveTokens: config.defaultOutputReserveTokens,
+              tokenizerFamily: config.tokenizerFamily,
+              capacitySource: config.capacitySource,
             };
 
             if (config.apiKey) {
@@ -1596,15 +1881,26 @@ export const ModelDeleteDialog = ({
                       max_tokens: config.maxTokens,
                       timeout_seconds: config.timeoutSeconds,
                       concurrency_limit: config.concurrencyLimit,
+                      context_window_tokens: config.contextWindowTokens,
+                      max_input_tokens: config.maxInputTokens,
+                      max_output_tokens: config.maxOutputTokens,
+                      default_output_reserve_tokens:
+                        config.defaultOutputReserveTokens,
+                      tokenizer_family: config.tokenizerFamily,
+                      capacity_source: config.capacitySource,
                     }
                   : model
               )
             );
 
-            message.success(t("model.message.updateSuccess") || "Update successful");
+            message.success(
+              t("model.message.updateSuccess") || "Update successful"
+            );
           } catch (error) {
             console.error("Failed to update model settings:", error);
-            message.error(t("model.message.updateFailed") || "Failed to update settings");
+            message.error(
+              t("model.message.updateFailed") || "Failed to update settings"
+            );
           }
         }}
       />

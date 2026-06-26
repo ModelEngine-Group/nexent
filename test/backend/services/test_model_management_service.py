@@ -108,6 +108,8 @@ consts_const_mod = types.ModuleType("consts.const")
 consts_const_mod.LOCALHOST_IP = "127.0.0.1"
 consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
+consts_const_mod.CAPACITY_SUGGESTION_ENABLED = True
+consts_const_mod.CAPACITY_VISIBILITY_ENABLED = True
 consts_const_mod.DATA_PROCESS_SERVICE = "http://data-process"
 consts_const_mod.FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024
 consts_const_mod.MAX_CONCURRENT_UPLOADS = 5
@@ -1022,6 +1024,57 @@ async def test_update_single_model_for_tenant_success_single_model():
         )
 
 
+async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max_tokens():
+    """LLM updates carrying max_output_tokens must mirror into the legacy
+    max_tokens column so the SDK's pre-W2 auto-fill cannot read a stale value
+    and trip CallerMaxTokensOverrideForbidden at the W2 dispatch boundary.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name", "max_tokens": 204800},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "max_output_tokens": 131072,
+        # No explicit max_tokens — caller relies on backend coercion.
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_args = mock_update.call_args.args[1]
+        assert update_args["max_output_tokens"] == 131072
+        assert update_args["max_tokens"] == 131072
+
+
+async def test_update_single_model_for_tenant_preserves_embedding_max_tokens():
+    """Embedding rows must NOT have max_tokens mirrored from max_output_tokens —
+    max_tokens is repurposed as the vector dimension on those rows.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 10, "model_type": "embedding", "display_name": "emb", "max_tokens": 4096},
+    ]
+    # Defensive caller accidentally passes max_output_tokens on an embedding row.
+    model_data = {
+        "model_id": 10,
+        "display_name": "emb",
+        "max_output_tokens": 8192,
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "emb", model_data)
+
+        update_args = mock_update.call_args.args[1]
+        # Embedding rows skip the coercion, so legacy max_tokens stays untouched.
+        assert "max_tokens" not in update_args
+
+
 async def test_update_single_model_for_tenant_conflict_new_display_name():
     """Updating to a new conflicting display_name raises ValueError."""
     svc = import_svc()
@@ -1705,3 +1758,268 @@ async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_tr
         assert mock_create.call_count == 1
         create_args = mock_create.call_args[0][0]
         assert create_args["ssl_verify"] is True
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_update_branch_persists_operator_capacity():
+    """Re-confirming a batch with operator-marked capacity updates W1/W2 columns.
+
+    Regression test for the gap that left glm-5.x style rows with NULL
+    W2 columns: the batch_create update branch previously only checked
+    legacy max_tokens for changes, so a user who tweaked the top-level
+    batch defaults and re-confirmed could not push the new
+    context_window_tokens / max_output_tokens onto an existing row.
+    """
+    svc = import_svc()
+
+    existing_row = {
+        "model_id": 42,
+        "model_repo": "dashscope",
+        "model_name": "glm-5.2",
+        "max_tokens": 31920,
+        "context_window_tokens": None,
+        "max_output_tokens": None,
+        "capacity_source": None,
+    }
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [
+            {
+                "id": "dashscope/glm-5.2",
+                "max_tokens": 31920,
+                "context_window_tokens": 200000,
+                "max_output_tokens": 31920,
+                "default_output_reserve_tokens": 4096,
+                "tokenizer_family": "qwen",
+                "capacity_source": "operator",
+            }
+        ],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.2")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.2"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        mock_update.assert_called_once()
+        called_model_id, called_update_data, *_ = mock_update.call_args[0]
+        assert called_model_id == 42
+        assert called_update_data["context_window_tokens"] == 200000
+        assert called_update_data["max_output_tokens"] == 31920
+        assert called_update_data["default_output_reserve_tokens"] == 4096
+        assert called_update_data["tokenizer_family"] == "qwen"
+        assert called_update_data["capacity_source"] == "operator"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_update_branch_skips_provider_candidate_capacity():
+    """Provider-discovered hints must not auto-overwrite an existing row.
+
+    Even when the catalog response contains rich inference_metadata, those
+    values stay tagged capacity_source="provider_candidate" until the
+    operator accepts them. Refreshing the provider list must not
+    silently rewrite a row's operator-set capacity (or its NULLs) with
+    catalog hints.
+    """
+    svc = import_svc()
+
+    existing_row = {
+        "model_id": 7,
+        "model_repo": "dashscope",
+        "model_name": "glm-5.1",
+        "max_tokens": 8192,
+        "context_window_tokens": None,
+        "max_output_tokens": None,
+        "capacity_source": None,
+    }
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [
+            {
+                "id": "dashscope/glm-5.1",
+                "max_tokens": 8192,
+                "context_window_tokens": 128000,
+                "max_output_tokens": 8192,
+                "tokenizer_family": "qwen",
+                "capacity_source": "provider_candidate",
+            }
+        ],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[existing_row]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("dashscope", "glm-5.1")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="dashscope/glm-5.1"), \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "create_model_record"):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # max_tokens didn't change between existing (8192) and incoming
+        # (8192), so no update is needed at all. If the implementation
+        # were treating provider_candidate as authoritative, update would
+        # fire with the W2 fields.
+        if mock_update.called:
+            _, called_update_data, *_ = mock_update.call_args[0]
+            assert "context_window_tokens" not in called_update_data
+            assert "max_output_tokens" not in called_update_data
+            assert "tokenizer_family" not in called_update_data
+            assert called_update_data.get("capacity_source") != "provider_candidate"
+
+
+def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": 1,
+            "model_repo": "",
+            "model_name": "gpt-4o",
+            "model_factory": "openai",
+            "model_type": "llm",
+            "context_window_tokens": 128000,
+            "max_output_tokens": 16384,
+            "max_tokens": 16384,
+            "base_url": "https://api.openai.com/v1",
+        },
+        {
+            "model_id": 2,
+            "model_repo": "",
+            "model_name": "glm-5",
+            "model_factory": "OpenAI-API-Compatible",
+            "model_type": "llm",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 131072,
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+        {
+            "model_id": 3,
+            "model_repo": "",
+            "model_name": "vision-model",
+            "model_factory": "custom",
+            "model_type": "vlm",
+            "context_window_tokens": 32000,
+            "max_output_tokens": None,
+            "max_tokens": 8192,
+            "base_url": "https://example.com/v1",
+        },
+        {
+            "model_id": 4,
+            "model_repo": "",
+            "model_name": "embedding-model",
+            "model_factory": "openai",
+            "model_type": "embedding",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 1536,
+            "base_url": "https://api.openai.com/v1",
+        },
+        {
+            "model_id": 5,
+            "model_repo": "",
+            "model_name": "rerank-model",
+            "model_factory": "custom",
+            "model_type": "rerank",
+            "context_window_tokens": None,
+            "max_output_tokens": None,
+            "max_tokens": 512,
+            "base_url": "https://example.com/v1",
+        },
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "_capacity_suggestion_available", side_effect=[True, False]):
+        result = svc.get_capacity_coverage("tenant-a")
+
+    assert result["total_llm_vlm"] == 3
+    assert result["bare_count"] == 2
+    assert [model["model_id"] for model in result["bare_models"]] == [2, 3]
+    assert result["bare_models"][0]["max_tokens"] == 131072
+    assert result["bare_models"][0]["suggestion_available"] is True
+    assert result["bare_models"][1]["suggestion_available"] is False
+
+
+def test_get_capacity_coverage_visibility_flag_off():
+    svc = import_svc()
+
+    with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
+            mock.patch.object(svc, "get_model_records") as mock_get_records:
+        result = svc.get_capacity_coverage("tenant-a")
+
+    assert result == {"total_llm_vlm": 0, "bare_count": 0, "bare_models": []}
+    mock_get_records.assert_not_called()
+
+
+def test_capacity_suggestion_available_uses_catalog_matcher():
+    svc = import_svc()
+
+    model = {
+        "model_id": 10,
+        "model_repo": "",
+        "model_name": "gpt-4o",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+    fake_result = mock.MagicMock()
+    fake_result.match_kind = svc.CapacitySuggestionMatchKind.CATALOG_EXACT
+
+    with mock.patch.object(svc, "suggest_capacity", return_value=fake_result) as mock_suggest:
+        assert svc._capacity_suggestion_available(model) is True
+
+    mock_suggest.assert_called_once_with(
+        model_name="gpt-4o",
+        base_url="https://api.openai.com/v1",
+        provider_hint="openai",
+        model_type="llm",
+        enabled=True,
+    )
+
+
+def test_capacity_suggestion_available_records_error_on_exception():
+    """A catalog-matcher exception falls back to False AND increments the
+    coverage-error counter. Without the counter a corrupt catalog entry would
+    silently flip every row's suggestion_available to False with zero signal.
+    """
+    svc = import_svc()
+
+    model = {
+        "model_id": 42,
+        "model_repo": "",
+        "model_name": "broken-model",
+        "model_factory": "openai",
+        "model_type": "llm",
+        "base_url": "https://api.openai.com/v1",
+    }
+
+    with mock.patch.object(svc, "suggest_capacity", side_effect=RuntimeError("catalog corrupt")), \
+            mock.patch.object(svc, "_record_capacity_coverage_error") as mock_record:
+        assert svc._capacity_suggestion_available(model) is False
+
+    mock_record.assert_called_once()
+    recorded_args = mock_record.call_args[0]
+    assert recorded_args[0] == 42
+    assert isinstance(recorded_args[1], RuntimeError)
+
+
+def test_record_capacity_coverage_error_no_op_when_counter_disabled():
+    """The recorder must not raise when OpenTelemetry is unavailable; the
+    counter is None and the call becomes a no-op so coverage scans keep
+    working in deployments without telemetry installed.
+    """
+    svc = import_svc()
+
+    with mock.patch.object(svc, "_capacity_suggestion_coverage_errors_total", None):
+        # Should not raise.
+        svc._record_capacity_coverage_error(7, RuntimeError("boom"))

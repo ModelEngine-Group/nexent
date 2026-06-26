@@ -1,0 +1,93 @@
+{{- $global := default dict .Values.global -}}
+{{- $sqlFileNames := default dict $global.sqlFileNames -}}
+{{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $workspaceStorage := default dict $sharedStorage.workspace -}}
+{{- $skillsStorage := default dict $sharedStorage.skills -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-config
+  annotations:
+    "helm.sh/hook-weight": "20"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-config
+  template:
+    metadata:
+      labels:
+        app: nexent-config
+      annotations:
+        checksum/nexent-backend: {{ dig "rolloutChecksums" "backend" "" .Values.global | quote }}
+        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: nexent-config
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          ports:
+            - containerPort: 5010
+              name: http
+          command:
+            - /opt/nexent/scripts/start-backend.sh
+            - python
+            - backend/config_service.py
+          envFrom:
+            - configMapRef:
+                name: nexent-config
+            - secretRef:
+                name: nexent-secrets
+          env:
+            - name: NEXENT_SQL_STARTUP_MODE
+              value: "migrate"
+            - name: DEPLOYMENT_VERSION
+              value: {{ .Values.global.deploymentVersion | quote }}
+            - name: skip_proxy
+              value: {{ .Values.config.skipProxy | quote }}
+            - name: UMASK
+              value: {{ .Values.config.umask | quote }}
+          volumeMounts:
+            - name: nexent-sql-files
+              mountPath: /opt/nexent/sql
+              readOnly: true
+            - name: nexent-workspace
+              mountPath: /mnt/nexent
+            - name: nexent-skills
+              mountPath: /mnt/nexent-data/skills
+          resources:
+            requests:
+              memory: {{ .Values.resources.backend.requests.memory }}
+              cpu: {{ .Values.resources.backend.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.backend.limits.memory }}
+              cpu: {{ .Values.resources.backend.limits.cpu }}
+      volumes:
+        - name: nexent-sql-files
+          configMap:
+            name: nexent-sql-files
+            items:
+              - key: init.sql
+                path: init.sql
+              - key: migrations-.keep
+                path: migrations/.keep
+{{ range $name := default (list) $sqlFileNames.migrations }}
+              - key: {{ printf "migrations-%s" $name | quote }}
+                path: {{ printf "migrations/%s" $name | quote }}
+{{ end }}
+              - key: supabase-.keep
+                path: supabase/.keep
+{{ range $name := default (list) $sqlFileNames.supabase }}
+              - key: {{ printf "supabase-%s" $name | quote }}
+                path: {{ printf "supabase/%s" $name | quote }}
+{{ end }}
+        - name: nexent-workspace
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
+        - name: nexent-skills
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-skills" $skillsStorage.existingClaim }}

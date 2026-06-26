@@ -1,9 +1,11 @@
 import logging
 import threading
-from typing import Dict, Union
+from typing import TYPE_CHECKING, Any, Dict, Union
 
 from nexent.core.agents.agent_model import AgentRunInfo
-from nexent.core.agents.agent_context import ContextManager, ContextManagerConfig
+
+if TYPE_CHECKING:
+    from nexent.core.agents.agent_context import ContextManager, ContextManagerConfig
 
 logger = logging.getLogger("agent_run_manager")
 
@@ -25,7 +27,7 @@ class AgentRunManager:
             # user_id:conversation_id -> agent_run_info
             self.agent_runs: Dict[str, AgentRunInfo] = {}
             # conversation_id -> ContextManager (conversation-level lifetime)
-            self._conversation_context_managers: Dict[str, ContextManager] = {}
+            self._conversation_context_managers: Dict[str, Any] = {}
             # conversation_id -> active run count for safe cleanup
             self._conversation_run_counts: Dict[str, int] = {}
             self._initialized = True
@@ -78,10 +80,12 @@ class AgentRunManager:
     def get_or_create_context_manager(
         self,
         conversation_id: Union[int, str],
-        config: ContextManagerConfig,
+        config: "ContextManagerConfig",
         max_steps: int
-    ) -> ContextManager:
+    ) -> "ContextManager":
         """Get or create a conversation-level ContextManager instance."""
+        from nexent.core.agents.agent_context import ContextManager
+
         conv_key = str(conversation_id)
         with self._lock:
             cm = self._conversation_context_managers.get(conv_key)

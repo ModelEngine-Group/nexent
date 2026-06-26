@@ -27,7 +27,7 @@ kubectl get nodes
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
+cd nexent/deploy/k8s
 ```
 
 ### 3. 部署
@@ -57,7 +57,7 @@ cd nexent/k8s/helm
 - **mainland**: 使用中国大陆镜像源
 - **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
 
-部署成功后，非敏感部署选项会保存到 `k8s/helm/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 ### ⚠️ 重要提示
 
@@ -202,11 +202,11 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会生成运行时 Helm values，设置 `global.monitoring.enabled`、`global.monitoring.provider`、`global.monitoring.dashboardUrl`，并启用 `nexent-monitoring` 子 Chart。
 
 ```bash
-cd nexent/k8s/helm
+cd nexent/deploy/k8s
 ./deploy.sh
 ```
 
-如果本地已有 `k8s/helm/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
+如果本地已有 `deploy/k8s/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
 
 支持的 provider：
 
@@ -219,7 +219,7 @@ cd nexent/k8s/helm
 | `grafana` | 本地 Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | 本地 Zipkin | `http://localhost:30011` |
 
-选择 `langsmith` provider 前，请先在 `k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
+选择 `langsmith` provider 前，请先在 `deploy/deploy/k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
 
 常用 Helm values：
 

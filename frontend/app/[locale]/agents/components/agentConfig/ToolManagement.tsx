@@ -143,13 +143,15 @@ export default function ToolManagement({
 
         if (tooInstance.success && tooInstance.data) {
           // Merge instance params with default params
+          // Only use instance value if it exists and is not null/undefined
           const mergedParams =
             defaultTool.initParams?.map((param: ToolParam) => {
               const instanceValue = tooInstance.data?.params?.[param.name];
+              // Use instance value only if it's not null or undefined
+              const hasValidInstanceValue = instanceValue !== null && instanceValue !== undefined;
               return {
                 ...param,
-                value:
-                  instanceValue !== undefined ? instanceValue : param.value,
+                value: hasValidInstanceValue ? instanceValue : param.value,
               };
             }) ||
             defaultTool.initParams ||
