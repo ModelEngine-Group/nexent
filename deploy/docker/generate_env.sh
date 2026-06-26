@@ -8,9 +8,12 @@ DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="${DEPLOYMENT_ROOT_ENV:-$PROJECT_ROOT/.env}"
 ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
+LEGACY_ENV="$PROJECT_ROOT/docker/.env"
 LEGACY_ENV_EXAMPLE="$PROJECT_ROOT/docker/.env.example"
 
-echo "   📁 Target .env location: $ENV_FILE"
+if [ "${NEXENT_GENERATE_ENV_SKIP_MAIN:-false}" != "true" ]; then
+  echo "   📁 Target .env location: $ENV_FILE"
+fi
 
 update_env_var() {
   local key="$1"
@@ -41,6 +44,10 @@ prepare_env_file() {
 
   if [ -f "$ENV_FILE" ]; then
     echo "   ✅ Using existing root .env"
+  elif [ -f "$LEGACY_ENV" ]; then
+    echo "   root .env not found, copying docker/.env..."
+    cp "$LEGACY_ENV" "$ENV_FILE"
+    echo "   Created root .env from docker/.env"
   elif [ -f "$ENV_EXAMPLE" ]; then
     echo "   📋 root .env not found, copying .env.example..."
     cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -50,7 +57,7 @@ prepare_env_file() {
     cp "$LEGACY_ENV_EXAMPLE" "$ENV_FILE"
     echo "   ✅ Created root .env from docker/.env.example"
   else
-    echo "   ❌ ERROR Neither root .env nor .env.example exists"
+    echo "   ERROR Neither root .env nor docker/.env nor .env.example exists"
     ERROR_OCCURRED=1
     return 1
   fi
@@ -167,4 +174,6 @@ main() {
 }
 
 # Run main function
-main "$@"
+if [ "${NEXENT_GENERATE_ENV_SKIP_MAIN:-false}" != "true" ]; then
+  main "$@"
+fi

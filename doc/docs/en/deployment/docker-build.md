@@ -224,11 +224,35 @@ Notes:
 
 ## 🚀 Deployment Recommendations
 
-After building is complete, you can deploy local images from the `docker` directory:
+After building is complete, you can deploy local images from the repository root:
 
 ```bash
-cd docker
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
 > `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `deploy/docker/deploy.sh`.
+
+### Package Local Images for Offline Deployment
+
+After building local `latest` images, package them with the offline builder:
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target docker \
+  --version latest \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest \
+  --compress true \
+  --output-dir offline-package/docker-local
+```
+
+When `--version latest` or `--image-source local-latest` is used, the builder expects local Nexent application images and skips pulling those `latest` tags. The package can then be moved to another host and deployed with:
+
+```bash
+cd offline-package/docker-local
+bash deploy.sh --load-images docker \
+  --version latest \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest
+```
