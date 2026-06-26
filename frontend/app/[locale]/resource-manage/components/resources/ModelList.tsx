@@ -3,11 +3,12 @@
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Table, Button, Popconfirm, message, Tag, Segmented, Tooltip } from "antd";
-import { Edit, Trash2, RefreshCw } from "lucide-react";
+import { Edit, Trash2, RefreshCw, TriangleAlert } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
 import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
+import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
 import { useMonitoringData, type TimeRange } from "@/hooks/useMonitoringData";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
@@ -29,6 +30,8 @@ interface UnifiedModelRow extends ModelOption {
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+
+  const { bareModelIds } = useCapacityCoverage();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -222,6 +225,27 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       key: "displayName",
       width: 180,
       ellipsis: true,
+      render: (displayName: string, record: UnifiedModelRow) => {
+        const isBareCapacity = record.id && bareModelIds.has(record.id) && (record.type === 'llm' || record.type === 'vlm');
+        
+        return (
+          <div className="flex items-center">
+            <span className="truncate">{displayName}</span>
+            {isBareCapacity && (
+              <Tooltip title={t("model.list.capacityWarning.badgeTooltip")}>
+                <TriangleAlert
+                  size={14}
+                  className="text-yellow-500 cursor-pointer ml-1.5 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit(record);
+                  }}
+                />
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: t("common.type"),

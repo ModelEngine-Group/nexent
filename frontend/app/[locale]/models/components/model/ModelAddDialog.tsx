@@ -1877,6 +1877,7 @@ export const ModelAddDialog = ({
               onUseSuggestion={() =>
                 applyCapacitySuggestion(capacitySuggestion)
               }
+              acceptedSuggestion={acceptedCapacitySuggestion}
             />
           </div>
         )}

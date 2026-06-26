@@ -89,6 +89,8 @@ interface ModelCapacityFieldsProps {
    * `applyDefaults` option -- callers should pass matching booleans.
    */
   applyDefaultsOnEmpty?: boolean;
+  /** Currently accepted suggestion, used to detect fuzzy canonicalization mismatch */
+  acceptedSuggestion?: CapacitySuggestion | null;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -278,6 +280,7 @@ export const ModelCapacityFields = ({
   suggestionLoading = false,
   legacyMaxTokensCandidate,
   applyDefaultsOnEmpty = true,
+  acceptedSuggestion,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
@@ -495,6 +498,15 @@ export const ModelCapacityFields = ({
                   {suggestion.suggestedProvider && (
                     <Tag color="purple">{suggestion.suggestedProvider}</Tag>
                   )}
+                  {suggestion.matchKind === "catalog_fuzzy" &&
+                    (!acceptedSuggestion ||
+                      (acceptedSuggestion &&
+                        acceptedSuggestion.canonicalModelName !==
+                          suggestion.canonicalModelName)) && (
+                      <div className="text-xs text-yellow-700 mt-1">
+                        {t("model.dialog.capacity.suggestion.profileMissWarning")}
+                      </div>
+                    )}
                   {onUseSuggestion && (
                     <Button
                       size="small"

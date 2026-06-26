@@ -724,6 +724,7 @@ export const ModelEditDialog = ({
               onUseSuggestion={() =>
                 applyCapacitySuggestion(capacitySuggestion)
               }
+              acceptedSuggestion={acceptedCapacitySuggestion}
               // Legacy max_tokens is now surfaced via the actionable
               // legacyMaxTokensCandidate prompt with two-target buttons
               // (Context Window vs Max Output). The prompt is offered while
