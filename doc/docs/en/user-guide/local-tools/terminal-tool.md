@@ -33,7 +33,7 @@ Working directory: /opt/terminal
 ##### Method B: Local Image Build
 ```bash
 # Build Ubuntu Terminal image locally
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 ```
 
 > 📚 **Detailed Build Instructions**: Refer to [Docker Build Guide](/en/deployment/docker-build) for complete image build and push processes.

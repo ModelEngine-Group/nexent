@@ -14,7 +14,7 @@ Follow these steps to upgrade Nexent on Kubernetes safely:
 
 Before updating, record the current deployment version and data directory information.
 
-- Current Deployment Version Location: `APP_VERSION` in `backend/consts/const.py`
+- Current Deployment Version Location: root `VERSION`
 - Local volume directories: each Helm sub-chart's `storage.hostPath`, defaulting to `/var/lib/nexent-data/nexent-*`
 
 **Code downloaded via git**
@@ -35,7 +35,7 @@ git pull
 Navigate to the k8s/helm directory of the updated code and run the deployment script:
 
 ```bash
-cd k8s/helm
+cd deploy/k8s
 ./deploy.sh
 ```
 
@@ -55,79 +55,11 @@ After deployment:
 
 ---
 
-## 🗄️ Manual Database Update
+## 🗄️ Database Migrations
 
-If some SQL files fail to execute during the upgrade, or if you need to run incremental SQL scripts manually, you can perform the update using the methods below.
+SQL migrations are no longer executed manually. In Kubernetes, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies merged migration files from `deploy/sql/migrations/`, such as `v1_merged_migrations.sql`, `v2.0_merged_migrations.sql`, `v2.1_merged_migrations.sql`, and `v2.2_merged_migrations.sql`; the other backend services only wait for migration records to reach the target state.
 
-### 📋 Find SQL Scripts
-
-SQL migration scripts are located in the repository at:
-
-```
-docker/sql/
-```
-
-Check the [upgrade-guide](./upgrade-guide.md) or release notes to identify which SQL scripts need to be executed for your upgrade path.
-
-### ✅ Method A: Use a SQL Editor (recommended)
-
-1. Open your SQL client and create a new PostgreSQL connection.
-2. Get connection settings from the running PostgreSQL pod:
-
-   ```bash
-   # Get PostgreSQL pod name
-   kubectl get pods -n nexent -l app=nexent-postgresql
-
-   # Port-forward to access PostgreSQL locally
-   kubectl port-forward svc/nexent-postgresql 5433:5432 -n nexent &
-   ```
-
-3. Connection details:
-   - Host: `localhost`
-   - Port: `5433` (forwarded port)
-   - Database: `nexent`
-   - User: `root`
-   - Password: Check in `k8s/helm/nexent/charts/nexent-common/values.yaml`
-
-4. Test the connection. When successful, you should see tables under the `nexent` schema.
-5. Execute the required SQL file(s) in version order.
-
-> ⚠️ Important
-> - Always back up the database first, especially in production.
-> - Run scripts sequentially to avoid dependency issues.
-
-### 🧰 Method B: Use kubectl exec (no SQL client required)
-
-Execute SQL scripts directly via stdin redirection:
-
-1. Get the PostgreSQL pod name:
-
-   ```bash
-   kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}'
-   ```
-
-2. Execute the SQL file directly from your host machine:
-
-   ```bash
-   kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent < ./sql/v1.1.1_1030-update.sql
-   ```
-
-   Or if you want to see the output interactively:
-
-   ```bash
-   cat ./sql/v1.1.1_1030-update.sql | kubectl exec -i <pod-name> -n nexent -- psql -U root -d nexent
-   ```
-
-**Example - Execute multiple SQL files:**
-
-```bash
-# Get PostgreSQL pod name
-POSTGRES_POD=$(kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}')
-
-# Execute SQL files in order
-kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v1.8.0_xxxxx-update.sql
-kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0_0314_add_context_skill_t.sql
-```
+The migration runner records each source section in `nexent.schema_migrations`. If records are missing but business tables already exist, probes safely backfill `baselined` records; ambiguous cases fail instead of being skipped.
 
 > 💡 Tips
 > - Create a backup before running migrations:
@@ -137,13 +69,7 @@ kubectl exec -i $POSTGRES_POD -n nexent -- psql -U root -d nexent < ./sql/v2.0.0
    kubectl exec nexent/$POSTGRES_POD -n nexent -- pg_dump -U root nexent > backup_$(date +%F).sql
    ```
 
-> - For the Supabase database (when `supabase` is selected), use the `nexent-supabase-db` pod instead:
-
-   ```bash
-   SUPABASE_POD=$(kubectl get pods -n nexent -l app=nexent-supabase-db -o jsonpath='{.items[0].metadata.name}')
-   kubectl cp docker/sql/xxx.sql nexent/$SUPABASE_POD:/tmp/update.sql
-   kubectl exec -it nexent/$SUPABASE_POD -n nexent -- psql -U postgres -f /tmp/update.sql
-   ```
+> - Supabase initialization SQL is rendered from `deploy/sql/supabase/` into Helm values by the deploy script. It does not need to be copied or executed manually.
 
 ---
 
@@ -163,9 +89,7 @@ kubectl logs -n nexent -l app=nexent-config --tail=100
 kubectl logs -n nexent -l app=nexent-web --tail=100
 ```
 
-### Restart Services After Manual SQL Update（if needed）
-
-If you executed SQL scripts manually, restart the affected services:
+### Restart Services After Migration Retry
 
 ```bash
 kubectl rollout restart deployment/nexent-config -n nexent
@@ -175,6 +99,6 @@ kubectl rollout restart deployment/nexent-runtime -n nexent
 ### Re-initialize Elasticsearch (if needed)
 
 ```bash
-cd k8s/helm
+cd deploy/k8s
 bash init-elasticsearch.sh
 ```
