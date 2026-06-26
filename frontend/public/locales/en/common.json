@@ -879,6 +879,7 @@
   "model.list.capacityWarning.badgeTooltip": "Output token cap is not enforced for this model. Click to fill capacity values now.",
   "model.list.capacityWarning.tooltipAction": "Open capacity panel",
   "agent.modelSelector.bareCapacity.subtitle": "Output cap not enforced — configure capacity in Model Management.",
+  "agent.modelSelector.bareCapacity.tooltip": "Model capacity limits not configured — please configure in Model Management",
   "agent.modelSelector.bareCapacity.formNotice": "The selected model \"{{modelName}}\" has no capacity configured. The agent will run, but output-token enforcement and budget consistency checks are off until capacity is set in Model Management.",
   "agent.modelSelector.bareCapacity.formNoticeNoPermission": "The selected model \"{{modelName}}\" has no capacity configured. The agent will run, but output-token enforcement is off. Ask a model administrator to configure capacity for this model.",
   "dashboard.capacityCoverage.title": "Model capacity coverage",

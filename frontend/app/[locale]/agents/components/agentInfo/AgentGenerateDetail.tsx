@@ -14,9 +14,10 @@ import {
   Card,
   App,
   Alert,
+  Tooltip,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
+import { Zap, Maximize2, Settings2, Sparkles, TriangleAlert } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
 import {
@@ -550,11 +551,11 @@ export default function AgentGenerateDetail({}) {
     return {
       value: displayLabel,
       label: isBare ? (
-        <Flex vertical gap={0}>
+        <Flex align="center" gap={6}>
           <span>{displayLabel}</span>
-          <span className="text-[11px] text-yellow-700">
-            {t("agent.modelSelector.bareCapacity.subtitle")}
-          </span>
+          <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
+            <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
+          </Tooltip>
         </Flex>
       ) : (
         displayLabel
@@ -950,11 +951,11 @@ export default function AgentGenerateDetail({}) {
                                     disabled={model.connect_status !== "available"}
                                   >
                                     {isBare ? (
-                                      <Flex vertical gap={0}>
+                                      <Flex align="center" gap={6}>
                                         <span>{model.displayName}</span>
-                                        <span className="text-[11px] text-yellow-700">
-                                          {t("agent.modelSelector.bareCapacity.subtitle")}
-                                        </span>
+                                        <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
+                                          <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
+                                        </Tooltip>
                                       </Flex>
                                     ) : (
                                       model.displayName

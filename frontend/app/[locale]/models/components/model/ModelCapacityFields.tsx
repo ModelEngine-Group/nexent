@@ -412,8 +412,8 @@ export const ModelCapacityFields = ({
           message={t("model.dialog.capacity.legacyMaxTokensHint", {
             maxTokens: legacyMaxTokensCandidate,
           })}
-          action={
-            <Space size={6} wrap>
+          description={
+            <Space size={6} wrap className="mt-2">
               {(contextWindowIsRecommended
                 ? ["context", "output"]
                 : ["output", "context"]

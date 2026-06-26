@@ -850,6 +850,7 @@
   "model.list.capacityWarning.badgeTooltip": "该模型未启用输出 Token 限额。点击此处补全容量配置。",
   "model.list.capacityWarning.tooltipAction": "打开容量面板",
   "agent.modelSelector.bareCapacity.subtitle": "输出限额未启用 — 请在模型管理中补全容量。",
+  "agent.modelSelector.bareCapacity.tooltip": "模型容量配置缺少限额，请到模型管理中补全容量",
   "agent.modelSelector.bareCapacity.formNotice": "所选模型 \"{{modelName}}\" 尚未配置容量。Agent 可正常运行，但输出 Token 限额和预算一致性校验关闭，直到在「模型管理」中补全容量。",
   "agent.modelSelector.bareCapacity.formNoticeNoPermission": "所选模型 \"{{modelName}}\" 尚未配置容量。Agent 可正常运行，但输出 Token 限额关闭。请联系模型管理员补全该模型的容量配置。",
   "dashboard.capacityCoverage.title": "模型容量覆盖",
