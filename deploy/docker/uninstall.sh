@@ -165,6 +165,30 @@ resolve_delete_volumes() {
   [[ "$answer" =~ ^[Yy]$ ]]
 }
 
+remove_docker_named_volumes() {
+  command -v docker >/dev/null 2>&1 || return 0
+
+  local volume_names
+  volume_names="$(docker volume ls --format '{{.Name}}' 2>/dev/null || true)"
+  [ -n "$volume_names" ] || return 0
+
+  local volumes_to_remove=()
+  local volume
+  while IFS= read -r volume; do
+    [ -n "$volume" ] || continue
+    case "$volume" in
+      nexent_*|nexent-*|monitor_*)
+        volumes_to_remove+=("$volume")
+        ;;
+    esac
+  done <<< "$volume_names"
+
+  if [ "${#volumes_to_remove[@]}" -gt 0 ]; then
+    echo "🧹 Removing Docker volumes: ${volumes_to_remove[*]}"
+    docker volume rm -f "${volumes_to_remove[@]}" >/dev/null 2>&1 || true
+  fi
+}
+
 docker_compose_down_file() {
   local compose_file="$1"
   local use_project_name="$2"
@@ -190,6 +214,7 @@ docker_compose_down_file() {
 
 remove_nexent_data_dirs() {
   local root_dir="${ROOT_DIR:-$HOME/nexent-data}"
+  local work_dir="$HOME/nexent"
   root_dir="${root_dir%/}"
 
   if [ -z "$root_dir" ] || [ "$root_dir" = "/" ]; then
@@ -205,6 +230,8 @@ remove_nexent_data_dirs() {
     "$root_dir/volumes"
     "$root_dir/openssh-server"
     "$root_dir/scripts"
+    "$root_dir/skills"
+    "$work_dir"
   )
 
   local dir
@@ -238,6 +265,7 @@ main() {
   docker_compose_down_file "$COMPOSE_DIR/docker-compose.yml" true "$remove_volumes"
 
   if [ "$remove_volumes" = "true" ]; then
+    remove_docker_named_volumes
     remove_nexent_data_dirs
   fi
 
