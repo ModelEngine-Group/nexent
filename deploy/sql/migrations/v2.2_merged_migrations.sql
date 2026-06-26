@@ -340,17 +340,20 @@ CREATE TABLE IF NOT EXISTS nexent.ag_agent_repository_t (
     publisher_tenant_id VARCHAR(100) NOT NULL,
     publisher_user_id VARCHAR(100) NOT NULL,
     agent_id INTEGER NOT NULL,
-    source_version_no INTEGER NOT NULL,
+    version_no INTEGER NOT NULL,
     name VARCHAR(100) NOT NULL,
     display_name VARCHAR(100),
     description TEXT,
     author VARCHAR(100),
+    submitted_by VARCHAR(100),
     category_id INTEGER,
     tags TEXT[],
     tool_count INTEGER,
-    version_label VARCHAR(100),
+    icon VARCHAR(100),
+    downloads INTEGER DEFAULT 0,
+    version_name VARCHAR(100),
     agent_info_json JSONB NOT NULL,
-    status VARCHAR(30) DEFAULT 'NOT_SHARED',
+    status VARCHAR(30) DEFAULT 'not_shared',
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -364,30 +367,63 @@ ALTER SEQUENCE nexent.ag_agent_repository_t_agent_repository_id_seq
 
 ALTER TABLE nexent.ag_agent_repository_t OWNER TO root;
 
+-- Upgrade legacy ag_agent_repository_t schema if table already exists
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'nexent' AND table_name = 'ag_agent_repository_t'
+      AND column_name = 'source_version_no'
+  ) THEN
+    ALTER TABLE nexent.ag_agent_repository_t
+      RENAME COLUMN source_version_no TO version_no;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'nexent' AND table_name = 'ag_agent_repository_t'
+      AND column_name = 'version_label'
+  ) THEN
+    ALTER TABLE nexent.ag_agent_repository_t
+      RENAME COLUMN version_label TO version_name;
+  END IF;
+END $$;
+
+ALTER TABLE nexent.ag_agent_repository_t
+  ADD COLUMN IF NOT EXISTS submitted_by VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS icon VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS downloads INTEGER DEFAULT 0;
+
+DROP INDEX IF EXISTS nexent.uq_agent_repository_tenant_agent_active;
+
 COMMENT ON TABLE nexent.ag_agent_repository_t IS 'Agent marketplace repository for frozen shareable agent snapshots';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_repository_id IS 'Agent repository listing ID, unique primary key';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.publisher_tenant_id IS 'Publisher tenant ID';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.publisher_user_id IS 'Publisher user ID';
-COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_id IS 'Root agent ID from ag_tenant_agent_t; upsert key with publisher_tenant_id';
-COMMENT ON COLUMN nexent.ag_agent_repository_t.source_version_no IS 'Published version number frozen at share time';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_id IS 'Root agent ID from ag_tenant_agent_t; unique per version_no when active (delete_flag = N)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.version_no IS 'Published version number frozen at share time';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.name IS 'Root agent programmatic name for display and search';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.display_name IS 'Root agent display name';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.description IS 'Root agent description';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.author IS 'Agent author';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.submitted_by IS 'Submitter email when listing enters pending_review';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.category_id IS 'Optional marketplace category ID';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.tags IS 'Marketplace tags';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.tool_count IS 'Total tool count across all agents in the bundle (display only)';
-COMMENT ON COLUMN nexent.ag_agent_repository_t.version_label IS 'Repository entry version label for display (e.g. v1.0)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.version_name IS 'Repository entry version name for display (from ag_tenant_agent_version_t)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.icon IS 'Marketplace card icon (emoji or URL)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.downloads IS 'Marketplace download/copy count for card display';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.agent_info_json IS 'Frozen ExportAndImportDataFormat snapshot with optional skills';
-COMMENT ON COLUMN nexent.ag_agent_repository_t.status IS 'Listing status: NOT_SHARED (未共享) / PENDING_REVIEW (待审核) / REJECTED (审核驳回) / SHARED (已共享)';
+COMMENT ON COLUMN nexent.ag_agent_repository_t.status IS 'Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.created_by IS 'Creator ID';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.updated_by IS 'Updater ID';
 COMMENT ON COLUMN nexent.ag_agent_repository_t.delete_flag IS 'Soft delete flag: Y/N';
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_repository_tenant_agent_active
-    ON nexent.ag_agent_repository_t (publisher_tenant_id, agent_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_repository_agent_version_active
+    ON nexent.ag_agent_repository_t (agent_id, version_no)
     WHERE delete_flag = 'N';
 
 CREATE INDEX IF NOT EXISTS idx_agent_repository_publisher_delete
