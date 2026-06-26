@@ -802,23 +802,27 @@ class AgentRepository(TableBase):
     publisher_user_id = Column(String(100), nullable=False, doc="Publisher user ID")
     agent_id = Column(Integer, nullable=False,
                       doc="Root agent ID from ag_tenant_agent_t; upsert key")
-    source_version_no = Column(Integer, nullable=False,
-                               doc="Published version number frozen at share time")
+    version_no = Column(Integer, nullable=False,
+                        doc="Published version number frozen at share time")
     name = Column(String(100), nullable=False,
                   doc="Root agent programmatic name for display and search")
     display_name = Column(String(100), doc="Root agent display name")
     description = Column(Text, doc="Root agent description")
     author = Column(String(100), doc="Agent author")
+    submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
     category_id = Column(Integer, doc="Optional marketplace category ID")
     tags = Column(ARRAY(Text), doc="Marketplace tags")
     tool_count = Column(Integer,
                         doc="Total tool count across all agents in the bundle (display only)")
-    version_label = Column(String(100),
-                           doc="Repository entry version label for display (e.g. v1.0)")
+    icon = Column(String(100), doc="Marketplace card icon (emoji or URL)")
+    downloads = Column(Integer, default=0,
+                       doc="Marketplace download/copy count for card display")
+    version_name = Column(String(100),
+                          doc="Repository entry version name for display (from ag_tenant_agent_version_t)")
     agent_info_json = Column(JSONB, nullable=False,
                              doc="Frozen ExportAndImportDataFormat snapshot with optional skills")
-    status = Column(String(30), default="NOT_SHARED",
-                    doc="Listing status: NOT_SHARED (未共享) / PENDING_REVIEW (待审核) / REJECTED (审核驳回) / SHARED (已共享)")
+    status = Column(String(30), default="not_shared",
+                    doc="Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)")
 
 
 class UserTokenInfo(TableBase):

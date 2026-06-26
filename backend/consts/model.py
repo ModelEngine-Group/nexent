@@ -691,6 +691,42 @@ class AgentRepositorySnapshot(ExportAndImportDataFormat):
     skills: Optional[List["SkillZipEntry"]] = None
 
 
+class AgentRepositoryListingCreateRequest(BaseModel):
+    """Request body for creating a marketplace listing from an agent version."""
+    icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
+    downloads: int = Field(0, ge=0, description="Initial download/copy count for card display")
+    tags: Optional[List[str]] = Field(None, description="Marketplace tags")
+    category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+    tool_count: Optional[int] = Field(
+        None, ge=0, description="Total tool count across all agents in the bundle"
+    )
+
+
+class AgentRepositoryCategoryItem(BaseModel):
+    """Marketplace category option for agent repository filtering."""
+    id: int
+    key: str
+    name: str
+
+
+class AgentRepositoryListingDetailResponse(BaseModel):
+    """Detailed marketplace listing payload for repository detail view."""
+    agent_repository_id: int
+    agent_id: Optional[int] = None
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    author: Optional[str] = None
+    icon: Optional[str] = None
+    status: str
+    version_label: Optional[str] = None
+    downloads: int = 0
+    created_at: Optional[str] = None
+    model_name: Optional[str] = None
+    duty_prompt: Optional[str] = None
+    tools: List[str] = Field(default_factory=list)
+
+
 class SkillZipEntry(BaseModel):
     """A skill bundled inside an agent export ZIP."""
     skill_name: str

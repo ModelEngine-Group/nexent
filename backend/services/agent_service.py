@@ -1241,7 +1241,9 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                      if inst.get("tool_id") == tool_id),
                     None
                 )
-                params = (existing_instance or {}).get("params", {})
+                # Safely get params, default to empty dict if None or not present
+                raw_params = (existing_instance or {}).get("params")
+                params = raw_params if raw_params is not None else {}
                 create_or_update_tool_by_tool_info(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,

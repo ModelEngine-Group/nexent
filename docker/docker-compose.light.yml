@@ -1,0 +1,127 @@
+name: nexent-light
+
+x-es-vars: &es-vars
+  ELASTIC_PASSWORD: nexent@2025
+
+x-minio-vars: &minio-vars
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_REGION: us-east-1
+  MINIO_DEFAULT_BUCKET: nexent
+
+services:
+  nexent-elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.4
+    container_name: nexent-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9210:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    networks:
+      - nexent
+
+  nexent-postgresql:
+    image: postgres:16-alpine
+    container_name: nexent-postgresql
+    environment:
+      POSTGRES_USER: nexent
+      POSTGRES_PASSWORD: nexent@2025
+      POSTGRES_DB: nexent
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexent"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nexent
+
+  nexent-minio:
+    image: minio/minio:latest
+    container_name: nexent-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9010:9000"
+      - "9001:9001"
+    networks:
+      - nexent
+
+  nexent-config:
+    image: nexent/nexent:v2.2.0
+    container_name: nexent-config
+    restart: always
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+      nexent-postgresql:
+        condition: service_healthy
+    ports:
+      - "5010:5010"
+    volumes:
+      - ../sdk/nexent/core/tools/__init__.container.py:/opt/backend/.venv/lib/python3.10/site-packages/nexent/core/tools/__init__.py:cached
+      - ../sdk/nexent/core/tools/scheduled_task_tool.py:/opt/backend/.venv/lib/python3.10/site-packages/nexent/core/tools/scheduled_task_tool.py:cached
+      - ../sdk/nexent/core/utils/tools_common_message.py:/opt/backend/.venv/lib/python3.10/site-packages/nexent/core/utils/tools_common_message.py:cached
+      - ../sdk/nexent/core/agents/nexent_agent.py:/opt/backend/.venv/lib/python3.10/site-packages/nexent/core/agents/nexent_agent.py:cached
+      - ../backend/agents/create_agent_info.py:/opt/backend/agents/create_agent_info.py:cached
+      - ../backend/database/scheduled_task_db.py:/opt/backend/database/scheduled_task_db.py:cached
+      - ../backend/services/scheduled_task_scheduler.py:/opt/backend/services/scheduled_task_scheduler.py:cached
+      - ../backend/database/db_models.py:/opt/backend/database/db_models.py:cached
+      - ../backend/apps/runtime_app.py:/opt/backend/apps/runtime_app.py:cached
+      - ../backend/apps/app_factory.py:/opt/backend/apps/app_factory.py:cached
+      - ../backend/database/conversation_db.py:/opt/backend/database/conversation_db.py:cached
+      - ../backend/services/conversation_management_service.py:/opt/backend/services/conversation_management_service.py:cached
+      - ../backend/apps/conversation_management_app.py:/opt/backend/apps/conversation_management_app.py:cached
+      - ../backend/consts/model.py:/opt/backend/consts/model.py:cached
+      - nexent-user-data:/mnt/nexent
+    environment:
+      <<: [*minio-vars, *es-vars]
+      skip_proxy: "true"
+      UMASK: "0022"
+      POSTGRES_HOST: nexent-postgresql
+      POSTGRES_USER: nexent
+      NEXENT_POSTGRES_PASSWORD: "nexent@2025"
+      POSTGRES_DB: nexent
+      POSTGRES_PORT: "5432"
+      MINIO_ENDPOINT: http://nexent-minio:9000
+      LOCAL_MCP_SERVER: http://localhost:5013
+      DATA_PROCESS_SERVICE: http://localhost:5012
+      APPID: app_id
+      TOKEN: token
+    entrypoint: ["/bin/bash", "-c", "python backend/runtime_service.py & python backend/config_service.py"]
+    user: root
+    networks:
+      - nexent
+
+  nexent-web:
+    image: nexent/nexent-web:v2.2.0
+    container_name: nexent-web
+    restart: always
+    depends_on:
+      - nexent-config
+    ports:
+      - "3001:3000"
+    environment:
+      - HTTP_BACKEND=http://nexent-config:5010
+      - WS_BACKEND=ws://nexent-config:5014
+      - RUNTIME_HTTP_BACKEND=http://nexent-config:5014
+      - MINIO_ENDPOINT=http://nexent-minio:9000
+    networks:
+      - nexent
+
+volumes:
+  nexent-user-data:
+
+networks:
+  nexent:
+    driver: bridge

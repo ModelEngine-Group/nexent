@@ -2,6 +2,10 @@ import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
+import type {
+  AgentRepositoryListingListParams,
+  MyEditableAgentListParams,
+} from "@/types/agentRepository";
 import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
@@ -386,6 +390,42 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/memory/delete/${memoryId}`,
       clear: `${API_BASE_URL}/memory/clear`,
     },
+  },
+  agentRepository: {
+    listings: (params?: AgentRepositoryListingListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.status) queryParams.append("status", params.status);
+      if (params?.agent_id != null) {
+        queryParams.append("agent_id", String(params.agent_id));
+      }
+      if (params?.deduplicate_by_agent_id != null) {
+        queryParams.append(
+          "deduplicate_by_agent_id",
+          String(params.deduplicate_by_agent_id)
+        );
+      }
+      if (params?.category_id != null) {
+        queryParams.append("category_id", String(params.category_id));
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
+    },
+    mineAgents: (params?: MyEditableAgentListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.ownership) {
+        queryParams.append("ownership", params.ownership);
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
+    },
+    detail: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    import: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import`,
+    updateStatus: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
+    createListing: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
   },
   market: {
     agents: (params?: MarketAgentListParams) => {

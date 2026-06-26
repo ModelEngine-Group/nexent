@@ -28,7 +28,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Build main application image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent:${{ github.event.inputs.app_version }} -t nexent/nexent -f make/main/Dockerfile .
+        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent:${{ github.event.inputs.app_version }} -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
   build-data-process:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -55,7 +55,7 @@ jobs:
           GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
           rm -rf .git .gitattributes
       - name: Build data process image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-data-process:${{ github.event.inputs.app_version }} -t nexent/nexent-data-process -f make/data_process/Dockerfile .
+        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-data-process:${{ github.event.inputs.app_version }} -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
 
   build-web:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -63,7 +63,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Build web frontend image
-        run: docker build --build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua -t nexent/nexent-web:${{ github.event.inputs.app_version }} -t nexent/nexent-web -f make/web/Dockerfile .
+        run: docker build --build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua -t nexent/nexent-web:${{ github.event.inputs.app_version }} -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
   build-docs:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -71,7 +71,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Build docs image
-        run: docker build --progress=plain -t nexent/nexent-docs:${{ github.event.inputs.app_version }} -t nexent/nexent-docs -f make/docs/Dockerfile .
+        run: docker build --progress=plain -t nexent/nexent-docs:${{ github.event.inputs.app_version }} -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 
   deploy:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -86,26 +86,26 @@ jobs:
           cp -r $GITHUB_WORKSPACE/* $HOME/nexent/
       - name: Force APP_VERSION to latest in deploy.sh (CI only)
         run: |
-          sed -i 's/APP_VERSION="$(get_app_version)"/APP_VERSION="${{ github.event.inputs.app_version }}"/' $HOME/nexent/docker/deploy.sh
+          sed -i 's/APP_VERSION="$(get_app_version)"/APP_VERSION="${{ github.event.inputs.app_version }}"/' $HOME/nexent/deploy/docker/deploy.sh
       - name: Start docs container
         run: |
           docker stop nexent-docs 2>/dev/null || true
           docker rm nexent-docs 2>/dev/null || true
           docker run -d --name nexent-docs -p 4173:4173 nexent/nexent-docs
       - name: Ensure deploy.sh is executable
-        run: chmod +x $HOME/nexent/docker/deploy.sh
+        run: chmod +x $HOME/nexent/deploy.sh $HOME/nexent/deploy/docker/deploy.sh
       - name: Deploy with deploy.sh
         env:
           DEPLOYMENT_MODE: ${{ github.event.inputs.deployment_mode }}
         run: |
-          cd $HOME/nexent/docker
+          cd $HOME/nexent
           cp .env.example .env
           
           sed -i "s/APPID=.*/APPID=${{ secrets.VOICE_APPID }}/" .env
           sed -i "s/TOKEN=.*/TOKEN=${{ secrets.VOICE_TOKEN }}/" .env
           
           if [ "$DEPLOYMENT_MODE" = "production" ]; then
-            ./deploy.sh --mode 3 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-production-data"
+            ./deploy.sh docker --mode 3 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-production-data"
           else
-            ./deploy.sh --mode 1 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-development-data"
+            ./deploy.sh docker --mode 1 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-development-data"
           fi

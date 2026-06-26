@@ -1,0 +1,133 @@
+{{- if or (eq .Values.global.deploymentVersion "full") (index .Values.global.deploymentComponents "supabase") }}
+{{- $global := default dict .Values.global -}}
+{{- $sqlFileNames := default dict $global.sqlFileNames -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-supabase-db
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-supabase-db
+  annotations:
+    "helm.sh/hook-weight": "-1"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nexent-supabase-db
+  template:
+    metadata:
+      labels:
+        app: nexent-supabase-db
+      annotations:
+        checksum/nexent-supabase: {{ dig "rolloutChecksums" "supabase" "" .Values.global | quote }}
+        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
+    spec:
+      initContainers:
+        - name: init-db
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Copying init scripts into existing image script directory..."
+              cp -r /docker-entrypoint-initdb.d/* /initdb.d/
+              cp /custom-supabase-sql/webhooks.sql /initdb.d/init-scripts/98-webhooks.sql
+              cp /custom-supabase-sql/roles.sql /initdb.d/init-scripts/99-roles.sql
+              cp /custom-supabase-sql/jwt.sql /initdb.d/init-scripts/99-jwt.sql
+
+              cp /custom-supabase-sql/logs.sql /initdb.d/migrations/99-logs.sql
+              cp /custom-supabase-sql/realtime.sql /initdb.d/migrations/99-realtime.sql
+              cp /custom-supabase-sql/_supabase.sql /initdb.d/migrations/97-_supabase.sql
+              cp /custom-supabase-sql/pooler.sql /initdb.d/migrations/99-pooler.sql
+
+              echo "Initialization scripts are ready"
+          volumeMounts:
+            - mountPath: /custom-supabase-sql
+              name: custom-supabase-sql
+              readOnly: true
+            - mountPath: /initdb.d
+              name: initdb-scripts-data
+      containers:
+        - name: supabase-db
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.config.postgresPort | int }}
+              name: postgres
+          env:
+            - name: POSTGRES_HOST
+              value: /var/run/postgresql
+            - name: PGPORT
+              value: {{ .Values.config.postgresPort | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.config.postgresPort | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: SUPABASE_POSTGRES_PASSWORD
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: SUPABASE_POSTGRES_PASSWORD
+            - name: PGDATABASE
+              value: {{ .Values.config.postgresDb | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.config.postgresDb | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: JWT_SECRET
+                  optional: true
+            - name: JWT_EXP
+              value: {{ .Values.config.jwtExpiry | quote }}
+          volumeMounts:
+            - mountPath: /docker-entrypoint-initdb.d
+              name: initdb-scripts-data
+            - mountPath: /var/lib/postgresql/data
+              name: supabase-db-data
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu }}
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: initdb-scripts-data
+          emptyDir:
+            medium: ""
+        - name: custom-supabase-sql
+          configMap:
+            name: nexent-sql-files
+            items:
+              - key: supabase-.keep
+                path: .keep
+{{ range $name := default (list) $sqlFileNames.supabase }}
+              - key: {{ printf "supabase-%s" $name | quote }}
+                path: {{ $name | quote }}
+{{ end }}
+        - name: supabase-db-data
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-supabase-db" .Values.persistence.existingClaim }}
+{{- end }}
