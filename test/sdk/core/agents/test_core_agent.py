@@ -279,6 +279,121 @@ And some more text."""
     assert result == expected
 
 
+# ----------------------------------------------------------------------------
+# Tests for layered final-answer verification policy
+# ----------------------------------------------------------------------------
+
+def _make_verification_controller(**config_overrides):
+    config = core_agent_module.AgentVerificationConfig(
+        enabled=True,
+        step_verification_enabled=True,
+        final_verification_enabled=True,
+        llm_verification_enabled=True,
+        **config_overrides,
+    )
+    observer = MagicMock()
+    observer.add_message = MagicMock()
+    model = MagicMock()
+    logger = MagicMock()
+    logger.log = MagicMock()
+    return core_agent_module.VerificationController(
+        config=config,
+        observer=observer,
+        agent_name="test-agent",
+        model=model,
+        logger=logger,
+    ), model
+
+
+def test_final_verification_skips_llm_for_greeting():
+    """Simple greetings should not require external evidence or tool output."""
+    controller, model = _make_verification_controller()
+
+    result = controller.verify_final_answer(
+        task="你好",
+        candidate="你好！有什么我可以帮你的吗？",
+        memory_summary="Step 1:\nCode:\nObservation:\nOutput:",
+        round_number=1,
+    )
+
+    assert result.passed is True
+    assert result.phase == "final_pass"
+    model.assert_not_called()
+
+
+def test_final_verification_pass_message_explains_reason():
+    """Passed verification events should tell users what was checked."""
+    controller, _ = _make_verification_controller()
+
+    controller.verify_final_answer(
+        task="你好",
+        candidate="你好！有什么我可以帮你的吗？",
+        memory_summary="Step 1:\nCode:\nObservation:\nOutput:",
+        round_number=1,
+    )
+
+    messages = [
+        json.loads(call.args[2])["message"]
+        for call in controller.observer.add_message.call_args_list
+    ]
+
+    assert any("基础自检通过" in message and "答案非空" in message for message in messages)
+    assert any("最终自检通过" in message and "轻量对话无需外部证据" in message for message in messages)
+
+
+def test_verification_feedback_does_not_count_as_tool_error():
+    """Self-verification feedback should not poison the next final-answer check."""
+    controller, _ = _make_verification_controller()
+    memory_summary = """
+Step 1:
+Observation:
+Verification feedback:
+- Event: final_answer
+- Severity: blocking
+- Failed criteria: evidence_grounding, tool_error_handling
+- Repair instruction: Provide more evidence.
+"""
+
+    result = controller.verify_before_final_answer(
+        candidate="你好！有什么我可以帮你的吗？",
+        observation=memory_summary,
+        step_number=2,
+    )
+
+    assert result.passed is True
+    assert "previous_errors_acknowledged" not in result.failed_criteria
+
+
+def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
+    """Verifier output is normalized when failed criteria are not required by policy."""
+    controller, _ = _make_verification_controller()
+    verifier_payload = json.dumps({
+        "passed": False,
+        "score": 0.5,
+        "status": "revise",
+        "failed_criteria": ["evidence_grounding", "tool_error_handling"],
+        "checks": [
+            {"name": "evidence_grounding", "passed": False},
+            {"name": "tool_error_handling", "passed": False},
+        ],
+        "revision_instruction": "Find evidence.",
+        "user_visible_note": "Missing evidence.",
+    })
+
+    result = controller._parse_llm_verifier_result(
+        verifier_payload,
+        {
+            "task_profile": "lightweight_conversation",
+            "evidence_required": False,
+            "tool_error_check_required": False,
+        },
+    )
+
+    assert result.passed is True
+    assert result.failed_criteria == []
+    assert result.score >= controller.config.pass_score
+
+
 def test_parse_code_blobs_run_format_with_newline():
     """Test parse_code_blobs with <code>\\ncontent\\n</code> pattern."""
     text = """Here is some code:
@@ -396,7 +511,11 @@ second_block()
 
 
 def test_parse_code_blobs_python_match():
-    """Test parse_code_blobs with ```python\\ncontent\\n``` pattern (legacy format)."""
+    """Test parse_code_blobs raises ValueError for ```python\\ncontent\\n``` pattern.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """Here is some code:
 ```python
 print("Hello World")
@@ -404,13 +523,18 @@ x = 42
 ```
 And some more text."""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "print(\"Hello World\")\nx = 42"
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_py_match():
-    """Test parse_code_blobs with ```py\\ncontent\\n``` pattern (legacy format)."""
+    """Test parse_code_blobs raises ValueError for ```py\\ncontent\\n``` pattern.
+    
+    Note: ```py blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """Here is some code:
 ```py
 def hello():
@@ -418,13 +542,18 @@ def hello():
 ```
 And some more text."""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "def hello():\n    return \"Hello\""
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_multiple_matches():
-    """Test parse_code_blobs with multiple code blocks."""
+    """Test parse_code_blobs raises ValueError when multiple ```python/```py blocks are present.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """First code block:
 ```python
 print("First")
@@ -435,20 +564,27 @@ Second code block:
 print("Second")
 ```"""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "print(\"First\")\n\nprint(\"Second\")"
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_direct_python_code():
-    """Test parse_code_blobs with direct Python code (no code blocks)."""
+    """Test parse_code_blobs with direct Python code (no code blocks).
+    
+    Direct Python code without code blocks will raise ValueError because
+    it's not wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
+    """
     text = '''print("Hello World")
 x = 42
 def hello():
     return "Hello"'''
 
-    result = core_agent_module.parse_code_blobs(text)
-    assert result == text
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_invalid_no_match():
@@ -514,41 +650,60 @@ incomplete code without closing backticks"""
 
 
 def test_parse_code_blobs_py_with_newline_after_fence():
-    """Test parse_code_blobs skips newline after ```py\\n."""
+    """Test parse_code_blobs raises ValueError for ```py\\ncontent\\n``` pattern.
+    
+    Note: ```py blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """```py
 print("hello")
 ```"""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = 'print("hello")'
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_python_with_newline_after_fence():
-    """Test parse_code_blobs skips newline after ```python\\n."""
+    """Test parse_code_blobs raises ValueError for ```python\\ncontent\\n``` pattern.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """```python
 print("hello")
 ```"""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = 'print("hello")'
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_single_line():
-    """Test parse_code_blobs with single line content."""
+    """Test parse_code_blobs raises ValueError for single-line ```python block.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """Single line:
 ```python
 print("Hello")
 ```"""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = 'print("Hello")'
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_mixed_content():
-    """Test parse_code_blobs with mixed content including non-code text."""
+    """Test parse_code_blobs raises ValueError when mixed content contains only ```python blocks.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """Thoughts: I need to calculate the sum
 Code:
 ```python
@@ -559,9 +714,10 @@ result = sum_numbers(5, 3)
 ```
 The result is 8."""
 
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "def sum_numbers(a, b):\n    return a + b\n\nresult = sum_numbers(5, 3)"
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 # ----------------------------------------------------------------------------
@@ -719,47 +875,64 @@ def test_final_answer_error_creation():
 # ----------------------------------------------------------------------------
 
 def test_parse_code_blobs_whitespace_variation():
-    """Test parse_code_blobs with different whitespace patterns."""
+    """Test parse_code_blobs raises ValueError for ```python block with whitespace variation.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """```python
 print("hello")
 ```"""
-    result = core_agent_module.parse_code_blobs(text)
-    expected = 'print("hello")'
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_no_newline_at_end():
-    """Test parse_code_blobs when code block doesn't end with newline but has trailing whitespace."""
+    """Test parse_code_blobs raises ValueError for ```python block without trailing newline.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """```python
 print("hello")
 ```
 And some text."""
-    result = core_agent_module.parse_code_blobs(text)
-    expected = 'print("hello")'
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_with_comments():
-    """Test parse_code_blobs with Python comments in code."""
+    """Test parse_code_blobs raises ValueError for ```python block with comments.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """```python
 # This is a comment
 x = 1  # inline comment
 ```"""
-    result = core_agent_module.parse_code_blobs(text)
-    expected = "# This is a comment\nx = 1  # inline comment"
-    assert result == expected
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_with_multiline_string():
-    """Test parse_code_blobs with multiline strings."""
+    """Test parse_code_blobs raises ValueError for ```python block with multiline strings.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = '''```python
 message = """
 This is a
 multiline string
 """
 ```'''
-    result = core_agent_module.parse_code_blobs(text)
-    assert 'multiline string' in result
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_ruby_no_match():
@@ -896,7 +1069,11 @@ def test_parse_code_blobs_whitespace_only_run_block():
 
 
 def test_parse_code_blobs_special_characters():
-    """Test parse_code_blobs preserves special characters in code."""
+    """Test parse_code_blobs raises ValueError for ```python block with special characters.
+    
+    Note: ```python blocks are intentionally NOT supported to prevent
+    KB content containing code examples from being accidentally executed.
+    """
     text = """```python
 x = "!@#$%^&*()_+-=[]{}|;':\",./<>?"
 y = 'single quotes'
@@ -904,10 +1081,9 @@ z = "double quotes"
 w = '''triple single'''
 ```"""
 
-    result = core_agent_module.parse_code_blobs(text)
-    assert "!@#$%^&*()_+-=[]{}|;':\",./<>?" in result
-    assert "single quotes" in result
-    assert "double quotes" in result
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_convert_code_format_unicode_content():
@@ -938,13 +1114,16 @@ def test():
 
 
 def test_parse_code_blobs_only_whitespace_text():
-    """Test parse_code_blobs with whitespace-only text (valid Python)."""
-    # Whitespace-only text is valid Python syntax (empty string)
+    """Test parse_code_blobs raises ValueError for whitespace-only text.
+    
+    Whitespace-only text is not valid executable code because it's not
+    wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
+    """
     text = "   \n\n   \t\t   "
 
-    # ast.parse("   \n\n   \t\t   ") == ast.parse("") which is valid
-    result = core_agent_module.parse_code_blobs(text)
-    assert result == "   \n\n   \t\t   " or result.strip() == ""
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    assert "executable code block pattern" in str(exc_info.value)
 
 
 def test_parse_code_blobs_partial_code_like_text():
@@ -1161,6 +1340,59 @@ This code demonstrates how to work with JSON in Python."""
     assert "import json" in transformed
     assert "```<END_DISPLAY_CODE>" not in transformed
     assert "<DISPLAY:" not in transformed
+
+
+# ----------------------------------------------------------------------------
+# Edge case tests for convert_code_format to improve coverage
+# ----------------------------------------------------------------------------
+
+def test_convert_code_format_display_no_closing_angle_bracket():
+    """Test convert_code_format handles <DISPLAY:language without closing > gracefully."""
+    # This covers line 133: if lang_end == -1: break
+    text = """```<DISPLAY:python
+print('hello')
+```"""
+    # The opening tag has no closing >, so it should be left as-is
+    transformed = core_agent_module.convert_code_format(text)
+    # Should not crash, and should preserve original if no conversion happened
+    assert isinstance(transformed, str)
+
+
+def test_convert_code_format_code_colon_no_language():
+    """Test convert_code_format handles code: without language gracefully."""
+    # This covers line 150: if lang_end == lang_start: break
+    text = """```code:
+print('hello')
+```"""
+    # The code: has no language, so it should be left as-is
+    transformed = core_agent_module.convert_code_format(text)
+    # Should not crash
+    assert isinstance(transformed, str)
+
+
+def test_convert_code_format_display_tag_no_closing_bracket():
+    """Test convert_code_format handles <DISPLAY:language without closing >."""
+    # This covers line 163: if lang_end == -1: break
+    text = """<DISPLAY:python
+print('hello')
+</DISPLAY>"""
+    # The opening tag has no closing >, so conversion should stop
+    transformed = core_agent_module.convert_code_format(text)
+    # Should not crash, closing tag should still be converted
+    assert "</DISPLAY>" not in transformed
+
+
+def test_convert_code_format_multiple_display_tags_partial():
+    """Test convert_code_format with multiple display tags, some invalid."""
+    text = """<DISPLAY:python
+first()
+</DISPLAY>
+<DISPLAY:javascript
+second()
+</DISPLAY>"""
+    # First has closing >, second doesn't
+    transformed = core_agent_module.convert_code_format(text)
+    assert isinstance(transformed, str)
 
 
 # ----------------------------------------------------------------------------
@@ -2255,13 +2487,13 @@ class TestHandleMaxStepsReached:
         # Should return error message
         assert "Error in generating final LLM output" in result
 
-        # Verify logger was called with warning
+        # Verify logger was called with error
         agent.logger.log.assert_called()
-        warning_calls = [
+        error_calls = [
             call for call in agent.logger.log.call_args_list
-            if call[1].get("level") and "WARNING" in str(call[1].get("level"))
+            if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
-        assert len(warning_calls) >= 1
+        assert len(error_calls) >= 1
 
     def test_handle_max_steps_reached_creates_memory_step_with_error(self):
         """Test that a memory step with AgentMaxStepsError is created."""
@@ -2376,3 +2608,119 @@ class TestHandleMaxStepsReached:
 
         # Model should have been called (which uses messages from _build_final_answer_messages)
         assert agent.model.called
+
+
+# ----------------------------------------------------------------------------
+# Tests for _log_model_call_parameters method
+# ----------------------------------------------------------------------------
+
+class TestLogModelCallParameters:
+    """Test suite for _log_model_call_parameters method."""
+
+    def _create_agent_for_log_params_test(self):
+        """Create a CoreAgent instance with mocked dependencies."""
+        module = TestRunStreamRealExecution._load_core_agent_in_isolation(self)
+        CoreAgent = module.CoreAgent
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.observer = MagicMock()
+        agent.stop_event = threading.Event()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+        agent.max_steps = 3
+        agent.name = "test_agent"
+        agent.task = "test task"
+        agent.state = {}
+        agent.final_answer_checks = None
+        agent.return_full_result = False
+        agent.python_executor = MagicMock()
+        agent.model = MagicMock()
+        agent.prompt_templates = {}
+        agent.tools = {}
+        agent.managed_agents = {}
+        agent.provide_run_summary = False
+        agent._use_structured_outputs_internally = False
+
+        return agent, module
+
+    def test_log_model_call_parameters_with_model_dump(self):
+        """Test _log_model_call_parameters with messages that have model_dump method."""
+        agent, module = self._create_agent_for_log_params_test()
+
+        # Create mock message with model_dump method
+        mock_msg = MagicMock()
+        mock_msg.model_dump = MagicMock(return_value={"role": "user", "content": "test"})
+        mock_msg.token_usage = None
+
+        input_messages = [mock_msg]
+        stop_sequences = ["Observation:"]
+        additional_args = {"temperature": 0.7}
+
+        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
+        # Verify logger was called
+        agent.logger.log_markdown.assert_called_once()
+
+    def test_log_model_call_parameters_with_dict(self):
+        """Test _log_model_call_parameters with messages that have __dict__."""
+        agent, module = self._create_agent_for_log_params_test()
+
+        # Create mock message with __dict__ but no model_dump
+        mock_msg = MagicMock(spec=[])  # Empty spec means no model_dump
+        del mock_msg.model_dump  # Ensure no model_dump
+        mock_msg.__dict__ = {"role": "user", "content": "test"}
+
+        input_messages = [mock_msg]
+        stop_sequences = []
+        additional_args = {}
+
+        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
+        agent.logger.log_markdown.assert_called_once()
+
+    def test_log_model_call_parameters_with_fallback_str(self):
+        """Test _log_model_call_parameters with messages that fall back to str()."""
+        agent, module = self._create_agent_for_log_params_test()
+
+        # Create mock message that falls back to str
+        mock_msg = MagicMock(spec=[])
+        del mock_msg.model_dump
+        del mock_msg.__dict__
+
+        input_messages = [mock_msg]
+        stop_sequences = ["stop"]
+        additional_args = {"api_key": "secret123"}
+
+        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
+        # Verify sensitive data was redacted
+        call_args = agent.logger.log_markdown.call_args
+        content = call_args[1]["content"]
+        assert "REDACTED" in content
+
+    def test_log_model_call_parameters_exception_handling(self):
+        """Test _log_model_call_parameters handles exceptions gracefully."""
+        agent, module = self._create_agent_for_log_params_test()
+
+        # Make truncate_content raise an exception
+        import unittest.mock
+
+        original_truncate = module.truncate_content
+
+        def failing_truncate(content, max_length=1000):
+            raise TypeError("Cannot truncate")
+
+        with unittest.mock.patch.object(module, 'truncate_content', side_effect=failing_truncate):
+            input_messages = [MagicMock(model_dump=MagicMock(side_effect=TypeError("no dump")))]
+            input_messages[0].__dict__ = {"role": "user"}
+
+            # Should not raise, should log warning via exception handler
+            agent._log_model_call_parameters(input_messages, [], {})
+
+        # Verify warning was logged via the except block
+        # The exception handler logs via self.logger.log()
+        agent.logger.log.assert_called()

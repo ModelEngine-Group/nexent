@@ -38,6 +38,12 @@ export const chatConfig = {
   
   // Supported document file extensions
   documentExtensions: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "epub", "html", "xml"],
+
+  // Supported audio file extensions
+  audioExtensions: ["mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "webm"],
+
+  // Supported video file extensions
+  videoExtensions: ["mp4", "mov", "m4v", "avi", "mkv", "webm", "wmv", "flv"],
   
   // Supported text document extensions
   supportedTextExtensions: ["md", "markdown", "txt", "csv", "json"],
@@ -73,6 +79,12 @@ export const chatConfig = {
 
     // Compressed file
     compressed: ["zip", "rar", "7z", "tar", "gz"],
+
+    // Audio files
+    audio: ["mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "webm"],
+
+    // Video files
+    video: ["mp4", "mov", "m4v", "avi", "mkv", "wmv", "flv"],
 },
 
 // File preview type constants
@@ -105,9 +117,11 @@ messageTypes: {
   STEP_COUNT: "step_count" as const,
   TOKEN_COUNT: "token_count" as const,
   MAX_STEPS_REACHED: "max_steps_reached" as const,
+  VERIFICATION: "verification" as const,
   SEARCH_CONTENT_PLACEHOLDER: "search_content_placeholder" as const,
   VIRTUAL: "virtual" as const,
   PREPROCESS: "preprocess" as const,
+  SKILL_FILES: "skill_files" as const,
 },
 
 // Content type constants for last content type tracking
@@ -121,6 +135,7 @@ contentTypes: {
   SEARCH_CONTENT: "search_content" as const,
   CARD: "card" as const,
   MEMORY_SEARCH: "memory_search" as const,
+  VERIFICATION: "verification" as const,
   PREPROCESS: "preprocess" as const,
 },
 

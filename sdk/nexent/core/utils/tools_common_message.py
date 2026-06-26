@@ -13,10 +13,12 @@ class ToolSign(Enum):
     DIFY_SEARCH = "g"  # Dify search tool identifier
     IDATA_SEARCH = "h"  # iData search tool identifier
     HAOTIAN_SEARCH = "i"  # Haotian search tool identifier
+    AIDP_SEARCH = "j"  # AIDP search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
     DATABASE_OPERATION = "z"  # Database operation tool identifier
+    MEMORY_OPERATION = "n"      # Memory operation tool identifier
 
 
 # Tool sign mapping for backward compatibility
@@ -29,10 +31,12 @@ TOOL_SIGN_MAPPING = {
     "dify_search": ToolSign.DIFY_SEARCH.value,
     "idata_search": ToolSign.IDATA_SEARCH.value,
     "haotian_search": ToolSign.HAOTIAN_SEARCH.value,
+    "aidp_search": ToolSign.AIDP_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
     "database_operation": ToolSign.DATABASE_OPERATION.value,
+    "memory_operation": ToolSign.MEMORY_OPERATION.value,
 }
 
 # Reverse mapping for lookup

@@ -53,6 +53,8 @@ export const GENERATE_PROMPT_STREAM_TYPES = {
   AGENT_VAR_NAME: "agent_var_name",
   AGENT_DESCRIPTION: "agent_description",
   AGENT_DISPLAY_NAME: "agent_display_name",
+  GREETING_MESSAGE: "greeting_message",
+  EXAMPLE_QUESTIONS: "example_questions",
 } as const;
 
 export const TOOL_PARAM_TYPES = {
@@ -97,6 +99,7 @@ export const TOOL_PARAM_OPTIONS = {
   // Knowledge base search tool
   knowledge_base_search: {
     search_mode: ["hybrid", "accurate", "semantic"],
+    multimodal: [true, false],
   },
   // Dify search tool
   dify_search: {
@@ -120,17 +123,31 @@ export const TOOL_PARAM_OPTIONS = {
       "hybrid_search",
     ],
   },
+  // AIDP search tool
+  aidp_search: {
+    search_method: [
+      "hybrid_search",
+      "vector_search",
+      "full_text_search",
+    ],
+    reranking_mode: ["performance", "high_accuracy"],
+    multi_modal: [true, false],
+    reranking_enable: [true, false],
+    rewrite_enable: [true, false],
+    related_search_enable: [true, false],
+  },
 } as const;
 
 // Get options for a specific tool and parameter
 export function getToolParamOptions(
   toolName: string,
   paramName: string
-): string[] | undefined {
+): string[] | boolean[] | undefined {
   const toolOptions =
     TOOL_PARAM_OPTIONS[toolName as keyof typeof TOOL_PARAM_OPTIONS];
   if (!toolOptions) return undefined;
   return toolOptions[paramName as keyof typeof toolOptions] as
     | string[]
+    | boolean[]
     | undefined;
 }

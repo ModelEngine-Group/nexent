@@ -1,14 +1,26 @@
 import logging
+import threading
 from typing import List, Dict, Any, Optional
 
-from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
+from consts.const import (
+    CAPACITY_SUGGESTION_ENABLED,
+    CAPACITY_VISIBILITY_ENABLED,
+    LOCALHOST_IP,
+    LOCALHOST_NAME,
+    DOCKER_INTERNAL_HOST,
+)
 from consts.model import ModelConnectStatusEnum
-from consts.provider import ProviderEnum, SILICON_BASE_URL, DASHSCOPE_BASE_URL, TOKENPONY_BASE_URL
+from consts.provider import (
+    ProviderEnum,
+    SILICON_BASE_URL,
+    DASHSCOPE_BASE_URL,
+    DASHSCOPE_REALTIME_BASE_URL,
+    TOKENPONY_BASE_URL,
+)
 
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
-    get_model_by_display_name,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
@@ -20,7 +32,8 @@ from services.model_provider_service import (
     merge_existing_model_attributes,
     get_provider_models,
 )
-from services.model_health_service import embedding_dimension_check
+from services.model_health_service import embedding_dimension_check, _infer_model_factory
+from services.model_capacity_suggestion_service import CapacitySuggestionMatchKind, suggest_capacity
 from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
@@ -31,6 +44,174 @@ from services.vectordatabase_service import get_vector_db_core
 from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
+
+INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
+CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
+
+
+# OpenTelemetry counter for silent catalog-matcher failures during the
+# capacity-coverage scan. The matcher is called per row so we cannot raise --
+# but the silent fallback to suggestion_available=False would hide a corrupt
+# catalog entry that turns every "available" hint into "false" across a whole
+# tenant. The counter gives staging/CI a single number to watch.
+#
+# Guarded the same way as the SDK monitor module: if OpenTelemetry is not
+# installed (some deployments run without it), the counter is None and the
+# increment becomes a no-op.
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _capacity_suggestion_meter = _otel_metrics.get_meter(__name__)
+    _capacity_suggestion_coverage_errors_total = _capacity_suggestion_meter.create_counter(
+        name="model_capacity_suggestion_coverage_errors_total",
+        description=(
+            "Count of catalog-matcher exceptions raised while computing the "
+            "per-row `suggestion_available` flag in /model/capacity-coverage. "
+            "Non-zero means catalog data or matcher logic is broken; "
+            "operators see every row as suggestion_available=False."
+        ),
+        unit="errors",
+    )
+except Exception:  # pragma: no cover - OTel is optional at runtime
+    _capacity_suggestion_coverage_errors_total = None
+
+
+# Per-process dedup for the warning log emitted when the catalog-matcher
+# raises during /capacity-coverage. The OTel counter still increments per
+# failure (no monitoring impact); only the log line is deduped, so a global
+# catalog bug surfaces once per (model_id, error_type) instead of flooding
+# logs on every endpoint call. Same pattern as
+# `_warn_missing_capacity_once` in `backend/agents/create_agent_info.py`.
+_CAPACITY_SUGGESTION_ERROR_EMITTED: set = set()
+_CAPACITY_SUGGESTION_ERROR_LOCK = threading.Lock()
+
+
+def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> None:
+    if _capacity_suggestion_coverage_errors_total is None:
+        return
+    try:
+        _capacity_suggestion_coverage_errors_total.add(
+            1,
+            {
+                "model_id": str(model_id) if model_id is not None else "unknown",
+                "error_type": type(exc).__name__,
+            },
+        )
+    except Exception:  # pragma: no cover - never break coverage for telemetry
+        pass
+
+
+def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
+    """Allow the three multimodal slots to share display names across slots."""
+    if not existing_models:
+        return False
+
+    if model_type in INDEPENDENT_MULTIMODAL_MODEL_TYPES:
+        return any(
+            existing.get("model_type") == model_type
+            or existing.get("model_type") not in INDEPENDENT_MULTIMODAL_MODEL_TYPES
+            for existing in existing_models
+        )
+
+    return True
+
+
+def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
+    """Keep the deprecated `max_tokens` column in lockstep with `max_output_tokens`.
+
+    W1 step 7 deprecates `max_tokens` as the LLM/VLM output-cap alias of
+    `max_output_tokens`. Legacy clients that still write `max_tokens`
+    independently let the two columns diverge in the DB; that divergence
+    later surfaces at the W2 dispatch boundary as
+    `CallerMaxTokensOverrideForbidden` because the SDK auto-fills
+    `max_tokens` from the model record while the W2 snapshot computes its
+    output cap from `max_output_tokens`.
+
+    Defense in depth at the service layer: when a caller sends a non-None
+    `max_output_tokens`, force `max_tokens` to mirror it. Embedding rows are
+    exempt because they repurpose `max_tokens` as the vector dimension.
+    """
+    max_output = model_data.get("max_output_tokens")
+    if max_output is None:
+        return
+    if model_data.get("model_type") in ("embedding", "multi_embedding"):
+        return
+    model_data["max_tokens"] = max_output
+
+
+def _is_bare_capacity_model(model: Dict[str, Any]) -> bool:
+    return model.get("context_window_tokens") is None or model.get("max_output_tokens") is None
+
+
+def _capacity_suggestion_available(model: Dict[str, Any]) -> bool:
+    if not CAPACITY_SUGGESTION_ENABLED:
+        return False
+
+    try:
+        model_name = add_repo_to_name(model.get("model_repo", ""), model.get("model_name", ""))
+        result = suggest_capacity(
+            model_name=model_name,
+            base_url=model.get("base_url"),
+            provider_hint=model.get("model_factory"),
+            model_type=model.get("model_type"),
+            enabled=CAPACITY_SUGGESTION_ENABLED,
+        )
+        return result.match_kind != CapacitySuggestionMatchKind.NONE
+    except Exception as exc:
+        # A catalog-matcher exception must not break /capacity-coverage --
+        # the endpoint scans every LLM/VLM row, and one bad row would make
+        # the whole tenant view explode. We fall back to False and emit a
+        # counter so a corrupt catalog is visible in metrics instead of
+        # silently turning every row into "no suggestion available".
+        dedup_key = (model.get("model_id"), type(exc).__name__)
+        should_log = False
+        with _CAPACITY_SUGGESTION_ERROR_LOCK:
+            if dedup_key not in _CAPACITY_SUGGESTION_ERROR_EMITTED:
+                _CAPACITY_SUGGESTION_ERROR_EMITTED.add(dedup_key)
+                should_log = True
+        if should_log:
+            logger.warning(
+                "Capacity coverage suggestion check failed for model_id=%s: %s "
+                "(per-process dedup; OTel counter still increments per failure)",
+                model.get("model_id"),
+                exc,
+            )
+        _record_capacity_coverage_error(model.get("model_id"), exc)
+        return False
+
+
+def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
+    """Return bare-capacity LLM/VLM coverage for one tenant."""
+    if not CAPACITY_VISIBILITY_ENABLED:
+        return {
+            "total_llm_vlm": 0,
+            "bare_count": 0,
+            "bare_models": [],
+        }
+
+    records = get_model_records(None, tenant_id)
+    scoped_records = [
+        model for model in records
+        if model.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
+    ]
+    bare_models = [
+        {
+            "model_id": model["model_id"],
+            "model_name": add_repo_to_name(model.get("model_repo", ""), model.get("model_name", "")),
+            "model_factory": model.get("model_factory"),
+            "model_type": model.get("model_type"),
+            "max_tokens": model.get("max_tokens"),
+            "suggestion_available": _capacity_suggestion_available(model),
+        }
+        for model in scoped_records
+        if _is_bare_capacity_model(model)
+    ]
+
+    return {
+        "total_llm_vlm": len(scoped_records),
+        "bare_count": len(bare_models),
+        "bare_models": bare_models,
+    }
 
 
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
@@ -55,6 +236,10 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             model_data["ssl_verify"] = False
         else:
             model_data["ssl_verify"] = True
+
+        # Set model_factory to modelengine when using open/router URL
+        if "open/router" in model_base_url:
+            model_data["model_factory"] = "modelengine"
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
             model_data["model_name"]) if model_data.get("model_name") else ("", "")
@@ -67,23 +252,39 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 model_name=model_data.get("model_name", "")
             )
 
+        _coerce_legacy_max_tokens_alias(model_data)
+
         # Use NOT_DETECTED status as default
         model_data["connect_status"] = model_data.get(
             "connect_status") or ModelConnectStatusEnum.NOT_DETECTED.value
 
         # Check display name conflict scoped by tenant
         if model_data.get("display_name"):
-            existing_model_by_display = get_model_by_display_name(
+            existing_models_by_display = get_models_by_display_name(
                 model_data["display_name"], tenant_id)
-            if existing_model_by_display:
+            if _has_display_name_conflict(existing_models_by_display, model_data.get("model_type")):
                 logging.error(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
                 raise ValueError(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
 
-        # If embedding or multi_embedding, set max_tokens via embedding dimension check
+        # If embedding or multi_embedding, ensure base_url ends with /embeddings
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
-            model_data["max_tokens"] = await embedding_dimension_check(model_data)
+            base_url = model_data.get("base_url", "")
+            if base_url and "/embeddings" not in base_url:
+                model_data["base_url"] = f"{base_url.rstrip('/')}/embeddings"
+            # Infer model_factory from base_url if not set
+            model_data["model_factory"] = _infer_model_factory(
+                model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
+            )
+            # Get embedding dimension
+            dimension = await embedding_dimension_check(model_data)
+            if dimension is None:
+                raise ValueError(
+                    f"Failed to get embedding dimension for model '{model_data.get('display_name', model_data.get('model_name'))}'. "
+                    "Please verify the URL, API key, and network connection."
+                )
+            model_data["max_tokens"] = dimension
             # Set default chunk_batch if not provided
             if model_data.get("chunk_batch") is None:
                 model_data["chunk_batch"] = 10
@@ -150,7 +351,7 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             # ModelEngine models carry their own base_url in each model dict
             model_url = ""
         elif provider == ProviderEnum.DASHSCOPE.value:
-            model_url = DASHSCOPE_BASE_URL
+            model_url = DASHSCOPE_REALTIME_BASE_URL if model_type in ("stt", "tts") else DASHSCOPE_BASE_URL
         elif provider == ProviderEnum.TOKENPONY.value:
             model_url = TOKENPONY_BASE_URL
         else:
@@ -160,31 +361,79 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             tenant_id, provider, model_type)
         model_list_ids = {model.get("id")
                           for model in model_list} if model_list else set()
+        existing_model_map = {
+            add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            ): model
+            for model in existing_model_list
+        }
 
-        # Delete existing models not present
+        # Delete existing models not present.
+        # The membership key MUST match how existing_model_map (a few lines
+        # above) and the create-or-update branch (a few lines below) build
+        # their lookup key, otherwise the two halves disagree about what
+        # "the same model" means. Both of those use add_repo_to_name, which
+        # omits the slash when model_repo is empty. The naive
+        # `model_repo + "/" + model_name` here always prepends "/" for the
+        # empty-repo case (DashScope catalogs return bare names like
+        # "glm-4.7" and rows land with model_repo=""), so "/glm-4.7" never
+        # matched the catalog's "glm-4.7" entry -- every existing row was
+        # treated as "not in the incoming list" and silently soft-deleted on
+        # every batch_create. Use the same helper to keep both halves
+        # speaking the same language.
         for model in existing_model_list:
-            model_full_name = model["model_repo"] + "/" + model["model_name"]
+            model_full_name = add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            )
             if model_full_name not in model_list_ids:
                 delete_model_record(model["model_id"], user_id, tenant_id)
 
         # Create or update new models
         for model in model_list:
+            model["model_type"] = model_type
             _, model_name = split_repo_name(
                 model["id"]) if model.get("id") else ("", "")
             model_repo, model_name_only = split_repo_name(
                 model.get("id", "")) if model.get("id") else ("", "")
             model_display_name = add_repo_to_name(model_repo, model_name_only)
             if model_name:
-                existing_model_by_display = get_model_by_display_name(
-                    model_display_name, tenant_id)
-                if existing_model_by_display:
+                existing_model = existing_model_map.get(model_display_name)
+                if existing_model:
+                    update_data = {}
                     # Check if max_tokens has changed
-                    existing_max_tokens = existing_model_by_display.get(
-                        "max_tokens")
+                    existing_max_tokens = existing_model.get("max_tokens")
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
-                        update_model_record(existing_model_by_display["model_id"], {
-                                            "max_tokens": new_max_tokens}, user_id)
+                        update_data["max_tokens"] = new_max_tokens
+                    # Same gap as prepare_model_dict had for the create branch:
+                    # the batch refresh path only touched legacy max_tokens, so
+                    # editing a row's capacity via batch-add (e.g. tweaking the
+                    # top-level batch defaults and re-confirming) silently
+                    # dropped the W1/W2 capacity updates. We mirror the
+                    # operator-vs-candidate rule from prepare_model_dict here:
+                    # only persist W1/W2 capacity when the payload is marked
+                    # capacity_source="operator", so provider-discovered hints
+                    # don't auto-overwrite an existing row on a refresh.
+                    if model.get("capacity_source") == "operator":
+                        for field in (
+                            "context_window_tokens",
+                            "max_input_tokens",
+                            "max_output_tokens",
+                            "default_output_reserve_tokens",
+                            "tokenizer_family",
+                            "capability_profile_version",
+                        ):
+                            new_value = model.get(field)
+                            if new_value is None:
+                                continue
+                            if existing_model.get(field) != new_value:
+                                update_data[field] = new_value
+                        if existing_model.get("capacity_source") != "operator":
+                            update_data["capacity_source"] = "operator"
+                    if update_data:
+                        update_model_record(existing_model["model_id"], update_data, user_id)
                     continue
 
             model_dict = await prepare_model_dict(
@@ -267,6 +516,16 @@ async def update_single_model_for_tenant(
             else:
                 model_data["ssl_verify"] = True
 
+        # Carry model_type from the existing record so the legacy-alias
+        # coercion can distinguish LLM/VLM updates from embedding updates
+        # even when the caller payload omits model_type. We don't store the
+        # injected model_type back on model_data because the update path
+        # explicitly strips it later.
+        existing_model_type = existing_models[0].get("model_type") if existing_models else None
+        if model_data.get("max_output_tokens") is not None and \
+                existing_model_type not in ("embedding", "multi_embedding"):
+            model_data["max_tokens"] = model_data["max_output_tokens"]
+
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
             for model in existing_models:
@@ -295,6 +554,7 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
     """Batch update models for a tenant by model_id or model_name."""
     try:
         for model in model_list:
+            _coerce_legacy_max_tokens_alias(model)
             # Build update data excluding id fields
             update_data = {k: v for k, v in model.items() if k not in ["model_id", "model_name"]}
 
@@ -523,7 +783,3 @@ async def list_models_for_admin(
     except Exception as e:
         logging.error(f"Failed to retrieve admin model list: {str(e)}")
         raise Exception(f"Failed to retrieve admin model list: {str(e)}")
-
-
-
-

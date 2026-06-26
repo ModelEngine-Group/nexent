@@ -1,10 +1,93 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Any, Dict, Iterable, List
 
 import aiohttp
 
 logger = logging.getLogger("model_provider")
+
+
+_CONTEXT_WINDOW_KEYS = (
+    "context_window_tokens",
+    "context_window",
+    "context_length",
+    "max_context_length",
+    "max_context_tokens",
+    "max_sequence_length",
+)
+_MAX_INPUT_KEYS = ("max_input_tokens", "input_token_limit", "max_prompt_tokens")
+_MAX_OUTPUT_KEYS = (
+    "max_output_tokens",
+    "output_token_limit",
+    "max_completion_tokens",
+    "max_tokens",
+)
+_OUTPUT_RESERVE_KEYS = (
+    "default_output_reserve_tokens",
+    "default_output_reserve",
+    "output_reserve_tokens",
+)
+_TOKENIZER_KEYS = ("tokenizer_family", "tokenizer", "tokenizer_type")
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _candidate_dicts(raw: Dict, nested_keys: Iterable[str]) -> List[Dict]:
+    candidates = [raw]
+    for key in nested_keys:
+        value = raw.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+    return candidates
+
+
+def _first_positive_int(candidates: List[Dict], keys: tuple[str, ...]) -> int | None:
+    for candidate in candidates:
+        for key in keys:
+            value = _positive_int(candidate.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _first_non_empty_str(candidates: List[Dict], keys: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        for key in keys:
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _extract_capacity_hints_from_raw(raw: Dict, nested_keys: Iterable[str] = ()) -> Dict:
+    """Extract advisory provider-discovery capacity hints from one raw model row."""
+    candidates = _candidate_dicts(raw, nested_keys)
+    hints = {}
+    for target_key, source_keys in (
+        ("context_window_tokens", _CONTEXT_WINDOW_KEYS),
+        ("max_input_tokens", _MAX_INPUT_KEYS),
+        ("max_output_tokens", _MAX_OUTPUT_KEYS),
+        ("default_output_reserve_tokens", _OUTPUT_RESERVE_KEYS),
+    ):
+        value = _first_positive_int(candidates, source_keys)
+        if value is not None:
+            hints[target_key] = value
+
+    tokenizer_family = _first_non_empty_str(candidates, _TOKENIZER_KEYS)
+    if tokenizer_family:
+        hints["tokenizer_family"] = tokenizer_family
+
+    if hints:
+        hints["capacity_source"] = "provider_candidate"
+    return hints
 
 
 # =============================================================================

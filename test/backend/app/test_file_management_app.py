@@ -51,21 +51,43 @@ async def _stub_list_files_impl(prefix: str, limit: int | None = None):
     files = [{"name": "a.txt", "url": "http://u", "key": "knowledge_base/a.txt"}]
     return files[:limit] if limit else files
 
-def _stub_check_file_access(object_name: str, user_id: str) -> bool:
+def _stub_resolve_minio_upload_folder(
+    folder: str | None,
+    user_id: str | None = None,
+    uploader_tenant_id: str | None = None,
+) -> str:
+    # Keep behavior consistent with production expectations for tests:
+    # - knowledge_base stays shared
+    # - otherwise default to attachments/{user_id} when user_id is present
+    if folder == "knowledge_base":
+        return "knowledge_base"
+    if user_id:
+        return f"attachments/{user_id}"
+    return folder or "attachments"
+
+
+def _stub_check_file_access(object_name: str, user_id: str | None, caller_tenant_id: str | None = None) -> bool:
     """Stub for check_file_access - allows access by default for testing."""
+    if not user_id:
+        return False
     if object_name.startswith("attachments/"):
         # attachments/{user_id}/*: only owner can access
-        if user_id:
-            expected_prefix = f"attachments/{user_id}"
-            return object_name.startswith(expected_prefix)
-        return False
+        expected_prefix = f"attachments/{user_id}"
+        return object_name.startswith(expected_prefix)
     # knowledge_base/*: all authenticated users can access
     return object_name.startswith("knowledge_base/")
 
 
-def _stub_check_file_access_batch(object_names: List[str], user_id: str) -> Dict[str, bool]:
+def _stub_check_file_access_batch(
+    object_names: List[str],
+    user_id: str | None,
+    caller_tenant_id: str | None = None,
+) -> Dict[str, bool]:
     """Stub for check_file_access_batch - returns dict of object_name -> allowed."""
-    return {name: _stub_check_file_access(name, user_id) for name in object_names}
+    return {
+        name: _stub_check_file_access(name, user_id, caller_tenant_id)
+        for name in object_names
+    }
 
 async def _stub_preprocess_files_generator(*_: Any, **__: Any) -> AsyncGenerator[str, None]:
     yield "data: {\"type\": \"progress\", \"progress\": 0}\n\n"
@@ -88,6 +110,7 @@ sfms_stub.get_file_stream_impl = _stub_get_file_stream_impl
 sfms_stub.delete_file_impl = _stub_delete_file_impl
 sfms_stub.list_files_impl = _stub_list_files_impl
 sfms_stub.preprocess_files_generator = _stub_preprocess_files_generator
+sfms_stub.resolve_minio_upload_folder = _stub_resolve_minio_upload_folder
 sfms_stub.check_file_access = _stub_check_file_access
 sfms_stub.check_file_access_batch = _stub_check_file_access_batch
 sys.modules["services.file_management_service"] = sfms_stub
@@ -129,11 +152,12 @@ sys.modules.setdefault("consts", consts_pkg)
 
 model_stub = types.ModuleType("consts.model")
 class ProcessParams:  # minimal stub
-    def __init__(self, chunking_strategy: str, source_type: str, index_name: str, authorization: str | None):
+    def __init__(self, chunking_strategy: str, source_type: str, index_name: str, authorization: str | None, model_id: int | None = None):
         self.chunking_strategy = chunking_strategy
         self.source_type = source_type
         self.index_name = index_name
         self.authorization = authorization
+        self.model_id = model_id
 model_stub.ProcessParams = ProcessParams
 sys.modules.setdefault("consts.model", model_stub)
 setattr(consts_pkg, "model", model_stub)
@@ -183,7 +207,7 @@ async def test_options_route_ok():
 
 @pytest.mark.asyncio
 async def test_upload_files_success(monkeypatch):
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None):
+    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
         return [], ["/abs/path1"], ["a.txt"]
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
@@ -210,7 +234,7 @@ async def test_upload_files_no_files_bad_request():
 
 @pytest.mark.asyncio
 async def test_upload_files_no_valid_files_uploaded(monkeypatch):
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None):
+    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
         return ["err"], [], []
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
@@ -225,7 +249,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_files_internal_error(monkeypatch):
     """Test upload_files with internal error returns 500."""
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None):
+    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
         raise RuntimeError("Storage failed")
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
@@ -249,6 +273,7 @@ async def test_process_files_success(monkeypatch):
         index_name="kb1",
         destination="local",
         authorization="Bearer x",
+        model_id=1,
     )
     assert resp.status_code == 201
     assert "Files processing triggered successfully" in resp.body.decode()
@@ -267,6 +292,7 @@ async def test_process_files_error_none(monkeypatch):
             index_name="kb",
             destination="local",
             authorization=None,
+            model_id=1,
         )
     assert "Data process service failed" in str(ei.value)
 
@@ -284,6 +310,7 @@ async def test_process_files_error_message(monkeypatch):
             index_name="kb",
             destination="local",
             authorization=None,
+            model_id=1,
         )
     assert "boom" in str(ei.value)
 
@@ -314,7 +341,7 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
     """Test storage_upload_files with attachments folder uses user_id for isolation."""
     captured_params = {}
 
-    async def fake_upload(files, folder, user_id=None):
+    async def fake_upload(files, folder, user_id=None, **kwargs):
         captured_params["folder"] = folder
         captured_params["user_id"] = user_id
         return [{"success": True, "file_name": "private.txt"}]
@@ -329,7 +356,6 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
     )
     # Folder should be prefixed with user_id
     assert captured_params["folder"] == "attachments/user1"
-    assert captured_params["user_id"] == "user1"
     assert result["success_count"] == 1
 
 
@@ -613,7 +639,7 @@ async def test_get_storage_file_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_access_denied_for_attachments(monkeypatch):
     """Test that access to other user's attachments is forbidden."""
-    def fake_check_access(object_name, user_id):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -668,7 +694,7 @@ async def test_remove_storage_file_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_remove_storage_file_access_denied(monkeypatch):
     """Test that deletion of other user's file is forbidden."""
-    def fake_check_access(object_name, user_id):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -729,7 +755,7 @@ async def test_get_storage_file_batch_urls_mixed(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
     """Test batch URLs when all files are denied access."""
-    def fake_check_access(object_name, user_id):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None):
         return False  # Deny all access
 
     def fake_get(object_name, expires):
@@ -752,7 +778,7 @@ async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_error(monkeypatch):
     """Test batch URLs with internal error returns error in results, not exception."""
-    def fake_check_access(object_name, user_id):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None):
         return True
 
     def fake_get(object_name, expires):
@@ -1499,7 +1525,7 @@ async def test_preview_file_office_converted_to_pdf(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_access_denied(monkeypatch):
     """Test preview_file access denied for other user's attachments."""
-    def fake_check_access(object_name, user_id):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)

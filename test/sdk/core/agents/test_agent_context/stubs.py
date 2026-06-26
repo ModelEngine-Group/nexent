@@ -135,9 +135,6 @@ def register_smolagents_mocks() -> ModuleType:
     Idempotent: subsequent calls return the already-registered module.
     Returns the top-level mock module.
     """
-    if "smolagents" in sys.modules:
-        return sys.modules["smolagents"]
-
     mock = build_smolagents_mock()
     sys.modules.update({
         "smolagents":        mock,
@@ -146,3 +143,34 @@ def register_smolagents_mocks() -> ModuleType:
         "smolagents.agents": mock.agents,
     })
     return mock
+
+
+def restore_real_smolagents() -> None:
+    """
+    Remove smolagents mock entries from sys.modules and force-reimport the
+    real packages. Safe to call after loader.py has finished loading
+    agent_context via importlib: by then the mock classes are already
+    captured as module-level attributes in the loaded modules, so swapping
+    sys.modules back to real packages does not invalidate those references.
+
+    Required to prevent cross-test contamination: sibling test trees (e.g.
+    test/backend/utils/test_context_utils.py) import the real
+    nexent.core.agents.agent_context, which itself does
+    "from smolagents.memory import AgentMemory" at module load time. Without
+    restoration, that import resolves to the bare mock ModuleType and fails
+    with ImportError("unknown location").
+    """
+    import importlib
+
+    for key in ("smolagents.memory", "smolagents.models", "smolagents.agents", "smolagents"):
+        mod = sys.modules.get(key)
+        # Heuristic for mock: ModuleType without __spec__ and __file__.
+        if mod is not None and getattr(mod, "__spec__", None) is None and not hasattr(mod, "__file__"):
+            del sys.modules[key]
+
+    for key in ("smolagents", "smolagents.memory", "smolagents.models", "smolagents.agents"):
+        try:
+            importlib.import_module(key)
+        except ImportError:
+            # Real smolagents may not have every submodule we mocked; tolerate.
+            pass

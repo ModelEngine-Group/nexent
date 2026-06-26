@@ -45,6 +45,7 @@ import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
+import { resolveAgentListTenantKey } from "@/lib/agentListTenant";
 import { message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
@@ -148,7 +149,7 @@ export function VersionCardItem({
   );
 
   const { tools: toolList } = useToolList();
-  const { agents: agentList } = useAgentList(user?.tenantId ?? null);
+  const { agents: agentList } = useAgentList("");
 
   // Get current agent's permission from agent list
   const currentAgent = useMemo(() => {
@@ -254,11 +255,7 @@ export function VersionCardItem({
         if (store.currentAgentId === agentId) {
           const agentResult = await searchAgentInfo(agentId);
           if (agentResult.success && agentResult.data) {
-            const permissionFromList = currentAgent?.permission ?? undefined;
-            store.setCurrentAgent({
-              ...agentResult.data,
-              permission: permissionFromList,
-            });
+            store.setCurrentAgent(agentResult.data);
             store.triggerForceRefresh();
           }
         }

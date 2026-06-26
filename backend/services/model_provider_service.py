@@ -6,7 +6,7 @@ from consts.const import (
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import ProviderEnum
+from consts.provider import ProviderEnum, DASHSCOPE_REALTIME_BASE_URL
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from services.providers.base import AbstractModelProvider
@@ -108,6 +108,35 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         "max_tokens", 0) if not is_embedding_type else 0
     timeout_seconds_value = 120 if not is_embedding_type else None
 
+    # W1/W2 capacity fields. The frontend batch-add resolves these in
+    # buildBatchModelData (row override -> top-level batch default) and
+    # sends them per row tagged with capacity_source. Two cases:
+    #   - capacity_source="operator": the operator explicitly saved these
+    #     values (top-level batch default panel or per-row gear modal).
+    #     Persist them. Without this branch the ModelRequest defaults kick
+    #     in (all None) and every freshly batch-created row lands with
+    #     context_window_tokens=NULL, max_output_tokens=NULL even though
+    #     the user filled the panel -- the glm-5.1/glm-5.2 incident.
+    #   - capacity_source="provider_candidate" (or anything else): per the
+    #     W1 design these are advisory UI hints surfaced from the catalog
+    #     by _extract_capacity_hints. They are shown to the user as
+    #     suggestions but not auto-persisted; only operator acceptance
+    #     should write them.
+    is_operator_capacity = model.get("capacity_source") == "operator"
+    capacity_kwargs = (
+        {
+            "context_window_tokens": model.get("context_window_tokens"),
+            "max_input_tokens": model.get("max_input_tokens"),
+            "max_output_tokens": model.get("max_output_tokens"),
+            "default_output_reserve_tokens": model.get("default_output_reserve_tokens"),
+            "tokenizer_family": model.get("tokenizer_family"),
+            "capacity_source": "operator",
+            "capability_profile_version": model.get("capability_profile_version"),
+        }
+        if is_operator_capacity
+        else {}
+    )
+
     model_obj = ModelRequest(
         model_factory=provider,
         model_name=model_name,
@@ -118,7 +147,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         expected_chunk_size=expected_chunk_size,
         maximum_chunk_size=maximum_chunk_size,
         chunk_batch=chunk_batch,
-        timeout_seconds=timeout_seconds_value
+        timeout_seconds=timeout_seconds_value,
+        **capacity_kwargs,
     )
 
     model_dict = model_obj.model_dump()
@@ -127,14 +157,18 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Determine the correct base_url and, for embeddings, update the actual
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
-        if provider != ProviderEnum.MODELENGINE.value:
-            # Ensure proper slash between base URL and endpoint
+        if provider == ProviderEnum.DASHSCOPE.value and model["model_type"] == "embedding":
             model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
-        else:
-            # For ModelEngine embedding models, append the embeddings path
+        elif provider == ProviderEnum.MODELENGINE.value:
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
-        # The embedding dimension might differ from the provided max_tokens.
+        elif "/embeddings" in model_url:
+            # URL already contains /embeddings endpoint, use as-is
+            model_dict["base_url"] = model_url.rstrip('/')
+        else:
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
+    elif model["model_type"] in ("stt", "tts") and provider == ProviderEnum.DASHSCOPE.value:
+        model_dict["base_url"] = DASHSCOPE_REALTIME_BASE_URL
     elif model["model_type"] == "rerank":
         if provider == ProviderEnum.DASHSCOPE.value:
             model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
@@ -190,11 +224,20 @@ def merge_existing_model_attributes(
     if not model_list or not existing_model_list:
         return model_list
 
-    # Create a mapping table for existing models for quick lookup
+    # Create a mapping table for existing models for quick lookup.
+    # Use add_repo_to_name so the lookup key matches the format used by
+    # provider responses and downstream consumers. Naive `model_repo + "/" +
+    # model_name` prepends a leading slash when model_repo is empty
+    # (DashScope-style bare names like "glm-4.7" land with model_repo=""),
+    # so "/glm-4.7" never matches the catalog's "glm-4.7" entry and the
+    # merge silently no-ops -- the same wire-key bug fixed in
+    # batch_create_models_for_tenant's delete loop.
     existing_model_map = {}
     for existing_model in existing_model_list:
-        model_full_name = existing_model["model_repo"] + \
-            "/" + existing_model["model_name"]
+        model_full_name = add_repo_to_name(
+            model_repo=existing_model["model_repo"],
+            model_name=existing_model["model_name"],
+        )
         existing_model_map[model_full_name] = existing_model
 
     # Iterate through the model list, merge specified fields from existing models

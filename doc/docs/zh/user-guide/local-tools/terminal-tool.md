@@ -33,7 +33,7 @@ SSH端口: 2222
 ##### 方式B：本地构建镜像
 ```bash
 # 本地构建Ubuntu Terminal镜像
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 ```
 
 > 📚 **详细构建说明**：参考 [Docker 构建指南](/zh/deployment/docker-build) 了解完整的镜像构建和推送流程。

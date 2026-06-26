@@ -2,14 +2,20 @@
 Unit tests for config_sync_service STT model config saving.
 These tests cover the STT specific fields in save_config_impl.
 """
+import importlib
 import sys
+import types
+import importlib
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 # Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Apply critical patches before importing any modules
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
@@ -22,6 +28,31 @@ minio_client_mock.client = MagicMock()
 minio_config_mock = MagicMock()
 minio_config_mock.validate = MagicMock()
 
+if 'consts.const' in sys.modules and not hasattr(sys.modules['consts.const'], 'APP_DESCRIPTION'):
+    sys.modules.pop('consts.const', None)
+if 'consts' in sys.modules and not hasattr(sys.modules['consts'], '__path__'):
+    sys.modules.pop('consts', None)
+
+database_client_module = types.ModuleType('database.client')
+database_client_module.MinioClient = MagicMock()
+database_client_module.minio_client = minio_client_mock
+database_client_module.as_dict = MagicMock(side_effect=lambda value: value)
+database_client_module.db_client = MagicMock()
+database_client_module.db_client.clean_string_values = MagicMock(side_effect=lambda value: value)
+database_client_module.get_db_session = MagicMock()
+sys.modules['database.client'] = database_client_module
+database_package = sys.modules.get('database') or importlib.import_module('database')
+setattr(database_package, 'client', database_client_module)
+database_model_management_module = types.ModuleType('database.model_management_db')
+database_model_management_module.get_model_by_model_id = MagicMock()
+database_model_management_module.get_model_id_by_display_name = MagicMock()
+database_model_management_module.get_model_records = MagicMock(return_value=[])
+sys.modules['database.model_management_db'] = database_model_management_module
+setattr(database_package, 'model_management_db', database_model_management_module)
+backend_database_client_module = sys.modules.get('backend.database.client')
+if backend_database_client_module is not None and not hasattr(backend_database_client_module, 'minio_client'):
+    backend_database_client_module.minio_client = minio_client_mock
+
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig',
@@ -29,7 +60,7 @@ patch('nexent.storage.minio_config.MinIOStorageConfig',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 patch('database.client.MinioClient', return_value=minio_client_mock).start()
-patch('backend.database.client.minio_client', minio_client_mock).start()
+patch('backend.database.client.minio_client', minio_client_mock, create=True).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import backend modules after all patches are applied
@@ -47,14 +78,17 @@ def service_mocks():
     with patch('backend.services.config_sync_service.tenant_config_manager') as mock_tenant_config_manager, \
             patch('backend.services.config_sync_service.get_env_key') as mock_get_env_key, \
             patch('backend.services.config_sync_service.safe_value') as mock_safe_value, \
+            patch('backend.services.config_sync_service.get_model_records') as mock_get_model_records, \
             patch('backend.services.config_sync_service.get_model_id_by_display_name') as mock_get_model_id, \
             patch('backend.services.config_sync_service.get_model_name_from_config') as mock_get_model_name, \
             patch('backend.services.config_sync_service.logger') as mock_logger:
 
+        mock_get_model_records.return_value = []
         yield {
             'tenant_config_manager': mock_tenant_config_manager,
             'get_env_key': mock_get_env_key,
             'safe_value': mock_safe_value,
+            'get_model_records': mock_get_model_records,
             'get_model_id': mock_get_model_id,
             'get_model_name': mock_get_model_name,
             'logger': mock_logger

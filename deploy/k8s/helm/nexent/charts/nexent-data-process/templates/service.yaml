@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-data-process
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: {{ default "ClusterIP" .Values.service.type }}
+  ports:
+    - port: 5012
+      targetPort: 5012
+      name: http
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.http }}
+      nodePort: {{ .Values.service.nodePorts.http }}
+      {{- end }}
+    - port: 5555
+      targetPort: 5555
+      name: flower
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.flower }}
+      nodePort: {{ .Values.service.nodePorts.flower }}
+      {{- end }}
+    - port: 8265
+      targetPort: 8265
+      name: ray-dashboard
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePorts.rayDashboard }}
+      nodePort: {{ .Values.service.nodePorts.rayDashboard }}
+      {{- end }}
+  selector:
+    app: nexent-data-process

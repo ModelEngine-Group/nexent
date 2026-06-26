@@ -19,7 +19,7 @@ import marketService, { MarketApiError } from "@/services/marketService";
 import { AgentMarketCard } from "./components/AgentMarketCard";
 import MarketAgentDetailModal from "./components/MarketAgentDetailModal";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
-import { ImportAgentData } from "@/hooks/useAgentImport";
+import { ImportAgentData } from "@/lib/agentImportUtils";
 import MarketErrorState from "./components/MarketErrorState";
 import "./MarketContent.css";
 

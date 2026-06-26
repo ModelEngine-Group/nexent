@@ -8,18 +8,29 @@ from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.model import UserSignInRequest, UserSignUpRequest
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
+from consts.const import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
+from consts.model import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    AppException,
+    UnauthorizedError,
+    ValidationError,
+)
+from consts.error_code import ErrorCode
+from services.cas_service import build_logout_url, CasAuthenticationError
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token
+    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
+    update_password
 from services.user_service import delete_user_and_cleanup
-from consts.exceptions import UnauthorizedError
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_id, extract_session_id_from_authorization
 
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = logging.getLogger("user_management_app")
 router = APIRouter(prefix="/user", tags=["user"])
 
 
@@ -33,10 +44,12 @@ async def service_health():
                             content={"message": "Auth service is available"})
     except ConnectionError as e:
         logging.error(f"Auth service health check failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Auth service is unavailable")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Auth service is unavailable")
     except Exception as e:
         logging.error(f"Auth service health check failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Auth service is unavailable")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Auth service is unavailable")
 
 
 @router.post("/signup")
@@ -49,7 +62,7 @@ async def signup(request: UserSignUpRequest):
                                                       auto_login=request.auto_login)
         success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
         return JSONResponse(status_code=HTTPStatus.OK,
-                            content={"message":success_message, "data":user_data})
+                            content={"message": success_message, "data": user_data})
     except NoInviteCodeException as e:
         logging.error(f"User registration failed by invite code: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -58,18 +71,28 @@ async def signup(request: UserSignUpRequest):
         logging.error(f"User registration failed by invite code: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
+    except ValidationError as e:
+        detail = str(e)
+        if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:
+            logging.warning(
+                "User registration rejected: asset owner invite requires OAuth")
+        else:
+            logging.warning(
+                f"User registration rejected by validation: {detail}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
     except UserRegistrationException as e:
-        logging.error(f"User registration failed by registration service: {str(e)}")
+        logging.error(
+            f"User registration failed by registration service: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="REGISTRATION_SERVICE_ERROR")
-    except AuthApiError as e:
-        logging.error(f"User registration failed by email already exists: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.CONFLICT,
-                            detail="EMAIL_ALREADY_EXISTS")
     except AuthWeakPasswordError as e:
         logging.error(f"User registration failed by weak password: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail="WEAK_PASSWORD")
+    except AuthApiError as e:
+        logging.error(f"User registration failed by auth error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                            detail="EMAIL_ALREADY_EXISTS")
     except Exception as e:
         logging.error(f"User registration failed, unknown error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -81,13 +104,16 @@ async def signin(request: UserSignInRequest):
     """User login"""
     try:
         signin_content = await signin_user(email=request.email,
-                                      password=request.password)
+                                           password=request.password)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content=signin_content)
     except AuthApiError as e:
         logging.error(f"User login failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                             detail="Email or password error")
+    except ValidationError as e:
+        logging.warning(f"User login rejected by feature flag: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"User login failed, unknown error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -108,7 +134,7 @@ async def user_refresh_token(request: Request):
             raise ValueError("No refresh token provided")
         session_info = await refresh_user_token(authorization, refresh_token)
         return JSONResponse(status_code=HTTPStatus.OK,
-                            content={"message":"Token refresh successful", "data":{"session": session_info}})
+                            content={"message": "Token refresh successful", "data": {"session": session_info}})
     except ValueError as e:
         logging.error(f"Refresh token failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -125,7 +151,18 @@ async def logout(request: Request):
     authorization = request.headers.get("Authorization")
     try:
         # Make logout idempotent: if no token or token expired, still return success
+        session_id = None
+        cas_logout_url = ""
         if authorization:
+            session_id = extract_session_id_from_authorization(authorization)
+            if session_id:
+                from database.cas_session_db import revoke_cas_session_by_session_id
+
+                revoke_cas_session_by_session_id(session_id, actor="user")
+                try:
+                    cas_logout_url = build_logout_url()
+                except CasAuthenticationError as cas_err:
+                    logging.warning(f"CAS logout URL is unavailable: {str(cas_err)}")
             client = get_authorized_client(authorization)
             try:
                 client.auth.sign_out()
@@ -134,7 +171,12 @@ async def logout(request: Request):
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
         return JSONResponse(status_code=HTTPStatus.OK,
-                            content={"message":"Logout successful"})
+                            content={
+                                "message": "Logout successful",
+                                "data": {
+                                    "cas_logout_url": cas_logout_url
+                                }
+                            })
 
     except Exception as e:
         logging.error(f"User logout failed: {str(e)}")
@@ -154,8 +196,8 @@ async def get_session(request: Request):
     try:
         data = await get_session_by_authorization(authorization)
         return JSONResponse(status_code=HTTPStatus.OK,
-                     content={"message": "Session is valid",
-                              "data": data})
+                            content={"message": "Session is valid",
+                                     "data": data})
     except UnauthorizedError as e:
         logging.error(f"Get user session unauthorized: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
@@ -188,6 +230,10 @@ async def get_user_information(request: Request):
         user_info = await get_user_info(user_id)
         if not user_info:
             raise UnauthorizedError("User information not found")
+
+        user_info["user"]["auth_provider"] = (
+            "cas" if extract_session_id_from_authorization(authorization) else "local"
+        )
 
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Success",
@@ -275,6 +321,7 @@ async def revoke_user_account(request: Request):
         logging.error(f"User revoke failed: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")
+
 
 @router.post("/tokens")
 async def create_token_endpoint(
@@ -379,3 +426,49 @@ async def delete_token_endpoint(
         logging.error(f"Failed to delete token: {str(e)}", exc_info=e)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+
+
+@router.put("/password")
+async def update_password_endpoint(
+    request: UpdatePasswordRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Update current user's password.
+
+    This endpoint requires the user to provide their current password for verification
+    before setting a new password.
+    """
+    try:
+        if not authorization:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: No authorization token provided")
+
+        user_id, _ = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+
+        await update_password(
+            user_id=str(user_id),
+            old_password=request.old_password,
+            new_password=request.new_password
+        )
+
+        logger.info(f"Password updated successfully for user {user_id}")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Password updated successfully"}
+        )
+
+    except UnauthorizedError as e:
+        logger.warning(f"Password update unauthorized for user: {str(e)}")
+        raise AppException(ErrorCode.PROFILE_INVALID_CREDENTIALS, str(e))
+    except AppException as e:
+        logger.warning(
+            f"Password update business error: {e.error_code} - {str(e)}")
+        raise e  # Let app_exception_handler format the response
+    except Exception as e:
+        logging.error(f"Failed to update password: {str(e)}", exc_info=e)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Internal Server Error")

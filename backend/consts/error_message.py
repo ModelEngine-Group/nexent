@@ -104,6 +104,9 @@ class ErrorMessage:
         ErrorCode.PROFILE_UPDATE_FAILED: "Profile update failed.",
         ErrorCode.PROFILE_USER_ALREADY_EXISTS: "User already exists.",
         ErrorCode.PROFILE_INVALID_CREDENTIALS: "Invalid username or password.",
+        # Profile - Password
+        ErrorCode.PROFILE_PASSWORD_WEAK: "Password does not meet security requirements. Please use a stronger password.",
+        ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD: "New password cannot be the same as the old password.",
 
         # ==================== 12 TenantResource / 租户资源 ====================
         ErrorCode.TENANT_NOT_FOUND: "Tenant not found.",
@@ -120,6 +123,16 @@ class ErrorMessage:
         ErrorCode.DIFY_AUTH_ERROR: "Dify authentication failed. Please check your API key.",
         ErrorCode.DIFY_RATE_LIMIT: "Dify API rate limit exceeded. Please try again later.",
         ErrorCode.ME_CONNECTION_FAILED: "Failed to connect to ME service.",
+        ErrorCode.IDATA_SERVICE_ERROR: "iData service error.",
+        ErrorCode.IDATA_CONFIG_INVALID: "iData configuration invalid. Please check URL and API key format.",
+        ErrorCode.IDATA_CONNECTION_ERROR: "Failed to connect to iData. Please check network connection and URL.",
+        ErrorCode.IDATA_RESPONSE_ERROR: "Failed to parse iData response. Please check API URL.",
+        ErrorCode.IDATA_AUTH_ERROR: "iData authentication failed. Please check your API key.",
+        ErrorCode.IDATA_RATE_LIMIT: "iData API rate limit exceeded. Please try again later.",
+        ErrorCode.AIDP_SERVICE_ERROR: "AIDP service error.",
+        ErrorCode.AIDP_CONFIG_INVALID: "AIDP configuration invalid. Please check URL and API key format.",
+        ErrorCode.AIDP_CONNECTION_ERROR: "Failed to connect to AIDP. Please check network connection and URL.",
+        ErrorCode.AIDP_AUTH_ERROR: "AIDP authentication failed. Please check your API key.",
 
         # ==================== 14 Northbound / 北向接口 ====================
         ErrorCode.NORTHBOUND_REQUEST_FAILED: "Northbound request failed.",

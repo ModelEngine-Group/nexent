@@ -1,5 +1,6 @@
 import { message } from "antd";
 import log from "@/lib/logger";
+import { fetchWithAuth } from "@/lib/auth";
 import {
   createSkill,
   updateSkill,
@@ -8,6 +9,8 @@ import {
   fetchSkills,
   deleteSkill,
 } from "@/services/agentConfigService";
+import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
+import { InstallableSkill } from "@/types/agentConfig";
 import {
   THINKING_STEPS_ZH,
   type CreateSkillStreamRequest,
@@ -37,7 +40,8 @@ export interface SkillListItem {
   description?: string;
   tags: string[];
   content?: string;
-  params: Record<string, unknown> | null;
+  config_values: Record<string, unknown> | null;
+  config_schemas: unknown[] | null;
   source: string;
   tool_ids: number[];
   created_by?: string | null;
@@ -149,10 +153,11 @@ export const processSkillStream = async (
 
 /**
  * Load skills for lists (tenant-resources table, etc.).
- * Maps API payload to {@link SkillListItem} including params for config editing.
+ * Maps API payload to {@link SkillListItem} including config_schemas for config editing.
+ * @param tenantId - Optional tenant ID for super admin to query a specific tenant's skills.
  */
-export async function fetchSkillsList(): Promise<SkillListItem[]> {
-  const res = await fetchSkills();
+export async function fetchSkillsList(tenantId?: string | null): Promise<SkillListItem[]> {
+  const res = await fetchSkills(tenantId);
   if (!res.success) {
     throw new Error(res.message || "Failed to fetch skills");
   }
@@ -165,11 +170,18 @@ export async function fetchSkillsList(): Promise<SkillListItem[]> {
         : typeof rawId === "string"
           ? Number.parseInt(rawId, 10)
           : Number.NaN;
-    const rawParams = s.params;
-    let params: Record<string, unknown> | null = null;
-    if (rawParams !== undefined && rawParams !== null) {
-      if (typeof rawParams === "object" && !Array.isArray(rawParams)) {
-        params = { ...(rawParams as Record<string, unknown>) };
+    const rawConfigSchemas = s.config_schemas;
+    let config_schemas: unknown[] | null = null;
+    if (rawConfigSchemas !== undefined && rawConfigSchemas !== null) {
+      if (Array.isArray(rawConfigSchemas)) {
+        config_schemas = rawConfigSchemas;
+      }
+    }
+    const rawConfigValues = s.config_values;
+    let config_values: Record<string, unknown> | null = null;
+    if (rawConfigValues !== undefined && rawConfigValues !== null) {
+      if (typeof rawConfigValues === "object" && !Array.isArray(rawConfigValues)) {
+        config_values = { ...(rawConfigValues as Record<string, unknown>) };
       }
     }
     const rawToolIds = s.tool_ids;
@@ -182,7 +194,8 @@ export async function fetchSkillsList(): Promise<SkillListItem[]> {
       description: s.description !== undefined ? String(s.description) : undefined,
       tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
       content: s.content !== undefined ? String(s.content) : undefined,
-      params,
+      config_schemas,
+      config_values,
       source: String(s.source ?? "custom"),
       tool_ids: toolIds,
       created_by: s.created_by !== undefined ? (s.created_by as string | null) : undefined,
@@ -323,11 +336,6 @@ export const skillNameExists = (
 };
 
 export { updateSkill };
-
-/**
- * Call the /skills/create-simple backend API to generate a skill.
- */
-import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 
 /**
  * Interactive skill creation via backend API (SDK-backed).
@@ -814,3 +822,57 @@ export const stopSkillCreation = async (taskId: string): Promise<boolean> => {
     return false;
   }
 };
+
+/**
+ * Fetch official skills with installation status for a tenant.
+ * Used in the tenant creation flow to show which skills are installable.
+ * @param tenantId - Optional tenant ID for super admin to query a specific tenant's skills.
+ */
+export async function fetchOfficialSkillsWithStatus(tenantId?: string): Promise<InstallableSkill[]> {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.official}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.official;
+    const response = await fetchWithAuth(url);
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    const rawSkills: unknown[] = data.skills || [];
+    return (rawSkills as Record<string, unknown>[]).map((s) => ({
+      skill_id: Number(s.skill_id),
+      name: String(s.name ?? ""),
+      description: s.description !== undefined ? String(s.description) : "",
+      source: String(s.source ?? "official"),
+      status: (s.status as InstallableSkill["status"]) ?? "installable",
+    }));
+  } catch (error) {
+    log.error("Failed to fetch official skills with status:", error);
+    throw error;
+  }
+}
+
+export async function installOfficialSkills(
+  skillNames: string[],
+  locale: string = "en",
+  tenantId?: string
+): Promise<{ installed: string[]; total: number }> {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.install}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.install;
+    const response = await fetchWithAuth(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skill_names: skillNames, locale }),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return { installed: data.installed || [], total: data.total || 0 };
+  } catch (error) {
+    log.error("Failed to install official skills:", error);
+    throw error;
+  }
+}

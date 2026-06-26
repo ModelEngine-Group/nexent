@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexent-redis
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: {{ default "ClusterIP" .Values.service.type }}
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+      {{- if and (eq (default "ClusterIP" .Values.service.type) "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+  selector:
+    app: nexent-redis

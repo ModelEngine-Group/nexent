@@ -16,22 +16,12 @@ import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
 
-export interface AgentInfoCompProps {
-  isShowVersionManagePanel: boolean;
-  openVersionManagePanel: () => void;
-  closeVersionManagementPanel: () => void;
-}
-
-export default function AgentInfoComp({
-  isShowVersionManagePanel,
-  openVersionManagePanel,
-  closeVersionManagementPanel,
-}: AgentInfoCompProps) {
+export default function AgentInfoComp() {
   const { t } = useTranslation("common");
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const isGenerating = useAgentConfigStore((state) => state.isGenerating);
 
   const isPanelActive = (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
   const { agentVersionList, total, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
@@ -42,17 +32,13 @@ export default function AgentInfoComp({
     currentAgentId, agentInfo?.current_version_no
   );
     
-  const isReadOnly = isPanelActive && !isCreatingMode && currentAgentPermission === "READ_ONLY";
-  const isEditable = isPanelActive && !isReadOnly;
+  const isReadOnly = useAgentConfigStore((state) => state.isReadOnly());
 
   // Save guard hook
   const saveGuard = useSaveGuard();
 
   // Debug drawer state
   const [isDebugDrawerOpen, setIsDebugDrawerOpen] = useState(false);
-
-  // Generation state shared with AgentGenerateDetail
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
@@ -83,54 +69,21 @@ export default function AgentInfoComp({
                 className="w-full"
               >
                 <Flex justify="flex-start" align="center" gap={8}>
-                  <Badge count={3} color="blue" />
-                  <h2 className="text-lg font-medium">
+                  <Badge count={2} color="blue" />
+                  <h2 className="text-[16px] font-medium">
                     {t("guide.steps.describeBusinessLogic.title")}
                   </h2>
                 </Flex>
-                <Button
-                  icon={<GitBranch size={16} />}
-                  onClick={isShowVersionManagePanel ? closeVersionManagementPanel : openVersionManagePanel}
-                  type={isShowVersionManagePanel ? "primary" : "default"}
-                >
-                  {t("agent.version.manage")}
-                </Button>
               </Flex>
             </Col>
           </Row>
 
           <Divider style={{ margin: "10px 0" }} />
-          {!isCreatingMode && agentInfo?.current_version_no !== 0 && total > 0 && (
-            <Row style={{ marginBottom: "8px" }}>
-              <Col className="w-full">
-                <Flex
-                  justify="space-between"
-                  align="center"
-                  className="w-full py-2 px-4 bg-gray-100 rounded-lg text-gray-700"
-                >
-                  <Flex justify="start" align="center" gap={4}>
-                    <History size={16} />
-                    <span className="text-sm">
-                      {t("agent.version.currentVersion")} :
-                    </span>
-                    <Tag color="cyan" variant="outlined" className="rounded-md font-mono text-sm"> {agentVersionDetail?.version.version_name}</Tag>
-                  </Flex>
-                  <Flex justify="end" align="center" gap={8} >
-                    {t("agent.version.totalVersions", { count: total ?? 0 })}
-                  </Flex>
-                </Flex>
-              </Col>
-            </Row>
-          )}
 
           <Row className="flex-1 min-h-0 h-full">
             <Col xs={24} className="h-full">
               <Flex vertical className="h-full min-h-0 w-full min-w-0">
-                <AgentGenerateDetail
-                  editable={isEditable}
-                  isGenerating={isGenerating}
-                  setIsGenerating={setIsGenerating}
-                />
+                <AgentGenerateDetail/>
               </Flex>
             </Col>
           </Row>

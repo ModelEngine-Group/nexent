@@ -1,8 +1,8 @@
 """
-Integration test for document vector operations
+Integration test for document vector operations.
 
-This test demonstrates the complete workflow from ES retrieval to clustering.
-Note: This requires a running Elasticsearch instance.
+This module validates the embedding and clustering workflow using deterministic
+fixtures so the clustering assertions stay stable across environments.
 """
 import os
 import sys
@@ -80,82 +80,84 @@ from backend.utils.document_vector_utils import (
 
 
 class TestDocumentVectorIntegration:
-    """Integration tests for document vector operations"""
-    
+    """Integration tests for document vector operations."""
+
     def test_complete_workflow(self):
-        """Test complete workflow: embedding calculation -> clustering"""
-        # Simulate document chunks with embeddings
+        """Test complete workflow: embedding calculation -> clustering."""
         chunks_1 = [
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 1 chunk 1'},
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 1 chunk 2'},
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 1 chunk 3'}
+            {"embedding": [1.0, 0.0], "content": "Document one chunk A"},
+            {"embedding": [0.9, 0.1], "content": "Document one chunk B"},
+            {"embedding": [0.95, 0.05], "content": "Document one chunk C"},
         ]
-        
         chunks_2 = [
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 2 chunk 1'},
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 2 chunk 2'}
+            {"embedding": [0.0, 1.0], "content": "Document two chunk A"},
+            {"embedding": [0.1, 0.9], "content": "Document two chunk B"},
         ]
-        
         chunks_3 = [
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 3 chunk 1'},
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 3 chunk 2'},
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 3 chunk 3'},
-            {'embedding': np.random.rand(128).tolist(), 'content': 'Content for doc 3 chunk 4'}
+            {"embedding": [0.85, 0.15], "content": "Document three chunk A"},
+            {"embedding": [0.8, 0.2], "content": "Document three chunk B"},
+            {"embedding": [0.88, 0.12], "content": "Document three chunk C"},
+            {"embedding": [0.83, 0.17], "content": "Document three chunk D"},
         ]
-        
-        # Calculate document embeddings
+
         doc_embedding_1 = calculate_document_embedding(chunks_1, use_weighted=True)
         doc_embedding_2 = calculate_document_embedding(chunks_2, use_weighted=True)
         doc_embedding_3 = calculate_document_embedding(chunks_3, use_weighted=True)
-        
+
         assert doc_embedding_1 is not None
         assert doc_embedding_2 is not None
         assert doc_embedding_3 is not None
-        
-        # Create document embeddings dictionary
+
         doc_embeddings = {
-            'doc_001': doc_embedding_1,
-            'doc_002': doc_embedding_2,
-            'doc_003': doc_embedding_3
+            "doc_001": doc_embedding_1,
+            "doc_002": doc_embedding_2,
+            "doc_003": doc_embedding_3,
         }
-        
-        # Determine optimal K
+
         embeddings_array = np.array([doc_embedding_1, doc_embedding_2, doc_embedding_3])
         optimal_k = auto_determine_k(embeddings_array, min_k=2, max_k=3)
-        
-        assert 2 <= optimal_k <= 3
-        
-        # Perform clustering
+
+        assert optimal_k == 2
+
         clusters = kmeans_cluster_documents(doc_embeddings, k=optimal_k)
-        
+
         assert len(clusters) == optimal_k
         assert sum(len(docs) for docs in clusters.values()) == 3
-    
+        assert sorted(len(docs) for docs in clusters.values()) == [1, 2]
+
+        cluster_sets = [set(docs) for docs in clusters.values()]
+        assert {"doc_001", "doc_003"} in cluster_sets
+        assert {"doc_002"} in cluster_sets
+
     def test_large_dataset_clustering(self):
-        """Test clustering with larger simulated dataset"""
-        # Create simulated document embeddings
-        n_docs = 50
-        doc_embeddings = {
-            f'doc_{i:03d}': np.random.rand(128) for i in range(n_docs)
+        """Test clustering with a deterministic larger simulated dataset."""
+        cluster_a = {
+            f"doc_a_{i:03d}": np.array([1.0 + i * 0.002, 1.0 + i * 0.001, 0.2])
+            for i in range(20)
         }
-        
-        # Auto-determine K
+        cluster_b = {
+            f"doc_b_{i:03d}": np.array([5.0 + i * 0.002, 5.0 + i * 0.001, 0.4])
+            for i in range(15)
+        }
+        cluster_c = {
+            f"doc_c_{i:03d}": np.array([9.0 + i * 0.002, 1.0 + i * 0.001, 0.6])
+            for i in range(15)
+        }
+        doc_embeddings = {**cluster_a, **cluster_b, **cluster_c}
+        n_docs = len(doc_embeddings)
+
         embeddings_array = np.array(list(doc_embeddings.values()))
-        optimal_k = auto_determine_k(embeddings_array, min_k=3, max_k=15)
-        
-        assert 3 <= optimal_k <= 15
-        
-        # Cluster documents
-        clusters = kmeans_cluster_documents(doc_embeddings, k=optimal_k)
-        
-        assert len(clusters) == optimal_k
+        optimal_k = auto_determine_k(embeddings_array, min_k=3, max_k=6)
+
+        assert 3 <= optimal_k <= 6
+
+        clusters = kmeans_cluster_documents(doc_embeddings, k=3)
+
+        assert len(clusters) == 3
         assert sum(len(docs) for docs in clusters.values()) == n_docs
-        
-        # Verify cluster sizes are reasonable
-        cluster_sizes = [len(docs) for docs in clusters.values()]
-        assert min(cluster_sizes) >= 1
-        # Allow for some imbalance in clustering results (realistic for random data)
-        assert max(cluster_sizes) <= n_docs * 0.7  # No single cluster dominates too much
+
+        cluster_sizes = sorted(len(docs) for docs in clusters.values())
+        assert cluster_sizes == [15, 15, 20]
 
 
 if __name__ == '__main__':

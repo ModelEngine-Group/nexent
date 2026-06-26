@@ -1,3 +1,5 @@
+import types
+import importlib.machinery
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import unittest
@@ -8,8 +10,11 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 # Mock external dependencies
-sys.modules['boto3'] = MagicMock()
-
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
@@ -28,7 +33,15 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
+from consts.exceptions import (
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    UserRegistrationException,
+    UnauthorizedError,
+    AppException,
+    ValidationError,
+)
+from consts.error_code import ErrorCode
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
 # Import the modules we need
@@ -47,7 +60,7 @@ client = TestClient(app)
 
 class MockUser:
     """Mock User class for testing"""
-    
+
     def __init__(self, user_id, email):
         self.id = user_id
         self.email = email
@@ -233,6 +246,23 @@ class TestUserSignup:
             data = response.json()
             assert data["detail"] == "INVITE_CODE_INVALID"
 
+    def test_signup_validation_error_returns_400(self):
+        """Test registration rejected by ASSET_OWNER feature flag returns 400."""
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            mock_signup.side_effect = ValidationError("ASSET_OWNER feature is not enabled")
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "owner@example.com",
+                    "password": "password123",
+                    "invite_code": "AO123",
+                },
+            )
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
+
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
         with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
@@ -283,7 +313,7 @@ class TestUserSignup:
                 }
             )
 
-            assert response.status_code == HTTPStatus.NOT_ACCEPTABLE
+            assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert data["detail"] == "WEAK_PASSWORD"
 
@@ -308,6 +338,22 @@ class TestUserSignup:
 
 class TestUserSignin:
     """Test user signin endpoint"""
+
+    def test_signin_validation_error_returns_400(self):
+        """Test login rejected by ASSET_OWNER feature flag returns 400."""
+        with patch("apps.user_management_app.signin_user") as mock_signin:
+            mock_signin.side_effect = ValidationError("ASSET_OWNER feature is not enabled")
+
+            response = client.post(
+                "/user/signin",
+                json={
+                    "email": "owner@example.com",
+                    "password": "password123",
+                },
+            )
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
 
     def test_signin_success(self):
         """Test successful user login"""
@@ -472,6 +518,69 @@ class TestLogout:
         data = response.json()
         assert data["message"] == "Logout successful"
         mock_get_client.assert_called_once_with("Bearer token")
+        mock_client.auth.sign_out.assert_called_once()
+
+    @patch('database.cas_session_db.revoke_cas_session_by_session_id')
+    @patch('apps.user_management_app.build_logout_url')
+    @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_authorized_client')
+    def test_logout_returns_cas_logout_url_for_cas_session(
+        self,
+        mock_get_client,
+        mock_extract_session_id,
+        mock_build_logout_url,
+        mock_revoke_cas_session,
+    ):
+        """Test logout returns CAS logout URL when the JWT carries a CAS session id."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_extract_session_id.return_value = "sid-1"
+        mock_build_logout_url.return_value = (
+            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin"
+        )
+
+        response = client.post(
+            "/user/logout",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert (
+            data["data"]["cas_logout_url"]
+            == "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin"
+        )
+        mock_revoke_cas_session.assert_called_once_with("sid-1", actor="user")
+        mock_build_logout_url.assert_called_once_with()
+        mock_client.auth.sign_out.assert_called_once()
+
+    @patch('database.cas_session_db.revoke_cas_session_by_session_id')
+    @patch('apps.user_management_app.build_logout_url')
+    @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_authorized_client')
+    def test_logout_does_not_return_cas_logout_url_when_not_configured(
+        self,
+        mock_get_client,
+        mock_extract_session_id,
+        mock_build_logout_url,
+        mock_revoke_cas_session,
+    ):
+        """Test logout skips CAS server logout redirect when CAS_LOGOUT_URL is empty."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_extract_session_id.return_value = "sid-1"
+        mock_build_logout_url.return_value = ""
+
+        response = client.post(
+            "/user/logout",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"]["cas_logout_url"] == ""
+        mock_revoke_cas_session.assert_called_once_with("sid-1", actor="user")
+        mock_build_logout_url.assert_called_once_with()
         mock_client.auth.sign_out.assert_called_once()
 
     @patch('apps.user_management_app.get_authorized_client')
@@ -661,10 +770,46 @@ class TestCurrentUserInfo:
         assert data["data"]["user"]["tenant_id"] == "tenant456"
         assert data["data"]["user"]["user_email"] == "test@example.com"
         assert data["data"]["user"]["user_role"] == "USER"
+        assert data["data"]["user"]["auth_provider"] == "local"
         assert data["data"]["user"]["permissions"] == [
             "agent:create", "agent:read"]
         assert data["data"]["user"]["accessibleRoutes"] == ["chat", "agents"]
         mock_get_user_info.assert_called_once_with("user123")
+
+    @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.validate_token')
+    @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_current_user_info_marks_cas_user(
+        self,
+        mock_get_user_info,
+        mock_validate_token,
+        mock_extract_session_id,
+    ):
+        """Test CAS-authenticated current user info includes auth provider"""
+        mock_user = MockUser("user123", "test@example.com")
+        mock_validate_token.return_value = (True, mock_user)
+        mock_extract_session_id.return_value = "cas-session-123"
+        mock_get_user_info.return_value = {
+            "user": {
+                "user_id": "user123",
+                "group_ids": [1],
+                "tenant_id": "tenant456",
+                "user_email": "test@example.com",
+                "user_role": "USER",
+                "permissions": ["agent:read"],
+                "accessibleRoutes": ["chat"]
+            }
+        }
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer cas-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"]["user"]["auth_provider"] == "cas"
+        mock_extract_session_id.assert_called_once_with("Bearer cas-token")
 
     def test_current_user_info_no_authorization(self):
         """Test current user info retrieval without authorization header"""
@@ -1074,5 +1219,133 @@ class TestDeleteTokenEndpoint:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
+class TestUpdatePasswordEndpoint:
+    """Tests for PUT /password endpoint."""
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_success(self, mock_get_user_id, mock_update_password):
+        """Test successful password update."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.return_value = True
+
+        response = client.put(
+            "/user/password",
+            json={
+                "old_password": "OldPass123",
+                "new_password": "NewPass456"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Password updated successfully"
+        mock_update_password.assert_awaited_once_with(
+            user_id="user-123",
+            old_password="OldPass123",
+            new_password="NewPass456"
+        )
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_invalid_old_password(self, mock_get_user_id, mock_update_password):
+        """Test password update with incorrect old password."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = UnauthorizedError("Invalid old password")
+
+        with pytest.raises(AppException) as exc_info:
+            client.put(
+                "/user/password",
+                json={
+                    "old_password": "WrongPass123",
+                    "new_password": "NewPass456"
+                },
+                headers={"Authorization": "Bearer test-jwt-token"}
+            )
+
+        assert exc_info.value.error_code == ErrorCode.PROFILE_INVALID_CREDENTIALS
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_weak_password(self, mock_get_user_id, mock_update_password):
+        """Test password update with weak password."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
+
+        with pytest.raises(AppException) as exc_info:
+            client.put(
+                "/user/password",
+                json={
+                    "old_password": "OldPass123",
+                    "new_password": "weak1234"
+                },
+                headers={"Authorization": "Bearer test-jwt-token"}
+            )
+
+        assert exc_info.value.error_code == ErrorCode.PROFILE_PASSWORD_WEAK
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_same_as_old(self, mock_get_user_id, mock_update_password):
+        """Test password update with new password same as old."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = AppException(ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD)
+
+        with pytest.raises(AppException) as exc_info:
+            client.put(
+                "/user/password",
+                json={
+                    "old_password": "SamePass123",
+                    "new_password": "SamePass123"
+                },
+                headers={"Authorization": "Bearer test-jwt-token"}
+            )
+
+        assert exc_info.value.error_code == ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD
+
+    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_update_password_unexpected_error(self, mock_get_user_id, mock_update_password):
+        """Test password update with unexpected error."""
+        mock_get_user_id.return_value = ("user-123", "tenant-456")
+        mock_update_password.side_effect = Exception("Database error")
+
+        response = client.put(
+            "/user/password",
+            json={
+                "old_password": "OldPass123",
+                "new_password": "NewPass456"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+    def test_update_password_missing_old_password(self):
+        """Test password update with missing old_password field."""
+        response = client.put(
+            "/user/password",
+            json={
+                "new_password": "NewPass456"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    def test_update_password_missing_new_password(self):
+        """Test password update with missing new_password field."""
+        response = client.put(
+            "/user/password",
+            json={
+                "old_password": "OldPass123"
+            },
+            headers={"Authorization": "Bearer test-jwt-token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 if __name__ == "__main__":
-    pytest.main([__file__]) 
+    pytest.main([__file__])

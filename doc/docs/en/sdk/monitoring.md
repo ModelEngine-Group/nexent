@@ -16,7 +16,7 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 
 ```bash
 cd docker
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 cp monitoring/monitoring.env.example monitoring/monitoring.env
 
 vim .env
@@ -293,7 +293,7 @@ service:
       exporters: [otlphttp/langsmith, debug]
 ```
 
-See `docker/monitoring/otel-collector-config.yml` for full configuration with platform examples.
+See `deploy/docker/assets/monitoring/otel-collector-config.yml` for full configuration with platform examples.
 
 ## Graceful Degradation
 

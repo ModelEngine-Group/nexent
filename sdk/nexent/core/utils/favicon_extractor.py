@@ -1,33 +1,29 @@
 import requests
 from urllib.parse import urlparse
 
-def get_favicon_url(page_url):
+
+def get_favicon_url(page_url: str) -> str:
+    """Build the default favicon URL for a given page URL.
+
+    Args:
+        page_url: Target page URL.
+
+    Returns:
+        Default favicon URL.
     """
-    从给定网页URL提取favicon图标地址
-
-    参数:
-        page_url (str): 要分析的网页URL
-
-    返回:
-        str: favicon图标的完整URL，如果找不到则返回None
-    """
-
-    # 解析输入URL
     parsed_url = urlparse(page_url)
     base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-    default_favicon = f"{base_url}/favicon.ico"
-    return default_favicon
+    return f"{base_url}/favicon.ico"
 
 
-def check_favicon_exists(url):
-    """
-    检查给定的favicon URL是否有效
+def check_favicon_exists(url: str) -> bool:
+    """Check whether a favicon URL exists.
 
-    参数:
-        url (str): 要检查的favicon URL
+    Args:
+        url: Favicon URL to check.
 
-    返回:
-        bool: 如果URL存在且返回200状态码则为True
+    Returns:
+        True if the favicon exists, otherwise False.
     """
     try:
         response = requests.head(url, timeout=3, allow_redirects=True)
@@ -40,17 +36,5 @@ if __name__ == "__main__":
     url = "https://www.travelking.com.tw/zh-cn/tourguide/scenery100577.html"
     # url = "https://apps.apple.com/cn/app/wemeeting/id1480497919"
 
-    # 获取favicon URL
-    import time
-    start = time.time()
-    favicon_url = get_favicon_url(url)
-
-    if favicon_url:
-        print(f"找到favicon: {favicon_url}")
-    else:
-        print("未找到favicon")
-    end = time.time()
-    print(str(end - start))
-
-    print(check_favicon_exists(favicon_url))
-
+    # Manual smoke check for favicon existence.
+    _ = check_favicon_exists(get_favicon_url(url))

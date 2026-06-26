@@ -25,8 +25,8 @@
 
 1. 克隆项目到本地
 2. 在 Cursor 中打开项目文件夹
-3. 运行 `docker/deploy.sh` 脚本，在`infrastructure` 模式下启动容器
-4. 进入 `nexent-minio` 与 `nexent-elasticsearch` 容器, 将 `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `ELASTICSEARCH_API_KEY` 环境变量复制到 `docker/docker-compose.dev.yml` 中的相应环境变量位置
+3. 在 `docker` 目录运行 `./deploy.sh --components infrastructure,application --port-policy development` 启动基础容器
+4. 进入 `nexent-minio` 与 `nexent-elasticsearch` 容器, 将 `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `ELASTICSEARCH_API_KEY` 环境变量复制到 `deploy/docker/compose/docker-compose.dev.yml` 中的相应环境变量位置
 5. 按下 `F1` 或 `Ctrl+Shift+P`，输入 `Dev Containers: Reopen in Container ...`
 6. Cursor 将根据 `.devcontainer` 目录中的配置启动开发容器
 
@@ -54,7 +54,7 @@
 您可以通过修改以下文件来自定义开发环境：
 
 - `.devcontainer/devcontainer.json` - 插件配置项
-- `docker/docker-compose.dev.yml` - 开发容器的具体构筑项，需要修改环境变量值才能正常启动
+- `deploy/docker/compose/docker-compose.dev.yml` - 开发容器的具体构筑项，需要修改环境变量值才能正常启动
 
 ## 6. 常见问题解决
 

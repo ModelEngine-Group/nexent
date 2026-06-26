@@ -9,6 +9,7 @@ export interface User {
   role: UserRole;
   avatarUrl?: string;
   tenantId?: string;
+  authProvider?: "local" | "cas";
 }
 
 // Session type definition
@@ -232,6 +233,8 @@ export interface AuthorizationContextType {
   hasPermission: (permission: string) => boolean;
   hasAnyPermission: (permissions: string[]) => boolean;
   canAccessRoute: (route: string) => boolean;
+
+  getAccessibleGroupIds: () => number[];
 
   // Authz prompt modal (permission denied)
   isAuthzPromptModalOpen: boolean;

@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
 
 def _flatten_content(raw_content: Any) -> str:
@@ -24,7 +24,7 @@ def _flatten_content(raw_content: Any) -> str:
     return "" if raw_content is None else str(raw_content)
 
 
-def prepare_messages_for_completion(normalized_messages: List[Any], model_factory: str | None) -> List[Any]:
+def prepare_messages_for_completion(normalized_messages: List[Any], model_factory: Optional[str] = None) -> List[Any]:
     """
     Prepare messages for completion based on provider requirements.
 
@@ -46,5 +46,4 @@ def prepare_messages_for_completion(normalized_messages: List[Any], model_factor
             prepared.append({"role": role, "content": _flatten_content(content)})
         return prepared
     return normalized_messages
-
 

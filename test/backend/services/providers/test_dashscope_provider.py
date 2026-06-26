@@ -89,6 +89,44 @@ class TestDashScopeModelProvider:
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
         assert result[0]["max_tokens"] == 4096
+        assert "capacity_source" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_get_models_llm_surfaces_capacity_hints(self, mocker: MockFixture):
+        """Provider token metadata is returned as advisory capacity hints."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "output": {
+                "models": [
+                    {
+                        "model": "qwen-plus",
+                        "description": "Advanced text generation",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Text"],
+                            "context_length": 131072,
+                            "max_output_tokens": "8192",
+                            "tokenizer_family": "qwen",
+                        }
+                    }
+                ]
+            }
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        self._setup_mock_client(mocker, mock_response)
+
+        provider = DashScopeModelProvider()
+        result = await provider.get_models({
+            "model_type": "llm",
+            "api_key": "test-api-key",
+        })
+
+        assert result[0]["context_window_tokens"] == 131072
+        assert result[0]["max_output_tokens"] == 8192
+        assert result[0]["tokenizer_family"] == "qwen"
+        assert result[0]["capacity_source"] == "provider_candidate"
 
     @pytest.mark.asyncio
     async def test_get_models_embedding_success(self, mocker: MockFixture):
@@ -141,10 +179,26 @@ class TestDashScopeModelProvider:
                 "models": [
                     {
                         "model": "qwen-vl-plus",
-                        "description": "Vision language model",
+                        "description": "Vision language model for image understanding",
                         "inference_metadata": {
                             "request_modality": ["Image", "Text"],
                             "response_modality": ["Text"]
+                        }
+                    },
+                    {
+                        "model": "qwen3.6-27b",
+                        "description": "Qwen 3.6 multimodal model",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Text"]
+                        }
+                    },
+                    {
+                        "model": "qwen-vl-max",
+                        "description": "Qwen VL max model",
+                        "inference_metadata": {
+                            "request_modality": ["Image", "Text"],
+                            "response_modality": ["Text", "Image"]
                         }
                     }
                 ]
@@ -167,10 +221,128 @@ class TestDashScopeModelProvider:
 
         result = await provider.get_models(provider_config)
 
+        assert [model["id"] for model in result] == ["qwen-vl-plus", "qwen3.6-27b", "qwen-vl-max"]
+        assert all(model["model_type"] == "vlm" for model in result)
+        assert all(model["model_tag"] == "chat" for model in result)
+
+    @pytest.mark.asyncio
+    async def test_get_models_vlm2_only_returns_image_generation_models(self, mocker: MockFixture):
+        """Image generation slot only returns image-generation multimodal models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "output": {
+                "models": [
+                    {
+                        "model": "qwen-vl-plus",
+                        "description": "Vision language model",
+                        "inference_metadata": {
+                            "request_modality": ["Image", "Text"],
+                            "response_modality": ["Text"]
+                        }
+                    },
+                    {
+                        "model": "qwen-image-max",
+                        "description": "Image generation model",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Image"]
+                        }
+                    },
+                    {
+                        "model": "qwen-vl-max",
+                        "description": "Qwen VL max model",
+                        "inference_metadata": {
+                            "request_modality": ["Image", "Text"],
+                            "response_modality": ["Text", "Image"]
+                        }
+                    },
+                    {
+                        "model": "qwen-plus",
+                        "description": "Text generation model",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Text"]
+                        }
+                    }
+                ]
+            }
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        self._setup_mock_client(mocker, mock_response)
+
+        provider = DashScopeModelProvider()
+        provider_config = {
+            "model_type": "vlm2",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
         assert len(result) == 1
-        assert result[0]["id"] == "qwen-vl-plus"
-        assert result[0]["model_type"] == "vlm"
+        assert result[0]["id"] == "qwen-image-max"
+        assert result[0]["model_type"] == "vlm2"
         assert result[0]["model_tag"] == "chat"
+
+    @pytest.mark.asyncio
+    async def test_get_models_vlm3_only_returns_video_understanding_models(self, mocker: MockFixture):
+        """Video understanding slot excludes image generation and text-only models."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "output": {
+                "models": [
+                    {
+                        "model": "qwen-image-max",
+                        "description": "Image generation model",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Image"]
+                        }
+                    },
+                    {
+                        "model": "qwen-omni-turbo",
+                        "description": "Video understanding model",
+                        "inference_metadata": {
+                            "request_modality": ["Video", "Text"],
+                            "response_modality": ["Text"]
+                        }
+                    },
+                    {
+                        "model": "qwen3-omni-30b-a3b-instruct",
+                        "description": "Omni multimodal model",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Text"]
+                        }
+                    },
+                    {
+                        "model": "qwen-plus",
+                        "description": "Text generation model",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Text"]
+                        }
+                    }
+                ]
+            }
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        self._setup_mock_client(mocker, mock_response)
+
+        provider = DashScopeModelProvider()
+        provider_config = {
+            "model_type": "vlm3",
+            "api_key": "test-api-key"
+        }
+
+        result = await provider.get_models(provider_config)
+
+        assert [model["id"] for model in result] == ["qwen-omni-turbo", "qwen3-omni-30b-a3b-instruct"]
+        assert all(model["model_type"] == "vlm3" for model in result)
+        assert all(model["model_tag"] == "chat" for model in result)
 
     @pytest.mark.asyncio
     async def test_get_models_rerank_success(self, mocker: MockFixture):

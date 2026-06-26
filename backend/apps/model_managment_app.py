@@ -16,7 +16,10 @@ import logging
 
 from consts.model import (
     BatchCreateModelsRequest,
+    CapacitySuggestionFields,
     ModelRequest,
+    ModelCapacitySuggestionRequest,
+    ModelCapacitySuggestionResponse,
     ProviderModelRequest,
     ManageTenantModelListRequest,
     ManageTenantModelListResponse,
@@ -28,16 +31,18 @@ from consts.model import (
     ManageProviderModelListRequest,
     ManageProviderModelCreateRequest,
 )
+from consts.const import CAPACITY_SUGGESTION_ENABLED
 
 from fastapi import APIRouter, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
 )
+from services.model_capacity_suggestion_service import suggest_capacity
 from services.model_management_service import (
     create_model_for_tenant,
     create_provider_models_for_tenant,
@@ -49,12 +54,66 @@ from services.model_management_service import (
     list_models_for_tenant,
     list_llm_models_for_tenant,
     list_models_for_admin,
+    get_capacity_coverage,
 )
 from utils.auth_utils import get_current_user_id
 
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
+
+
+def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionResponse:
+    suggestions = None
+    if result.suggestions is not None:
+        suggestions = CapacitySuggestionFields(
+            context_window_tokens=result.suggestions.context_window_tokens,
+            max_input_tokens=result.suggestions.max_input_tokens,
+            max_output_tokens=result.suggestions.max_output_tokens,
+            default_output_reserve_tokens=result.suggestions.default_output_reserve_tokens,
+            tokenizer_family=result.suggestions.tokenizer_family,
+        )
+
+    return ModelCapacitySuggestionResponse(
+        suggestions=suggestions,
+        match_kind=result.match_kind.value,
+        match_confidence=result.match_confidence.value if result.match_confidence else None,
+        match_explanation=result.match_explanation,
+        suggested_provider=result.suggested_provider,
+        canonical_model_name=result.canonical_model_name,
+        capability_profile_version=result.capability_profile_version,
+        capacity_source_on_accept=result.capacity_source_on_accept,
+    )
+
+
+def _suggest_capacity_for_request(request: ModelCapacitySuggestionRequest) -> ModelCapacitySuggestionResponse:
+    result = suggest_capacity(
+        model_name=request.model_name,
+        base_url=request.base_url,
+        provider_hint=request.provider_hint,
+        model_type=request.model_type,
+        api_key=request.api_key,
+        enabled=CAPACITY_SUGGESTION_ENABLED,
+    )
+    return _capacity_suggestion_response_to_model(result)
+
+
+def _capacity_suggestion_for_model_request(request: ModelRequest):
+    if not CAPACITY_SUGGESTION_ENABLED:
+        return None
+
+    try:
+        suggestion_request = ModelCapacitySuggestionRequest(
+            model_name=request.model_name,
+            base_url=request.base_url,
+            provider_hint=request.model_factory,
+            api_key=request.api_key,
+            model_type=request.model_type,
+        )
+        return _suggest_capacity_for_request(suggestion_request).model_dump()
+    except ValueError as exc:
+        logger.debug("Capacity suggestion unavailable for connectivity request: %s", exc)
+        return None
 
 
 @router.post("/create")
@@ -88,6 +147,57 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         logging.error(f"Failed to create model: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/suggest-capacity")
+async def suggest_model_capacity(
+    request: ModelCapacitySuggestionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Return a non-mutating capacity suggestion for a model add/edit form.
+
+    Response uses the shared `/model/*` envelope ({message, data}) so the
+    frontend service layer can unwrap it the same way as every other
+    `/model/*` route. Returning the bare Pydantic model broke the dialog
+    and coverage-banner integrations because the frontend reads
+    `result.data` unconditionally.
+    """
+    try:
+        get_current_user_id(authorization)
+        result = _suggest_capacity_for_request(request)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully suggested model capacity",
+            "data": jsonable_encoder(result),
+        })
+    except ValueError as e:
+        logging.error(f"Invalid capacity suggestion request: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to suggest model capacity: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/capacity-coverage")
+async def get_model_capacity_coverage(authorization: Optional[str] = Header(None)):
+    """Return bare-capacity LLM/VLM coverage for the current tenant.
+
+    Wrapped in the shared `{message, data}` envelope; see
+    `suggest_model_capacity` for the same rationale.
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_capacity_coverage(tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved model capacity coverage",
+            "data": jsonable_encoder(result),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get model capacity coverage: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/provider/create")
@@ -264,6 +374,7 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
     Returns each model enriched with repo-qualified `model_name` and a normalized
     `connect_status` value.
     """
+
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         logger.debug(
@@ -297,7 +408,8 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
 
 @router.post("/healthcheck")
 async def check_model_health(
-        display_name: str = Query(..., description="Display name to check"),
+        display_name: Annotated[str, Query(..., description="Display name to check")],
+        model_type: Annotated[str, Query(..., description="...")],
         authorization: Optional[str] = Header(None)
 ):
     """Check and update model connectivity, returning the latest status.
@@ -308,7 +420,7 @@ async def check_model_health(
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        result = await check_model_connectivity(display_name, tenant_id)
+        result = await check_model_connectivity(display_name, tenant_id, model_type)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully checked model connectivity",
             "data": result
@@ -336,6 +448,11 @@ async def check_temporary_model_health(request: ModelRequest):
     """
     try:
         result = await verify_model_config_connectivity(request.model_dump())
+        result["capacity_suggestion"] = (
+            _capacity_suggestion_for_model_request(request)
+            if result.get("connectivity") is True
+            else None
+        )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully verified model connectivity",
             "data": result

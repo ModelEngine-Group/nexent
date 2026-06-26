@@ -53,9 +53,10 @@ import {
 import {
   fetchSkillFiles,
   fetchSkillFileContent,
+  SkillFilesAccessDeniedError,
   type SkillFileNode,
 } from "@/services/agentConfigService";
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
 
 const { TextArea } = Input;
@@ -520,6 +521,10 @@ export default function SkillBuildModal({
       setActiveSkillTab("SKILL.md");
     } catch (error) {
       log.error("Failed to load skill files:", error);
+      if (error instanceof SkillFilesAccessDeniedError) {
+        message.warning(error.message);
+        return;
+      }
       // Fallback to basic content
       const skill = allSkills.find((s) => s.name === skillName);
       if (skill?.content) {

@@ -175,11 +175,55 @@ GDE_DEF = _FakeOAuthProviderDefinition(
     enabled_check=None,
 )
 
+LINK_APP_DEF = _FakeOAuthProviderDefinition(
+    name="link_app",
+    display_name="Link App",
+    icon="link_app",
+    authorize_url="https://linkapp.test/CNS/oauth2/authorize",
+    authorize_method="GET",
+    authorize_params={"response_type": "code", "scope": "read write"},
+    authorize_fragment="",
+    authorize_param_map={
+        "client_id": "client_id",
+        "redirect_uri": "redirect_uri",
+        "scope": "scope",
+        "state": "state",
+    },
+    encode_redirect_uri=False,
+    token_url="https://linkapp.test/CNS/oauth2/token",
+    token_method="POST",
+    token_params_map={
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
+    },
+    token_extra_params={},
+    token_error_key="error",
+    token_error_message_key="error_description",
+    token_response_id_key=None,
+    userinfo_url="https://linkapp.test/BGM/deparment/syncDept",
+    userinfo_auth_scheme="Bearer",
+    userinfo_params={},
+    userinfo_field_map={
+        "id": "id",
+        "email": "email",
+        "username": "login",
+    },
+    userinfo_needs_email_fetch=False,
+    userinfo_email_url=None,
+    client_id_env="LINK_APP_OAUTH_CLIENT_ID",
+    client_secret_env="LINK_APP_OAUTH_CLIENT_SECRET",
+    enabled_check=None,
+)
+
 oauth_providers_mock = MagicMock()
 oauth_providers_mock.OAUTH_PROVIDER_REGISTRY = {
     "github": GITHUB_DEF,
     "wechat": WECHAT_DEF,
     "gde": GDE_DEF,
+    "link_app": LINK_APP_DEF,
 }
 
 
@@ -271,7 +315,6 @@ class TestResolveField(unittest.TestCase):
         result = _resolve_field(data, "attributes.userId")
         self.assertIsNone(result)
 
-
 class TestBuildSSLContext(unittest.TestCase):
     def test_returns_default_context_when_verify_enabled(self):
         ctx = _build_ssl_context()
@@ -287,14 +330,22 @@ class TestBuildSSLContext(unittest.TestCase):
 class TestGetSupportedProviders(unittest.TestCase):
     def test_supported_providers_set(self):
         providers = get_supported_providers()
-        self.assertEqual(providers, {"github", "wechat", "gde"})
+        self.assertEqual(providers, {"github", "wechat", "gde", "link_app"})
 
 
 class TestGetEnabledProviders(unittest.TestCase):
     def test_returns_github_when_configured(self):
         with patch.dict(
             os.environ,
-            {"GITHUB_OAUTH_CLIENT_ID": "id", "GITHUB_OAUTH_CLIENT_SECRET": "secret"},
+            {
+                "GITHUB_OAUTH_CLIENT_ID": "id",
+                "GITHUB_OAUTH_CLIENT_SECRET": "secret",
+                "GDE_OAUTH_CLIENT_ID": "",
+                "GDE_OAUTH_CLIENT_SECRET": "",
+                "LINK_APP_OAUTH_CLIENT_ID": "",
+                "LINK_APP_OAUTH_CLIENT_SECRET": "",
+                "ENABLE_WECHAT_OAUTH": "false",
+            },
             clear=False,
         ):
             providers = get_enabled_providers()
@@ -309,6 +360,10 @@ class TestGetEnabledProviders(unittest.TestCase):
             for k in [
                 "GITHUB_OAUTH_CLIENT_ID",
                 "GITHUB_OAUTH_CLIENT_SECRET",
+                "GDE_OAUTH_CLIENT_ID",
+                "GDE_OAUTH_CLIENT_SECRET",
+                "LINK_APP_OAUTH_CLIENT_ID",
+                "LINK_APP_OAUTH_CLIENT_SECRET",
                 "WECHAT_OAUTH_APP_ID",
                 "WECHAT_OAUTH_APP_SECRET",
             ]
@@ -326,6 +381,10 @@ class TestGetEnabledProviders(unittest.TestCase):
             "ENABLE_WECHAT_OAUTH": "true",
             "WECHAT_OAUTH_APP_ID": "wx_id",
             "WECHAT_OAUTH_APP_SECRET": "wx_secret",
+            "GDE_OAUTH_CLIENT_ID": "",
+            "GDE_OAUTH_CLIENT_SECRET": "",
+            "LINK_APP_OAUTH_CLIENT_ID": "",
+            "LINK_APP_OAUTH_CLIENT_SECRET": "",
         }
         with patch.dict(os.environ, env, clear=False):
             providers = get_enabled_providers()
@@ -343,6 +402,10 @@ class TestGetAuthorizeUrl(unittest.TestCase):
             {
                 "GITHUB_OAUTH_CLIENT_ID": "gh_test_id",
                 "GITHUB_OAUTH_CLIENT_SECRET": "gh_test_secret",
+                "GDE_OAUTH_CLIENT_ID": "",
+                "GDE_OAUTH_CLIENT_SECRET": "",
+                "LINK_APP_OAUTH_CLIENT_ID": "",
+                "LINK_APP_OAUTH_CLIENT_SECRET": "",
             },
             clear=False,
         ):
@@ -359,6 +422,10 @@ class TestGetAuthorizeUrl(unittest.TestCase):
             {
                 "GITHUB_OAUTH_CLIENT_ID": "gh_test_id",
                 "GITHUB_OAUTH_CLIENT_SECRET": "gh_test_secret",
+                "GDE_OAUTH_CLIENT_ID": "",
+                "GDE_OAUTH_CLIENT_SECRET": "",
+                "LINK_APP_OAUTH_CLIENT_ID": "",
+                "LINK_APP_OAUTH_CLIENT_SECRET": "",
             },
             clear=False,
         ):
@@ -379,6 +446,20 @@ class TestGetAuthorizeUrl(unittest.TestCase):
         self.assertIn("open.weixin.qq.com/connect/qrconnect", url)
         self.assertIn("appid=wx_test_id", url)
         self.assertTrue(url.endswith("#wechat_redirect"))
+
+    def test_returns_link_app_authorize_url(self):
+        env = {
+            "LINK_APP_OAUTH_CLIENT_ID": "link_client",
+            "LINK_APP_OAUTH_CLIENT_SECRET": "link_secret",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            url = get_authorize_url("link_app")
+
+        self.assertIn("linkapp.test/CNS/oauth2/authorize", url)
+        self.assertIn("client_id=link_client", url)
+        self.assertIn("response_type=code", url)
+        self.assertIn("scope=read+write", url)
+        self.assertIn("state=link_app", url)
 
     def test_unsupported_provider_raises(self):
         with self.assertRaises(_OAuthProviderError):
@@ -404,7 +485,6 @@ class TestGetProviderUserInfo(unittest.TestCase):
     def test_raises_for_unsupported_provider(self):
         with self.assertRaises(_OAuthProviderError):
             get_provider_user_info("google", "token123")
-
 
 class TestCreateOrUpdateOAuthAccount(unittest.TestCase):
     def test_creates_new_account_when_none_exists(self):
@@ -699,14 +779,14 @@ class TestGetProviderUserInfoEdgeCases(unittest.TestCase):
         mock_user_resp.read.return_value = b'{"id": "12345", "login": "octocat"}'
         mock_emails_resp = MagicMock()
         mock_emails_resp.read.return_value = b'[{"email": "secondary@github.com", "primary": false}, {"email": "primary@github.com", "primary": true}]'
-        
+
         mock_cm1 = MagicMock()
         mock_cm1.__enter__ = MagicMock(return_value=mock_user_resp)
         mock_cm1.__exit__ = MagicMock(return_value=False)
         mock_cm2 = MagicMock()
         mock_cm2.__enter__ = MagicMock(return_value=mock_emails_resp)
         mock_cm2.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", side_effect=[mock_cm1, mock_cm2]):
             env = {
                 "GITHUB_OAUTH_CLIENT_ID": "id",
@@ -722,14 +802,14 @@ class TestGetProviderUserInfoEdgeCases(unittest.TestCase):
         mock_user_resp.read.return_value = b'{"id": "12345", "login": "octocat"}'
         mock_emails_resp = MagicMock()
         mock_emails_resp.read.return_value = b'[{"email": "first@github.com"}]'
-        
+
         mock_cm1 = MagicMock()
         mock_cm1.__enter__ = MagicMock(return_value=mock_user_resp)
         mock_cm1.__exit__ = MagicMock(return_value=False)
         mock_cm2 = MagicMock()
         mock_cm2.__enter__ = MagicMock(return_value=mock_emails_resp)
         mock_cm2.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", side_effect=[mock_cm1, mock_cm2]):
             env = {
                 "GITHUB_OAUTH_CLIENT_ID": "id",
@@ -745,14 +825,14 @@ class TestGetProviderUserInfoEdgeCases(unittest.TestCase):
         mock_user_resp.read.return_value = b'{"id": "12345", "login": "testuser"}'
         mock_emails_resp = MagicMock()
         mock_emails_resp.read.return_value = b'[]'
-        
+
         mock_cm1 = MagicMock()
         mock_cm1.__enter__ = MagicMock(return_value=mock_user_resp)
         mock_cm1.__exit__ = MagicMock(return_value=False)
         mock_cm2 = MagicMock()
         mock_cm2.__enter__ = MagicMock(return_value=mock_emails_resp)
         mock_cm2.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", side_effect=[mock_cm1, mock_cm2]):
             env = {
                 "GITHUB_OAUTH_CLIENT_ID": "id",
@@ -766,11 +846,11 @@ class TestGetProviderUserInfoEdgeCases(unittest.TestCase):
     def test_wechat_does_not_fetch_emails(self):
         mock_user_resp = MagicMock()
         mock_user_resp.read.return_value = b'{"openid": "wx123", "nickname": "wechat_user"}'
-        
+
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_user_resp)
         mock_cm.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", return_value=mock_cm):
             env = {
                 "ENABLE_WECHAT_OAUTH": "true",
@@ -786,11 +866,11 @@ class TestGetProviderUserInfoEdgeCases(unittest.TestCase):
     def test_resolves_nested_field_path(self):
         mock_user_resp = MagicMock()
         mock_user_resp.read.return_value = b'{"attributes": {"userId": "nested123"}, "id": "testuser"}'
-        
+
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_user_resp)
         mock_cm.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", return_value=mock_cm):
             env = {
                 "GDE_URL": "https://gde.test",
@@ -807,11 +887,11 @@ class TestExchangeCodeForProviderTokenWithMock(unittest.TestCase):
     def test_exchange_with_post_method(self):
         mock_token_resp = MagicMock()
         mock_token_resp.read.return_value = b'{"access_token": "gh_token_123"}'
-        
+
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_token_resp)
         mock_cm.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", return_value=mock_cm):
             env = {
                 "GITHUB_OAUTH_CLIENT_ID": "test_id",
@@ -825,11 +905,11 @@ class TestExchangeCodeForProviderTokenWithMock(unittest.TestCase):
     def test_exchange_with_get_method(self):
         mock_token_resp = MagicMock()
         mock_token_resp.read.return_value = b'{"access_token": "wx_token_456", "openid": "wx_openid"}'
-        
+
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_token_resp)
         mock_cm.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", return_value=mock_cm):
             env = {
                 "ENABLE_WECHAT_OAUTH": "true",
@@ -845,11 +925,11 @@ class TestExchangeCodeForProviderTokenWithMock(unittest.TestCase):
     def test_raises_on_provider_error_response(self):
         mock_token_resp = MagicMock()
         mock_token_resp.read.return_value = b'{"errcode": 40001, "errmsg": "invalid code"}'
-        
+
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_token_resp)
         mock_cm.__exit__ = MagicMock(return_value=False)
-        
+
         with patch("urllib.request.urlopen", return_value=mock_cm):
             env = {
                 "ENABLE_WECHAT_OAUTH": "true",

@@ -15,10 +15,9 @@ import {
 } from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "antd";
-import { Tooltip } from "@/components/ui/tooltip";
+import { Button, Tooltip } from "antd";
 import { Textarea } from "@/components/ui/textarea";
-import { FilePreviewDrawer } from "@/components/ui/filePreviewDrawer";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
@@ -27,7 +26,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
-import { TokenUsageIndicator } from "@/components/ui/tokenUsageIndicator";
+import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
 import { TokenMetrics } from "@/types/chat";
 
 // Get file extension
@@ -96,9 +95,23 @@ const getFileIcon = (file: File) => {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
+  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
+    return <FileTextFilled size={iconSize} color="#16a085" />;
+  }
+
+  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
+    return <FileTextFilled size={iconSize} color="#8e44ad" />;
+  }
+
   // Default file icon
   return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
 };
+
+const isSupportedMediaFile = (extension: string, fileType: string) =>
+  fileType.startsWith("audio/") ||
+  fileType.startsWith("video/") ||
+  chatConfig.audioExtensions.includes(extension) ||
+  chatConfig.videoExtensions.includes(extension);
 
 // File limit constants from config
 const MAX_FILE_COUNT = chatConfig.maxFileCount;
@@ -121,8 +134,10 @@ interface ChatInputProps {
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
   latestMetrics?: TokenMetrics | null;
+  agentGreeting?: string | null;
+  agentExampleQuestions?: string[];
 }
 
 export function ChatInput({
@@ -142,6 +157,8 @@ export function ChatInput({
   selectedAgentId = null,
   onAgentSelect,
   latestMetrics = null,
+  agentGreeting = null,
+  agentExampleQuestions = [],
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -617,8 +634,9 @@ export function ChatInput({
         chatConfig.supportedTextExtensions.includes(extension) ||
         file.type === "text/csv" ||
         file.type === "text/plain";
+      const isMedia = isSupportedMediaFile(extension, file.type);
 
-      if (isImage || isDocument || isSupportedTextFile) {
+      if (isImage || isDocument || isSupportedTextFile || isMedia) {
         // Create a preview URL for images
         const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
 
@@ -899,7 +917,7 @@ export function ChatInput({
                 id="file-upload-regular"
                 className="hidden"
                 onChange={handleFileUpload}
-                accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
                 multiple
               />
             </Button>
@@ -1026,8 +1044,9 @@ export function ChatInput({
       chatConfig.supportedTextExtensions.includes(extension) ||
       fileType === "text/csv" ||
       fileType === "text/plain";
+    const isMedia = isSupportedMediaFile(extension, fileType);
 
-    return !(isImage || isDocument || isSupportedTextFile);
+    return !(isImage || isDocument || isSupportedTextFile || isMedia);
   });
 
   // Regular mode, keep the original rendering logic
@@ -1049,17 +1068,23 @@ export function ChatInput({
       {/* Chat input part */}
       {isInitialMode ? (
         <div className="flex flex-col items-center justify-center h-full w-full max-w-5xl mx-auto mt-[-80px]">
-          <div className="flex flex-col items-center mb-4">
-            <div className="flex items-center mb-6">
-              <div className="h-16 w-16 rounded-full overflow-hidden mr-4">
-                <img
-                  src={avatarUrl}
-                  alt={appConfig.appName}
-                  className="h-full w-full object-cover"
-                />
+          <div className="flex flex-col items-center mb-6">
+            <div className="h-16 w-16 rounded-full overflow-hidden mb-4 ring-2 ring-offset-2 ring-slate-100">
+              <img
+                src={avatarUrl}
+                alt={appConfig.appName}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            {agentGreeting ? (
+              <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl px-6 py-5 max-w-2xl shadow-sm border border-slate-100 mb-4">
+                <p className="text-lg text-gray-800 leading-relaxed text-center">
+                  {agentGreeting}
+                </p>
               </div>
+            ) : (
               <h1
-                className="text-4xl font-bold bg-clip-text text-transparent"
+                className="text-4xl font-bold bg-clip-text text-transparent mb-2"
                 style={{
                   backgroundImage: (() => {
                     const colors = extractColorsFromUri(
@@ -1073,11 +1098,27 @@ export function ChatInput({
               >
                 {t("chatInput.helloIm", { appName: appConfig.appName })}
               </h1>
-            </div>
-            <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              {appConfig.appDescription || t("chatInput.introMessage")}
-            </p>
+            )}
+            {!agentGreeting && (
+              <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                {appConfig.appDescription || t("chatInput.introMessage")}
+              </p>
+            )}
           </div>
+          {agentExampleQuestions.length > 0 && (
+            <div className="flex flex-col gap-2 max-w-3xl mb-4 w-full">
+              {agentExampleQuestions.map((question, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => onInputChange(question)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-sm text-gray-700 shadow-sm transition-all text-left flex items-center gap-2"
+                >
+                  <span className="text-muted-foreground font-medium">{idx + 1}.</span>
+                  <span>{question}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div
             ref={dropAreaRef}
             className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"

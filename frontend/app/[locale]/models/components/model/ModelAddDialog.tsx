@@ -1,7 +1,16 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
+import {
+  Alert,
+  Modal,
+  Select,
+  Input,
+  Button,
+  Switch,
+  Tooltip,
+  App,
+} from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
   LoaderCircle,
@@ -13,7 +22,13 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
-import { ModelType, SingleModelConfig, STTModelConfig } from "@/types/modelConfig";
+import {
+  ModelType,
+  SingleModelConfig,
+  STTModelConfig,
+  TTSModelConfig,
+  CapacitySuggestion,
+} from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
@@ -24,6 +39,23 @@ import {
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
 } from "./ModelChunkSizeSilder";
+import {
+  isValidMaxTokens,
+  ModelMaxTokensInput,
+  parseMaxTokens,
+} from "./ModelMaxTokensInput";
+import {
+  buildCapacityPayload,
+  capacityFieldKeys,
+  capacityFormFromSuggestion,
+  capacityFormFromModel,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  emptyCapacityForm,
+  ModelCapacityFields,
+  ModelCapacityFormState,
+  validateCapacityForm,
+} from "./ModelCapacityFields";
 
 const { Option } = Select;
 
@@ -49,7 +81,7 @@ const DEFAULT_FORM_STATE = {
   displayName: "",
   url: "",
   apiKey: "",
-  maxTokens: "4096",
+  maxTokens: "",
   isMultimodal: false,
   isBatchImport: false,
   provider: "modelengine",
@@ -64,7 +96,41 @@ const DEFAULT_FORM_STATE = {
   sttProvider: "dashscope", // dashscope or volcengine
   modelAppid: "",
   accessToken: "",
+  // TTS specific fields
+  ttsProvider: "dashscope", // ali or volcengine
+  ...emptyCapacityForm,
 };
+
+const resolveConnectivityModelType = (type: ModelType): ModelType =>
+  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3
+    ? (MODEL_TYPES.VLM as ModelType)
+    : type;
+
+const resolveConfigKey = (type: ModelType): string => type;
+
+const isVlmConfigType = (type: ModelType): boolean =>
+  type === MODEL_TYPES.VLM ||
+  type === MODEL_TYPES.VLM2 ||
+  type === MODEL_TYPES.VLM3;
+
+const emptyModelConfig = {
+  modelName: "",
+  displayName: "",
+  apiConfig: { apiKey: "", modelUrl: "" },
+};
+
+const BATCH_UNSUPPORTED_MODEL_TYPES_BY_PROVIDER: Record<
+  string,
+  readonly string[]
+> = {
+  silicon: [MODEL_TYPES.STT, MODEL_TYPES.TTS],
+};
+
+const isBatchModelTypeSupported = (
+  provider: string,
+  type: ModelType
+): boolean =>
+  !BATCH_UNSUPPORTED_MODEL_TYPES_BY_PROVIDER[provider]?.includes(type);
 
 // Connectivity status type comes from utils
 
@@ -196,7 +262,11 @@ export const ModelAddDialog = ({
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig, saveConfig } = useConfig();
+  const {
+    modelConfig: currentModelConfig,
+    updateModelConfig,
+    saveConfig,
+  } = useConfig();
 
   // Parse backend error message and return i18n key with params
   const parseModelError = (
@@ -224,6 +294,14 @@ export const ModelAddDialog = ({
   const [form, setForm] = useState(DEFAULT_FORM_STATE);
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
+  const [checkingCapacitySuggestion, setCheckingCapacitySuggestion] =
+    useState(false);
+  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
+    useState(true);
+  const [capacitySuggestion, setCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
+  const [acceptedCapacitySuggestion, setAcceptedCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
   const [connectivityStatus, setConnectivityStatus] = useState<{
     status: ConnectivityStatusType;
     message: string;
@@ -251,10 +329,15 @@ export const ModelAddDialog = ({
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [selectedModelForSettings, setSelectedModelForSettings] =
     useState<any>(null);
-  const [modelMaxTokens, setModelMaxTokens] = useState("4096");
+  const [modelMaxTokens, setModelMaxTokens] = useState("");
+  // Per-row capacity overrides edited via the gear icon in batch mode. Mirrors
+  // the top-level form's capacity fields so the same ModelCapacityFields panel
+  // can be rendered against this row-scoped state.
+  const [modelCapacity, setModelCapacity] =
+    useState<ModelCapacityFormState>(emptyCapacityForm);
 
   // Use the silicon model list hook
-  const siliconHook  = useSiliconModelList({
+  const siliconHook = useSiliconModelList({
     form,
     setModelList,
     setSelectedModelIds,
@@ -281,8 +364,8 @@ export const ModelAddDialog = ({
   let getModelList;
   let getProviderSelectedModalList;
 
-// 2. 根据条件赋值
-  if (form.provider === "silicon") {
+  // Use silicon hook for silicon and modelengine providers (both use the same API pattern)
+  if (form.provider === "silicon" || form.provider === "modelengine") {
     ({ getModelList, getProviderSelectedModalList } = siliconHook);
   } else if (form.provider === "dashscope") {
     ({ getModelList, getProviderSelectedModalList } = dashscopeHook);
@@ -293,6 +376,9 @@ export const ModelAddDialog = ({
   const resetForm = useCallback(() => {
     setForm(DEFAULT_FORM_STATE);
     setConnectivityStatus({ status: null, message: "" });
+    setCapacitySuggestionEnabled(true);
+    setCapacitySuggestion(null);
+    setAcceptedCapacitySuggestion(null);
     setModelList([]);
     setModelSearchTerm("");
     setSelectedModelIds(new Set());
@@ -318,12 +404,15 @@ export const ModelAddDialog = ({
     }));
   }, [isOpen, defaultProvider, defaultIsBatchImport]);
 
-  // Switch to LLM when batch import is enabled while STT/TTS is selected
+  // Keep batch import on a provider/type pair that the provider catalog can fetch.
   useEffect(() => {
-    if (form.isBatchImport && (form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS)) {
+    if (
+      form.isBatchImport &&
+      !isBatchModelTypeSupported(form.provider, form.type)
+    ) {
       handleFormChange("type", MODEL_TYPES.LLM);
     }
-  }, [form.isBatchImport]);
+  }, [form.isBatchImport, form.provider, form.type]);
 
   const parseModelName = (name: string): string => {
     if (!name) return "";
@@ -387,12 +476,22 @@ export const ModelAddDialog = ({
     }));
     // If the key configuration item changes, clear the verification status
     if (
-      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(
-        field
-      ) ||
+      [
+        "type",
+        "name",
+        "url",
+        "apiKey",
+        "maxTokens",
+        "vectorDimension",
+        "provider",
+      ].includes(field) ||
       field === "provider"
     ) {
       setConnectivityStatus({ status: null, message: "" });
+      if (["type", "name", "url", "apiKey", "provider"].includes(field)) {
+        setCapacitySuggestion(null);
+        setAcceptedCapacitySuggestion(null);
+      }
     }
     // Clear model search term when model type changes
     if (field === "type") {
@@ -405,15 +504,117 @@ export const ModelAddDialog = ({
     }
   };
 
+  const canSuggestCapacity = () =>
+    supportsCapacityFields &&
+    !form.isBatchImport &&
+    form.name.trim() !== "" &&
+    (form.url.trim() !== "" || form.provider.trim() !== "");
+
+  const applyCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
+    const next = capacityFormFromSuggestion(suggestion);
+    if (!next || Object.keys(next).length === 0) return;
+    setForm((prev) => ({
+      ...prev,
+      ...next,
+      name: suggestion?.canonicalModelName || prev.name,
+      // Do NOT overwrite `provider` from the catalog suggestion. The catalog's
+      // `suggested_provider` namespace (deepseek, openai, jina, ...) is a
+      // superset of the frontend dropdown's allowed values
+      // (modelengine / silicon / dashscope / tokenpony / custom); writing an
+      // unknown one back into `model_factory` makes the model disappear from
+      // the active list and the edit dropdown.
+    }));
+    setAcceptedCapacitySuggestion(suggestion);
+  };
+
+  const handleSuggestCapacity = async () => {
+    if (!canSuggestCapacity()) {
+      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
+      return;
+    }
+    setCheckingCapacitySuggestion(true);
+    try {
+      const suggestion = await modelService.suggestCapacity({
+        modelName: form.name.trim(),
+        baseUrl: form.url.trim(),
+        // Only send providerHint when the user actually picked it (batch mode
+        // exposes the dropdown). In single-add mode the form keeps a hidden
+        // default ("modelengine") that the user never sees, so forwarding it
+        // would falsely pin catalog lookup to that provider.
+        ...(form.isBatchImport ? { providerHint: form.provider } : {}),
+        apiKey: form.apiKey.trim() || undefined,
+        modelType: resolveConnectivityModelType(form.type),
+      });
+      setCapacitySuggestion(suggestion);
+      if (!suggestion.suggestions) {
+        setAcceptedCapacitySuggestion(null);
+      }
+    } catch (error) {
+      setCapacitySuggestion(null);
+      setAcceptedCapacitySuggestion(null);
+      message.error(t("model.dialog.capacity.suggestion.failed"));
+    } finally {
+      setCheckingCapacitySuggestion(false);
+    }
+  };
+
   // Verify if the vector dimension is valid
   const isValidVectorDimension = (value: string): boolean => {
-    const dimension = parseInt(value);
+    const dimension = Number.parseInt(value, 10);
     return !isNaN(dimension) && dimension > 0;
   };
 
   // Check if the form is valid
   const isFormValid = () => {
+    if (
+      supportsCapacityFields &&
+      // context_window/max_output are no longer required; only the data-shape
+      // checks (positive int / cross-field relationships) gate the Add button.
+      validateCapacityForm(form, [])
+    ) {
+      return false;
+    }
+
+    // Capacity panel replaces the legacy max_tokens field for LLM/VLM types.
+    // Only voice and rerank-style types still rely on the standalone max_tokens.
+    const needsMaxTokens =
+      !supportsCapacityFields &&
+      form.type !== MODEL_TYPES.EMBEDDING &&
+      form.type !== MODEL_TYPES.MULTI_EMBEDDING &&
+      form.type !== MODEL_TYPES.STT;
+
     if (form.isBatchImport) {
+      if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
+        return false;
+      }
+      // Per-row capacity gate for LLM/VLM batch import. After moving
+      // context_window/max_output to optional-with-defaults, the batch top
+      // defaults are guaranteed to be populated (capacityFormToSnakePayload
+      // substitutes DEFAULT_* on empty), so `effectiveContextWindow` and
+      // `effectiveMaxOutput` cannot be falsy in normal flow. Keeping the
+      // gate as defense-in-depth for future row sources (e.g., a catalog
+      // entry that pre-fills both row columns NULL and somehow bypasses
+      // the substitute) -- cheap to keep, costly to discover missing.
+      //
+      // We deliberately do NOT fall back to model.max_tokens here. Per the
+      // W1/W2 production plan the legacy column is unconditionally seeded
+      // with DEFAULT_LLM_MAX_TOKENS (4096) by the provider adapters, so
+      // treating it as a stand-in for max_output_tokens would mask missing
+      // W2 metadata and let any row pass validation.
+      if (supportsCapacityFields) {
+        const batchDefaults = capacityFormToSnakePayload(form);
+        for (const model of modelList) {
+          if (!selectedModelIds.has(model.id)) continue;
+          if (!rowSupportsCapacityFields(model)) continue;
+          const effectiveContextWindow =
+            model.context_window_tokens ?? batchDefaults.context_window_tokens;
+          const effectiveMaxOutput =
+            model.max_output_tokens ?? batchDefaults.max_output_tokens;
+          if (!effectiveContextWindow || !effectiveMaxOutput) {
+            return false;
+          }
+        }
+      }
       // If provider is ModelEngine, require the ModelEngine URL as well.
       if (form.provider === "modelengine") {
         return (
@@ -423,6 +624,9 @@ export const ModelAddDialog = ({
         );
       }
       return form.provider.trim() !== "" && form.apiKey.trim() !== "";
+    }
+    if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
+      return false;
     }
     if (form.type === MODEL_TYPES.EMBEDDING) {
       return (
@@ -442,20 +646,25 @@ export const ModelAddDialog = ({
       // For STT models, validate based on provider type
       if (form.sttProvider === "volcengine") {
         // Volcano Engine requires appid and access_token
-        return (
-          form.modelAppid.trim() !== "" &&
-          form.accessToken.trim() !== ""
-        );
+        return form.modelAppid.trim() !== "" && form.accessToken.trim() !== "";
       } else {
         // DashScope requires API Key and model name
         return form.apiKey.trim() !== "" && form.name.trim() !== "";
       }
     }
-    return (
-      form.name.trim() !== "" &&
-      form.url.trim() !== "" &&
-      form.maxTokens.trim() !== ""
-    );
+    if (form.type === MODEL_TYPES.TTS) {
+      // For TTS models, validate based on provider type
+      if (form.ttsProvider === "volcengine") {
+        // Volcano Engine requires appid and access_token
+        return form.modelAppid.trim() !== "" && form.accessToken.trim() !== "";
+      } else {
+        // Ali TTS requires API Key and model name (URL is optional)
+        return form.apiKey.trim() !== "" && form.name.trim() !== "";
+      }
+    }
+    // LLM/VLM final case: capacity validation already enforced above; no
+    // standalone max_tokens to check.
+    return form.name.trim() !== "" && form.url.trim() !== "";
   };
 
   // Verify model connectivity
@@ -475,7 +684,7 @@ export const ModelAddDialog = ({
       const modelType =
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : form.type;
+          : resolveConnectivityModelType(form.type);
 
       let connectivity = false;
 
@@ -483,46 +692,83 @@ export const ModelAddDialog = ({
       if (tenantId) {
         connectivity = await modelService.checkManageTenantModelConnectivity(
           tenantId,
-          form.displayName || form.name
+          form.displayName || form.name,
+          modelType
         );
-      } else {
+      } else if (form.type === MODEL_TYPES.STT) {
         // For STT models, build the appropriate config based on provider
-        if (form.type === MODEL_TYPES.STT) {
-          const sttConfig: any = {
-            modelType: modelType,
-          };
+        const sttConfig: any = {
+          modelType: modelType,
+          baseUrl: form.url,
+        };
 
-          if (form.sttProvider === "volcengine") {
-            sttConfig.modelFactory = "volcengine";
-            sttConfig.modelAppid = form.modelAppid.trim();
-            sttConfig.accessToken = form.accessToken.trim();
-          } else {
-            sttConfig.apiKey = form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
-            sttConfig.modelFactory = "dashscope";
-            sttConfig.modelName = form.name;
-            sttConfig.baseUrl = form.url;
-          }
-
-          const result = await modelService.verifyModelConfigConnectivity(sttConfig);
-          connectivity = result.connectivity;
+        if (form.sttProvider === "volcengine") {
+          sttConfig.modelFactory = "volcengine";
+          sttConfig.modelAppid = form.modelAppid.trim();
+          sttConfig.accessToken = form.accessToken.trim();
         } else {
-          const config = {
-            modelName: form.name,
-            modelType: modelType,
-            baseUrl: form.url,
-            apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-            maxTokens:
-              form.type === MODEL_TYPES.EMBEDDING
-                ? parseInt(form.vectorDimension)
-                : parseInt(form.maxTokens),
-            embeddingDim:
-              form.type === MODEL_TYPES.EMBEDDING
-                ? parseInt(form.vectorDimension)
-                : undefined,
-          };
+          sttConfig.apiKey = form.apiKey.trim() || "sk-no-api-key";
+          sttConfig.modelFactory = "dashscope";
+          sttConfig.modelName = form.name;
+        }
 
-          const result = await modelService.verifyModelConfigConnectivity(config);
-          connectivity = result.connectivity;
+        const result =
+          await modelService.verifyModelConfigConnectivity(sttConfig);
+        connectivity = result.connectivity;
+      } else if (form.type === MODEL_TYPES.TTS) {
+        // For TTS models, build the appropriate config based on provider
+        const ttsConfig: any = {
+          modelType: modelType,
+          baseUrl: form.url,
+        };
+
+        if (form.ttsProvider === "volcengine") {
+          ttsConfig.modelFactory = "volcengine";
+          ttsConfig.modelAppid = form.modelAppid.trim();
+          ttsConfig.accessToken = form.accessToken.trim();
+        } else {
+          ttsConfig.apiKey = form.apiKey.trim() || "sk-no-api-key";
+          ttsConfig.modelFactory = "dashscope";
+          ttsConfig.modelName = form.name;
+        }
+
+        const result =
+          await modelService.verifyModelConfigConnectivity(ttsConfig);
+        connectivity = result.connectivity;
+      } else {
+        // For other model types (LLM, Embedding, VLM, Rerank, etc.)
+        // For LLM/VLM the legacy form.maxTokens field is gone; use the new
+        // capacity panel's maxOutputTokens value as the connectivity-probe
+        // budget. Do NOT fall back to form.maxTokens for capacity types --
+        // the W1/W2 plan deprecates that field for LLM/VLM, and isFormValid
+        // already guarantees form.maxOutputTokens is filled before this
+        // probe runs.
+        const resolvedMaxTokens =
+          form.type === MODEL_TYPES.EMBEDDING
+            ? Number.parseInt(form.vectorDimension, 10)
+            : supportsCapacityFields
+              ? Number.parseInt(form.maxOutputTokens || "0", 10)
+              : parseMaxTokens(form.maxTokens);
+        const config = {
+          modelName: form.name,
+          modelType: modelType,
+          baseUrl: form.url,
+          apiKey: form.apiKey.trim() || "sk-no-api-key",
+          maxTokens: resolvedMaxTokens,
+          embeddingDim:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? Number.parseInt(form.vectorDimension, 10)
+              : undefined,
+        };
+
+        const result = await modelService.verifyModelConfigConnectivity(config);
+        connectivity = result.connectivity;
+        if (
+          capacitySuggestionEnabled &&
+          supportsCapacityFields &&
+          result.capacitySuggestion
+        ) {
+          setCapacitySuggestion(result.capacitySuggestion);
         }
       }
 
@@ -558,62 +804,197 @@ export const ModelAddDialog = ({
     }
   };
 
+  const getResolvedModelType = (): ModelType =>
+    form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
+      ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+      : form.type;
+
+  const getApiKeyOrPlaceholder = () =>
+    form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey;
+
+  const getChunkingBatchSize = () =>
+    Number.parseInt(form.chunkingBatchSize, 10) || 10;
+
+  const buildEmbeddingBatchModelData = (model: any) => {
+    const { max_tokens, ...modelWithoutMaxTokens } = model;
+    return {
+      ...modelWithoutMaxTokens,
+      ...(isEmbeddingModel
+        ? {
+            expected_chunk_size: form.chunkSizeRange[0],
+            maximum_chunk_size: form.chunkSizeRange[1],
+            chunk_batch: getChunkingBatchSize(),
+          }
+        : {}),
+    };
+  };
+
+  // Translate the top-level ModelCapacityFormState (camelCase, string) into the
+  // snake_case fields the batch-add backend expects. Used as the per-row
+  // fallback in batch mode when the row itself has no capacity overrides AND
+  // as the single-add wire payload.
+  //
+  // `applyDefaults` controls whether empty context_window/max_output get the
+  // shared UI defaults substituted. Defaults true for write-time paths
+  // (single-add, batch fallback for missing rows, per-row gear). The Settings
+  // Modal's "no-op edit" path passes false so that opening the gear and
+  // saving without touching anything does not clobber an existing
+  // `context_window_tokens=128000` (from catalog) with the 32K default.
+  const capacityFormToSnakePayload = (
+    capacity: ModelCapacityFormState,
+    options?: { applyDefaults?: boolean }
+  ) => {
+    const applyDefaults = options?.applyDefaults !== false;
+    const toInt = (raw: string) => {
+      const trimmed = raw.trim();
+      if (!/^[1-9]\d*$/.test(trimmed)) return undefined;
+      return Number.parseInt(trimmed, 10);
+    };
+    const tokenizer = capacity.tokenizerFamily.trim();
+    const contextWindow =
+      toInt(capacity.contextWindowTokens) ??
+      (applyDefaults ? DEFAULT_CONTEXT_WINDOW_TOKENS : undefined);
+    const maxOutput =
+      toInt(capacity.maxOutputTokens) ??
+      (applyDefaults ? DEFAULT_MAX_OUTPUT_TOKENS : undefined);
+    const hasAny = capacityFieldKeys.some(
+      (k) => capacity[k].trim() !== ""
+    );
+    return {
+      context_window_tokens: contextWindow,
+      max_input_tokens: toInt(capacity.maxInputTokens),
+      max_output_tokens: maxOutput,
+      default_output_reserve_tokens: toInt(capacity.defaultOutputReserveTokens),
+      tokenizer_family: tokenizer || undefined,
+      // When defaults substituted, the row carries a deterministic operator
+      // value. When not (Settings Modal no-op preserve mode), only mark
+      // operator-sourced if the operator actually typed something.
+      capacity_source: applyDefaults || hasAny ? "operator" : undefined,
+    };
+  };
+
+  const buildBatchModelData = (model: any, modelType: ModelType) => {
+    const isEmbeddingType =
+      modelType === MODEL_TYPES.EMBEDDING ||
+      modelType === MODEL_TYPES.MULTI_EMBEDDING;
+
+    if (isEmbeddingType) {
+      // Backend sets max_tokens for embedding models during connectivity checks.
+      return buildEmbeddingBatchModelData(model);
+    }
+
+    if (modelType === MODEL_TYPES.STT) {
+      const { max_tokens, ...modelWithoutMaxTokens } = model;
+      return modelWithoutMaxTokens;
+    }
+
+    // Rerank and other legacy-only types: keep the pre-W2 path that relies on
+    // form.maxTokens as the batch default.
+    if (!rowSupportsCapacityFields(model)) {
+      return {
+        ...model,
+        max_tokens: model.max_tokens ?? parseMaxTokens(form.maxTokens),
+      };
+    }
+
+    // LLM/VLM: row-scoped capacity overrides win; otherwise fall back to the
+    // top-level capacity panel acting as the batch default. snake_case here
+    // because that's what the backend create-batch endpoint expects.
+    const fallback = capacityFormToSnakePayload(form);
+
+    const resolved = {
+      context_window_tokens:
+        model.context_window_tokens ?? fallback.context_window_tokens,
+      max_input_tokens: model.max_input_tokens ?? fallback.max_input_tokens,
+      max_output_tokens: model.max_output_tokens ?? fallback.max_output_tokens,
+      default_output_reserve_tokens:
+        model.default_output_reserve_tokens ??
+        fallback.default_output_reserve_tokens,
+      tokenizer_family: model.tokenizer_family ?? fallback.tokenizer_family,
+      capacity_source: model.capacity_source ?? fallback.capacity_source,
+    };
+
+    return {
+      ...model,
+      ...resolved,
+      // Mirror max_output_tokens into legacy max_tokens. Backend has a coercion
+      // helper but mirroring here keeps the wire payload self-consistent.
+      max_tokens:
+        resolved.max_output_tokens ??
+        model.max_tokens ??
+        parseMaxTokens(form.maxTokens),
+    };
+  };
+
+  const createBatchModels = async (modelType: ModelType, modelsData: any[]) => {
+    // Use manage interface if tenantId is provided (for super admin), otherwise use current tenant.
+    if (tenantId) {
+      await modelService.batchCreateManageTenantModels({
+        tenantId,
+        provider: form.provider,
+        type: modelType,
+        apiKey: getApiKeyOrPlaceholder(),
+        models: modelsData,
+      });
+      return;
+    }
+
+    await modelService.addBatchCustomModel({
+      api_key: getApiKeyOrPlaceholder(),
+      provider: form.provider,
+      type: modelType,
+      models: modelsData,
+    });
+  };
+
+  const persistBatchVlmConfig = async (enabledModels: any[]) => {
+    if (!isVlmConfigType(form.type) || enabledModels.length === 0) {
+      return;
+    }
+
+    const selectedModel = enabledModels[0];
+    const selectedDisplayName =
+      selectedModel.displayName || selectedModel.id || "";
+    const configKey = resolveConfigKey(form.type);
+    const vlmConfigUpdate: any = {
+      [configKey]: {
+        modelName: selectedModel.id || selectedModel.model_name || "",
+        displayName: selectedDisplayName,
+        apiConfig: {
+          apiKey: form.apiKey,
+          modelUrl: "",
+        },
+      },
+    };
+
+    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+      if (
+        key !== configKey &&
+        currentModelConfig?.[key]?.displayName === selectedDisplayName
+      ) {
+        vlmConfigUpdate[key] = emptyModelConfig;
+      }
+    }
+
+    updateModelConfig(vlmConfigUpdate);
+    await persistModelConfig();
+  };
+
   // Handle batch adding models
   const handleBatchAddModel = async () => {
     // Only include models whose id is in selectedModelIds (i.e., switch is ON)
     const enabledModels = modelList.filter((model: any) =>
       selectedModelIds.has(model.id)
     );
-    const modelType =
-      form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
-        ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-        : form.type;
+    const modelType = getResolvedModelType();
+
     try {
-      const isEmbeddingType =
-        modelType === MODEL_TYPES.EMBEDDING ||
-        modelType === MODEL_TYPES.MULTI_EMBEDDING;
+      const modelsData = enabledModels.map((model: any) =>
+        buildBatchModelData(model, modelType)
+      );
 
-      // Prepare the model data
-      const modelsData = enabledModels.map((model: any) => {
-        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
-        if (isEmbeddingType) {
-          const { max_tokens, ...modelWithoutMaxTokens } = model;
-          return {
-            ...modelWithoutMaxTokens,
-            // Add chunk size range for embedding models
-            ...(isEmbeddingModel
-              ? {
-                  expected_chunk_size: form.chunkSizeRange[0],
-                  maximum_chunk_size: form.chunkSizeRange[1],
-                  chunk_batch: parseInt(form.chunkingBatchSize) || 10,
-                }
-              : {}),
-          };
-        } else {
-          return {
-            ...model,
-            max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
-          };
-        }
-      });
-
-      // Use manage interface if tenantId is provided (for super admin), otherwise use current tenant
-      if (tenantId) {
-        await modelService.batchCreateManageTenantModels({
-          tenantId,
-          provider: form.provider,
-          type: modelType,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          models: modelsData,
-        });
-      } else {
-        await modelService.addBatchCustomModel({
-          api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          provider: form.provider,
-          type: modelType,
-          models: modelsData,
-        });
-      }
+      await createBatchModels(modelType, modelsData);
+      await persistBatchVlmConfig(enabledModels);
 
       // Reset form state and close dialog on success
       resetForm();
@@ -635,25 +1016,128 @@ export const ModelAddDialog = ({
     }
   };
 
+  // Resolve whether a fetched batch row uses the capacity panel. The row's own
+  // model_type wins (a row may be rerank even when form.type is LLM during
+  // mixed-type fetches), falling back to the form-level decision.
+  const rowSupportsCapacityFields = (model: any): boolean => {
+    const rowType = model?.model_type;
+    if (
+      rowType === MODEL_TYPES.EMBEDDING ||
+      rowType === MODEL_TYPES.MULTI_EMBEDDING
+    )
+      return false;
+    if (rowType === MODEL_TYPES.STT || rowType === MODEL_TYPES.TTS)
+      return false;
+    if (rowType === MODEL_TYPES.RERANK) return false;
+    if (rowType) return true;
+    return supportsCapacityFields;
+  };
+
   // Handle settings button click
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
-    setModelMaxTokens(model.max_tokens?.toString() || "4096");
+    setModelMaxTokens(model.max_tokens?.toString() || "");
+    if (rowSupportsCapacityFields(model)) {
+      // Merge order: row's W2 capacity values (from provider catalog hints)
+      // win, falling back to the top-level batch defaults typed into the
+      // capacity panel. The gear modal must reflect exactly what the row
+      // will end up using if the user clicks save without further edits.
+      //
+      // Crucially we do NOT pass model.max_tokens into capacityFormFromModel.
+      // Per the W1/W2 production plan, max_tokens is a deprecated legacy
+      // alias and "never used as a context window after migration". On
+      // batch-fetched rows the backend providers (Dashscope, Silicon,
+      // ModelEngine, TokenPony) unconditionally inject the legacy column
+      // with DEFAULT_LLM_MAX_TOKENS=4096 to keep the NOT-NULL contract;
+      // promoting that sentinel into max_output_tokens here makes the gear
+      // modal show 4096 every time the upstream catalog omits real W2
+      // metadata, shadowing the user's batch defaults.
+      const rowMapped = capacityFormFromModel({
+        contextWindowTokens: model.context_window_tokens,
+        maxInputTokens: model.max_input_tokens,
+        maxOutputTokens: model.max_output_tokens,
+        defaultOutputReserveTokens: model.default_output_reserve_tokens,
+        tokenizerFamily: model.tokenizer_family,
+      });
+      setModelCapacity({
+        contextWindowTokens:
+          rowMapped.contextWindowTokens || form.contextWindowTokens,
+        maxInputTokens: rowMapped.maxInputTokens || form.maxInputTokens,
+        maxOutputTokens: rowMapped.maxOutputTokens || form.maxOutputTokens,
+        defaultOutputReserveTokens:
+          rowMapped.defaultOutputReserveTokens ||
+          form.defaultOutputReserveTokens,
+        tokenizerFamily: rowMapped.tokenizerFamily || form.tokenizerFamily,
+      });
+    } else {
+      setModelCapacity(emptyCapacityForm);
+    }
     setSettingsModalVisible(true);
   };
 
   // Handle settings save
   const handleSettingsSave = () => {
-    if (selectedModelForSettings) {
-      // Update the model in the list with new max_tokens
+    if (!selectedModelForSettings) {
+      setSettingsModalVisible(false);
+      return;
+    }
+
+    const useCapacity = rowSupportsCapacityFields(selectedModelForSettings);
+
+    if (useCapacity) {
+      // Persist capacity fields onto the row in their snake_case API shape so
+      // buildBatchModelData can forward them without further translation.
+      // Defaults always apply at save: the gear modal preloads modelCapacity
+      // from the row's existing values (or batch defaults), so "no-op save"
+      // already carries non-empty inputs and goes through toInt unchanged.
+      // Only the row-NULL + empty-batch-default case lands DEFAULT_*, which
+      // is the desired "empty input means default" semantic.
+      const payload = capacityFormToSnakePayload(modelCapacity);
+      const hasAny = capacityFieldKeys.some(
+        (k) => modelCapacity[k].trim() !== ""
+      );
       setModelList((prev) =>
         prev.map((model) =>
           model.id === selectedModelForSettings.id
-            ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+            ? {
+                ...model,
+                context_window_tokens:
+                  payload.context_window_tokens ??
+                  (hasAny ? null : model.context_window_tokens),
+                max_input_tokens:
+                  payload.max_input_tokens ??
+                  (hasAny ? null : model.max_input_tokens),
+                max_output_tokens:
+                  payload.max_output_tokens ??
+                  (hasAny ? null : model.max_output_tokens),
+                default_output_reserve_tokens:
+                  payload.default_output_reserve_tokens ??
+                  (hasAny ? null : model.default_output_reserve_tokens),
+                tokenizer_family:
+                  payload.tokenizer_family ??
+                  (hasAny ? null : model.tokenizer_family),
+                capacity_source: hasAny
+                  ? payload.capacity_source
+                  : model.capacity_source,
+                // Mirror max_output_tokens into legacy max_tokens so the
+                // backend coercion path stays consistent for rows that bypass it.
+                max_tokens: payload.max_output_tokens ?? model.max_tokens,
+              }
+            : model
+        )
+      );
+    } else {
+      const nextMaxTokens = parseMaxTokens(modelMaxTokens);
+      if (!nextMaxTokens) return;
+      setModelList((prev) =>
+        prev.map((model) =>
+          model.id === selectedModelForSettings.id
+            ? { ...model, max_tokens: nextMaxTokens }
             : model
         )
       );
     }
+
     setSettingsModalVisible(false);
     setSelectedModelForSettings(null);
   };
@@ -677,9 +1161,21 @@ export const ModelAddDialog = ({
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
+      const acceptedModelName =
+        acceptedCapacitySuggestion?.canonicalModelName || form.name;
+      // `acceptedCapacitySuggestion?.suggestedProvider` is intentionally NOT
+      // used here. See applyCapacitySuggestion above for the rationale.
 
-      // Determine the maximum tokens value
-      let maxTokensValue = parseInt(form.maxTokens);
+      // Determine the maximum tokens value.
+      // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
+      // input is hidden and must not be read here per the W1/W2 plan
+      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
+      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
+      // a few lines below, keeping the deprecated NOT NULL column aligned
+      // with the W2 source of truth.
+      let maxTokensValue = supportsCapacityFields
+        ? 0
+        : parseMaxTokens(form.maxTokens) || 0;
       if (
         form.type === MODEL_TYPES.EMBEDDING ||
         form.type === MODEL_TYPES.MULTI_EMBEDDING
@@ -692,20 +1188,34 @@ export const ModelAddDialog = ({
       if (tenantId) {
         const modelParams: any = {
           tenantId,
-          name: form.name,
+          name: acceptedModelName,
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+          modelFactory: form.provider,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
         // Add STT specific fields
         if (form.type === MODEL_TYPES.STT) {
-          modelParams.modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
+          modelParams.modelFactory =
+            form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
           if (form.sttProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
+          }
+        }
+
+        // Add TTS specific fields
+        if (form.type === MODEL_TYPES.TTS) {
+          modelParams.modelFactory =
+            form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
+          if (form.ttsProvider === "volcengine") {
+            modelParams.modelAppid = form.modelAppid;
+            modelParams.accessToken = form.accessToken;
+            modelParams.baseUrl = form.url;
           }
         }
 
@@ -713,26 +1223,41 @@ export const ModelAddDialog = ({
         if (isEmbeddingModel) {
           modelParams.expectedChunkSize = form.chunkSizeRange[0];
           modelParams.maximumChunkSize = form.chunkSizeRange[1];
-          modelParams.chunkingBatchSize = parseInt(form.chunkingBatchSize) || 10;
+          modelParams.chunkingBatchSize =
+            Number.parseInt(form.chunkingBatchSize, 10) || 10;
         }
 
         await modelService.createManageTenantModel(modelParams);
       } else {
         const modelParams: any = {
-          name: form.name,
+          name: acceptedModelName,
           type: modelType,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
+          modelFactory: form.provider,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         };
 
         // Add STT specific fields
         if (form.type === MODEL_TYPES.STT) {
-          modelParams.modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
+          modelParams.modelFactory =
+            form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
           if (form.sttProvider === "volcengine") {
             modelParams.modelAppid = form.modelAppid;
             modelParams.accessToken = form.accessToken;
+          }
+        }
+
+        // Add TTS specific fields
+        if (form.type === MODEL_TYPES.TTS) {
+          modelParams.modelFactory =
+            form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
+          if (form.ttsProvider === "volcengine") {
+            modelParams.modelAppid = form.modelAppid;
+            modelParams.accessToken = form.accessToken;
+            modelParams.baseUrl = form.url;
           }
         }
 
@@ -740,38 +1265,54 @@ export const ModelAddDialog = ({
         if (isEmbeddingModel) {
           modelParams.expectedChunkSize = form.chunkSizeRange[0];
           modelParams.maximumChunkSize = form.chunkSizeRange[1];
-          modelParams.chunkingBatchSize = parseInt(form.chunkingBatchSize) || 10;
+          modelParams.chunkingBatchSize =
+            Number.parseInt(form.chunkingBatchSize, 10) || 10;
         }
 
         await modelService.addCustomModel(modelParams);
       }
 
       // Create the model configuration object
-      let modelConfig: SingleModelConfig | STTModelConfig = {
-        modelName: form.name,
+      // Note: id is set to 0 as placeholder; backend assigns the actual id when saving
+      let modelConfig: SingleModelConfig | STTModelConfig | TTSModelConfig = {
+        id: 0,
+        modelName: acceptedModelName,
         displayName: form.displayName || form.name,
         apiConfig: {
           apiKey: form.apiKey,
           modelUrl: form.url,
         },
+        ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
       };
 
       // Add STT specific fields to config
       if (form.type === MODEL_TYPES.STT) {
-        (modelConfig as STTModelConfig).modelFactory = form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
+        (modelConfig as STTModelConfig).modelFactory =
+          form.sttProvider === "volcengine" ? "volcengine" : "dashscope";
         if (form.sttProvider === "volcengine") {
           (modelConfig as STTModelConfig).modelAppid = form.modelAppid;
           (modelConfig as STTModelConfig).accessToken = form.accessToken;
         }
       }
 
+      // Add TTS specific fields to config
+      if (form.type === MODEL_TYPES.TTS) {
+        (modelConfig as TTSModelConfig).modelFactory =
+          form.ttsProvider === "volcengine" ? "volcengine" : "dashscope";
+        if (form.ttsProvider === "volcengine") {
+          (modelConfig as TTSModelConfig).modelAppid = form.modelAppid;
+          (modelConfig as TTSModelConfig).accessToken = form.accessToken;
+        }
+      }
+
       // Add the dimension field for embedding models
       if (form.type === MODEL_TYPES.EMBEDDING) {
-        modelConfig.dimension = parseInt(form.vectorDimension);
+        modelConfig.dimension = Number.parseInt(form.vectorDimension, 10);
       }
 
       // Update the local storage according to the model type
       let configUpdate: any = {};
+      const configKey = resolveConfigKey(form.type);
 
       switch (modelType) {
         case MODEL_TYPES.LLM:
@@ -784,7 +1325,21 @@ export const ModelAddDialog = ({
           configUpdate = { multiEmbedding: modelConfig };
           break;
         case MODEL_TYPES.VLM:
-          configUpdate = { vlm: modelConfig };
+        case MODEL_TYPES.VLM2:
+        case MODEL_TYPES.VLM3:
+          configUpdate = { [configKey]: modelConfig };
+          for (const key of [
+            MODEL_TYPES.VLM,
+            MODEL_TYPES.VLM2,
+            MODEL_TYPES.VLM3,
+          ]) {
+            if (
+              key !== configKey &&
+              currentModelConfig?.[key]?.displayName === modelConfig.displayName
+            ) {
+              configUpdate[key] = emptyModelConfig;
+            }
+          }
           break;
         case MODEL_TYPES.RERANK:
           configUpdate = { rerank: modelConfig };
@@ -829,8 +1384,20 @@ export const ModelAddDialog = ({
   };
 
   const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
-  const isRerankModel = form.type === MODEL_TYPES.RERANK;
   const isSTTModel = form.type === MODEL_TYPES.STT;
+  const isTTSModel = form.type === MODEL_TYPES.TTS;
+  // Capacity fields apply to LLM/VLM types in both single-add and batch-add
+  // paths. In batch mode the top-level capacity panel becomes a per-batch
+  // default (mirrors how form.maxTokens worked pre-W2), with each row's gear
+  // dialog free to override individual values.
+  const supportsCapacityFields =
+    !isEmbeddingModel &&
+    !isSTTModel &&
+    !isTTSModel &&
+    form.type !== MODEL_TYPES.RERANK;
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(form, [])
+    : null;
 
   return (
     <Modal
@@ -927,14 +1494,32 @@ export const ModelAddDialog = ({
             <Option value={MODEL_TYPES.EMBEDDING}>
               {t("model.type.embedding")}
             </Option>
-            <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
-            <Option value={MODEL_TYPES.RERANK}>
-              {t("model.type.rerank")}
+            <Option value={MODEL_TYPES.VLM}>
+              {t("model.type.imageUnderstanding")}
             </Option>
-            <Option value={MODEL_TYPES.STT} disabled={form.isBatchImport}>
+            <Option value={MODEL_TYPES.VLM2}>
+              {t("model.type.imageGeneration")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM3}>
+              {t("model.type.videoUnderstanding")}
+            </Option>
+            <Option value={MODEL_TYPES.RERANK}>{t("model.type.rerank")}</Option>
+            <Option
+              value={MODEL_TYPES.STT}
+              disabled={
+                form.isBatchImport &&
+                !isBatchModelTypeSupported(form.provider, MODEL_TYPES.STT)
+              }
+            >
               {t("model.type.stt")}
             </Option>
-            <Option value={MODEL_TYPES.TTS} disabled>
+            <Option
+              value={MODEL_TYPES.TTS}
+              disabled={
+                form.isBatchImport &&
+                !isBatchModelTypeSupported(form.provider, MODEL_TYPES.TTS)
+              }
+            >
               {t("model.type.tts")}
             </Option>
           </Select>
@@ -1000,7 +1585,7 @@ export const ModelAddDialog = ({
         )}
 
         {/* Model URL */}
-        {!form.isBatchImport   && (
+        {!form.isBatchImport && (
           <div>
             <label
               htmlFor="url"
@@ -1026,7 +1611,6 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-
         {/* STT Provider Selection */}
         {!form.isBatchImport && isSTTModel && (
           <div>
@@ -1040,71 +1624,167 @@ export const ModelAddDialog = ({
               onChange={(value) => handleFormChange("sttProvider", value)}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
-              <Option value="volcengine">{t("model.provider.volcengine")}</Option>
+              <Option value="volcengine">
+                {t("model.provider.volcengine")}
+              </Option>
             </Select>
           </div>
         )}
 
         {/* STT Fields for Volcano Engine */}
-        {!form.isBatchImport && isSTTModel && form.sttProvider === "volcengine" && (
-          <>
+        {!form.isBatchImport &&
+          isSTTModel &&
+          form.sttProvider === "volcengine" && (
+            <>
+              <div>
+                <label
+                  htmlFor="modelAppid"
+                  className="block mb-1 text-sm font-medium text-gray-700"
+                >
+                  {t("model.dialog.label.modelAppid")}
+                  <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  id="modelAppid"
+                  placeholder={t("model.dialog.placeholder.modelAppid")}
+                  value={form.modelAppid}
+                  onChange={(e) =>
+                    handleFormChange("modelAppid", e.target.value)
+                  }
+                  autoComplete="new-password"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="accessToken"
+                  className="block mb-1 text-sm font-medium text-gray-700"
+                >
+                  {t("model.dialog.label.accessToken")}
+                  <span className="text-red-500">*</span>
+                </label>
+                <Input.Password
+                  id="accessToken"
+                  placeholder={t("model.dialog.placeholder.accessToken")}
+                  value={form.accessToken}
+                  onChange={(e) =>
+                    handleFormChange("accessToken", e.target.value)
+                  }
+                  autoComplete="new-password"
+                />
+              </div>
+            </>
+          )}
+
+        {/* API Key (for DashScope STT) */}
+        {!form.isBatchImport &&
+          isSTTModel &&
+          form.sttProvider === "dashscope" && (
             <div>
               <label
-                htmlFor="modelAppid"
+                htmlFor="apiKey"
                 className="block mb-1 text-sm font-medium text-gray-700"
               >
-                {t("model.dialog.label.modelAppid")}
-                <span className="text-red-500">*</span>
-              </label>
-              <Input
-                id="modelAppid"
-                placeholder={t("model.dialog.placeholder.modelAppid")}
-                value={form.modelAppid}
-                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="accessToken"
-                className="block mb-1 text-sm font-medium text-gray-700"
-              >
-                {t("model.dialog.label.accessToken")}
+                {t("model.dialog.label.apiKey")}{" "}
                 <span className="text-red-500">*</span>
               </label>
               <Input.Password
-                id="accessToken"
-                placeholder={t("model.dialog.placeholder.accessToken")}
-                value={form.accessToken}
-                onChange={(e) => handleFormChange("accessToken", e.target.value)}
+                id="apiKey"
+                placeholder={t("model.dialog.placeholder.apiKey")}
+                value={form.apiKey}
+                onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
               />
             </div>
-          </>
-        )}
+          )}
 
-        {/* API Key (for DashScope STT) */}
-        {!form.isBatchImport && isSTTModel && form.sttProvider === "dashscope" && (
+        {/* TTS Provider Selection */}
+        {!form.isBatchImport && isTTSModel && (
           <div>
-            <label
-              htmlFor="apiKey"
-              className="block mb-1 text-sm font-medium text-gray-700"
-            >
-              {t("model.dialog.label.apiKey")}{" "}
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.ttsProvider")}
               <span className="text-red-500">*</span>
             </label>
-            <Input.Password
-              id="apiKey"
-              placeholder={t("model.dialog.placeholder.apiKey")}
-              value={form.apiKey}
-              onChange={(e) => handleFormChange("apiKey", e.target.value)}
-              autoComplete="new-password"
-            />
+            <Select
+              style={{ width: "100%" }}
+              value={form.ttsProvider}
+              onChange={(value) => handleFormChange("ttsProvider", value)}
+            >
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="volcengine">
+                {t("model.provider.volcengine")}
+              </Option>
+            </Select>
           </div>
         )}
 
+        {/* TTS Fields for Volcano Engine */}
+        {!form.isBatchImport &&
+          isTTSModel &&
+          form.ttsProvider === "volcengine" && (
+            <>
+              <div>
+                <label
+                  htmlFor="modelAppid"
+                  className="block mb-1 text-sm font-medium text-gray-700"
+                >
+                  {t("model.dialog.label.modelAppid")}
+                  <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  id="modelAppid"
+                  placeholder={t("model.dialog.placeholder.modelAppid")}
+                  value={form.modelAppid}
+                  onChange={(e) =>
+                    handleFormChange("modelAppid", e.target.value)
+                  }
+                  autoComplete="new-password"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="accessToken"
+                  className="block mb-1 text-sm font-medium text-gray-700"
+                >
+                  {t("model.dialog.label.accessToken")}
+                  <span className="text-red-500">*</span>
+                </label>
+                <Input.Password
+                  id="accessToken"
+                  placeholder={t("model.dialog.placeholder.accessToken")}
+                  value={form.accessToken}
+                  onChange={(e) =>
+                    handleFormChange("accessToken", e.target.value)
+                  }
+                  autoComplete="new-password"
+                />
+              </div>
+            </>
+          )}
+
+        {/* API Key (for Ali TTS) */}
+        {!form.isBatchImport &&
+          isTTSModel &&
+          form.ttsProvider === "dashscope" && (
+            <div>
+              <label
+                htmlFor="apiKey"
+                className="block mb-1 text-sm font-medium text-gray-700"
+              >
+                {t("model.dialog.label.apiKey")}{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <Input.Password
+                id="apiKey"
+                placeholder={t("model.dialog.placeholder.apiKey")}
+                value={form.apiKey}
+                onChange={(e) => handleFormChange("apiKey", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+          )}
+
         {/* API Key (for non-STT, non-TTS models) */}
-        {!form.isBatchImport && !isSTTModel && (
+        {!form.isBatchImport && !isSTTModel && !isTTSModel && (
           <div>
             <label
               htmlFor="apiKey"
@@ -1173,20 +1853,81 @@ export const ModelAddDialog = ({
           </div>
         )}
 
-        {/* Max Tokens */}
-        {!isEmbeddingModel && !form.isBatchImport && !isSTTModel && (
+        {supportsCapacityFields && (
+          <div className="space-y-2">
+            {form.isBatchImport && (
+              <Alert
+                type="info"
+                showIcon
+                message={t("model.dialog.capacity.batchDefault.title")}
+                description={t("model.dialog.capacity.batchDefault.hint")}
+              />
+            )}
+            {!form.isBatchImport && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-700">
+                    {t("model.dialog.capacity.suggestion.title")}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {t("model.dialog.capacity.suggestion.hint")}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Switch
+                    size="small"
+                    checked={capacitySuggestionEnabled}
+                    onChange={setCapacitySuggestionEnabled}
+                  />
+                  <Button
+                    size="small"
+                    onClick={handleSuggestCapacity}
+                    loading={checkingCapacitySuggestion}
+                    disabled={
+                      !capacitySuggestionEnabled || !canSuggestCapacity()
+                    }
+                  >
+                    {t("model.dialog.capacity.suggestion.check")}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <ModelCapacityFields
+              value={form}
+              onChange={(field, value) => handleFormChange(field, value)}
+              validationError={capacityValidationError}
+              formMode="add"
+              // context_window/max_output are no longer required; an empty
+              // input lands the shared DEFAULT_* values at save time
+              // (see capacityFormToSnakePayload).
+              suggestion={
+                capacitySuggestionEnabled && !form.isBatchImport
+                  ? capacitySuggestion
+                  : null
+              }
+              suggestionLoading={checkingCapacitySuggestion}
+              onUseSuggestion={() =>
+                applyCapacitySuggestion(capacitySuggestion)
+              }
+            />
+          </div>
+        )}
+
+        {/* Max Tokens (legacy; only for non-LLM types still using the standalone field) */}
+        {!isEmbeddingModel && !isSTTModel && !supportsCapacityFields && (
           <div>
             <label
               htmlFor="maxTokens"
               className="block mb-1 text-sm font-medium text-gray-700"
             >
-              {t("model.dialog.label.maxTokens")}
+              {t("model.dialog.label.maxTokens")}{" "}
+              <span className="text-red-500">*</span>
             </label>
-            <Input
+            <ModelMaxTokensInput
               id="maxTokens"
               placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
-              onChange={(e) => handleFormChange("maxTokens", e.target.value)}
+              onChange={(value) => handleFormChange("maxTokens", value)}
             />
           </div>
         )}
@@ -1335,7 +2076,7 @@ export const ModelAddDialog = ({
                           )}
                         </div>
                         <div className="flex items-center space-x-2">
-                          {!isEmbeddingModel && (
+                          {!isEmbeddingModel && !isSTTModel && (
                             <Tooltip
                               title={t(
                                 "model.dialog.modelList.tooltip.settings"
@@ -1384,7 +2125,7 @@ export const ModelAddDialog = ({
             <div className="mt-0.5 ml-6">
               {(form.isBatchImport
                 ? t("model.dialog.help.content.batchImport")
-                : isSTTModel
+                : isSTTModel || isTTSModel
                   ? t("model.dialog.help.content.voice")
                   : t("model.dialog.help.content")
               )
@@ -1498,7 +2239,37 @@ export const ModelAddDialog = ({
               )}
               {isSTTModel && (
                 <>
-                  <Tooltip title={t("model.provider.volengine")}>
+                  <Tooltip title={t("model.provider.volcengine")}>
+                    <a
+                      href={PROVIDER_LINKS.volcengine}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/volcengine.png"
+                        alt="VolcEngine"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                  <Tooltip title={t("model.provider.dashscope")}>
+                    <a
+                      href={PROVIDER_LINKS.dashscope}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/aliyuncs.png"
+                        alt="AlibabaCloud"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
+                  </Tooltip>
+                </>
+              )}
+              {isTTSModel && (
+                <>
+                  <Tooltip title={t("model.provider.volcengine")}>
                     <a
                       href={PROVIDER_LINKS.volcengine}
                       target="_blank"
@@ -1693,29 +2464,56 @@ export const ModelAddDialog = ({
       </div>
 
       {/* Settings Modal */}
-      <Modal
-        title={t("model.dialog.settings.title")}
-        open={settingsModalVisible}
-        onCancel={() => setSettingsModalVisible(false)}
-        onOk={handleSettingsSave}
-        cancelText={t("common.cancel")}
-        okText={t("common.confirm")}
-        destroyOnHidden
-      >
-        <div className="space-y-3">
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.settings.label.maxTokens")}
-            </label>
-            <Input
-              type="number"
-              value={modelMaxTokens}
-              onChange={(e) => setModelMaxTokens(e.target.value)}
-              placeholder={t("model.dialog.placeholder.maxTokens")}
-            />
-          </div>
-        </div>
-      </Modal>
+      {(() => {
+        const useCapacity = selectedModelForSettings
+          ? rowSupportsCapacityFields(selectedModelForSettings)
+          : false;
+        const settingsCapacityError = useCapacity
+          ? validateCapacityForm(modelCapacity, [])
+          : null;
+        const okDisabled = useCapacity
+          ? settingsCapacityError !== null
+          : !isValidMaxTokens(modelMaxTokens);
+        return (
+          <Modal
+            title={t("model.dialog.settings.title")}
+            open={settingsModalVisible}
+            onCancel={() => setSettingsModalVisible(false)}
+            onOk={handleSettingsSave}
+            okButtonProps={{ disabled: okDisabled }}
+            cancelText={t("common.cancel")}
+            okText={t("common.confirm")}
+            destroyOnHidden
+          >
+            <div className="space-y-3">
+              {useCapacity ? (
+                <ModelCapacityFields
+                  value={modelCapacity}
+                  onChange={(field, value) =>
+                    setModelCapacity((prev) => ({ ...prev, [field]: value }))
+                  }
+                  validationError={settingsCapacityError}
+                  formMode="add"
+                  // context_window/max_output not required; defaults land at
+                  // save via capacityFormToSnakePayload when input is empty.
+                />
+              ) : (
+                <div>
+                  <label className="block mb-1 text-sm font-medium text-gray-700">
+                    {t("model.dialog.settings.label.maxTokens")}{" "}
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <ModelMaxTokensInput
+                    value={modelMaxTokens}
+                    onChange={setModelMaxTokens}
+                    placeholder={t("model.dialog.placeholder.maxTokens")}
+                  />
+                </div>
+              )}
+            </div>
+          </Modal>
+        );
+      })()}
     </Modal>
   );
 };

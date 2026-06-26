@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Card, Col, Row, Space, App } from "antd";
+import { Alert, Button, Card, Col, Row, Space, App } from "antd";
 import { Plus, ShieldCheck, RefreshCw, PenLine } from "lucide-react";
 
 import {
@@ -19,7 +19,7 @@ import {
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
-import { ModelOption, ModelType } from "@/types/modelConfig";
+import { CapacityCoverage, ModelOption, ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import { ModelListCard } from "./model/ModelListCard";
@@ -56,7 +56,20 @@ const getModelData = (t: any) => ({
   },
   multimodal: {
     title: t("modelConfig.category.multimodal"),
-    options: [{ id: MODEL_TYPES.VLM, name: t("modelConfig.option.vlmModel") }],
+    options: [
+      {
+        id: MODEL_TYPES.VLM,
+        name: t("modelConfig.option.imageUnderstandingModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM2,
+        name: t("modelConfig.option.imageGenerationModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM3,
+        name: t("modelConfig.option.videoUnderstandingModel"),
+      },
+    ],
   },
   voice: {
     title: t("modelConfig.category.voice"),
@@ -108,6 +121,8 @@ export const ModelConfigSection = forwardRef<
     useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [capacityCoverage, setCapacityCoverage] =
+    useState<CapacityCoverage | null>(null);
 
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
@@ -142,7 +157,7 @@ export const ModelConfigSection = forwardRef<
     llm: { main: "" },
     embedding: { embedding: "", multi_embedding: "" },
     reranker: { reranker: "" },
-    multimodal: { vlm: "" },
+    multimodal: { vlm: "", vlm2: "", vlm3: "" },
     voice: { tts: "", stt: "" },
   });
 
@@ -246,10 +261,14 @@ export const ModelConfigSection = forwardRef<
     if (!modelConfig) return;
 
     try {
-      const allModels = await modelService.getAllModels();
+      const [allModels, coverage] = await Promise.all([
+        modelService.getAllModels(),
+        modelService.getCapacityCoverage(),
+      ]);
 
       // Update state with all models
       setModels(allModels);
+      setCapacityCoverage(coverage);
 
       // Load selected models from configuration and check if models still exist
       const llmMain = modelConfig.llm.displayName;
@@ -284,9 +303,21 @@ export const ModelConfigSection = forwardRef<
         : true;
 
       const vlm = modelConfig.vlm.displayName;
+      const vlm2 = modelConfig.vlm2?.displayName || "";
+      const vlm3 = modelConfig.vlm3?.displayName || "";
       const vlmExists = vlm
         ? allModels.some(
             (m) => m.displayName === vlm && m.type === MODEL_TYPES.VLM
+          )
+        : true;
+      const vlm2Exists = vlm2
+        ? allModels.some(
+            (m) => m.displayName === vlm2 && m.type === MODEL_TYPES.VLM2
+          )
+        : true;
+      const vlm3Exists = vlm3
+        ? allModels.some(
+            (m) => m.displayName === vlm3 && m.type === MODEL_TYPES.VLM3
           )
         : true;
 
@@ -318,6 +349,8 @@ export const ModelConfigSection = forwardRef<
         },
         multimodal: {
           vlm: vlmExists ? vlm : "",
+          vlm2: vlm2Exists ? vlm2 : "",
+          vlm3: vlm3Exists ? vlm3 : "",
         },
         voice: {
           tts: ttsExists ? tts : "",
@@ -363,6 +396,14 @@ export const ModelConfigSection = forwardRef<
         configUpdates.vlm = { modelName: "", displayName: "" };
       }
 
+      if (!vlm2Exists && vlm2) {
+        configUpdates.vlm2 = { modelName: "", displayName: "" };
+      }
+
+      if (!vlm3Exists && vlm3) {
+        configUpdates.vlm3 = { modelName: "", displayName: "" };
+      }
+
       if (!sttExists && stt) {
         configUpdates.stt = { modelName: "", displayName: "" };
       }
@@ -385,6 +426,8 @@ export const ModelConfigSection = forwardRef<
         !!modelConfig.multiEmbedding.modelName ||
         !!modelConfig.rerank.modelName ||
         !!modelConfig.vlm.modelName ||
+        !!modelConfig.vlm2?.modelName ||
+        !!modelConfig.vlm3?.modelName ||
         !!modelConfig.tts.modelName ||
         !!modelConfig.stt.modelName;
 
@@ -441,11 +484,20 @@ export const ModelConfigSection = forwardRef<
       const hasEmbedding = !!modelConfig.embedding.modelName;
       const hasReranker = !!modelConfig.rerank.modelName;
       const hasVlm = !!modelConfig.vlm.modelName;
+      const hasVlm2 = !!modelConfig.vlm2?.modelName;
+      const hasVlm3 = !!modelConfig.vlm3?.modelName;
       const hasTts = !!modelConfig.tts.modelName;
       const hasStt = !!modelConfig.stt.modelName;
 
       hasSelectedModels =
-        hasLlmMain || hasEmbedding || hasReranker || hasVlm || hasTts || hasStt;
+        hasLlmMain ||
+        hasEmbedding ||
+        hasReranker ||
+        hasVlm ||
+        hasVlm2 ||
+        hasVlm3 ||
+        hasTts ||
+        hasStt;
 
       if (hasSelectedModels) {
         currentSelectedModels.llm.main = modelConfig.llm.modelName;
@@ -455,6 +507,10 @@ export const ModelConfigSection = forwardRef<
           modelConfig.multiEmbedding.modelName || "";
         currentSelectedModels.reranker.reranker = modelConfig.rerank.modelName;
         currentSelectedModels.multimodal.vlm = modelConfig.vlm.modelName;
+        currentSelectedModels.multimodal.vlm2 =
+          modelConfig.vlm2?.modelName || "";
+        currentSelectedModels.multimodal.vlm3 =
+          modelConfig.vlm3?.modelName || "";
         currentSelectedModels.voice.tts = modelConfig.tts.modelName;
         currentSelectedModels.voice.stt = modelConfig.stt.modelName;
       } else {
@@ -492,7 +548,7 @@ export const ModelConfigSection = forwardRef<
           } else if (category === "reranker") {
             modelType = MODEL_TYPES.RERANK;
           } else if (category === "multimodal") {
-            modelType = MODEL_TYPES.VLM;
+            modelType = optionId as ModelType;
           } else if (category === MODEL_TYPES.EMBEDDING) {
             modelType =
               optionId === MODEL_TYPES.MULTI_EMBEDDING
@@ -527,6 +583,7 @@ export const ModelConfigSection = forwardRef<
           try {
             const isConnected = await modelService.verifyCustomModel(
               modelName,
+              modelType,
               signal
             );
 
@@ -603,7 +660,10 @@ export const ModelConfigSection = forwardRef<
     throttleTimerRef.current = setTimeout(async () => {
       try {
         // Use modelService to verify model
-        const isConnected = await modelService.verifyCustomModel(displayName);
+        const isConnected = await modelService.verifyCustomModel(
+          displayName,
+          modelType
+        );
 
         // Update model status
         updateModelStatus(
@@ -654,7 +714,7 @@ export const ModelConfigSection = forwardRef<
     } else if (category === "reranker") {
       modelType = MODEL_TYPES.RERANK;
     } else if (category === "multimodal") {
-      modelType = MODEL_TYPES.VLM;
+      modelType = option as ModelType;
     } else if (category === MODEL_TYPES.EMBEDDING) {
       modelType =
         option === MODEL_TYPES.MULTI_EMBEDDING
@@ -679,7 +739,7 @@ export const ModelConfigSection = forwardRef<
     ) {
       configKey = "multiEmbedding";
     } else if (category === "multimodal") {
-      configKey = MODEL_TYPES.VLM;
+      configKey = option;
     } else if (category === "reranker") {
       configKey = MODEL_TYPES.RERANK;
     } else if (category === "voice" && option === "tts") {
@@ -921,6 +981,27 @@ export const ModelConfigSection = forwardRef<
           </Row>
         </div>
 
+        {capacityCoverage && capacityCoverage.bareCount > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("modelConfig.capacityCoverage.warning", {
+              bareCount: capacityCoverage.bareCount,
+              total: capacityCoverage.totalLlmVlm,
+            })}
+            description={t("modelConfig.capacityCoverage.description", {
+              suggestionCount: capacityCoverage.bareModels.filter(
+                (model) => model.suggestionAvailable
+              ).length,
+            })}
+            action={
+              <Button size="small" onClick={() => setIsDeleteModalOpen(true)}>
+                {t("modelConfig.capacityCoverage.manage")}
+              </Button>
+            }
+          />
+        )}
+
         <div
           style={{
             width: "100%",
@@ -1005,7 +1086,7 @@ export const ModelConfigSection = forwardRef<
                               ? MODEL_TYPES.TTS
                               : MODEL_TYPES.STT
                             : key === "multimodal"
-                              ? MODEL_TYPES.VLM
+                              ? (option.id as ModelType)
                               : key === MODEL_TYPES.EMBEDDING &&
                                   option.id === MODEL_TYPES.MULTI_EMBEDDING
                                 ? MODEL_TYPES.MULTI_EMBEDDING
@@ -1056,6 +1137,7 @@ export const ModelConfigSection = forwardRef<
             return;
           }}
           models={models}
+          capacityCoverage={capacityCoverage}
         />
       </div>
     </>

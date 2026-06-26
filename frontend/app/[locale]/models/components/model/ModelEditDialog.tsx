@@ -1,18 +1,38 @@
-import { useState, useEffect } from 'react'
-import { useTranslation } from 'react-i18next'
+﻿import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
-import { Modal, Input, Button, App } from "antd";
+import { Alert, Modal, Select, Input, Button, Switch, App } from "antd";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { modelService } from "@/services/modelService";
-import { ModelOption, ModelType } from "@/types/modelConfig";
+import {
+  CapacitySuggestion,
+  ModelOption,
+  ModelType,
+} from "@/types/modelConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import {
   ModelChunkSizeSlider,
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
 } from "./ModelChunkSizeSilder";
+import {
+  isValidMaxTokens,
+  ModelMaxTokensInput,
+  parseMaxTokens,
+} from "./ModelMaxTokensInput";
+import {
+  buildCapacityPayload,
+  capacityFormFromSuggestion,
+  capacityFormFromModel,
+  emptyCapacityForm,
+  ModelCapacityFields,
+  ModelCapacityFormState,
+  validateCapacityForm,
+} from "./ModelCapacityFields";
+
+const { Option } = Select;
 
 interface ModelEditDialogProps {
   isOpen: boolean;
@@ -38,7 +58,7 @@ export const ModelEditDialog = ({
     displayName: "",
     url: "",
     apiKey: "",
-    maxTokens: "4096",
+    maxTokens: "",
     timeoutSeconds: "120",
     concurrencyLimit: "",
     vectorDimension: "1024",
@@ -47,9 +67,22 @@ export const ModelEditDialog = ({
       DEFAULT_MAXIMUM_CHUNK_SIZE,
     ] as [number, number],
     chunkingBatchSize: "10",
+    // Voice model fields (STT/TTS)
+    modelFactory: "",
+    modelAppid: "",
+    accessToken: "",
+    ...emptyCapacityForm,
   });
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
+  const [checkingCapacitySuggestion, setCheckingCapacitySuggestion] =
+    useState(false);
+  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
+    useState(true);
+  const [capacitySuggestion, setCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
+  const [acceptedCapacitySuggestion, setAcceptedCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
   const [connectivityStatus, setConnectivityStatus] = useState<{
     status: ConnectivityStatusType;
     message: string;
@@ -66,7 +99,7 @@ export const ModelEditDialog = ({
         displayName: model.displayName || model.name,
         url: model.apiUrl || "",
         apiKey: model.apiKey || "",
-        maxTokens: model.maxTokens?.toString() || "4096",
+        maxTokens: model.maxTokens?.toString() || "",
         timeoutSeconds: model.timeoutSeconds?.toString() || "120",
         concurrencyLimit: model.concurrencyLimit?.toString() || "",
         vectorDimension: model.maxTokens?.toString() || "1024",
@@ -75,15 +108,39 @@ export const ModelEditDialog = ({
           model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
         ] as [number, number],
         chunkingBatchSize: (model.chunkingBatchSize || 10).toString(),
+        modelFactory: model.modelFactory || "",
+        modelAppid: model.modelAppid || "",
+        accessToken: model.accessToken || "",
+        ...capacityFormFromModel(model),
       });
+      setCapacitySuggestionEnabled(true);
+      setCapacitySuggestion(null);
+      setAcceptedCapacitySuggestion(null);
     }
   }, [model]);
 
   const handleFormChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     // If the key configuration item changes, clear the verification status
-    if (["url", "apiKey", "maxTokens", "timeoutSeconds", "vectorDimension"].includes(field)) {
+    if (
+      [
+        "url",
+        "apiKey",
+        "maxTokens",
+        "timeoutSeconds",
+        "concurrencyLimit",
+        "vectorDimension",
+        "modelFactory",
+        "modelAppid",
+        "accessToken",
+        "name",
+      ].includes(field)
+    ) {
       setConnectivityStatus({ status: null, message: "" });
+      if (["url", "apiKey", "modelFactory", "name"].includes(field)) {
+        setCapacitySuggestion(null);
+        setAcceptedCapacitySuggestion(null);
+      }
     }
   };
 
@@ -91,9 +148,94 @@ export const ModelEditDialog = ({
     form.type === MODEL_TYPES.EMBEDDING ||
     form.type === MODEL_TYPES.MULTI_EMBEDDING;
   const isRerankModel = form.type === MODEL_TYPES.RERANK;
+  const connectivityModelType =
+    form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3
+      ? (MODEL_TYPES.VLM as ModelType)
+      : form.type;
+  const isVoiceModel =
+    form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS;
+  const supportsCapacityFields =
+    !isEmbeddingModel && !isRerankModel && !isVoiceModel;
+  const capacityValidationError = supportsCapacityFields
+    ? validateCapacityForm(form, [])
+    : null;
+
+  const canSuggestCapacity = () =>
+    supportsCapacityFields && form.name.trim() !== "" && form.url.trim() !== "";
+
+  const applyCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
+    const next = capacityFormFromSuggestion(suggestion);
+    if (!next || Object.keys(next).length === 0) return;
+    setForm((prev) => ({
+      ...prev,
+      ...next,
+      name: suggestion?.canonicalModelName || prev.name,
+      // Do NOT overwrite `modelFactory` from the catalog suggestion. The
+      // catalog's `suggested_provider` namespace (deepseek, openai, jina,
+      // ...) is a superset of the frontend dropdown's allowed values; writing
+      // an unknown one back into `model_factory` makes the model disappear
+      // from the active list and the edit dropdown.
+    }));
+    setAcceptedCapacitySuggestion(suggestion);
+  };
+
+  const handleSuggestCapacity = async () => {
+    if (!canSuggestCapacity()) {
+      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
+      return;
+    }
+    setCheckingCapacitySuggestion(true);
+    try {
+      const suggestion = await modelService.suggestCapacity({
+        modelName: form.name.trim(),
+        baseUrl: form.url.trim(),
+        providerHint: form.modelFactory || model?.source,
+        apiKey: form.apiKey.trim() || undefined,
+        modelType: connectivityModelType,
+      });
+      setCapacitySuggestion(suggestion);
+      if (!suggestion.suggestions) {
+        setAcceptedCapacitySuggestion(null);
+      }
+    } catch (error) {
+      setCapacitySuggestion(null);
+      setAcceptedCapacitySuggestion(null);
+      message.error(t("model.dialog.capacity.suggestion.failed"));
+    } finally {
+      setCheckingCapacitySuggestion(false);
+    }
+  };
 
   const isFormValid = () => {
-    return form.name.trim() !== "" && form.url.trim() !== "";
+    if (
+      supportsCapacityFields &&
+      // context_window/max_output not required; only data-shape checks gate Save.
+      validateCapacityForm(form, [])
+    ) {
+      return false;
+    }
+
+    // Capacity panel replaces the legacy max_tokens field for LLM/VLM, so
+    // the standalone max_tokens is only required for the types that still
+    // render that field (voice and rerank-style).
+    const needsMaxTokens =
+      !supportsCapacityFields && !isEmbeddingModel && !isRerankModel;
+
+    if (isVoiceModel) {
+      if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
+        return false;
+      }
+      if (form.modelFactory === "volcengine") {
+        return form.modelAppid.trim() !== "" && form.accessToken.trim() !== "";
+      } else {
+        return form.name.trim() !== "" && form.apiKey.trim() !== "";
+      }
+    }
+    return (
+      form.name.trim() !== "" &&
+      form.url.trim() !== "" &&
+      (!needsMaxTokens || isValidMaxTokens(form.maxTokens))
+    );
   };
 
   // Verify model connectivity
@@ -110,11 +252,18 @@ export const ModelEditDialog = ({
     });
 
     try {
-      const modelType = form.type as ModelType;
-
-      const config = {
+      // For LLM/VLM the legacy form.maxTokens field is no longer rendered;
+      // use form.maxOutputTokens (capacity panel) for the connectivity-probe
+      // budget. Do NOT fall back to form.maxTokens for capacity types --
+      // the W1/W2 plan deprecates that field for LLM/VLM, and isFormValid
+      // already guarantees form.maxOutputTokens is filled before this
+      // probe runs.
+      const llmProbeMaxTokens = supportsCapacityFields
+        ? Number.parseInt(form.maxOutputTokens || "0", 10)
+        : parseMaxTokens(form.maxTokens);
+      const config: any = {
         modelName: form.name,
-        modelType: modelType,
+        modelType: connectivityModelType,
         baseUrl: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
         maxTokens:
@@ -122,14 +271,30 @@ export const ModelEditDialog = ({
             ? parseInt(form.vectorDimension)
             : form.type === MODEL_TYPES.RERANK
               ? 0
-              : parseInt(form.maxTokens),
+              : llmProbeMaxTokens,
         embeddingDim:
           form.type === MODEL_TYPES.EMBEDDING
             ? parseInt(form.vectorDimension)
             : undefined,
       };
 
+      // Add voice model fields for STT/TTS
+      if (isVoiceModel) {
+        config.modelFactory = form.modelFactory;
+        if (form.modelFactory === "volcengine") {
+          config.modelAppid = form.modelAppid;
+          config.accessToken = form.accessToken;
+        }
+      }
+
       const result = await modelService.verifyModelConfigConnectivity(config);
+      if (
+        capacitySuggestionEnabled &&
+        supportsCapacityFields &&
+        result.capacitySuggestion
+      ) {
+        setCapacitySuggestion(result.capacitySuggestion);
+      }
 
       // Set connectivity status
       let connectivityMessage = "";
@@ -156,32 +321,77 @@ export const ModelEditDialog = ({
 
   const handleSave = async () => {
     if (!model) return;
+    // Defensive gate: the Save button is already disabled via
+    // `!isFormValid()`, but disabled state can lag a tick behind state
+    // updates and the handler is also reachable from non-click paths.
+    // Re-check here so we never persist a row whose required W2 capacity
+    // fields are empty (this is how production glm-5.2 rows ended up with
+    // context_window_tokens=NULL and max_output_tokens=NULL).
+    if (!isFormValid()) return;
     setLoading(true);
     try {
       // Use update interface instead of delete + add
       const modelType = form.type as ModelType;
-      // Determine max tokens
-      let maxTokensValue = parseInt(form.maxTokens);
+      // Determine max tokens.
+      // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
+      // input is hidden and must not be read here per the W1/W2 plan
+      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
+      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
+      // a few lines below, keeping the deprecated NOT NULL column aligned
+      // with the W2 source of truth.
+      let maxTokensValue = supportsCapacityFields
+        ? 0
+        : parseMaxTokens(form.maxTokens) || 0;
       if (isEmbeddingModel || isRerankModel) maxTokensValue = 0;
 
       // Use original displayName for lookup, pass new displayName in body if changed
       const originalDisplayName = model.displayName || model.name;
       const newDisplayName = form.displayName;
+      const acceptedModelName =
+        acceptedCapacitySuggestion?.canonicalModelName || form.name;
+      // `acceptedCapacitySuggestion?.suggestedProvider` is intentionally NOT
+      // used here. See applyCapacitySuggestion above for the rationale.
 
       // Use manage interface if tenantId is provided
       if (tenantId) {
         await modelService.updateManageTenantModel({
           tenantId,
           currentDisplayName: originalDisplayName,
-          displayName: newDisplayName !== originalDisplayName ? newDisplayName : undefined,
+          name: acceptedCapacitySuggestion ? acceptedModelName : undefined,
+          displayName:
+            newDisplayName !== originalDisplayName ? newDisplayName : undefined,
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue !== 0 ? maxTokensValue : undefined,
-          expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
-          maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
-          chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
-          timeoutSeconds: !isEmbeddingModel && !isRerankModel ? parseInt(form.timeoutSeconds) || 120 : undefined,
-          concurrencyLimit: !isEmbeddingModel && !isRerankModel ? (form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined) : undefined,
+          expectedChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[0]
+            : undefined,
+          maximumChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[1]
+            : undefined,
+          chunkingBatchSize: isEmbeddingModel
+            ? parseInt(form.chunkingBatchSize) || 10
+            : undefined,
+          modelFactory: isVoiceModel ? form.modelFactory : undefined,
+          modelAppid:
+            isVoiceModel && form.modelFactory === "volcengine"
+              ? form.modelAppid
+              : undefined,
+          accessToken:
+            isVoiceModel && form.modelFactory === "volcengine"
+              ? form.accessToken
+              : undefined,
+          timeoutSeconds:
+            !isEmbeddingModel && !isRerankModel
+              ? parseInt(form.timeoutSeconds) || 120
+              : undefined,
+          concurrencyLimit:
+            !isEmbeddingModel && !isRerankModel
+              ? form.concurrencyLimit
+                ? parseInt(form.concurrencyLimit)
+                : undefined
+              : undefined,
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         });
       } else {
         await modelService.updateSingleModel({
@@ -190,6 +400,7 @@ export const ModelEditDialog = ({
           ...(newDisplayName !== originalDisplayName
             ? { displayName: newDisplayName }
             : {}),
+          ...(acceptedCapacitySuggestion ? { name: acceptedModelName } : {}),
           url: form.url,
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
@@ -202,13 +413,30 @@ export const ModelEditDialog = ({
                 chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
               }
             : {}),
+          // Send voice model fields
+          ...(isVoiceModel
+            ? {
+                modelFactory: form.modelFactory,
+                modelAppid:
+                  form.modelFactory === "volcengine"
+                    ? form.modelAppid
+                    : undefined,
+                accessToken:
+                  form.modelFactory === "volcengine"
+                    ? form.accessToken
+                    : undefined,
+              }
+            : {}),
           // Send timeout for non-embedding models
           ...(!isEmbeddingModel && !isRerankModel
             ? {
                 timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
-                concurrencyLimit: form.concurrencyLimit ? parseInt(form.concurrencyLimit) : undefined,
+                concurrencyLimit: form.concurrencyLimit
+                  ? parseInt(form.concurrencyLimit)
+                  : undefined,
               }
             : {}),
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
         });
       }
 
@@ -218,6 +446,8 @@ export const ModelEditDialog = ({
         embedding: MODEL_TYPES.EMBEDDING,
         multi_embedding: MODEL_TYPES.MULTI_EMBEDDING,
         vlm: MODEL_TYPES.VLM,
+        vlm2: MODEL_TYPES.VLM2,
+        vlm3: MODEL_TYPES.VLM3,
         rerank: MODEL_TYPES.RERANK,
         tts: MODEL_TYPES.TTS,
         stt: MODEL_TYPES.STT,
@@ -225,14 +455,24 @@ export const ModelEditDialog = ({
       const configKey = modelConfigKeyMap[modelType];
       updateModelConfig({
         [configKey]: {
-          modelName: form.name,
+          modelName: acceptedModelName,
           displayName: form.displayName || form.name,
           apiConfig: {
             apiKey: form.apiKey,
             modelUrl: form.url,
           },
+          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...(isEmbeddingModel
             ? { dimension: parseInt(form.vectorDimension) }
+            : {}),
+          ...(isVoiceModel
+            ? {
+                modelFactory: form.modelFactory,
+                modelAppid:
+                  form.modelFactory === "volcengine" ? form.modelAppid : "",
+                accessToken:
+                  form.modelFactory === "volcengine" ? form.accessToken : "",
+              }
             : {}),
         },
       });
@@ -283,15 +523,67 @@ export const ModelEditDialog = ({
         </div>
 
         {/* URL */}
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t("model.dialog.label.url")}
-          </label>
-          <Input
-            value={form.url}
-            onChange={(e) => handleFormChange("url", e.target.value)}
-          />
-        </div>
+        {!isVoiceModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("model.dialog.label.url")}
+            </label>
+            <Input
+              value={form.url}
+              onChange={(e) => handleFormChange("url", e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Voice Model Factory */}
+        {isVoiceModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {form.type === MODEL_TYPES.TTS
+                ? t("model.dialog.label.ttsProvider")
+                : t("model.dialog.label.sttProvider")}
+            </label>
+            <Select
+              style={{ width: "100%" }}
+              value={form.modelFactory || "dashscope"}
+              onChange={(value) => handleFormChange("modelFactory", value)}
+            >
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="volcengine">
+                {t("model.provider.volcengine")}
+              </Option>
+            </Select>
+          </div>
+        )}
+
+        {/* Voice Model App ID and Access Token (Volcengine) */}
+        {isVoiceModel && form.modelFactory === "volcengine" && (
+          <>
+            <div>
+              <label className="block mb-1 text-sm font-medium text-gray-700">
+                {t("model.dialog.label.modelAppid")}
+              </label>
+              <Input
+                value={form.modelAppid}
+                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+            <div>
+              <label className="block mb-1 text-sm font-medium text-gray-700">
+                {t("model.dialog.label.accessToken")}
+              </label>
+              <Input.Password
+                value={form.accessToken}
+                onChange={(e) =>
+                  handleFormChange("accessToken", e.target.value)
+                }
+                autoComplete="new-password"
+                visibilityToggle={false}
+              />
+            </div>
+          </>
+        )}
 
         {/* API Key */}
         <div>
@@ -306,15 +598,74 @@ export const ModelEditDialog = ({
           />
         </div>
 
-        {/* maxTokens */}
-        {!isEmbeddingModel && !isRerankModel && (
+        {supportsCapacityFields && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+              <div>
+                <div className="text-sm font-medium text-gray-700">
+                  {t("model.dialog.capacity.suggestion.title")}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {t("model.dialog.capacity.suggestion.hint")}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Switch
+                  size="small"
+                  checked={capacitySuggestionEnabled}
+                  onChange={setCapacitySuggestionEnabled}
+                />
+                <Button
+                  size="small"
+                  onClick={handleSuggestCapacity}
+                  loading={checkingCapacitySuggestion}
+                  disabled={!capacitySuggestionEnabled || !canSuggestCapacity()}
+                >
+                  {t("model.dialog.capacity.suggestion.check")}
+                </Button>
+              </div>
+            </div>
+            <ModelCapacityFields
+              value={form}
+              onChange={(field, value) => handleFormChange(field, value)}
+              validationError={capacityValidationError}
+              capacitySource={model.capacitySource}
+              capabilityProfileVersion={model.capabilityProfileVersion}
+              // context_window/max_output no longer required; empty input
+              // lands DEFAULT_* via buildCapacityPayload at save time.
+              suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
+              suggestionLoading={checkingCapacitySuggestion}
+              onUseSuggestion={() =>
+                applyCapacitySuggestion(capacitySuggestion)
+              }
+              // Legacy max_tokens is now surfaced via the actionable
+              // legacyMaxTokensCandidate prompt (no more silent promote in
+              // capacityFormFromModel). Keep the plain deprecation banner
+              // fallback for the rare case where the record has neither
+              // column populated, so users still see the migration nudge.
+              showDeprecatedMaxTokensWarning={
+                Boolean(model.maxTokens) &&
+                !model.maxOutputTokens &&
+                !form.maxOutputTokens
+              }
+              legacyMaxTokensCandidate={
+                model.maxOutputTokens ? undefined : model.maxTokens
+              }
+            />
+          </div>
+        )}
+
+        {/* maxTokens (legacy; only kept for types not covered by the capacity panel) */}
+        {!isEmbeddingModel && !isRerankModel && !supportsCapacityFields && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.maxTokens")}
+              {t("model.dialog.label.maxTokens")}{" "}
+              <span className="text-red-500">*</span>
             </label>
-            <Input
+            <ModelMaxTokensInput
               value={form.maxTokens}
-              onChange={(e) => handleFormChange("maxTokens", e.target.value)}
+              placeholder={t("model.dialog.placeholder.maxTokens")}
+              onChange={(value) => handleFormChange("maxTokens", value)}
             />
           </div>
         )}
@@ -329,7 +680,9 @@ export const ModelEditDialog = ({
               type="number"
               min="1"
               value={form.timeoutSeconds}
-              onChange={(e) => handleFormChange("timeoutSeconds", e.target.value)}
+              onChange={(e) =>
+                handleFormChange("timeoutSeconds", e.target.value)
+              }
             />
           </div>
         )}
@@ -344,7 +697,9 @@ export const ModelEditDialog = ({
               type="number"
               min="1"
               value={form.concurrencyLimit}
-              onChange={(e) => handleFormChange("concurrencyLimit", e.target.value)}
+              onChange={(e) =>
+                handleFormChange("concurrencyLimit", e.target.value)
+              }
               placeholder={t("model.dialog.placeholder.concurrencyLimit")}
             />
             <div className="text-xs text-gray-500 mt-1">
@@ -451,72 +806,199 @@ export const ModelEditDialog = ({
 };
 
 // New: provider config edit dialog (only apiKey and maxTokens)
+interface ProviderConfigInitialCapacity {
+  contextWindowTokens?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  /** Legacy alias passed through so capacityFormFromModel can auto-migrate it. */
+  maxTokens?: number;
+  defaultOutputReserveTokens?: number;
+  tokenizerFamily?: string;
+  capacitySource?: string;
+  capabilityProfileVersion?: string;
+}
+
 interface ProviderConfigEditDialogProps {
-  isOpen: boolean
-  initialApiKey?: string
-  initialMaxTokens?: string
-  initialTimeoutSeconds?: string
-  initialConcurrencyLimit?: string
-  modelType?: ModelType
-  showApiKeyField?: boolean  // Whether to show API Key field (default: true)
-  onClose: () => void
-  onSave: (config: { apiKey?: string; maxTokens: number; timeoutSeconds?: number; concurrencyLimit?: number }) => Promise<void> | void
+  isOpen: boolean;
+  initialApiKey?: string;
+  initialMaxTokens?: string;
+  initialTimeoutSeconds?: string;
+  initialConcurrencyLimit?: string;
+  initialCapacity?: ProviderConfigInitialCapacity;
+  hideCapacityFields?: boolean; // Suppress capacity controls when caller is a provider-level batch (not per-model)
+  modelType?: ModelType;
+  showApiKeyField?: boolean; // Whether to show API Key field (default: true)
+  onClose: () => void;
+  onSave: (config: {
+    apiKey?: string;
+    maxTokens: number;
+    timeoutSeconds?: number;
+    concurrencyLimit?: number;
+    contextWindowTokens?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
+    defaultOutputReserveTokens?: number;
+    tokenizerFamily?: string;
+    capacitySource?: string;
+  }) => Promise<void> | void;
 }
 
 export const ProviderConfigEditDialog = ({
   isOpen,
-  initialApiKey = '',
-  initialMaxTokens = '4096',
-  initialTimeoutSeconds = '120',
-  initialConcurrencyLimit = '',
+  initialApiKey = "",
+  initialMaxTokens = "",
+  initialTimeoutSeconds = "120",
+  initialConcurrencyLimit = "",
+  initialCapacity,
+  hideCapacityFields = false,
   modelType,
   showApiKeyField = true,
   onClose,
   onSave,
 }: ProviderConfigEditDialogProps) => {
-  const { t } = useTranslation()
-  const [apiKey, setApiKey] = useState<string>(initialApiKey)
-  const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens)
-  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(initialTimeoutSeconds)
-  const [concurrencyLimit, setConcurrencyLimit] = useState<string>(initialConcurrencyLimit)
-  const [saving, setSaving] = useState<boolean>(false)
+  const { t } = useTranslation();
+  const [apiKey, setApiKey] = useState<string>(initialApiKey);
+  const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens);
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(
+    initialTimeoutSeconds
+  );
+  const [concurrencyLimit, setConcurrencyLimit] = useState<string>(
+    initialConcurrencyLimit
+  );
+  const [capacityForm, setCapacityForm] = useState(
+    initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
+  );
+  const [saving, setSaving] = useState<boolean>(false);
 
   useEffect(() => {
-    setApiKey(initialApiKey)
-    setMaxTokens(initialMaxTokens)
-    setTimeoutSeconds(initialTimeoutSeconds)
-    setConcurrencyLimit(initialConcurrencyLimit)
-  }, [initialApiKey, initialMaxTokens, initialTimeoutSeconds, initialConcurrencyLimit])
+    setApiKey(initialApiKey);
+    setMaxTokens(initialMaxTokens);
+    setTimeoutSeconds(initialTimeoutSeconds);
+    setConcurrencyLimit(initialConcurrencyLimit);
+    setCapacityForm(
+      initialCapacity
+        ? capacityFormFromModel(initialCapacity)
+        : emptyCapacityForm
+    );
+  }, [
+    initialApiKey,
+    initialMaxTokens,
+    initialTimeoutSeconds,
+    initialConcurrencyLimit,
+    initialCapacity,
+  ]);
+
+  const isEmbeddingModel =
+    modelType === MODEL_TYPES.EMBEDDING ||
+    modelType === MODEL_TYPES.MULTI_EMBEDDING;
+  const isRerankModel = modelType === MODEL_TYPES.RERANK;
+  const isVoiceModel =
+    modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS;
+  const isLlmOrVlm = !isEmbeddingModel && !isRerankModel && !isVoiceModel;
+  // Per-model capacity panel: shown when the dialog is editing a single
+  // model's W2 capacity (gear icon next to a row).
+  const supportsCapacityFields = !hideCapacityFields && isLlmOrVlm;
+  // Provider-level "bulk apply" capacity panel: shown when the dialog is
+  // editing shared provider settings (the "修改配置" button). Renders the
+  // same ModelCapacityFields panel; context_window / max_output / etc. are
+  // reasonable defaults to broadcast across N models.
+  const supportsBulkCapacity = hideCapacityFields && isLlmOrVlm;
+  // Only rerank and voice models legitimately need the deprecated max_tokens
+  // input. Per the W1/W2 plan, never surface legacy max_tokens for LLM/VLM
+  // regardless of the hideCapacityFields flag.
+  const needsLegacyMaxTokens = isRerankModel || isVoiceModel;
+  // Neither mode marks any field required:
+  // - per-row mode (supportsCapacityFields): context_window/max_output are
+  //   optional and get DEFAULT_* substituted at save by buildCapacityPayload
+  // - bulk-apply mode (supportsBulkCapacity): optional broadcast -- "fill
+  //   to override; leave empty to keep each row's current value"
+  const capacityRequiredFields: Array<keyof ModelCapacityFormState> = [];
+  const capacityValidationError =
+    supportsCapacityFields || supportsBulkCapacity
+      ? validateCapacityForm(capacityForm, capacityRequiredFields)
+      : null;
+
+  const handleCapacityChange = (
+    field: keyof typeof capacityForm,
+    value: string
+  ) => {
+    setCapacityForm((prev) => ({ ...prev, [field]: value }));
+  };
 
   const valid = () => {
-    const parsed = parseInt(maxTokens)
-    return !Number.isNaN(parsed) && parsed >= 0
-  }
+    if (supportsCapacityFields) {
+      // Per-model capacity edit: required fields enforced by
+      // validateCapacityForm.
+      return !capacityValidationError;
+    }
+    if (supportsBulkCapacity) {
+      // Provider-level bulk apply: capacity fields are optional ("fill to
+      // override; leave empty to keep current per-model value"). Only fail
+      // when a typed value is not a positive integer.
+      return !capacityValidationError;
+    }
+    if (needsLegacyMaxTokens) {
+      return isValidMaxTokens(maxTokens);
+    }
+    // Embedding shared config: the dialog only owns
+    // apiKey/timeoutSeconds/concurrencyLimit, so always valid.
+    return true;
+  };
 
   const handleSave = async () => {
-    if (!valid()) return
+    if (!valid()) return;
     try {
-      setSaving(true)
-      const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
-      const isRerankModel = modelType === MODEL_TYPES.RERANK
+      setSaving(true);
+      // Only rerank/voice models legitimately surface the legacy maxTokens
+      // input. In every other case the maxTokens state still carries the
+      // backend's DEFAULT_LLM_MAX_TOKENS sentinel from the row prefill, so
+      // reading it would either be a no-op (LLM/VLM with capacity panel:
+      // buildCapacityPayload's max_output_tokens mirror overrides) or
+      // actively wrong (LLM/VLM provider-level config: would force the
+      // 4096 sentinel onto every existing row). Sending 0 here makes
+      // handleProviderConfigSave's `maxTokens || m.maxTokens` fall back to
+      // each row's current value, preserving it.
+      const legacyMaxTokens = needsLegacyMaxTokens
+        ? parseMaxTokens(maxTokens) || 0
+        : 0;
       await onSave({
-        ...(showApiKeyField ? { apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey } : {}),
-        maxTokens: parseInt(maxTokens),
-        ...(!isEmbeddingModel && !isRerankModel ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 } : {}),
-        ...(!isEmbeddingModel && !isRerankModel ? { concurrencyLimit: concurrencyLimit ? parseInt(concurrencyLimit) : undefined } : {}),
-      })
-      onClose()
+        ...(showApiKeyField
+          ? { apiKey: apiKey.trim() === "" ? "sk-no-api-key" : apiKey }
+          : {}),
+        maxTokens: legacyMaxTokens,
+        ...(!isEmbeddingModel && !isRerankModel
+          ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 }
+          : {}),
+        ...(!isEmbeddingModel && !isRerankModel
+          ? {
+              concurrencyLimit: concurrencyLimit
+                ? parseInt(concurrencyLimit)
+                : undefined,
+            }
+          : {}),
+        // Both per-model and bulk-apply modes write capacity via
+        // buildCapacityPayload. Per-model (supportsCapacityFields) opts
+        // into default substitution: empty context_window/max_output land
+        // DEFAULT_CONTEXT_WINDOW_TOKENS / DEFAULT_MAX_OUTPUT_TOKENS at the
+        // wire. Bulk-apply (supportsBulkCapacity) passes applyDefaults=false
+        // so empty fields stay omitted ("don't broadcast this value"), and
+        // an apiKey-only bulk edit doesn't accidentally null out per-row
+        // capacity by writing 32K/4K across N rows.
+        ...(supportsCapacityFields
+          ? buildCapacityPayload(capacityForm)
+          : supportsBulkCapacity
+            ? buildCapacityPayload(capacityForm, { applyDefaults: false })
+            : {}),
+      });
+      onClose();
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
-
-  const isEmbeddingModel = modelType === MODEL_TYPES.EMBEDDING || modelType === MODEL_TYPES.MULTI_EMBEDDING
-  const isRerankModel = modelType === MODEL_TYPES.RERANK
+  };
 
   return (
     <Modal
-      title={t('common.button.editConfig')}
+      title={t("common.button.editConfig")}
       open={isOpen}
       onCancel={onClose}
       footer={null}
@@ -526,17 +1008,73 @@ export const ProviderConfigEditDialog = ({
         {showApiKeyField && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.apiKey')}
+              {t("model.dialog.label.apiKey")}
             </label>
-            <Input.Password value={apiKey} onChange={(e) => setApiKey(e.target.value)} visibilityToggle={false} />
+            <Input.Password
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              visibilityToggle={false}
+            />
           </div>
         )}
-        {!isEmbeddingModel && (
+        {supportsCapacityFields && (
+          <ModelCapacityFields
+            value={capacityForm}
+            onChange={handleCapacityChange}
+            validationError={capacityValidationError}
+            capacitySource={initialCapacity?.capacitySource}
+            capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
+            // context_window/max_output optional; DEFAULT_* substitute at save.
+            showDeprecatedMaxTokensWarning={
+              Boolean(initialMaxTokens) &&
+              !initialCapacity?.maxOutputTokens &&
+              !capacityForm.maxOutputTokens
+            }
+            legacyMaxTokensCandidate={
+              initialCapacity?.maxOutputTokens
+                ? undefined
+                : initialCapacity?.maxTokens
+            }
+          />
+        )}
+        {supportsBulkCapacity && (
+          <div className="space-y-2">
+            <Alert
+              type="info"
+              showIcon
+              message={t("model.dialog.capacity.bulkApply.title")}
+              description={t("model.dialog.capacity.bulkApply.hint")}
+            />
+            <ModelCapacityFields
+              value={capacityForm}
+              onChange={handleCapacityChange}
+              validationError={capacityValidationError}
+              formMode="add"
+              // Bulk-apply broadcast: empty input means "do not broadcast";
+              // showing DEFAULT_* placeholders here would mislead operators
+              // into thinking empty would land 32K/4K on every selected row.
+              applyDefaultsOnEmpty={false}
+            />
+          </div>
+        )}
+        {/* Legacy max_tokens input — only rendered for model types that
+            legitimately still own this field (rerank, STT/TTS). LLM/VLM use
+            the capacity panel; if hideCapacityFields=true is set (provider-
+            level config edit) the dialog deliberately drops both the
+            capacity panel and the legacy input -- per the W1/W2 plan
+            ("Never use legacy max_tokens") capacity is set per-model from
+            the gear icon, not via a provider-level shared value. */}
+        {needsLegacyMaxTokens && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.maxTokens')}
+              {t("model.dialog.label.maxTokens")}{" "}
+              <span className="text-red-500">*</span>
             </label>
-            <Input value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+            <ModelMaxTokensInput
+              value={maxTokens}
+              placeholder={t("model.dialog.placeholder.maxTokens")}
+              onChange={setMaxTokens}
+            />
           </div>
         )}
         {!isEmbeddingModel && !isRerankModel && (
@@ -570,12 +1108,17 @@ export const ProviderConfigEditDialog = ({
           </div>
         )}
         <div className="flex justify-end space-x-3">
-          <Button onClick={onClose}>{t('common.button.cancel')}</Button>
-          <Button type="primary" onClick={handleSave} loading={saving} disabled={!valid()}>
-            {t('common.button.save')}
+          <Button onClick={onClose}>{t("common.button.cancel")}</Button>
+          <Button
+            type="primary"
+            onClick={handleSave}
+            loading={saving}
+            disabled={!valid()}
+          >
+            {t("common.button.save")}
           </Button>
         </div>
       </div>
     </Modal>
-  )
-} 
+  );
+};

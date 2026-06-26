@@ -23,7 +23,7 @@ title: 环境准备
 ```bash
 # 在项目根目录的 docker 目录执行
 cd docker
-./deploy.sh --mode infrastructure
+./deploy.sh --components infrastructure --port-policy development
 ```
 
 :::: info 重要提示
@@ -131,4 +131,3 @@ uv pip install -e ".[dev]"
 - 测试框架（pytest）
 - 数据处理依赖（unstructured）
 - 其他开发辅助依赖
-

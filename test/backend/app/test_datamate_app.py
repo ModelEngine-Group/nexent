@@ -1,5 +1,7 @@
 import sys
 import os
+import types
+import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock, call
 
 import pytest
@@ -16,8 +18,11 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 # Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
+boto3_module = types.ModuleType("boto3")
+boto3_module.client = MagicMock()
+boto3_module.resource = MagicMock()
+boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
+sys.modules['boto3'] = boto3_module
 
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
@@ -43,10 +48,6 @@ patch('backend.database.client.MinioClient',
 patch('database.client.MinioClient', return_value=minio_client_mock).start()
 patch('backend.database.client.minio_client', minio_client_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-
-# Patch supabase to avoid import errors
-supabase_mock = MagicMock()
-sys.modules['supabase'] = supabase_mock
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import

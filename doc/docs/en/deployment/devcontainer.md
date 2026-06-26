@@ -25,8 +25,8 @@ This development container configuration sets up a complete Nexent development e
 
 1. Clone the project locally
 2. Open project folder in Cursor/VS Code
-3. Run `docker/deploy.sh` script in `infrastructure` mode to start containers
-4. Enter `nexent-minio` and `nexent-elasticsearch` containers, copy `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `ELASTICSEARCH_API_KEY` environment variables to corresponding positions in `docker/docker-compose.dev.yml`
+3. Run `./deploy.sh --components infrastructure,application --port-policy development` from the `docker` directory to start base containers
+4. Enter `nexent-minio` and `nexent-elasticsearch` containers, copy `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `ELASTICSEARCH_API_KEY` environment variables to corresponding positions in `deploy/docker/compose/docker-compose.dev.yml`
 5. Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Reopen in Container ...`
 6. Cursor will start the development container based on configuration in `.devcontainer` directory
 
@@ -54,7 +54,7 @@ The following ports are mapped in devcontainer.json:
 You can customize the development environment by modifying:
 
 - `.devcontainer/devcontainer.json` - Plugin configuration
-- `docker/docker-compose.dev.yml` - Development container build configuration, requires environment variable modification for proper startup
+- `deploy/docker/compose/docker-compose.dev.yml` - Development container build configuration, requires environment variable modification for proper startup
 
 ## 5. Troubleshooting
 

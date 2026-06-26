@@ -10,7 +10,7 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 
 import { Agent } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
+import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import {
   searchAgentInfo,
   updateAgentInfo,
@@ -163,13 +163,7 @@ export default function AgentList({
     try {
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
-        // Get permission from agent list (agentList prop contains permission from /agent/list)
-        const permissionFromList = agent.permission ?? undefined;
-        // Merge permission into agent detail before setting as current
-        setCurrentAgent({
-          ...result.data,
-          permission: permissionFromList,
-        });
+        setCurrentAgent(result.data);
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
@@ -252,6 +246,7 @@ export default function AgentList({
         model_name: detail.model,
         model_id: detail.model_id ?? undefined,
         max_steps: detail.max_step,
+        requested_output_tokens: detail.requested_output_tokens ?? null,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,

@@ -27,7 +27,7 @@ kubectl get nodes
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
+cd nexent/deploy/k8s
 ```
 
 ### 3. 部署
@@ -35,21 +35,29 @@ cd nexent/k8s/helm
 运行部署脚本：
 
 ```bash
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
-执行此命令后，系统会提示您选择配置选项：
+执行此命令后，系统会通过 Bash TUI 选择配置选项。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
 
-**版本选择:**
-- **Speed version（轻量快速部署，默认）**: 快速启动核心功能，适合个人用户和小团队使用
-- **Full version（完整功能版）**: 提供企业级租户管理和资源隔离等高级功能，包含 Supabase 认证服务
+**组件组合:**
+- **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
+- **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
+- **data-process（可选）**: 数据处理服务
+- **supabase（可选）**: 启用用户、租户和认证能力
+- **terminal（可选）**: 启用 OpenSSH 终端工具
+- **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
-**镜像源选择:**
-- **中国大陆**: 使用优化的区域镜像源，加快镜像拉取速度
-- **通用**: 使用标准 Docker Hub 镜像源
+**端口策略:**
+- **development（默认）**: 使用 NodePort 暴露 Web 和调试/内部服务
+- **production**: 内部服务使用 ClusterIP，仅暴露生产入口
 
-**可选组件:**
-- **终端工具**: 启用 openssh-server 供 AI 智能体执行 shell 命令
+**镜像来源:**
+- **general（默认）**: 使用标准公开镜像仓库
+- **mainland**: 使用中国大陆镜像源
+- **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
+
+部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 ### ⚠️ 重要提示
 
@@ -72,7 +80,7 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
 # Step 3: 重新部署并记录 su 账号密码
-./deploy-helm.sh apply
+./deploy.sh
 ```
 
 ### 4. 访问您的安装
@@ -113,7 +121,7 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 | nexent-redis | 缓存层 |
 | nexent-minio | S3 兼容对象存储 |
 
-**Supabase 服务（完整版独有）:**
+**Supabase 服务（选择 `supabase` 组件时）:**
 | 服务 | 描述 |
 |---------|-------------|
 | nexent-supabase-kong | API 网关 |
@@ -124,13 +132,14 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 | 服务 | 描述 |
 |---------|-------------|
 | nexent-openssh-server | AI 智能体 SSH 终端 |
+| nexent-monitoring | 可选观测组件 |
 
 ## 🔌 端口映射
 
 | 服务 | 内部端口 | NodePort | 描述 |
 |---------|---------------|----------|-------------|
 | Web 界面 | 3000 | 30000 | 主应用程序访问 |
-| Northbound API | 5010 | 30013 | 北向 API 服务 |
+| Northbound API | 5013 | 30013 | 北向 API 服务 |
 | SSH 服务器 | 22 | 30022 | 终端工具访问 |
 
 内部服务通信使用 Kubernetes 内部 DNS（例如 `http://nexent-config:5010`）。
@@ -141,34 +150,261 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 
 | 数据类型 | PersistentVolume | 默认宿主机路径 |
 |-----------|------------------|-------------------|
-| Elasticsearch | nexent-elasticsearch-pv | `{dataDir}/elasticsearch` |
-| PostgreSQL | nexent-postgresql-pv | `{dataDir}/postgresql` |
-| Redis | nexent-redis-pv | `{dataDir}/redis` |
-| MinIO | nexent-minio-pv | `{dataDir}/minio` |
-| Supabase DB（完整版）| nexent-supabase-db-pv | `{dataDir}/supabase-db` |
+| Elasticsearch | nexent-elasticsearch-pv | `/var/lib/nexent-data/nexent-elasticsearch` |
+| PostgreSQL | nexent-postgresql-pv | `/var/lib/nexent-data/nexent-postgresql` |
+| Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
+| MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
+| Supabase DB（选择 supabase 时）| nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 
-默认 `dataDir` 为 `/var/lib/nexent-data`（可在 `values.yaml` 中配置）。
+卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `./uninstall.sh --delete-local-data true` 删除 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
 
 ## 🔧 部署命令
 
 ```bash
 # 交互式部署
-./deploy-helm.sh apply
+./deploy.sh
+
+# 非交互式部署默认组件
+./deploy.sh --components infrastructure,application --port-policy development --image-source general
+
+# 启用用户/租户能力、数据处理和终端工具
+./deploy.sh --components infrastructure,application,supabase,data-process,terminal
 
 # 使用中国大陆镜像源部署
-./deploy-helm.sh apply --is-mainland Y
+./deploy.sh --image-source mainland
 
-# 部署完整版本（包含 Supabase）
-./deploy-helm.sh apply --deployment-version full
+# 使用本地 latest 镜像
+./deploy.sh --image-source local-latest
 
 # 仅清理 Helm 状态（修复卡住的发布）
-./deploy-helm.sh clean
+./uninstall.sh clean
 
-# 卸载但保留数据
-./deploy-helm.sh delete
+# 卸载，默认保留本地数据；交互确认是否删除 namespace 和本地数据
+./uninstall.sh
 
-# 完全卸载包括所有数据
-./deploy-helm.sh delete-all
+# 卸载并删除 namespace
+./uninstall.sh --delete-namespace true
+
+# 卸载并删除本地 hostPath 数据
+./uninstall.sh --delete-local-data true
+
+# 完全卸载，包括 namespace 和本地 hostPath 数据
+./uninstall.sh delete-all
+
+# 完全卸载但保留本地 hostPath 数据
+./uninstall.sh delete-all --keep-local-data
+```
+
+## 🔧 高级配置
+
+### 监控配置
+
+Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会生成运行时 Helm values，设置 `global.monitoring.enabled`、`global.monitoring.provider`、`global.monitoring.dashboardUrl`，并启用 `nexent-monitoring` 子 Chart。
+
+```bash
+cd nexent/deploy/k8s
+./deploy.sh
+```
+
+如果本地已有 `deploy/k8s/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
+
+支持的 provider：
+
+| Provider | 用途 | 默认访问地址 |
+|----------|------|--------------|
+| `otlp` | 仅启动 OpenTelemetry Collector，适合转发到外部平台 | 无 Dashboard |
+| `phoenix` | 本地 Phoenix 追踪分析 | `http://localhost:30006` |
+| `langfuse` | 本地 Langfuse 观测栈 | `http://localhost:30001` |
+| `langsmith` | 转发到托管 LangSmith | `https://smith.langchain.com/` |
+| `grafana` | 本地 Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
+| `zipkin` | 本地 Zipkin | `http://localhost:30011` |
+
+选择 `langsmith` provider 前，请先在 `deploy/deploy/k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
+
+常用 Helm values：
+
+| Values | 说明 |
+|--------|------|
+| `global.monitoring.enabled` | 是否让 Nexent 后端开启 OpenTelemetry 上报 |
+| `global.monitoring.provider` | 后端 provider 标识：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
+| `global.monitoring.otlpEndpoint` | 后端 OTLP HTTP 上报地址，默认 `http://nexent-otel-collector:4318` |
+| `global.monitoring.dashboardUrl` | 前端监控入口地址，留空则隐藏入口 |
+| `global.monitoring.traceContentMode` | Trace 内容采集模式：`summary`、`metrics`、`full` |
+| `nexent-monitoring.<provider>.service.nodePort` | 调整各 Dashboard 的 NodePort |
+| `nexent-monitoring.langfuse.init.*` | 本地 Langfuse 初始组织、项目和管理员账号 |
+| `nexent-monitoring.grafana.adminUser` / `adminPassword` | 本地 Grafana 管理员账号 |
+
+查看监控组件状态：
+
+```bash
+kubectl get pods -n nexent | grep -E 'otel|phoenix|grafana|tempo|zipkin|langfuse'
+kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
+```
+
+> **生产建议**：请替换默认密码、密钥和 Langfuse `encryptionKey`，并将 Dashboard Service 改为 ClusterIP 或通过受控 Ingress 暴露。
+
+### OAuth 登录配置
+
+OAuth 登录依赖 `supabase` 组件。启用第三方登录时，请同时部署 `supabase`，并将 `config.oauth.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址。
+
+```bash
+./deploy.sh --components infrastructure,application,supabase
+```
+
+Kubernetes 部署通过 `nexent-common` 的 `config.oauth.*` values 写入后端环境变量：
+
+```bash
+helm upgrade --install nexent nexent \
+  --namespace nexent --create-namespace \
+  --set global.deploymentComponents.supabase=true \
+  --set nexent-supabase-kong.enabled=true \
+  --set nexent-supabase-auth.enabled=true \
+  --set nexent-supabase-db.enabled=true \
+  --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
+  --set nexent-common.config.oauth.githubClientId=your_github_client_id \
+  --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret
+```
+
+可配置的 OAuth values：
+
+| Values | 对应环境变量 | 说明 |
+|--------|--------------|------|
+| `nexent-common.config.oauth.callbackBaseUrl` | `OAUTH_CALLBACK_BASE_URL` | Web 入口地址，回调路径会自动拼接 |
+| `nexent-common.config.oauth.githubClientId` | `GITHUB_OAUTH_CLIENT_ID` | GitHub OAuth Client ID |
+| `nexent-common.config.oauth.githubClientSecret` | `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth Client Secret |
+| `nexent-common.config.oauth.gdeUrl` | `GDE_URL` | GDE OAuth 服务地址 |
+| `nexent-common.config.oauth.gdeClientId` | `GDE_OAUTH_CLIENT_ID` | GDE OAuth Client ID |
+| `nexent-common.config.oauth.gdeClientSecret` | `GDE_OAUTH_CLIENT_SECRET` | GDE OAuth Client Secret |
+| `nexent-common.config.oauth.enableWechat` | `ENABLE_WECHAT_OAUTH` | 是否启用 WeChat OAuth |
+| `nexent-common.config.oauth.wechatClientId` | `WECHAT_OAUTH_APP_ID` | WeChat App ID |
+| `nexent-common.config.oauth.wechatClientSecret` | `WECHAT_OAUTH_APP_SECRET` | WeChat App Secret |
+| `nexent-common.config.oauth.sslVerify` | `OAUTH_SSL_VERIFY` | 访问 OAuth provider 时是否校验证书 |
+| `nexent-common.config.oauth.caBundle` | `OAUTH_CA_BUNDLE` | 自定义 CA bundle 路径 |
+
+Provider 回调地址：
+
+| Provider | 回调地址 |
+|----------|----------|
+| GitHub | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=github` |
+| GDE | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=gde` |
+| WeChat | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
+
+本地 NodePort 默认回调示例为 `http://localhost:30000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，并在 OAuth provider 控制台中登记相同地址。
+
+### CAS 登录配置
+
+CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `nexent-common.config.cas.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`nexent-common.config.cas.serverUrl` 是 CAS Server 根地址，也不要带结尾 `/`。
+
+Kubernetes 部署通过 `nexent-common` 的 `config.cas.*` values 写入后端环境变量：
+
+```bash
+helm upgrade --install nexent nexent \
+  --namespace nexent --create-namespace \
+  --set nexent-common.config.cas.enabled=true \
+  --set nexent-common.config.cas.serverUrl=https://cas.example.com/cas \
+  --set nexent-common.config.cas.callbackBaseUrl=https://nexent.example.com \
+  --set nexent-common.config.cas.loginMode=force \
+  --set nexent-common.config.cas.logoutUrl=/logout
+```
+
+可配置的 CAS values：
+
+| Values | 对应环境变量 | 说明 |
+|--------|--------------|------|
+| `nexent-common.config.cas.enabled` | `CAS_ENABLED` | 是否启用 CAS |
+| `nexent-common.config.cas.serverUrl` | `CAS_SERVER_URL` | CAS Server 根地址 |
+| `nexent-common.config.cas.validatePath` | `CAS_VALIDATE_PATH` | serviceValidate 路径，默认 `/p3/serviceValidate` |
+| `nexent-common.config.cas.callbackBaseUrl` | `CAS_CALLBACK_BASE_URL` | Web 入口地址，CAS 回调路径会自动拼接 |
+| `nexent-common.config.cas.loginMode` | `CAS_LOGIN_MODE` | `disabled`、`button` 或 `force` |
+| `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | 用户标识属性。为空时使用 `<cas:user>` |
+| `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | 邮箱属性 |
+| `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | 角色属性 |
+| `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | 租户属性 |
+| `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | CAS 角色到 Nexent 角色的 JSON 映射 |
+| `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | CAS 本地会话最长有效期 |
+| `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent 本地会话有效期 |
+| `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | 距离过期多少秒内触发无感续期 |
+| `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | 无感续期等待超时时间 |
+| `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | CAS 未返回邮箱时生成邮箱使用的域名 |
+| `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS 登出地址。为空时 Nexent 主动退出不调用 CAS Server 登出接口 |
+| `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | 访问 CAS Server 时是否校验证书 |
+| `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | 自定义 CA bundle 路径 |
+
+常用 CAS 地址：
+
+| 用途 | 地址 |
+|------|------|
+| Nexent 登录入口 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service 回调 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS 无感续期回调 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS 单点登出回调 | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+Apereo CAS 使用 JSON Service Registry 时，可以新增一个服务注册文件，例如 `Nexent-10001.json`。文件需要放到 CAS 部署配置的 service registry 目录中，`id` 必须全局唯一。本地 NodePort 示例：
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:30000/api/user/cas/logout_callback"
+}
+```
+
+生产环境建议保持 `CAS_SSL_VERIFY=true`；自签名证书优先配置 `CAS_CA_BUNDLE`，仅本地验证时再临时设置 `CAS_SSL_VERIFY=false`。
+
+#### CAS 对接 ModelEngine
+
+当使用 CAS 协议对接 ModelEngine 时，建议通过 values 文件配置 Nexent，避免 `CAS_ROLE_MAP_JSON` 在命令行中转义复杂。
+
+创建 `cas-modelengine-values.yaml`：
+
+```yaml
+nexent-common:
+  config:
+    cas:
+      enabled: true
+      serverUrl: "https://<ModelEngine IP>:5443/SSOSvr"
+      validatePath: "/p3/serviceValidate"
+      callbackBaseUrl: "http://<Nexent IP>:30000"
+      loginMode: "force"
+      userAttribute: "userName"
+      emailAttribute: "email"
+      roleAttribute: "userType"
+      tenantAttribute: "tenant_id"
+      roleMapJson: '{"1":"ADMIN","3":"DEV"}'
+      sessionMaxAgeSeconds: 3600
+      localSessionMaxAgeSeconds: 3600
+      renewBeforeSeconds: 300
+      renewTimeoutSeconds: 10
+      syntheticEmailDomain: "cas.local"
+      logoutUrl: "/logout?service=http://<Nexent IP>:30000"
+      sslVerify: false
+      caBundle: ""
+```
+
+同时，需要进入 OMS 容器添加 CAS client 的注册配置文件，参考如下步骤：
+
+```bash
+# 创建注册配置文件，将 JSON 部分输入文件并保存
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:30000/api/user/cas/logout_callback"
+}
+
+# 执行如下命令，将配置文件拷贝到容器中
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
 ```
 
 ## 🔍 故障排查

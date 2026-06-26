@@ -31,6 +31,10 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
+TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
+UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
+    "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH"
+)
 
 
 # Upload Configuration
@@ -43,9 +47,11 @@ PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
 
-
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
+
+# Container-internal official skills ZIP directory
+OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
 
 
 # Preview Configuration
@@ -74,13 +80,39 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 # JWT secret for verifying Supabase-signed access tokens.
 # GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
-SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+SUPABASE_JWT_SECRET = os.getenv(
+    'SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
 # OAuth Configuration
 OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 OAUTH_SSL_VERIFY = os.getenv("OAUTH_SSL_VERIFY", "true").lower() == "true"
 OAUTH_CA_BUNDLE = os.getenv("OAUTH_CA_BUNDLE", "")
+
+
+# CAS SSO Configuration
+CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
+CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
+CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
+CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
+# CAS login mode:
+# - disabled: disable CAS login entry and automatic CAS redirects.
+# - button: show CAS as an optional login entry.
+# - force: automatically redirect unauthenticated users to CAS login.
+CAS_LOGIN_MODE = os.getenv("CAS_LOGIN_MODE", "disabled").lower()
+CAS_USER_ATTRIBUTE = os.getenv("CAS_USER_ATTRIBUTE", "")
+CAS_EMAIL_ATTRIBUTE = os.getenv("CAS_EMAIL_ATTRIBUTE", "email")
+CAS_ROLE_ATTRIBUTE = os.getenv("CAS_ROLE_ATTRIBUTE", "role")
+CAS_TENANT_ATTRIBUTE = os.getenv("CAS_TENANT_ATTRIBUTE", "tenant_id")
+CAS_ROLE_MAP_JSON = os.getenv("CAS_ROLE_MAP_JSON", "")
+CAS_SESSION_MAX_AGE_SECONDS = int(os.getenv("CAS_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
+LOCAL_SESSION_MAX_AGE_SECONDS = int(os.getenv("LOCAL_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
+CAS_RENEW_BEFORE_SECONDS = int(os.getenv("CAS_RENEW_BEFORE_SECONDS", "300") or 300)
+CAS_RENEW_TIMEOUT_SECONDS = int(os.getenv("CAS_RENEW_TIMEOUT_SECONDS", "10") or 10)
+CAS_SYNTHETIC_EMAIL_DOMAIN = os.getenv("CAS_SYNTHETIC_EMAIL_DOMAIN", "cas.local")
+CAS_LOGOUT_URL = os.getenv("CAS_LOGOUT_URL", "")
+CAS_SSL_VERIFY = os.getenv("CAS_SSL_VERIFY", "true").lower() == "true"
+CAS_CA_BUNDLE = os.getenv("CAS_CA_BUNDLE", "")
 
 
 # ===== To be migrated to frontend configuration =====
@@ -105,14 +137,42 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
+# Invitation code type for asset administrator registration
+ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
+
+# User role identifier for asset administrators
+ASSET_OWNER_ROLE = "ASSET_OWNER"
+
+# Tenant ID for asset administrators (virtual tenant, not a real tenant)
+ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+
+# MinIO prefix for ASSET_OWNER-scoped attachment uploads (attachments/asset_owner/{user_id}/...)
+ASSET_OWNER_ATTACHMENTS_PREFIX = "attachments/asset_owner"
+
+# When false, block ASSET_OWNER invites, registrations, and sign-in.
+ENABLE_ASSET_OWNER_ROLE = os.getenv(
+    "ENABLE_ASSET_OWNER_ROLE", "false").lower() == "true"
+
+# HTTP detail key: asset owner must register via OAuth, not email/password signup.
+ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL = "ASSET_OWNER_USE_OAUTH"
+
 # Roles that can edit all resources within a tenant (permission = EDIT).
 # Keep this centralized to avoid drifting role logic across modules.
-CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
+CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
 
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"
 PERMISSION_EDIT = "EDIT"
 PERMISSION_PRIVATE = "PRIVATE"
+
+# Response flag when system prompts are withheld from non-ASSET_OWNER callers.
+AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
+
+# W11 capacity suggestion rollout flags.
+CAPACITY_SUGGESTION_ENABLED = os.getenv(
+    "CAPACITY_SUGGESTION_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+CAPACITY_VISIBILITY_ENABLED = os.getenv(
+    "CAPACITY_VISIBILITY_ENABLED", "true").lower() in ("true", "1", "yes", "on")
 
 
 # Deployment Version Configuration
@@ -129,6 +189,7 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_REGION = os.getenv("MINIO_REGION")
 MINIO_DEFAULT_BUCKET = os.getenv("MINIO_DEFAULT_BUCKET")
+S3_URL_PREFIX = "s3://"
 
 
 # Postgres Configuration
@@ -178,6 +239,7 @@ NEXENT_MCP_DOCKER_IMAGE = os.getenv(
     "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
 ENABLE_UPLOAD_IMAGE = os.getenv(
     "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
+ENABLE_JIUWEN_SDK = os.getenv("NEXENT_ENABLE_JIUWEN_SDK", "true").lower() == "true"
 
 
 # Celery Configuration
@@ -194,8 +256,10 @@ QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
-RAY_WARM_ACTOR_POOL_SIZE_PART = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
-RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
+RAY_WARM_ACTOR_POOL_SIZE_PART = int(
+    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
+RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
+    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
 # Global Ray actor pool (shared by process_q/process_part_q workers)
 RAY_GLOBAL_ACTOR_POOL_SIZE = int(os.getenv("RAY_GLOBAL_ACTOR_POOL_SIZE", "3"))
 RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
@@ -203,9 +267,6 @@ RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
     "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")
 RAY_GLOBAL_ACTOR_POOL_NAMESPACE = os.getenv(
     "RAY_GLOBAL_ACTOR_POOL_NAMESPACE", "nexent-data-process")
-
-
-
 
 
 # Voice Service Configuration
@@ -305,6 +366,8 @@ MODEL_CONFIG_MAPPING = {
     "multiEmbedding": "MULTI_EMBEDDING_ID",
     "rerank": "RERANK_ID",
     "vlm": "VLM_ID",
+    "vlm2": "VLM2_ID",
+    "vlm3": "VLM3_ID",
     "stt": "STT_ID",
     "tts": "TTS_ID"
 }
@@ -344,36 +407,47 @@ OTEL_SERVICE_NAME_RAW = os.getenv("OTEL_SERVICE_NAME")
 OTEL_SERVICE_NAME = OTEL_SERVICE_NAME_RAW or "nexent-backend"
 OTEL_EXPORTER_OTLP_ENDPOINT_RAW = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 OTEL_EXPORTER_OTLP_ENDPOINT = OTEL_EXPORTER_OTLP_ENDPOINT_RAW or "http://localhost:4318"
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
-OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = os.getenv(
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = os.getenv(
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
 OTEL_EXPORTER_OTLP_PROTOCOL_RAW = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
 OTEL_EXPORTER_OTLP_PROTOCOL = OTEL_EXPORTER_OTLP_PROTOCOL_RAW or "http"
 OTEL_EXPORTER_OTLP_HEADERS_RAW = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
 OTEL_EXPORTER_OTLP_HEADERS = OTEL_EXPORTER_OTLP_HEADERS_RAW or ""
-OTEL_EXPORTER_OTLP_AUTHORIZATION = os.getenv("OTEL_EXPORTER_OTLP_AUTHORIZATION", "")
+OTEL_EXPORTER_OTLP_AUTHORIZATION = os.getenv(
+    "OTEL_EXPORTER_OTLP_AUTHORIZATION", "")
 OTEL_EXPORTER_OTLP_X_API_KEY = os.getenv("OTEL_EXPORTER_OTLP_X_API_KEY", "")
 OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION = os.getenv(
     "OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION", "")
 LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
 LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "")
-OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENABLED")
+OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW = os.getenv(
+    "OTEL_EXPORTER_OTLP_METRICS_ENABLED")
 OTEL_EXPORTER_OTLP_METRICS_ENABLED = (
     OTEL_EXPORTER_OTLP_METRICS_ENABLED_RAW or "true").lower() == "true"
-MONITORING_INSTRUMENT_REQUESTS_RAW = os.getenv("MONITORING_INSTRUMENT_REQUESTS")
+MONITORING_INSTRUMENT_REQUESTS_RAW = os.getenv(
+    "MONITORING_INSTRUMENT_REQUESTS")
 MONITORING_INSTRUMENT_REQUESTS = (
     MONITORING_INSTRUMENT_REQUESTS_RAW or "false").lower() == "true"
-MONITORING_FASTAPI_INCLUDED_URLS = os.getenv("MONITORING_FASTAPI_INCLUDED_URLS", "")
-MONITORING_FASTAPI_EXCLUDED_URLS = os.getenv("MONITORING_FASTAPI_EXCLUDED_URLS", "")
-MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv("MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
+MONITORING_FASTAPI_INCLUDED_URLS = os.getenv(
+    "MONITORING_FASTAPI_INCLUDED_URLS", "")
+MONITORING_FASTAPI_EXCLUDED_URLS = os.getenv(
+    "MONITORING_FASTAPI_EXCLUDED_URLS", "")
+MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
+    "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
-MONITORING_TRACE_CONTENT_MODE = os.getenv("MONITORING_TRACE_CONTENT_MODE", "summary")
+MONITORING_TRACE_CONTENT_MODE = os.getenv(
+    "MONITORING_TRACE_CONTENT_MODE", "summary")
 MONITORING_TRACE_MAX_CHARS = os.getenv("MONITORING_TRACE_MAX_CHARS", "4000")
 MONITORING_TRACE_MAX_ITEMS = os.getenv("MONITORING_TRACE_MAX_ITEMS", "20")
 TELEMETRY_SAMPLE_RATE_RAW = os.getenv("TELEMETRY_SAMPLE_RATE")
 TELEMETRY_SAMPLE_RATE = float(TELEMETRY_SAMPLE_RATE_RAW or "1.0")
 
 # Parse OTLP headers into dict format
+
+
 def _parse_otlp_headers(headers_str: str) -> dict:
     """Parse OTLP headers string into dict. Format: 'key1=value1,key2=value2'"""
     if not headers_str:
@@ -384,6 +458,7 @@ def _parse_otlp_headers(headers_str: str) -> dict:
             key, value = pair.split("=", 1)
             headers[key.strip()] = value.strip()
     return headers
+
 
 OTLP_HEADERS = _parse_otlp_headers(OTEL_EXPORTER_OTLP_HEADERS)
 if OTEL_EXPORTER_OTLP_AUTHORIZATION:
@@ -407,15 +482,17 @@ MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 
 # Container Platform Configuration
-IS_DEPLOYED_BY_KUBERNETES = os.getenv("IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
+IS_DEPLOYED_BY_KUBERNETES = os.getenv(
+    "IS_DEPLOYED_BY_KUBERNETES", "false").lower() == "true"
 KUBERNETES_NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "nexent")
 
 # Northbound API public base URL (used for A2A agent cards and external file proxy links)
-NORTHBOUND_EXTERNAL_URL = os.getenv("NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
+NORTHBOUND_EXTERNAL_URL = os.getenv(
+    "NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
 # APP Version
-APP_VERSION = "v2.1.1"
+APP_VERSION = "v2.2.1"
 
 
 # Skill Creation Streaming Configuration

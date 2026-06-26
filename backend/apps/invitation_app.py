@@ -69,6 +69,12 @@ async def list_invitations_endpoint(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
+    except ValidationError as exc:
+        logger.warning(f"Invitation list rejected by feature flag: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc)
+        )
     except Exception as exc:
         logger.error(f"Unexpected error retrieving invitation list: {str(exc)}")
         raise HTTPException(
@@ -127,6 +133,12 @@ async def create_invitation_endpoint(
 
     except ValueError as exc:
         logger.warning(f"Invalid invitation creation parameters: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc)
+        )
+    except ValidationError as exc:
+        logger.warning(f"Invitation creation rejected by feature flag: {str(exc)}")
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
