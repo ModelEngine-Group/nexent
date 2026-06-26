@@ -44,7 +44,7 @@ MONITORING_PROVIDER=otlp
 | `grafana` | `./start-monitoring.sh --stack grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
 | `zipkin` | `./start-monitoring.sh --stack zipkin` | Collector + Zipkin | 本地 trace 查询 |
 
-也可以在 `docker/monitoring/monitoring.env` 中设置默认形态：
+也可以在 `deploy/docker/assets/monitoring/monitoring.env` 中设置默认形态：
 
 ```bash
 MONITORING_PROVIDER=phoenix
@@ -435,11 +435,11 @@ service:
 
 本地 Phoenix 和 Langfuse 分别使用独立 Collector 配置：
 
-- `docker/monitoring/otel-collector-phoenix-config.yml`
-- `docker/monitoring/otel-collector-langfuse-config.yml`
-- `docker/monitoring/otel-collector-langsmith-config.yml`
+- `deploy/docker/assets/monitoring/otel-collector-phoenix-config.yml`
+- `deploy/docker/assets/monitoring/otel-collector-langfuse-config.yml`
+- `deploy/docker/assets/monitoring/otel-collector-langsmith-config.yml`
 
-基础 debug 配置见 `docker/monitoring/otel-collector-config.yml`。
+基础 debug 配置见 `deploy/docker/assets/monitoring/otel-collector-config.yml`。
 
 ## 优雅降级
 

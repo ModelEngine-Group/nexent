@@ -27,7 +27,7 @@ kubectl get nodes
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
+cd nexent/deploy/k8s
 ```
 
 ### 3. Deployment
@@ -57,7 +57,7 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
 
-After a successful deployment, non-sensitive choices are saved to `k8s/helm/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 ### ⚠️ Important Notes
 
@@ -202,11 +202,11 @@ Helm uninstall does not delete local hostPath data by default. Use `./uninstall.
 Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script renders runtime Helm values for `global.monitoring.enabled`, `global.monitoring.provider`, and `global.monitoring.dashboardUrl`, and enables the `nexent-monitoring` subchart.
 
 ```bash
-cd nexent/k8s/helm
+cd nexent/deploy/k8s
 ./deploy.sh
 ```
 
-If `k8s/helm/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+If `deploy/k8s/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
 
 Supported providers:
 
@@ -219,7 +219,7 @@ Supported providers:
 | `grafana` | Local Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | Local Zipkin | `http://localhost:30011` |
 
-Before choosing the `langsmith` provider, configure `global.monitoring.langsmithApiKey` and `global.monitoring.langsmithProject` in `k8s/helm/nexent/values.yaml`. To change local Grafana, Langfuse, or dashboard ports, adjust the values file first, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
+Before choosing the `langsmith` provider, configure `global.monitoring.langsmithApiKey` and `global.monitoring.langsmithProject` in `deploy/deploy/k8s/helm/nexent/values.yaml`. To change local Grafana, Langfuse, or dashboard ports, adjust the values file first, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
 
 Common Helm values:
 

@@ -1,54 +1,104 @@
 ### 🏗️ Build and Push Images
 
+Recommended unified build entry:
+
+```bash
+# Run interactive selection, similar to the deploy scripts
+bash deploy/images/build.sh
+
+# Build selected images with a fixed version tag
+bash deploy/images/build.sh \
+  --images main,web,mcp,data-process,terminal \
+  --version v2.2.1 \
+  --registry general \
+  --platform linux/amd64,linux/arm64 \
+  --push
+
+# Build the same image set as latest
+bash deploy/images/build.sh \
+  --images main,web,mcp,data-process \
+  --version latest \
+  --registry general \
+  --platform linux/amd64 \
+  --load
+
+# Build one or more explicit images when needed
+bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
+```
+
+When run in a terminal without arguments, `deploy/images/build.sh` prompts for images, image version (`latest` or root `VERSION`), and registry. The interactive defaults are images `main,web` and version `latest`. Use `--interactive` to force the same prompts.
+
+`--platform` is command-line only. Omit it to build for the local architecture.
+
+Variant options:
+- `--dependency-variant cpu|gpu` controls data-process dependencies and defaults to `cpu`. `gpu` builds GPU/CUDA dependencies and uses the `-gpu` image-name suffix.
+- `--terminal-variant slim|conda` controls the terminal image and defaults to `slim`. `conda` keeps Miniconda, `vim`, and the compiler toolchain and uses the `-conda` image-name suffix.
+
+When building `data-process`, `deploy/images/build.sh` prepares `model-assets` automatically: it first uses an existing root `model-assets` directory, then tries `~/model-assets`, and otherwise clones the Hugging Face repository and runs `git lfs pull`. If you run `docker build` directly, prepare `model-assets` in the repository root first.
+
+Image options:
+- `--main` builds `nexent`
+- `--web` builds `nexent-web`
+- `--data-process` builds `nexent-data-process`
+- `--mcp` builds `nexent-mcp`
+- `--terminal` builds `nexent-ubuntu-terminal`
+- `--docs` builds `nexent-docs`
+
 ```bash
 # 🛠️ Create and use a new builder instance that supports multi-architecture builds
 docker buildx create --name nexent_builder --use
 
 # 🚀 build application for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f make/main/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 📊 build data_process for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f make/data_process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 🌐 build web frontend for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f make/web/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web -f make/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
 
 # 📚 build documentation for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile . --push
 
 # 🔗 build MCP Server for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f make/mcp/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f make/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
 
 # 💻 build Ubuntu Terminal for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
 ```
 
 ### 💻 Local Development Build
 
 ```bash
 # 🚀 Build application image (current architecture only)
-docker build --progress=plain -t nexent/nexent -f make/main/Dockerfile .
+docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
 # 📊 Build data process image (current architecture only)
-docker build --progress=plain -t nexent/nexent-data-process -f make/data_process/Dockerfile .
+docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
+
+# 📊 Build GPU data process image (current architecture only)
+docker build --progress=plain -t nexent/nexent-data-process-gpu -f deploy/images/dockerfiles/data-process/Dockerfile --build-arg DATA_PROCESS_DEPENDENCY_VARIANT=gpu .
 
 # 🌐 Build web frontend image (current architecture only)
-docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
+docker build --progress=plain -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile .
 
 # 📚 Build documentation image (current architecture only)
-docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 
 # 🔗 Build MCP Server image (current architecture only)
-docker build --progress=plain -t nexent/nexent-mcp -f make/mcp/Dockerfile .
+docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
 
 # 💻 Build OpenSSH Server image (current architecture only)
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
+
+# 💻 Build OpenSSH Server image with Conda (current architecture only)
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/images/dockerfiles/terminal/Dockerfile --build-arg TERMINAL_VARIANT=conda .
 ```
 
 ### 🧹 Clean up Docker resources
@@ -62,52 +112,48 @@ docker builder prune -f && docker system prune -f
 
 #### Main Application Image (nexent/nexent)
 - Contains backend API service
-- Built from `make/main/Dockerfile`
+- Built from `deploy/images/dockerfiles/main/Dockerfile`
 - Provides core agent services
 
 #### Data Processing Image (nexent/nexent-data-process)
 - Contains data processing service
-- Built from `make/data_process/Dockerfile`
+- Built from `deploy/images/dockerfiles/data-process/Dockerfile`
 - Handles document parsing and vectorization
 
 #### Web Frontend Image (nexent/nexent-web)
 - Contains Next.js frontend application
-- Built from `make/web/Dockerfile`
+- Built from `deploy/images/dockerfiles/web/Dockerfile`
 - Provides user interface
 
 #### Documentation Image (nexent/nexent-docs)
 - Contains Vitepress documentation site
-- Built from `make/docs/Dockerfile`
+- Built from `deploy/images/dockerfiles/docs/Dockerfile`
 - Provides project documentation and API reference
 
 #### MCP Server Image (nexent/nexent-mcp)
 - Contains MCP (Model Context Protocol) proxy service
-- Built from `make/mcp/Dockerfile`
+- Built from `deploy/images/dockerfiles/mcp/Dockerfile`
 - Provides MCP server functionality for AI model integration
 
 ##### Pre-installed Tools and Features
-- **Python Environment**: Python 3.10 + pip
+- **Python Environment**: Python 3.11 + pip
 - **MCP Proxy**: mcp-proxy package for protocol handling
 - **Node.js**: Node.js 20.17.0 with npm
 - **Architecture Support**: linux/amd64, linux/arm64
-- **Base Image**: python:3.10-slim
+- **Base Image**: python:3.11-slim
 
 #### OpenSSH Server Image (nexent/nexent-ubuntu-terminal)
 - Ubuntu 24.04-based SSH server container
-- Built from `make/terminal/Dockerfile`
-- Pre-installed with Conda, Python, Git and other development tools
-- Supports SSH key authentication with username `linuxserver.io`
-- Provides complete development environment
+- Built from `deploy/images/dockerfiles/terminal/Dockerfile`
+- Defaults to OpenSSH, Python, pip, venv, Git, Curl, and Wget
+- `TERMINAL_VARIANT=conda` also installs Miniconda, Vim, and the compiler toolchain
+- Runs as root and allows root login with password authentication
 
 ##### Pre-installed Tools and Features
-- **Python Environment**: Python 3 + pip + virtualenv
-- **Conda Management**: Miniconda3 environment management
-- **Development Tools**: Git, Vim, Nano, Curl, Wget
-- **Build Tools**: build-essential, Make
-- **SSH Service**: Port 2222, root login and password authentication disabled
-- **User Permissions**: `linuxserver.io` user has sudo privileges (no password required)
-- **Timezone Setting**: Asia/Shanghai
-- **Security Configuration**: SSH key authentication, 60-minute session timeout
+- **Python Environment**: Python 3 + pip + venv
+- **Conda Management**: Miniconda3 is included only in the `conda` variant
+- **Development Tools**: Git, Curl, Wget; the `conda` variant also includes Vim and build-essential
+- **SSH Service**: Container port 22, root login and password authentication enabled
 
 ### 🏷️ Tagging Strategy
 
@@ -130,7 +176,7 @@ The documentation image can be built and run independently to serve nexent.tech/
 ### Build Documentation Image
 
 ```bash
-docker build -t nexent/nexent-docs -f make/docs/Dockerfile .
+docker build -t nexent/nexent-docs -f deploy/images/dockerfiles/docs/Dockerfile .
 ```
 
 ### Run Documentation Container
@@ -185,4 +231,4 @@ cd docker
 bash deploy.sh --image-source local-latest
 ```
 
-> `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `docker/deploy.sh`.
+> `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `deploy/docker/deploy.sh`.

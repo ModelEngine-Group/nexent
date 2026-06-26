@@ -445,7 +445,7 @@ class ContextManager:
                 )
                 return [prev_action, last_action]
         return [last_action]
-    
+
     # ============================================================
     #  Mainly Entry Point
     # ============================================================
@@ -753,22 +753,22 @@ class ContextManager:
 
         full_text = self._pairs_to_text(pairs)
         if self._estimate_text_tokens(full_text) <= self.config.max_summary_input_tokens:
-            target_text = full_text 
+            target_text = full_text
         else:
             trimmed_pairs = self._trim_pairs_to_budget(
                 pairs, self.config.max_summary_input_tokens, keep_first=False
             )
             target_text = self._render_steps_with_truncation(
-                trimmed_pairs, fmt="pair", 
+                trimmed_pairs, fmt="pair",
                 max_tokens=self.config.max_summary_input_tokens,
                 task_budget_chars=800, action_budget_chars=1500
             )
-        
+
         summary_text = self._generate_summary(target_text, model, call_type="previous_summary")
         if summary_text:
-            return summary_text, True 
+            return summary_text, True
         logger.warning("previous full/truncated history summary generation failed, triggering L3 fallback truncation")
-        
+
         reduced_pairs = self._trim_pairs_to_budget(pairs, self.config.max_summary_reduce_tokens, False)
         reduced_text = self._render_steps_with_truncation(
             reduced_pairs, fmt="pair", max_tokens=self.config.max_summary_reduce_tokens
@@ -808,7 +808,7 @@ class ContextManager:
                 self.compression_calls_log.append(record)
                 self._step_local_log.append(record)
                 return cache.summary_text
-            
+
         # 2) Incremental compression
         if cache is not None and 0 < cache.end_steps < len(actions_to_compress):
             anchor_action = actions_to_compress[cache.end_steps - 1]
@@ -967,21 +967,21 @@ class ContextManager:
         budget_per_action = self.config.max_memory_step_length
 
         while True:
-            parts = [] 
-            
+            parts = []
+
             for prefix, content in rendered_steps:
                 if len(content) > budget_per_action:
                     text = f"{prefix}{content[:budget_per_action]}\n\n[System Note: Step content too long, partially truncated]"
                 else:
                     text = f"{prefix}{content}"
                 parts.append(text)
-                
+
             all_text = "\n\n".join(parts)
 
             if self._estimate_text_tokens(all_text) + prefill_tokens <= self.config.max_summary_input_tokens:
-                break 
+                break
             budget_per_action = int(budget_per_action * 0.9)
-            
+
             if budget_per_action < 50:
                 logger.warning(
                     f"Per-step compression budget has reached minimum threshold "
@@ -1326,9 +1326,9 @@ class ContextManager:
 
     def register_component(self, component) -> None:
         """Register a context component for system prompt assembly.
-        
+
         Components are accumulated and used by build_system_prompt().
-        
+
         Args:
             component: A ContextComponent instance (e.g., ToolsComponent,
                        MemoryComponent, KnowledgeBaseComponent).
@@ -1342,7 +1342,7 @@ class ContextManager:
 
     def clear_components(self) -> None:
         """Clear all registered context components.
-        
+
         Typically called at the start of a new agent run.
         """
         with self._lock:
@@ -1355,11 +1355,11 @@ class ContextManager:
 
     def replace_components(self, components: List) -> None:
         """Atomically replace all registered components.
-        
+
         Clears existing components and registers new ones under a single
         lock acquisition, preventing race conditions when the ContextManager
         is shared across concurrent runs (e.g., conversation-level CM reuse).
-        
+
         Args:
             components: List of ContextComponent instances to register.
                        Pass empty list to clear all components.
@@ -1385,7 +1385,7 @@ class ContextManager:
             "priority": PriorityWeightedStrategy,
         }
         strategy_class = strategy_map.get(self.config.strategy, TokenBudgetStrategy)
-        
+
         if self.config.strategy == "buffered":
             return strategy_class(buffer_size=self.config.buffer_size_per_component)
         elif self.config.strategy == "priority":
@@ -1394,35 +1394,35 @@ class ContextManager:
 
     def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
         """Build system prompt messages from registered components.
-        
+
         Uses configured strategy to select components within token budget,
         then converts each to message format.
-        
+
         Args:
             token_budget: Maximum tokens for all components. Defaults to
                           config.component_budgets total minus conversation_history.
-        
+
         Returns:
             List of message dicts with 'role' and 'content' keys.
         """
         if not self._components:
             return []
-        
+
         from .agent_model import SystemPromptComponent
-        
+
         budget = token_budget or self._calculate_component_budget()
         strategy = self._get_strategy()
         selected = strategy.select_components(
             self._components, budget, self.config.component_budgets
         )
-        
+
         messages = []
         for comp in selected:
             comp_messages = comp.to_messages()
             for msg in comp_messages:
                 if not self._message_already_present(messages, msg):
                     messages.append(msg)
-        
+
         return messages
 
     def _calculate_component_budget(self) -> int:
