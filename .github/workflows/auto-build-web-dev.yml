@@ -10,13 +10,13 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'frontend/**'
-      - 'make/web/**'
+      - 'deploy/images/dockerfiles/web/**'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'frontend/**'
-      - 'make/web/**'
+      - 'deploy/images/dockerfiles/web/**'
       - '.github/workflows/**'
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build web image (amd64) and load locally
         run: |
-          docker build --platform linux/amd64 -t nexent/nexent-web:dev-amd64 -f make/web/Dockerfile .
+          docker build --platform linux/amd64 -t nexent/nexent-web:dev-amd64 -f deploy/images/dockerfiles/web/Dockerfile .
 
   build-web-arm64:
     runs-on: ubuntu-24.04-arm
@@ -36,4 +36,4 @@ jobs:
         uses: actions/checkout@v4
       - name: Build web image (arm64) and load locally
         run: |
-          docker build --platform linux/arm64 -t nexent/nexent-web:dev-arm64 -f make/web/Dockerfile .
+          docker build --platform linux/arm64 -t nexent/nexent-web:dev-arm64 -f deploy/images/dockerfiles/web/Dockerfile .

@@ -6,7 +6,11 @@ from typing import Dict, List
 
 from consts.const import DEFAULT_LLM_MAX_TOKENS
 from consts.provider import TOKENPONY_GET_URL
-from services.providers.base import AbstractModelProvider, _classify_provider_error
+from services.providers.base import (
+    AbstractModelProvider,
+    _classify_provider_error,
+    _extract_capacity_hints_from_raw,
+)
 
 
 TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS = (
@@ -39,6 +43,10 @@ TOKENPONY_IMAGE_GENERATION_KEYWORDS = (
     "recraft",
 )
 TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS = ("omni", "video")
+
+
+def _extract_capacity_hints(raw: Dict) -> Dict:
+    return _extract_capacity_hints_from_raw(raw)
 
 
 def _has_keyword(text: str, keywords: tuple) -> bool:
@@ -126,6 +134,7 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     "model_type": "",
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
+                cleaned_model.update(_extract_capacity_hints(model_obj))
                 # 1. rerank
                 if 'rerank' in m_id:
                     cleaned_model.update({"model_tag": "rerank", "model_type": "rerank"})

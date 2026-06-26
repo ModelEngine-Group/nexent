@@ -1,0 +1,129 @@
+# Default values for nexent helm chart.
+global:
+  namespace: nexent
+  dataDir: "/var/lib/nexent-data"
+  sharedStorage:
+    mode: "local"
+    storageClassName: "nexent-local"
+    accessModes:
+      - ReadWriteOnce
+    workspace:
+      size: "10Gi"
+      localPath: "/var/lib/nexent"
+      existingClaim: "nexent-workspace"
+    skills:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/skills"
+      existingClaim: "nexent-skills"
+  deploymentVersion: "full"
+  deploymentComponents:
+    infrastructure: true
+    application: true
+    data-process: true
+    supabase: true
+    terminal: false
+    monitoring: false
+  portPolicy: "development"
+  imageSource: "registry"
+  monitoring:
+    enabled: false
+    provider: otlp
+    projectName: "nexent"
+    serviceName: nexent-backend
+    otlpEndpoint: http://nexent-otel-collector:4318
+    otlpTracesEndpoint: ""
+    otlpMetricsEndpoint: ""
+    otlpProtocol: http
+    otlpHeaders: ""
+    otlpAuthorization: ""
+    otlpApiKey: ""
+    otlpLangfuseIngestionVersion: ""
+    langsmithApiKey: ""
+    langsmithProject: "nexent"
+    otlpMetricsEnabled: true
+    instrumentRequests: false
+    fastapiIncludedUrls: "/agent/run"
+    fastapiExcludedUrls: ""
+    fastapiExcludeSpans: "receive,send"
+    dashboardUrl: ""
+    telemetrySampleRate: "1.0"
+    traceContentMode: "full"
+    traceMaxChars: "4000"
+    traceMaxItems: "20"
+
+# Optional monitoring stack. Set provider to one of:
+# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
+nexent-common:
+  # Shared ConfigMap values rendered into the Kubernetes nexent-config ConfigMap.
+  config:
+    cas:
+      enabled: "false"
+      serverUrl: ""
+      validatePath: "/p3/serviceValidate"
+      callbackBaseUrl: "http://localhost:30000"
+      # Supported values:
+      # - disabled: disable CAS login entry and automatic CAS redirects.
+      # - button: show CAS as an optional login entry.
+      # - force: automatically redirect unauthenticated users to CAS login.
+      loginMode: "disabled"
+      userAttribute: ""
+      emailAttribute: "email"
+      roleAttribute: "role"
+      tenantAttribute: "tenant_id"
+      roleMapJson: ""
+      sessionMaxAgeSeconds: "3600"
+      localSessionMaxAgeSeconds: "3600"
+      renewBeforeSeconds: "300"
+      renewTimeoutSeconds: "10"
+      syntheticEmailDomain: "cas.local"
+      logoutUrl: ""
+      sslVerify: "true"
+      caBundle: ""
+
+nexent-elasticsearch:
+  enabled: true
+nexent-postgresql:
+  enabled: true
+nexent-redis:
+  enabled: true
+nexent-minio:
+  enabled: true
+nexent-config:
+  enabled: true
+nexent-runtime:
+  enabled: true
+nexent-mcp:
+  enabled: true
+nexent-northbound:
+  enabled: true
+nexent-web:
+  enabled: true
+nexent-data-process:
+  enabled: true
+nexent-supabase-kong:
+  enabled: true
+nexent-supabase-auth:
+  enabled: true
+nexent-supabase-db:
+  enabled: true
+nexent-openssh:
+  enabled: false
+nexent-monitoring:
+  enabled: false
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: nexent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: nexent-tls
+  #    hosts:
+  #      - nexent.local

@@ -3,7 +3,11 @@ from typing import Dict, List
 import asyncio
 from consts.const import DEFAULT_LLM_MAX_TOKENS
 from consts.provider import DASHSCOPE_GET_URL
-from services.providers.base import AbstractModelProvider, _classify_provider_error
+from services.providers.base import (
+    AbstractModelProvider,
+    _classify_provider_error,
+    _extract_capacity_hints_from_raw,
+)
 
 
 DASHSCOPE_IMAGE_GENERATION_KEYWORDS = (
@@ -31,6 +35,10 @@ DASHSCOPE_IMAGE_UNDERSTANDING_KEYWORDS = (
     "qwen-3.6",
 )
 DASHSCOPE_VIDEO_UNDERSTANDING_KEYWORDS = ("omni", "video-understanding", "video-ocr")
+
+
+def _extract_capacity_hints(raw: Dict) -> Dict:
+    return _extract_capacity_hints_from_raw(raw, nested_keys=("inference_metadata",))
 
 
 def _modality_set(value) -> set:
@@ -155,6 +163,7 @@ class DashScopeModelProvider(AbstractModelProvider):
                     "model_type": "",
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
+                cleaned_model.update(_extract_capacity_hints(model_obj))
                # 1. Embedding
                 if 'embedding' in m_id.lower() or '向量' in desc:
                     cleaned_model.update({"model_tag": "embedding", "model_type": "embedding"})
@@ -214,4 +223,3 @@ class DashScopeModelProvider(AbstractModelProvider):
                 return []
         except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
             return _classify_provider_error("DashScope", exception=e)
-

@@ -293,7 +293,7 @@ service:
       exporters: [otlphttp/langsmith, debug]
 ```
 
-See `docker/monitoring/otel-collector-config.yml` for full configuration with platform examples.
+See `deploy/docker/assets/monitoring/otel-collector-config.yml` for full configuration with platform examples.
 
 ## Graceful Degradation
 

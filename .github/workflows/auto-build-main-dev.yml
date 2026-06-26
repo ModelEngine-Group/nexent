@@ -11,14 +11,18 @@ on:
     paths:
       - 'backend/**'
       - 'sdk/**'
-      - 'make/main/**'
+      - 'deploy/images/dockerfiles/main/**'
+      - 'deploy/common/**'
+      - 'deploy/sql/**'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
       - 'sdk/**'
-      - 'make/main/**'
+      - 'deploy/images/dockerfiles/main/**'
+      - 'deploy/common/**'
+      - 'deploy/sql/**'
       - '.github/workflows/**'
 
 jobs:
@@ -29,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build main image (amd64) and load locally
         run: |
-          docker build --platform linux/amd64 -t nexent/nexent:dev-amd64 -f make/main/Dockerfile .
+          docker build --platform linux/amd64 -t nexent/nexent:dev-amd64 -f deploy/images/dockerfiles/main/Dockerfile .
 
   build-main-arm64:
     runs-on: ubuntu-24.04-arm
@@ -38,4 +42,4 @@ jobs:
         uses: actions/checkout@v4
       - name: Build main image (arm64) and load locally
         run: |
-          docker build --platform linux/arm64 -t nexent/nexent:dev-arm64 -f make/main/Dockerfile .
+          docker build --platform linux/arm64 -t nexent/nexent:dev-arm64 -f deploy/images/dockerfiles/main/Dockerfile .

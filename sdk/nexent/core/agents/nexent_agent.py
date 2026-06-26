@@ -183,7 +183,7 @@ class NexentAgent:
             model_factory=model_config.model_factory,
             display_name=model_config.cite_name,
 extra_body=model_config.extra_body,
-            max_tokens=model_config.max_tokens,
+            max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
         )
         model.stop_event = self.stop_event
@@ -387,6 +387,16 @@ extra_body=model_config.extra_body,
 
         try:
             model = self.create_model(agent_config.model_name)
+            model.safe_input_budget_snapshot = getattr(
+                agent_config,
+                "safe_input_budget_snapshot",
+                None,
+            )
+            model.capacity_snapshot = getattr(
+                agent_config,
+                "capacity_snapshot",
+                None,
+            )
             prompt_templates = agent_config.prompt_templates
 
             try:
@@ -442,9 +452,9 @@ extra_body=model_config.extra_body,
             )
             agent.stop_event = self.stop_event
 
-            # Mount context manager if config provided
+            # Mount context manager if config provided and enabled
             ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config:
+            if ctx_config and ctx_config.enabled:
                 agent.context_manager = ContextManager(
                     config=ctx_config,
                     max_steps=agent_config.max_steps

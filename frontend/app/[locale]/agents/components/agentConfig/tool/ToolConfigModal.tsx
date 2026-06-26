@@ -1313,8 +1313,18 @@ export default function ToolConfigModal({
         return;
       }
 
-      // Convert params to backend format (use the synced params)
-      const paramsObj = currentParams.reduce(
+      // Convert params to backend format - use latestFormValues directly to avoid async state issues
+      // This ensures we capture the most recent form values without relying on async setState
+      const syncedParams = [...currentParams];
+      if (latestFormValues) {
+        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
+          const index = parseInt(fieldName.replace("param_", ""));
+          if (!isNaN(index) && syncedParams[index]) {
+            syncedParams[index] = { ...syncedParams[index], value };
+          }
+        });
+      }
+      const paramsObj = syncedParams.reduce(
         (acc, param) => {
           acc[param.name] = param.value;
           return acc;
@@ -1326,7 +1336,7 @@ export default function ToolConfigModal({
       // Include display_names for knowledge base tools to pass to prompt generation
       const updatedTool: typeof toolToSave = {
         ...toolToSave,
-        initParams: currentParams,
+        initParams: syncedParams,
         // Store knowledge base display names for prompt generation
         ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
           ? { display_names: selectedKbDisplayNames }

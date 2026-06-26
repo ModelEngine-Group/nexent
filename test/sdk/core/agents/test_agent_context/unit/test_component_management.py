@@ -98,6 +98,53 @@ class TestClearComponents:
         assert cm.get_registered_components()[0]._content == "new"
 
 
+class TestReplaceComponents:
+    """Tests for replace_components() atomic swap method."""
+
+    def test_replace_on_empty_manager(self):
+        cm = ContextManager()
+        cm.replace_components([MockComponent(content="new1"), MockComponent(content="new2")])
+        assert len(cm.get_registered_components()) == 2
+
+    def test_replace_clears_existing(self):
+        cm = ContextManager()
+        cm.register_component(MockComponent(content="old1"))
+        cm.register_component(MockComponent(content="old2"))
+        cm.replace_components([MockComponent(content="new")])
+        registered = cm.get_registered_components()
+        assert len(registered) == 1
+        assert registered[0]._content == "new"
+
+    def test_replace_with_empty_list(self):
+        cm = ContextManager()
+        cm.register_component(MockComponent(content="old"))
+        cm.replace_components([])
+        assert cm.get_registered_components() == []
+
+    def test_replace_estimates_tokens(self):
+        cm = ContextManager()
+        comp = MockComponent(content="some content here", token_estimate=0)
+        cm.replace_components([comp])
+        assert cm.get_registered_components()[0].token_estimate > 0
+
+    def test_replace_preserves_existing_token_estimate(self):
+        cm = ContextManager()
+        comp = MockComponent(content="x", token_estimate=42)
+        cm.replace_components([comp])
+        assert cm.get_registered_components()[0].token_estimate == 42
+
+    def test_replace_preserves_order(self):
+        cm = ContextManager()
+        comps = [
+            MockComponent(content="first", priority=10),
+            MockComponent(content="second", priority=20),
+            MockComponent(content="third", priority=30),
+        ]
+        cm.replace_components(comps)
+        registered = cm.get_registered_components()
+        assert [c._content for c in registered] == ["first", "second", "third"]
+
+
 class TestGetRegisteredComponents:
     """Tests for get_registered_components() method."""
     
