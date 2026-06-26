@@ -33,6 +33,7 @@ from database.attachment_db import (
     list_files,
     upload_fileobj,
 )
+from database.model_management_db import get_model_by_model_id
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
@@ -51,6 +52,27 @@ _conversion_locks: dict[str, asyncio.Lock] = {}
 _conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
+
+ALLOWED_SKILL_UPLOAD_ROOT = Path("/mnt/nexent").resolve()
+
+
+def is_allowed_skill_upload_path(file_path: str) -> bool:
+    """Return True when a local file path is under the allowed skill upload root."""
+    if not file_path:
+        return False
+
+    try:
+        candidate_path = Path(file_path).resolve()
+    except Exception:
+        return False
+
+    try:
+        candidate_path.relative_to(ALLOWED_SKILL_UPLOAD_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
 
 
 def resolve_minio_upload_folder(
@@ -83,6 +105,11 @@ def resolve_minio_upload_folder(
     if folder == "knowledge_base":
         return "knowledge_base"
 
+    if folder == "skill-files":
+        if user_id:
+            return f"skill-files/{user_id}"
+        return "skill-files"
+
     if user_id:
         return f"attachments/{user_id}"
 
@@ -101,7 +128,6 @@ def check_file_access(
     - knowledge_base/*: All authenticated users can access
     - attachments/{user_id}/*: Only the owner (user_id) can access
     - images_in_attachments/*: All authenticated users can access
-    - preview/*: Accessible if the original file is accessible
 
     Args:
         object_name: File object name in storage
@@ -124,6 +150,10 @@ def check_file_access(
         # Extracted image files used by knowledge-base image chunks.
         # Keep them readable for authenticated users to avoid broken image citations.
         return True
+
+    if object_name.startswith("skill-files/"):
+        # Generated documents are private to the uploader and must stay user-scoped.
+        return object_name.startswith(f"skill-files/{user_id}/")
 
     # Check if file is in user's attachments folder
     # Pattern: attachments/{user_id}/*
@@ -357,13 +387,19 @@ async def upload_to_minio(
             # Convert file content to BytesIO object
             file_obj = BytesIO(file_content)
 
+            # Store original filename before upload
+            original_filename = f.filename or ""
+
             # Upload file
             result = upload_fileobj(
                 file_obj=file_obj,
-                file_name=f.filename or "",
+                file_name=original_filename,
                 prefix=actual_folder,
                 file_size=len(file_content)
             )
+
+            # Preserve original filename in result (upload_fileobj uses it for object name generation)
+            result["original_file_name"] = original_filename
 
             # Reset file pointer for potential re-reading
             await f.seek(0)
@@ -376,6 +412,7 @@ async def upload_to_minio(
             results.append({
                 "success": False,
                 "file_name": f.filename,
+                "original_file_name": f.filename,
                 "error": "An error occurred while processing the file."
             })
     return results
@@ -412,20 +449,39 @@ async def list_files_impl(prefix: str, limit: Optional[int] = None):
     return files
 
 
-def get_llm_model(tenant_id: str):
-    # Get the tenant config
-    main_model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+def get_llm_model(tenant_id: str, model_id: Optional[int] = None):
+    if model_id:
+        main_model_config = get_model_by_model_id(int(model_id), tenant_id)
+        if not main_model_config:
+            raise ValueError(f"Model not found: {model_id}")
+        if main_model_config.get("model_type") != "llm":
+            raise ValueError(f"Selected model {model_id} is not an LLM model")
+    else:
+        # Get the tenant config
+        main_model_config = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     timeout_seconds = main_model_config.get(
         "timeout_seconds") if main_model_config else None
+    
+    resolved_model_name = get_model_name_from_config(main_model_config)
+
+    logger.info(
+        "Using LLM model for analyze_text_file: model_id=%s, display_name=%s, model_name=%s",
+        model_id,
+        main_model_config.get("display_name") if main_model_config else None,
+        resolved_model_name
+    )
+
     long_text_to_text_model = OpenAILongContextModel(
         observer=MessageObserver(),
-        model_id=get_model_name_from_config(main_model_config),
+        model_id=resolved_model_name,
         api_base=main_model_config.get("base_url"),
         api_key=main_model_config.get("api_key"),
         max_context_tokens=main_model_config.get("max_tokens"),
         ssl_verify=main_model_config.get("ssl_verify", True),
         timeout_seconds=timeout_seconds,
+        model_factory=main_model_config.get("model_factory"),
+        display_name=main_model_config.get("display_name"),
     )
     return long_text_to_text_model
 

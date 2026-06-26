@@ -1,4 +1,41 @@
-from backend.consts.exceptions import UnauthorizedError, SignatureValidationError, LimitExceededError
+from backend.consts.exceptions import (
+    AppException,
+    AgentRunException,
+    LimitExceededError,
+    MCPConnectionError,
+    MCPNameIllegal,
+    McpNotFoundError,
+    McpValidationError,
+    McpNameConflictError,
+    McpPortConflictError,
+    MemoryPreparationException,
+    NoInviteCodeException,
+    IncorrectInviteCodeException,
+    OfficeConversionException,
+    UnsupportedFileTypeException,
+    FileTooLargeException,
+    UserRegistrationException,
+    TimeoutException,
+    SignatureValidationError,
+    UnauthorizedError,
+    ValidationError,
+    NotFoundException,
+    MEConnectionException,
+    VoiceServiceException,
+    VoiceConfigException,
+    STTConnectionException,
+    TTSConnectionException,
+    ToolExecutionException,
+    MCPContainerError,
+    DuplicateError,
+    DataMateConnectionError,
+    SkillDuplicateError,
+    SkillException,
+    OAuthProviderError,
+    OAuthLinkError,
+    TaskNotFoundError,
+    UnsupportedOperationError,
+)
 import time
 import sys
 import os
@@ -97,10 +134,14 @@ sys.modules['database.user_tenant_db'] = MagicMock(
 sys.modules['database.token_db'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
 
-# Pre-mock nexent core dependency pulled by consts.model
-sys.modules['consts'] = MagicMock()
-
-# Mock consts.const but provide real LANGUAGE values for tests
+# Mock consts.const but provide real LANGUAGE values for tests.
+# We must keep the real ``UnauthorizedError``/``SignatureValidationError``/
+# ``LimitExceededError`` classes on the mock so tests that catch them can
+# still match; we also expose ``AppException`` and other exception classes
+# used by sibling test files so that imports like
+# ``from consts.exceptions import AppException`` succeed later in the
+# pytest run. ``run_all_test.py`` runs every test file in a separate
+# pytest process, so this mock is only visible inside this test file.
 consts_const_mock = MagicMock()
 consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
 consts_const_mock.DEFAULT_USER_ID = "user_id"
@@ -108,21 +149,58 @@ consts_const_mock.DEFAULT_TENANT_ID = "tenant_id"
 consts_const_mock.IS_SPEED_MODE = False
 sys.modules['consts.const'] = consts_const_mock
 
-# Mock exceptions module with real exception classes
+# Mock exceptions module with real exception classes. All known exception
+# classes from ``backend.consts.exceptions`` are imported above and re-
+# exported on the mock below, so any code (in this file or in modules it
+# imports) that does ``from consts.exceptions import SomeException`` still
+# gets a real class rather than a MagicMock. ``run_all_test.py`` runs
+# every test file in a separate pytest process, so this mock only affects
+# this file's own session.
 consts_exceptions_mock = MagicMock()
-consts_exceptions_mock.UnauthorizedError = UnauthorizedError
-consts_exceptions_mock.SignatureValidationError = SignatureValidationError
-consts_exceptions_mock.LimitExceededError = LimitExceededError
+for _exc_name in (
+    "AppException",
+    "AgentRunException",
+    "LimitExceededError",
+    "MCPConnectionError",
+    "MCPNameIllegal",
+    "McpNotFoundError",
+    "McpValidationError",
+    "McpNameConflictError",
+    "McpPortConflictError",
+    "MemoryPreparationException",
+    "NoInviteCodeException",
+    "IncorrectInviteCodeException",
+    "OfficeConversionException",
+    "UnsupportedFileTypeException",
+    "FileTooLargeException",
+    "UserRegistrationException",
+    "TimeoutException",
+    "SignatureValidationError",
+    "UnauthorizedError",
+    "ValidationError",
+    "NotFoundException",
+    "MEConnectionException",
+    "VoiceServiceException",
+    "VoiceConfigException",
+    "STTConnectionException",
+    "TTSConnectionException",
+    "ToolExecutionException",
+    "MCPContainerError",
+    "DuplicateError",
+    "DataMateConnectionError",
+    "SkillDuplicateError",
+    "SkillException",
+    "OAuthProviderError",
+    "OAuthLinkError",
+    "TaskNotFoundError",
+    "UnsupportedOperationError",
+):
+    setattr(consts_exceptions_mock, _exc_name, locals()[_exc_name])
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-
-# Mock supabase module
-supabase_mock = MagicMock()
-supabase_mock.create_client = MagicMock()
-sys.modules['supabase'] = supabase_mock
 
 sys.modules['boto3'] = MagicMock()
 sys.modules['psycopg2'] = MagicMock()
@@ -323,6 +401,22 @@ def test_get_current_user_id_with_mapping(monkeypatch):
     assert uid == "user-a" and tid == "tenant-a"
 
 
+def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
+    monkeypatch.setattr(au, "get_user_tenant_by_user_id",
+                        lambda u: {"tenant_id": "tenant-a"})
+    sys.modules["database.cas_session_db"] = MagicMock(
+        is_cas_session_active=MagicMock(return_value=False)
+    )
+
+    token = au.generate_session_jwt("user-a", 1000, session_id="cas-session-1")
+
+    with pytest.raises(UnauthorizedError, match="CAS session"):
+        au.get_current_user_id(token)
+
+
 def test_get_user_language_from_cookie():
     class Req:
         cookies = {"NEXT_LOCALE": "en"}
@@ -334,7 +428,7 @@ def test_get_user_language_from_cookie():
 def test_get_supabase_client_success(monkeypatch):
     """Test successful Supabase client creation"""
     mock_client = MagicMock()
-    monkeypatch.setattr(au, "create_client", lambda url, key: mock_client)
+    monkeypatch.setattr(au, "create_client", lambda url, key, options=None: mock_client)
     monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
     monkeypatch.setattr(au, "SUPABASE_KEY", "test_key")
 
@@ -344,7 +438,7 @@ def test_get_supabase_client_success(monkeypatch):
 
 def test_get_supabase_client_failure(monkeypatch):
     """Test Supabase client creation failure"""
-    def mock_create_client(url, key):
+    def mock_create_client(url, key, options=None):
         raise Exception("Connection failed")
 
     monkeypatch.setattr(au, "create_client", mock_create_client)
@@ -358,7 +452,7 @@ def test_get_supabase_client_failure(monkeypatch):
 def test_get_supabase_admin_client_success(monkeypatch):
     """Test successful Supabase admin client creation using SERVICE_ROLE_KEY"""
     mock_client = MagicMock()
-    monkeypatch.setattr(au, "create_client", lambda url, key: mock_client)
+    monkeypatch.setattr(au, "create_client", lambda url, key, options=None: mock_client)
     monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
     monkeypatch.setattr(au, "SERVICE_ROLE_KEY", "svc_key")
 
@@ -368,7 +462,7 @@ def test_get_supabase_admin_client_success(monkeypatch):
 
 def test_get_supabase_admin_client_failure(monkeypatch):
     """Test Supabase admin client creation failure"""
-    def mock_create_client(url, key):
+    def mock_create_client(url, key, options=None):
         raise Exception("Connection failed")
 
     monkeypatch.setattr(au, "create_client", mock_create_client)

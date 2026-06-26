@@ -10,7 +10,13 @@
 
 import { create } from "zustand";
 
-import { Agent, Tool, AgentConfigUpdate, Skill } from "@/types/agentConfig";
+import {
+  Agent,
+  Tool,
+  AgentConfigUpdate,
+  Skill,
+  DEFAULT_AGENT_VERIFICATION_CONFIG,
+} from "@/types/agentConfig";
 import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
 /**
@@ -28,6 +34,7 @@ export type EditableAgent = Pick<
   | "model"
   | "model_id"
   | "max_step"
+  | "requested_output_tokens"
   | "provide_run_summary"
   | "tools"
   | "duty_prompt"
@@ -38,6 +45,7 @@ export type EditableAgent = Pick<
   | "business_logic_model_id"
   | "prompt_template_id"
   | "prompt_template_name"
+  | "verification_config"
   | "sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
@@ -159,6 +167,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     model: llmConfig?.name || "",
     model_id: llmConfig?.id || 0,
     max_step: 15,
+    requested_output_tokens: null,
     provide_run_summary: false,
     tools: [],
     skills: [],
@@ -170,6 +179,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     business_logic_model_id: llmConfig?.id || 0,
     prompt_template_id: 0,
     prompt_template_name: "system_default",
+    verification_config: { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
     sub_agent_id_list: [],
     group_ids: [],
     ingroup_permission: "READ_ONLY",
@@ -190,6 +200,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         model: agent.model,
         model_id: agent.model_id || 0,
         max_step: agent.max_step,
+        requested_output_tokens: agent.requested_output_tokens ?? null,
         provide_run_summary: agent.provide_run_summary,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
@@ -201,6 +212,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_id: agent.business_logic_model_id || 0,
         prompt_template_id: agent.prompt_template_id ?? 0,
         prompt_template_name: agent.prompt_template_name || "system_default",
+        verification_config: agent.verification_config || { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
         sub_agent_id_list: agent.sub_agent_id_list || [],
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
@@ -309,6 +321,7 @@ const isDirty = (
       editedAgent.model !== "" ||
       editedAgent.model_id !== 0 ||
       editedAgent.max_step !== 0 ||
+      editedAgent.requested_output_tokens != null ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
@@ -318,6 +331,8 @@ const isDirty = (
       editedAgent.business_logic_model_id !== 0 ||
       (editedAgent.prompt_template_id ?? 0) !== 0 ||
       (editedAgent.prompt_template_name || "system_default") !== "system_default" ||
+      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
+        JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
       normalizeArray(editedAgent.group_ids || []).length > 0 ||
       normalizeArray(editedAgent.sub_agent_id_list || []).length > 0 ||
       normalizeArray(editedAgent.external_sub_agent_id_list || []).length > 0 ||
@@ -337,6 +352,8 @@ const isDirty = (
     baselineAgent.model !== editedAgent.model ||
     baselineAgent.model_id !== editedAgent.model_id ||
     baselineAgent.max_step !== editedAgent.max_step ||
+    (baselineAgent.requested_output_tokens ?? null) !==
+      (editedAgent.requested_output_tokens ?? null) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
@@ -346,6 +363,8 @@ const isDirty = (
     baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
     (baselineAgent.prompt_template_id ?? 0) !== (editedAgent.prompt_template_id ?? 0) ||
     (baselineAgent.prompt_template_name || "system_default") !== (editedAgent.prompt_template_name || "system_default") ||
+    JSON.stringify(baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
+      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) ||
     JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
       JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
     JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==
@@ -524,4 +543,3 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     return get().baselineAgent;
   },
 }));
-

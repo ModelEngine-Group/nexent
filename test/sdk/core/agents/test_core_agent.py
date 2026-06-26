@@ -231,6 +231,13 @@ def _load_core_agent_module():
     agent_context_mod.ContextManagerConfig = MagicMock()
     sys.modules["sdk.nexent.core.agents.agent_context"] = agent_context_mod
 
+    context_runtime_pkg = ModuleType("sdk.nexent.core.context_runtime")
+    context_runtime_contracts_mod = ModuleType("sdk.nexent.core.context_runtime.contracts")
+    context_runtime_contracts_mod.ContextRuntime = MagicMock()
+    context_runtime_contracts_mod.UnconfiguredContextRuntime = MagicMock()
+    sys.modules["sdk.nexent.core.context_runtime"] = context_runtime_pkg
+    sys.modules["sdk.nexent.core.context_runtime.contracts"] = context_runtime_contracts_mod
+
     monitor_mod = ModuleType("sdk.nexent.monitor")
     monitor_mod.get_monitoring_manager = MagicMock()
     sys.modules["sdk.nexent.monitor"] = monitor_mod
@@ -277,6 +284,121 @@ And some more text."""
     result = core_agent_module.parse_code_blobs(text)
     expected = "print(\"Hello World\")\nx = 42"
     assert result == expected
+
+
+# ----------------------------------------------------------------------------
+# Tests for layered final-answer verification policy
+# ----------------------------------------------------------------------------
+
+def _make_verification_controller(**config_overrides):
+    config = core_agent_module.AgentVerificationConfig(
+        enabled=True,
+        step_verification_enabled=True,
+        final_verification_enabled=True,
+        llm_verification_enabled=True,
+        **config_overrides,
+    )
+    observer = MagicMock()
+    observer.add_message = MagicMock()
+    model = MagicMock()
+    logger = MagicMock()
+    logger.log = MagicMock()
+    return core_agent_module.VerificationController(
+        config=config,
+        observer=observer,
+        agent_name="test-agent",
+        model=model,
+        logger=logger,
+    ), model
+
+
+def test_final_verification_skips_llm_for_greeting():
+    """Simple greetings should not require external evidence or tool output."""
+    controller, model = _make_verification_controller()
+
+    result = controller.verify_final_answer(
+        task="你好",
+        candidate="你好！有什么我可以帮你的吗？",
+        memory_summary="Step 1:\nCode:\nObservation:\nOutput:",
+        round_number=1,
+    )
+
+    assert result.passed is True
+    assert result.phase == "final_pass"
+    model.assert_not_called()
+
+
+def test_final_verification_pass_message_explains_reason():
+    """Passed verification events should tell users what was checked."""
+    controller, _ = _make_verification_controller()
+
+    controller.verify_final_answer(
+        task="你好",
+        candidate="你好！有什么我可以帮你的吗？",
+        memory_summary="Step 1:\nCode:\nObservation:\nOutput:",
+        round_number=1,
+    )
+
+    messages = [
+        json.loads(call.args[2])["message"]
+        for call in controller.observer.add_message.call_args_list
+    ]
+
+    assert any("基础自检通过" in message and "答案非空" in message for message in messages)
+    assert any("最终自检通过" in message and "轻量对话无需外部证据" in message for message in messages)
+
+
+def test_verification_feedback_does_not_count_as_tool_error():
+    """Self-verification feedback should not poison the next final-answer check."""
+    controller, _ = _make_verification_controller()
+    memory_summary = """
+Step 1:
+Observation:
+Verification feedback:
+- Event: final_answer
+- Severity: blocking
+- Failed criteria: evidence_grounding, tool_error_handling
+- Repair instruction: Provide more evidence.
+"""
+
+    result = controller.verify_before_final_answer(
+        candidate="你好！有什么我可以帮你的吗？",
+        observation=memory_summary,
+        step_number=2,
+    )
+
+    assert result.passed is True
+    assert "previous_errors_acknowledged" not in result.failed_criteria
+
+
+def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
+    """Verifier output is normalized when failed criteria are not required by policy."""
+    controller, _ = _make_verification_controller()
+    verifier_payload = json.dumps({
+        "passed": False,
+        "score": 0.5,
+        "status": "revise",
+        "failed_criteria": ["evidence_grounding", "tool_error_handling"],
+        "checks": [
+            {"name": "evidence_grounding", "passed": False},
+            {"name": "tool_error_handling", "passed": False},
+        ],
+        "revision_instruction": "Find evidence.",
+        "user_visible_note": "Missing evidence.",
+    })
+
+    result = controller._parse_llm_verifier_result(
+        verifier_payload,
+        {
+            "task_profile": "lightweight_conversation",
+            "evidence_required": False,
+            "tool_error_check_required": False,
+        },
+    )
+
+    assert result.passed is True
+    assert result.failed_criteria == []
+    assert result.score >= controller.config.pass_score
 
 
 def test_parse_code_blobs_run_format_with_newline():
@@ -1586,6 +1708,28 @@ class TestMaxStepsReached:
 class TestRunStreamRealExecution:
     """Tests that actually execute the real _run_stream method for line coverage."""
 
+    @staticmethod
+    def _context_runtime_mock(
+        *,
+        calls=0,
+        input_tokens=0,
+        output_tokens=0,
+        cache_hits=0,
+        cache_types=None,
+        token_threshold=None,
+    ):
+        runtime = MagicMock()
+        runtime.compression_stats.return_value = {
+            "calls": calls,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_hits": cache_hits,
+            "cache_types": cache_types or [],
+        }
+        runtime.chars_per_token = 1.5
+        runtime.token_threshold = token_threshold
+        return runtime
+
     def _load_core_agent_in_isolation(self):
         """Load CoreAgent in isolation without the test's module mocks."""
         import importlib.util
@@ -1801,6 +1945,7 @@ class TestRunStreamRealExecution:
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
         agent.context_manager = None
+        agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
         agent._step_stream = mock_step_stream
@@ -1835,13 +1980,14 @@ class TestRunStreamRealExecution:
         agent.context_manager.config.enabled = True
         agent.context_manager.config.token_threshold = 4096
         agent.context_manager.config.chars_per_token = 1.5
-        agent.context_manager.get_step_compression_stats.return_value = {
-            "calls": 1,
-            "input_tokens": 80,
-            "output_tokens": 40,
-            "cache_hits": 1,
-            "cache_types": ["exact"],
-        }
+        agent.context_runtime = self._context_runtime_mock(
+            calls=1,
+            input_tokens=80,
+            output_tokens=40,
+            cache_hits=1,
+            cache_types=["exact"],
+            token_threshold=4096,
+        )
 
         action_step = MagicMock()
         action_step.step_number = 3
@@ -2075,6 +2221,7 @@ class TestRunStreamRealExecution:
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
         agent.context_manager = None
+        agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
         agent._step_stream = mock_step_stream
@@ -2094,179 +2241,6 @@ class TestRunStreamRealExecution:
         # FinalAnswerError path should prevent MAX_STEPS_REACHED
         max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
         assert len(max_steps_calls) == 0
-
-
-# ----------------------------------------------------------------------------
-# Tests for _build_final_answer_messages function
-# ----------------------------------------------------------------------------
-
-class TestBuildFinalAnswerMessages:
-    """Test suite for _build_final_answer_messages standalone function."""
-
-    def _load_core_agent_for_function_test(self):
-        """Load core_agent module with proper mocks for standalone function testing."""
-        # Create a fresh mock setup for this test
-        import importlib.util
-        import sys
-        from types import ModuleType
-        from unittest.mock import MagicMock
-
-        # Create mock jinja2
-        mock_jinja2 = ModuleType("jinja2")
-        mock_jinja2.Template = MagicMock()
-        mock_jinja2.StrictUndefined = MagicMock()
-
-        # Create mock smolagents models
-        mock_models = ModuleType("smolagents.models")
-        mock_models.ChatMessage = MagicMock(name="ChatMessage")
-        mock_models.MessageRole = MagicMock(name="MessageRole")
-        mock_models.CODEAGENT_RESPONSE_FORMAT = MagicMock(name="CODEAGENT_RESPONSE_FORMAT")
-
-        mock_smolagents = ModuleType("smolagents")
-        mock_smolagents.models = mock_models
-
-        # Save and replace modules
-        original_modules = {}
-        for name in ["jinja2", "jinja2.template", "smolagents", "smolagents.models"]:
-            if name in sys.modules:
-                original_modules[name] = sys.modules[name]
-        sys.modules["jinja2"] = mock_jinja2
-        sys.modules["jinja2.template"] = mock_jinja2
-        sys.modules["smolagents"] = mock_smolagents
-        sys.modules["smolagents.models"] = mock_models
-
-        try:
-            # Find and load core_agent.py
-            test_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(test_dir))))
-            core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
-
-            spec = importlib.util.spec_from_file_location("core_agent_for_func", core_agent_path)
-            module = importlib.util.module_from_spec(spec)
-            module.__package__ = "sdk.nexent.core.agents"
-            spec.loader.exec_module(module)
-            return module, mock_models
-        finally:
-            for name, mod in original_modules.items():
-                sys.modules[name] = mod
-
-    def test_build_final_answer_messages_basic(self):
-        """Test that _build_final_answer_messages builds correct message structure."""
-        module, mock_models = self._load_core_agent_for_function_test()
-        _build_final_answer_messages = module._build_final_answer_messages
-
-        # Setup mock ChatMessage
-        mock_chat_message = MagicMock()
-        mock_models.ChatMessage = mock_chat_message
-
-        task = "Test task"
-        agent_prompt_templates = {
-            "final_answer": {
-                "pre_messages": "System prompt for final answer.",
-                "post_messages": "Given the task: {{ task }}, provide the final answer."
-            }
-        }
-        memory_messages = [
-            {"role": "system", "content": "System"},
-            {"role": "user", "content": "User message 1"},
-            {"role": "assistant", "content": "Assistant response 1"},
-            {"role": "user", "content": "User message 2"},
-        ]
-
-        result = _build_final_answer_messages(task, agent_prompt_templates, memory_messages)
-
-        # Should have: 1 system message + memory_messages[1:] + 1 user message = 5 messages
-        assert len(result) == 5
-
-    def test_build_final_answer_messages_skips_first_memory_message(self):
-        """Test that the first memory message (system) is skipped."""
-        module, mock_models = self._load_core_agent_for_function_test()
-        _build_final_answer_messages = module._build_final_answer_messages
-
-        mock_chat_message = MagicMock()
-        mock_models.ChatMessage = mock_chat_message
-
-        task = "My task"
-        agent_prompt_templates = {
-            "final_answer": {
-                "pre_messages": "Pre",
-                "post_messages": "Post: {{ task }}"
-            }
-        }
-        # First message should be skipped, rest should be included
-        memory_messages = [
-            {"role": "system", "content": "skip this"},
-            {"role": "user", "content": "include 1"},
-            {"role": "assistant", "content": "include 2"},
-        ]
-
-        result = _build_final_answer_messages(task, agent_prompt_templates, memory_messages)
-
-        # 1 system + 2 from memory_messages[1:] + 1 final user = 4
-        assert len(result) == 4
-
-    def test_build_final_answer_messages_empty_memory(self):
-        """Test _build_final_answer_messages with minimal memory messages."""
-        module, mock_models = self._load_core_agent_for_function_test()
-        _build_final_answer_messages = module._build_final_answer_messages
-
-        mock_chat_message = MagicMock()
-        mock_models.ChatMessage = mock_chat_message
-
-        task = "Task"
-        agent_prompt_templates = {
-            "final_answer": {
-                "pre_messages": "Pre",
-                "post_messages": "Post: {{ task }}"
-            }
-        }
-        # Only one message in memory (would cause empty result after slice)
-        memory_messages = [{"role": "system", "content": "only one"}]
-
-        result = _build_final_answer_messages(task, agent_prompt_templates, memory_messages)
-
-        # 1 system + 0 from memory[1:] + 1 user = 2
-        assert len(result) == 2
-
-    def test_build_final_answer_messages_template_rendering(self):
-        """Test that post_messages template is rendered correctly with task variable.
-
-        The function uses Jinja2 Template with StrictUndefined to render the post_messages
-        template with the task variable. This test verifies the overall function works
-        correctly by checking the returned message structure.
-        """
-        module, mock_models = self._load_core_agent_for_function_test()
-        _build_final_answer_messages = module._build_final_answer_messages
-
-        mock_chat_message = MagicMock()
-        mock_models.ChatMessage = mock_chat_message
-
-        # Test with various task values to verify template variable substitution
-        test_cases = [
-            "Simple task",
-            "Task with 'single quotes'",
-            'Task with "double quotes"',
-            "Task with {{ brackets }}",
-            "Task with unicode: 你好世界 🎉",
-        ]
-
-        for task in test_cases:
-            agent_prompt_templates = {
-                "final_answer": {
-                    "pre_messages": "Pre prompt",
-                    "post_messages": "Task: {{ task }}"
-                }
-            }
-            memory_messages = [
-                {"role": "system", "content": "sys"},
-                {"role": "user", "content": "msg"},
-            ]
-
-            # Should not raise for any valid task string
-            result = _build_final_answer_messages(task, agent_prompt_templates, memory_messages)
-
-            # Verify structure
-            assert len(result) == 3  # system + user + final user
 
 
 # ----------------------------------------------------------------------------
@@ -2309,6 +2283,17 @@ class TestHandleMaxStepsReached:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent._history_step_count = 0
+        agent.context_runtime = MagicMock()
+        agent.context_runtime.prepare_final_answer = MagicMock(
+            return_value=MagicMock(
+                messages=[
+                    {"role": "system", "content": "Final answer system prompt"},
+                    {"role": "user", "content": "Given task: original task, summarize."},
+                ],
+                evidence=MagicMock(),
+            )
+        )
 
         return agent, module
 
@@ -2372,13 +2357,13 @@ class TestHandleMaxStepsReached:
         # Should return error message
         assert "Error in generating final LLM output" in result
 
-        # Verify logger was called with warning
+        # Verify logger was called with error
         agent.logger.log.assert_called()
-        warning_calls = [
+        error_calls = [
             call for call in agent.logger.log.call_args_list
-            if call[1].get("level") and "WARNING" in str(call[1].get("level"))
+            if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
-        assert len(warning_calls) >= 1
+        assert len(error_calls) >= 1
 
     def test_handle_max_steps_reached_creates_memory_step_with_error(self):
         """Test that a memory step with AgentMaxStepsError is created."""
@@ -2466,17 +2451,9 @@ class TestHandleMaxStepsReached:
         # Should pass the current step_number (3)
         assert step_count_calls[0][0][2] == 3
 
-    def test_handle_max_steps_reached_uses_build_final_answer_messages(self):
-        """Test that _build_final_answer_messages is called to prepare the context."""
+    def test_handle_max_steps_reached_uses_context_runtime_final_answer(self):
+        """Test that final-answer context is prepared by ContextRuntime."""
         agent, module = self._create_agent_for_handle_max_steps_test()
-
-        # Track calls to write_memory_to_messages
-        memory_calls = []
-        agent.write_memory_to_messages = MagicMock(
-            side_effect=lambda *args, **kwargs: memory_calls.append(args) or [
-                {"role": "system", "content": "System"},
-            ]
-        )
 
         mock_chat_message = MagicMock()
         mock_chat_message.role = "assistant"
@@ -2488,10 +2465,12 @@ class TestHandleMaxStepsReached:
 
         agent._handle_max_steps_reached("my task prompt")
 
-        # write_memory_to_messages should have been called
-        assert len(memory_calls) >= 1
+        agent.context_runtime.prepare_final_answer.assert_called_once()
+        kwargs = agent.context_runtime.prepare_final_answer.call_args.kwargs
+        assert kwargs["task"] == "my task prompt"
+        assert kwargs["final_answer_templates"] is agent.prompt_templates
 
-        # Model should have been called (which uses messages from _build_final_answer_messages)
+        # Model should be called with messages from ContextRuntime.
         assert agent.model.called
 
 
@@ -2609,4 +2588,3 @@ class TestLogModelCallParameters:
         # Verify warning was logged via the except block
         # The exception handler logs via self.logger.log()
         agent.logger.log.assert_called()
-

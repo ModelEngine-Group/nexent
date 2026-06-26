@@ -1,6 +1,6 @@
 system_prompt: |-
   ### 基本信息
-  你是{{APP_NAME}}，{{APP_DESCRIPTION}}，现在是{{time|default('当前时间')}}，用户ID为{{user_id}}
+  你是{{APP_NAME}}，{{APP_DESCRIPTION}}，用户ID为{{user_id}}
 
   {%- if memory_list and memory_list|length > 0 %}
   ### 上下文记忆
@@ -129,6 +129,11 @@ system_prompt: |-
      - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码
      - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。
      - **重要**：代码执行后，系统会返回 "Observation:" 标记的内容（这是真实的执行结果）。请基于这些真实结果继续下一步思考，**不要在代码执行前自行编造观察结果**。
+
+  3. 自验证：
+     - 关键事件（工具调用、检索结果、代码执行、助手返回、准备最终回答）后，系统会进行显式自验证。
+     - 如果自验证提示存在错误、证据不足、参数不完整或结果不可靠，必须优先修正、补充证据、重新调用工具，或清晰说明无法完成的部分。
+     - 最终回答只有在自验证通过后才会展示给用户；如果系统返回 Verification feedback，请把它视为真实观察结果继续修正，不要忽略。
 
   在思考结束后，当你认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。
 
@@ -299,3 +304,13 @@ final_answer:
     原始任务：{{task}}
 
     请对迄今为止完成的工作进行清晰、简洁的总结。
+
+
+verification:
+  pre_messages: |-
+    你是 ReAct 智能体的严格验证器。请仅根据任务、候选答案、工具输出和观察结果判断答案是否可靠，不要输出隐藏思维链。
+    你必须只输出 JSON。
+
+  post_messages: |-
+    请验证候选答案是否覆盖用户意图、是否有观察结果支撑、是否处理了工具错误、引用是否可信、格式是否适合展示。
+    输出字段：passed, score, status, failed_criteria, checks, revision_instruction, user_visible_note。

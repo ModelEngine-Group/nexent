@@ -1,5 +1,6 @@
 import sys
 import types
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from unittest.mock import MagicMock, patch, ANY
@@ -118,6 +119,12 @@ class _MockProcessType:
     ERROR = "error"
 
 
+@dataclass
+class _MockAgentRunMetadata:
+    agent_name: str | None = None
+    query: str | None = None
+
+
 MessageObserver = _MockMessageObserver
 ProcessType = _MockProcessType
 
@@ -138,6 +145,38 @@ mock_sdk_nexent_core_utils_observer_module = types.ModuleType(
 )
 mock_sdk_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
 mock_sdk_nexent_core_utils_observer_module.ProcessType = _MockProcessType
+mock_sdk_nexent_monitor_module = types.ModuleType("sdk.nexent.monitor")
+mock_sdk_nexent_monitor_module.__path__ = []
+mock_sdk_nexent_monitor_module.AgentRunMetadata = _MockAgentRunMetadata
+mock_sdk_nexent_monitor_module.get_agent_monitoring_context = MagicMock(return_value=None)
+mock_sdk_nexent_monitor_module.get_monitoring_manager = MagicMock()
+mock_sdk_nexent_monitor_monitoring_module = types.ModuleType("sdk.nexent.monitor.monitoring")
+mock_sdk_nexent_monitor_monitoring_module.record_model_call = MagicMock()
+
+
+class _MockLegacyContextRuntime:
+    context_manager = None
+
+
+class _MockManagedContextRuntime:
+    def __init__(self, context_manager):
+        self.context_manager = context_manager
+
+
+mock_sdk_context_runtime_module = types.ModuleType("sdk.nexent.core.context_runtime")
+mock_sdk_context_runtime_module.__path__ = []
+mock_sdk_context_runtime_legacy_module = types.ModuleType("sdk.nexent.core.context_runtime.legacy")
+mock_sdk_context_runtime_legacy_module.__path__ = []
+mock_sdk_context_runtime_legacy_runtime_module = types.ModuleType(
+    "sdk.nexent.core.context_runtime.legacy.runtime"
+)
+mock_sdk_context_runtime_legacy_runtime_module.LegacyContextRuntime = _MockLegacyContextRuntime
+mock_sdk_context_runtime_managed_module = types.ModuleType("sdk.nexent.core.context_runtime.managed")
+mock_sdk_context_runtime_managed_module.__path__ = []
+mock_sdk_context_runtime_managed_runtime_module = types.ModuleType(
+    "sdk.nexent.core.context_runtime.managed.runtime"
+)
+mock_sdk_context_runtime_managed_runtime_module.ManagedContextRuntime = _MockManagedContextRuntime
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -251,8 +290,15 @@ module_mocks = {
     "sdk.nexent": mock_sdk_nexent_module,
     "sdk.nexent.core": mock_sdk_nexent_core_module,
     "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
+    "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
+    "sdk.nexent.core.context_runtime.legacy": mock_sdk_context_runtime_legacy_module,
+    "sdk.nexent.core.context_runtime.legacy.runtime": mock_sdk_context_runtime_legacy_runtime_module,
+    "sdk.nexent.core.context_runtime.managed": mock_sdk_context_runtime_managed_module,
+    "sdk.nexent.core.context_runtime.managed.runtime": mock_sdk_context_runtime_managed_runtime_module,
     "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
+    "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
+    "sdk.nexent.monitor.monitoring": mock_sdk_nexent_monitor_monitoring_module,
     "nexent.core.utils.prompt_template_utils": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
@@ -295,6 +341,27 @@ with patch.dict("sys.modules", module_mocks):
 
     # Clean up after import
     sys.modules.pop("nexent.utils.http_client_manager", None)
+
+
+# Keep the lightweight runtime modules available for create_single_agent()
+# tests.  They exercise runtime selection after the import-time patch.dict
+# context has restored sys.modules, while nexent_agent now performs runtime
+# imports inside create_single_agent().
+sys.modules.setdefault("sdk", mock_sdk_module)
+sys.modules.setdefault("sdk.nexent", mock_sdk_nexent_module)
+sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
+sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
+sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
+sys.modules.setdefault("sdk.nexent.core.context_runtime.legacy", mock_sdk_context_runtime_legacy_module)
+sys.modules.setdefault(
+    "sdk.nexent.core.context_runtime.legacy.runtime",
+    mock_sdk_context_runtime_legacy_runtime_module,
+)
+sys.modules.setdefault("sdk.nexent.core.context_runtime.managed", mock_sdk_context_runtime_managed_module)
+sys.modules.setdefault(
+    "sdk.nexent.core.context_runtime.managed.runtime",
+    mock_sdk_context_runtime_managed_runtime_module,
+)
 
 
 # ----------------------------------------------------------------------------
@@ -459,7 +526,9 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
     # Verify the result
     assert result == mock_model_instance
 
-    # Verify OpenAIModel was constructed with correct parameters
+    # Verify OpenAIModel was constructed with correct parameters.
+    # W1 renamed the SDK's `max_tokens` kwarg to `max_output_tokens`; the
+    # production code path here builds the same kwarg under the new name.
     mock_openai_model_class.assert_called_once_with(
         observer=nexent_agent_with_models.observer,
         model_id=mock_model_config.model_name,
@@ -471,8 +540,9 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         ssl_verify=True,
         display_name=mock_model_config.cite_name,
         extra_body=mock_model_config.extra_body,
-        max_tokens=mock_model_config.max_tokens,
+        max_output_tokens=mock_model_config.max_tokens,
         timeout_seconds=mock_model_config.timeout_seconds,
+        prompt_cache=mock_model_config.prompt_cache,
     )
 
     # Verify stop_event was set
@@ -491,7 +561,8 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
     # Verify the result
     assert result == mock_model_instance
 
-    # Verify OpenAIModel was constructed with correct parameters
+    # Verify OpenAIModel was constructed with correct parameters.
+    # W1 renamed the SDK's `max_tokens` kwarg to `max_output_tokens`.
     mock_openai_model_class.assert_called_once_with(
         observer=nexent_agent_with_models.observer,
         model_id=mock_deep_thinking_model_config.model_name,
@@ -503,8 +574,9 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         ssl_verify=True,
         display_name=mock_deep_thinking_model_config.cite_name,
         extra_body=mock_deep_thinking_model_config.extra_body,
-        max_tokens=mock_deep_thinking_model_config.max_tokens,
+        max_output_tokens=mock_deep_thinking_model_config.max_tokens,
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
+        prompt_cache=mock_deep_thinking_model_config.prompt_cache,
     )
 
     # Verify stop_event was set
@@ -937,6 +1009,88 @@ def test_create_local_tool_knowledge_base_with_display_name_map(nexent_agent_ins
     assert result.vdb_core == "mock_vdb_core"
     assert result.embedding_model == "mock_embedding_model"
     assert result.rerank_model == "mock_rerank_model"
+
+
+def test_create_local_tool_knowledge_base_with_document_paths_from_metadata(nexent_agent_instance):
+    """KnowledgeBaseSearchTool should receive document_paths from metadata via set_document_paths.
+
+    The `document_paths` parameter is declared with `exclude=True` so it must not
+    be passed to __init__. Instead it must be forwarded to `set_document_paths`
+    on the instance, sourced from `tool_config.metadata`. This guards against
+    the FieldInfo-iteration regression reported when document_paths is unset.
+    """
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    document_paths = ["s3://bucket/doc1.txt", "s3://bucket/doc2.txt"]
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 5, "index_names": ["kb1"]},
+        source="local",
+        metadata={
+            "vdb_core": "mock_vdb_core",
+            "embedding_model": "mock_embedding_model",
+            "document_paths": document_paths,
+        },
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    # document_paths is excluded and must not be forwarded to __init__.
+    init_kwargs = mock_kb_tool_class.call_args.kwargs
+    assert "document_paths" not in init_kwargs
+    # It must instead be applied via set_document_paths on the instance.
+    mock_kb_tool_instance.set_document_paths.assert_called_once_with(document_paths)
+
+
+def test_create_local_tool_knowledge_base_without_metadata_calls_set_document_paths_none(nexent_agent_instance):
+    """When metadata lacks document_paths, set_document_paths(None) must still be invoked.
+
+    Ensures the tool's internal filter is explicitly reset to None rather than
+    left as a stale FieldInfo default from the smolagents wrapper.
+    """
+    mock_kb_tool_class = MagicMock()
+    mock_kb_tool_instance = MagicMock()
+    mock_kb_tool_class.return_value = mock_kb_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="KnowledgeBaseSearchTool",
+        name="knowledge_base_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 5, "index_names": ["kb1"]},
+        source="local",
+        metadata=None,
+    )
+
+    original_value = nexent_agent.__dict__.get("KnowledgeBaseSearchTool")
+    nexent_agent.__dict__["KnowledgeBaseSearchTool"] = mock_kb_tool_class
+
+    try:
+        nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__["KnowledgeBaseSearchTool"] = original_value
+        elif "KnowledgeBaseSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["KnowledgeBaseSearchTool"]
+
+    mock_kb_tool_instance.set_document_paths.assert_called_once_with(None)
 
 
 def test_create_local_tool_knowledge_base_with_empty_display_name_map(nexent_agent_instance):

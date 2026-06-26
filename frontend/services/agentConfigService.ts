@@ -200,7 +200,7 @@ export const fetchPublishedAgentList = async () => {
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
       permission: agent.permission,
-      published_version_no: agent.published_version_no,
+      current_version_no: agent.current_version_no,
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
     }));
@@ -248,6 +248,7 @@ export const getCreatingSubAgentId = async () => {
         modelName: data.model_name,
         model_id: data.model_id,
         maxSteps: data.max_steps,
+        requestedOutputTokens: data.requested_output_tokens ?? null,
         businessDescription: data.business_description,
         dutyPrompt: data.duty_prompt,
         constraintPrompt: data.constraint_prompt,
@@ -407,8 +408,10 @@ export interface UpdateAgentInfoPayload {
   model_name?: string;
   model_id?: number;
   max_steps?: number;
+  requested_output_tokens?: number | null;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
+  verification_config?: Record<string, any>;
   enabled?: boolean;
   business_description?: string;
   business_logic_model_name?: string;
@@ -764,6 +767,7 @@ export const searchAgentInfo = async (
       model: data.model_name,
       model_id: data.model_id,
       max_step: data.max_steps,
+      requested_output_tokens: data.requested_output_tokens ?? null,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,
@@ -773,6 +777,7 @@ export const searchAgentInfo = async (
       prompt_template_id: data.prompt_template_id ?? 0,
       prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
+      verification_config: data.verification_config,
       enabled: data.enabled,
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],

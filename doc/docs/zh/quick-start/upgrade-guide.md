@@ -14,8 +14,8 @@
 
 更新之前，先记录下当前部署的版本和数据目录
 
-- 当前部署版本信息的位置：`backend/consts/const.py`中的 APP_VERSION
-- 数据目录信息的位置：`docker/.env`中的 ROOT_DIR
+- 当前部署版本信息的位置：根目录 `VERSION`
+- 数据目录信息的位置：`.env`中的 ROOT_DIR
 
 **git 方式下载的代码**
 
@@ -31,17 +31,17 @@ git pull
 
 ## 🔄 步骤二：执行升级
 
-进入更新后代码目录的docker目录，执行升级脚本：
+在更新后的代码仓库根目录执行 Docker 部署入口：
 
 ```bash
-bash upgrade.sh
+bash deploy.sh docker
 ```
 
 缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
 
 > 💡 提示
-> - 若 `docker/.env` 不存在，部署脚本会从 `.env.example` 自动复制一份。
-> - 若需配置语音模型（STT/TTS），请在 `docker/.env` 中补充相关变量，我们将尽快提供前端配置入口。
+> - 已有 `.env` 会原样保留；如果不存在，部署脚本会优先复用已有 `docker/.env`，再回退到 `.env.example` 或 `docker/.env.example`。
+> - 若需配置语音模型（STT/TTS），请在 `.env` 中补充相关变量，我们将尽快提供前端配置入口。
 
 ## 🌐 步骤三：验证部署
 
@@ -80,74 +80,12 @@ docker system prune -af
 
 ---
 
-### 🗄️ 手动更新数据库
+### 🗄️ 数据库迁移
 
-升级时如果存在部分 sql 文件执行失败，则可以手动执行更新。
+SQL 增量不再手动执行。Docker 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端容器只等待迁移记录达到目标状态。SQL 会从 `deploy/sql` 挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
 
-#### ✅ 方法一：使用 SQL 编辑器（推荐）
-
-1. 打开 SQL 编辑器，新建 PostgreSQL 连接。
-2. 在 `/nexent/docker/.env` 中找到以下信息：
-   - Host
-   - Port
-   - Database
-   - User
-   - Password
-3. 填写连接信息后测试连接，确认成功后可在 `nexent` schema 中查看所有表。
-4. 新建查询窗口。
-5. 打开 `/nexent/docker/sql` 目录，通过失败的sql文件查看 SQL 脚本。
-6. 将失败的sql文件和后续版本的sql文件依次执行。
-
-> ⚠️ 注意事项
-> - 升版本前请备份数据库，生产环境尤为重要。
-> - SQL 脚本需按时间顺序执行，避免依赖冲突。
-> - `.env` 变量可能命名为 `POSTGRES_HOST`、`POSTGRES_PORT` 等，请在客户端对应填写。
-
-#### 🧰 方法二：命令行执行（无需客户端）
-
-1. 进入 Docker 目录：
-
-   ```bash
-   cd nexent/docker
-   ```
-
-2. 从 `.env` 中获取数据库连接信息，例如：
-
-   ```bash
-   POSTGRES_HOST=localhost
-   POSTGRES_PORT=5432
-   POSTGRES_DB=nexent
-   POSTGRES_USER=root
-   POSTGRES_PASSWORD=your_password
-   ```
-
-3. 通过容器执行 SQL 脚本（示例）：
-
-   ```bash
-   # 我们需要执行以下命令（请注意替换占位符中的变量）
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.1_1030-update.sql
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.2_1105-update.sql
-   ```
-
-   请根据自己的部署版本，按版本顺序执行对应脚本。
+迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
 
 > 💡 提示
-> - 若 `.env` 中定义了数据库变量，可先导入：
->
->   **Windows PowerShell:**
->   ```powershell
->   Get-Content .env | Where-Object { $_ -notmatch '^#' -and $_ -match '=' } | ForEach-Object { $key, $value = $_ -split '=', 2; [Environment]::SetEnvironmentVariable($key.Trim(), $value.Trim(), 'Process') }
->   ```
->
->   **Linux/WSL:**
->   ```bash
->   export $(grep -v '^#' .env | xargs)
->   # 或使用 set -a 自动导出所有变量
->   set -a; source .env; set +a
->   ```
->
-> - 执行前建议先备份：
->
->   ```bash
->   docker exec -i nexent-postgres pg_dump -U [YOUR_POSTGRES_USER] [YOUR_POSTGRES_DB] > backup_$(date +%F).sql
->   ```
+> - 升级前请备份数据库，生产环境尤为重要。
+> - 如果服务启动失败，请查看后端容器日志中的 `[sql-migrations]` 记录。

@@ -230,7 +230,7 @@ async def add_mcp_service(
     server_url: str,
     tags: list | None,
     authorization_token: str | None,
-    custom_headers: dict | None,
+    custom_headers: dict | None = None,
     container_config: dict | None,
     registry_json: dict | None,
     enabled: bool = False,

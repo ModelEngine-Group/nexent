@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import types
 import pytest
 from unittest.mock import patch, MagicMock
 from contextlib import contextmanager
@@ -18,9 +19,25 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
+consts_mock.const.ASSET_OWNER_ROLE = "ASSET_OWNER"
+consts_mock.const.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+consts_mock.const.ENABLE_ASSET_OWNER_ROLE = False
+consts_mock.const.PERMISSION_EDIT = "EDIT"
+consts_mock.const.PERMISSION_READ = "READ_ONLY"
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+
+consts_exceptions_mod = types.ModuleType("consts.exceptions")
+
+
+class ValidationError(Exception):
+    pass
+
+
+consts_exceptions_mod.ValidationError = ValidationError
+sys.modules['consts.exceptions'] = consts_exceptions_mod
 
 # Mock consts.agent_unavailable_reasons
 agent_unavailable_reasons_mock = MagicMock()
@@ -206,8 +223,13 @@ def mock_tools_draft():
 
 
 @pytest.fixture
-def mock_relations_draft():
+def mock_relations_draft(monkeypatch):
     """Mock relations draft data"""
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=1),
+    )
     return [
         {
             "id": 1,
@@ -279,7 +301,46 @@ def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_
     mock_insert_agent.assert_called_once()
     assert mock_insert_tool.call_count == 2
     assert mock_insert_relation.call_count == 1
+    relation_snapshot = mock_insert_relation.call_args[0][0]
+    assert relation_snapshot["selected_agent_version_no"] == 1
     assert mock_insert_skill.call_count == 1
+
+    # Verify updated_by is set to user_id on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+
+    tool_snapshot_0 = mock_insert_tool.call_args_list[0][0][0]
+    tool_snapshot_1 = mock_insert_tool.call_args_list[1][0][0]
+    assert tool_snapshot_0["updated_by"] == "user1"
+    assert tool_snapshot_1["updated_by"] == "user1"
+
+    assert relation_snapshot["updated_by"] == "user1"
+
+    skill_snapshot = mock_insert_skill.call_args[0][0]
+    assert skill_snapshot["updated_by"] == "user1"
+
+
+def test_publish_version_impl_unpublished_sub_agent(
+    monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft
+):
+    """Test publishing fails when a sub-agent has no published version"""
+    mock_query_draft = MagicMock(
+        return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_current_version_no",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(agent_version_service_module, "get_next_version_no", MagicMock(return_value=1))
+
+    with pytest.raises(ValueError, match="Sub-agent 2 has no published version"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+        )
 
 
 def test_publish_version_impl_no_draft(monkeypatch):
@@ -329,6 +390,14 @@ def test_publish_version_impl_with_rollback_source(monkeypatch, mock_agent_draft
     assert call_args["source_type"] == "ROLLBACK"
     assert call_args["source_version_no"] == 1
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_skills(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing version with skill instances"""
@@ -364,6 +433,11 @@ def test_publish_version_impl_with_skills(monkeypatch, mock_agent_draft, mock_to
 
     assert result["version_no"] == 3
     assert mock_insert_skill.call_count == 3
+
+    # Verify updated_by is set on all skill snapshots
+    for i, call in enumerate(mock_insert_skill.call_args_list):
+        skill_snapshot = call[0][0]
+        assert skill_snapshot["updated_by"] == "user1"
 
 
 def test_publish_version_impl_empty_tools_relations(monkeypatch, mock_agent_draft, mock_skills_draft):
@@ -1284,6 +1358,7 @@ def test_get_version_detail_or_draft_draft_version(monkeypatch):
     assert result["version"]["version_status"] == "DRAFT"
     assert len(result["tools"]) == 1
     assert result["sub_agent_id_list"] == [2]
+    assert result["sub_agent_relations"] == [{"agent_id": 2, "version_no": None}]
     assert len(result["skills"]) == 1
 
 
@@ -1425,8 +1500,10 @@ def test_remove_audit_fields_for_insert():
     assert "other_field" in data
     assert "create_time" not in data
     assert "update_time" not in data
-    assert "created_by" not in data
-    assert "updated_by" not in data
+    assert "created_by" in data
+    assert data["created_by"] == "user1"
+    assert "updated_by" in data
+    assert data["updated_by"] == "user2"
     assert "delete_flag" not in data
 
 
@@ -1487,7 +1564,7 @@ def test_list_published_agents_impl_success(monkeypatch):
         return_value=(True, [])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(
+    agent_service_mock.get_model_by_model_id = MagicMock(
         return_value={"display_name": "Test Model", "model_name": "test_model"}
     )
 
@@ -1640,15 +1717,15 @@ def test_list_published_agents_impl_user_with_groups(monkeypatch):
         return_value=(True, [])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(
+    agent_service_mock.get_model_by_model_id = MagicMock(
         return_value={"display_name": "Test Model", "model_name": "test_model"}
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
     assert len(result) == 1
-    # User should have READ permission (not EDIT)
-    assert result[0]["permission"] == "READ"
+    # User should have READ_ONLY permission (not EDIT)
+    assert result[0]["permission"] == "READ_ONLY"
 
 
 def test_list_published_agents_impl_model_cache(monkeypatch):
@@ -1690,7 +1767,7 @@ def test_list_published_agents_impl_model_cache(monkeypatch):
         return_value=(True, [])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(
+    agent_service_mock.get_model_by_model_id = MagicMock(
         return_value={"display_name": "Test Model", "model_name": "test_model"}
     )
 
@@ -1771,7 +1848,7 @@ def test_list_published_agents_impl_is_available_false(monkeypatch):
         return_value=(False, ["model_not_configured"])
     )
     agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
-    model_management_db_mock.get_model_by_model_id = MagicMock(return_value=None)
+    agent_service_mock.get_model_by_model_id = MagicMock(return_value=None)
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
@@ -1780,8 +1857,7 @@ def test_list_published_agents_impl_is_available_false(monkeypatch):
     assert "model_not_configured" in result[0]["unavailable_reasons"]
 
 
-@pytest.mark.asyncio
-async def test_list_published_agents_impl_exception_handling(monkeypatch):
+def test_list_published_agents_impl_exception_handling(monkeypatch):
     """Test exception handling in list_published_agents_impl"""
     # Mock query_all_agent_info_by_tenant_id to raise an exception
     test_exception = RuntimeError("Database connection failed")
@@ -1796,7 +1872,7 @@ async def test_list_published_agents_impl_exception_handling(monkeypatch):
 
     # Verify that the exception is caught and re-raised as ValueError
     with pytest.raises(ValueError, match="Failed to list published agents: Database connection failed"):
-        await list_published_agents_impl(tenant_id="tenant1", user_id="user1")
+        asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
 
 def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -1860,6 +1936,14 @@ def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, 
         description="Test Description",
         version="1",
     )
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_existing_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2021,6 +2105,14 @@ def test_publish_version_impl_without_a2a(monkeypatch, mock_agent_draft, mock_to
     a2a_agent_db_mock.get_server_agent_by_agent_id.assert_not_called()
     a2a_agent_db_mock.create_server_agent.assert_not_called()
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing A2A agent that supports streaming"""
@@ -2061,6 +2153,14 @@ def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_d
 
     assert result["a2a_agent"]["streaming"] is True
     assert result["a2a_agent_card"]["streaming"] is True
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2140,6 +2240,14 @@ def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_
         version="1",
     )
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing with A2A when agent name is empty string - uses default name"""
@@ -2194,6 +2302,14 @@ def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools
     # Verify empty string falls back to default name
     call_kwargs = a2a_agent_db_mock.create_server_agent.call_args[1]
     assert call_kwargs["name"] == "Agent-55"
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_missing_endpoint_id_in_response(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2296,6 +2412,14 @@ def test_publish_version_impl_with_a2a_existing_agent_keeps_endpoint_id(monkeypa
     assert result["a2a_agent_card"]["agent_card_url"] == "/nb/a2a/a2a_1_persistent/.well-known/agent-card.json"
     assert result["a2a_agent_card"]["rest_endpoints"]["message_send"] == "/nb/a2a/a2a_1_persistent/message:send"
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_result_contains_both_keys(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test that publish_version_impl returns both a2a_agent and a2a_agent_card keys when publish_as_a2a=True"""
@@ -2345,6 +2469,14 @@ def test_publish_version_impl_with_a2a_result_contains_both_keys(monkeypatch, mo
     assert isinstance(result["a2a_agent"], dict)
     assert isinstance(result["a2a_agent_card"], dict)
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test A2A agent creation when agent draft has no description"""
@@ -2391,6 +2523,14 @@ def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_
     assert call_kwargs["description"] is None
     # Agent card should reflect None description
     assert result["a2a_agent_card"]["description"] is None
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2445,6 +2585,14 @@ def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeyp
     # Agent card should reflect updated values
     assert result["a2a_agent_card"]["name"] == "Test Agent"
     assert result["a2a_agent_card"]["description"] == "Test Description"
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_agent_card_all_fields(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2507,6 +2655,14 @@ def test_publish_version_impl_with_a2a_agent_card_all_fields(monkeypatch, mock_a
     assert card["jsonrpc_url"] == f"{expected_base_path}/v1"
     assert card["jsonrpc_methods"] == ["SendMessage", "SendStreamingMessage", "GetTask"]
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft, caplog):
     """Test that appropriate log messages are emitted for A2A agent creation"""
@@ -2551,6 +2707,14 @@ def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draf
     # Should contain log about creating A2A agent
     assert any("Creating/updating A2A Server agent" in msg for msg in log_messages)
     assert any("A2A Server agent created/updated with endpoint_id=a2a_1_log" in msg for msg in log_messages)
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_a2a_logging_on_update(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft, caplog):
@@ -2604,3 +2768,11 @@ def test_publish_version_impl_a2a_logging_on_update(monkeypatch, mock_agent_draf
     assert any("A2A Server agent already exists" in msg for msg in log_messages)
     assert any("Creating/updating A2A Server agent" in msg for msg in log_messages)
     assert any("A2A Server agent created/updated with endpoint_id=a2a_1_existing" in msg for msg in log_messages)
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"

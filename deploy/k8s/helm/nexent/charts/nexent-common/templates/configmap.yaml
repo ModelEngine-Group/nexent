@@ -1,0 +1,188 @@
+{{- $monitoring := default dict .Values.global.monitoring -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-config
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+data:
+  # Deployment version
+  DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
+
+  # Elasticsearch Service
+  ELASTICSEARCH_HOST: {{ .Values.config.elasticsearch.host | quote }}
+  ES_JAVA_OPTS: {{ .Values.config.elasticsearch.javaOpts | quote }}
+  ES_DISK_WATERMARK_LOW: {{ .Values.config.elasticsearch.diskWatermarkLow | quote }}
+  ES_DISK_WATERMARK_HIGH: {{ .Values.config.elasticsearch.diskWatermarkHigh | quote }}
+  ES_DISK_WATERMARK_FLOOD_STAGE: {{ .Values.config.elasticsearch.diskWatermarkFloodStage | quote }}
+
+  # Service URLs (internal)
+  CONFIG_SERVICE_URL: {{ .Values.config.services.configUrl | quote }}
+  ELASTICSEARCH_SERVICE: {{ .Values.config.services.elasticsearchService | quote }}
+  RUNTIME_SERVICE_URL: {{ .Values.config.services.runtimeUrl | quote }}
+  NEXENT_MCP_SERVER: {{ .Values.config.services.mcpServer | quote }}
+  MCP_MANAGEMENT_API: {{ .Values.config.services.mcpManagementServer | quote }}
+  DATA_PROCESS_SERVICE: {{ .Values.config.services.dataProcessService | quote }}
+  NORTHBOUND_API_SERVER: {{ .Values.config.services.northboundServer | quote }}
+  
+  # Service URLs (external)
+  NORTHBOUND_EXTERNAL_URL: {{ .Values.config.services.northboundExternalUrl | quote }}
+
+  # Postgres Config
+  POSTGRES_HOST: {{ .Values.config.postgres.host | quote }}
+  POSTGRES_USER: {{ .Values.config.postgres.user | quote }}
+  POSTGRES_DB: {{ .Values.config.postgres.db | quote }}
+  POSTGRES_PORT: {{ .Values.config.postgres.port | quote }}
+
+  # Minio Config
+  MINIO_ENDPOINT: {{ .Values.config.minio.endpoint | quote }}
+  MINIO_REGION: {{ .Values.config.minio.region | quote }}
+  MINIO_DEFAULT_BUCKET: {{ .Values.config.minio.defaultBucket | quote }}
+
+  # Redis Config
+  REDIS_URL: {{ .Values.config.redis.url | quote }}
+  REDIS_BACKEND_URL: {{ .Values.config.redis.backendUrl | quote }}
+
+  # Model Engine Config
+  MODEL_ENGINE_ENABLED: {{ .Values.config.modelEngine.enabled | quote }}
+
+  # Voice Service Config
+  APPID: {{ .Values.config.voiceService.appid | quote }}
+  TOKEN: {{ .Values.config.voiceService.token | quote }}
+  CLUSTER: {{ .Values.config.voiceService.cluster | quote }}
+  VOICE_TYPE: {{ .Values.config.voiceService.voiceType | quote }}
+  SPEED_RATIO: {{ .Values.config.voiceService.speedRatio | quote }}
+
+  # Model Path Config
+  CLIP_MODEL_PATH: {{ .Values.config.modelPath.clipModelPath | quote }}
+  NLTK_DATA: {{ .Values.config.modelPath.nltkData | quote }}
+  TABLE_TRANSFORMER_MODEL_PATH: {{ .Values.config.modelPath.tableTransformerModelPath | quote }}
+  UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH: {{ .Values.config.modelPath.unstructuredDefaultModelInitializeParamsJsonPath | quote }}
+
+  # Terminal Tool SSH Config
+  SSH_PRIVATE_KEY_PATH: {{ .Values.config.terminal.sshPrivateKeyPath | quote }}
+
+  # Supabase Config
+  DASHBOARD_USERNAME: {{ .Values.config.supabase.dashboardUsername | quote }}
+  DASHBOARD_PASSWORD: {{ .Values.config.supabase.dashboardPassword | quote }}
+  SITE_URL: {{ .Values.config.supabase.siteUrl | quote }}
+  SUPABASE_URL: {{ .Values.config.supabase.supabaseUrl | quote }}
+  API_EXTERNAL_URL: {{ .Values.config.supabase.apiExternalUrl | quote }}
+  DISABLE_SIGNUP: {{ .Values.config.supabase.disableSignup | quote }}
+  JWT_EXPIRY: {{ .Values.config.supabase.jwtExpiry | quote }}
+  DEBUG_JWT_EXPIRE_SECONDS: {{ .Values.config.supabase.debugJwtExpireSeconds | quote }}
+  ENABLE_EMAIL_SIGNUP: {{ .Values.config.supabase.enableEmailSignup | quote }}
+  ENABLE_EMAIL_AUTOCONFIRM: {{ .Values.config.supabase.enableEmailAutoconfirm | quote }}
+  ENABLE_ANONYMOUS_USERS: {{ .Values.config.supabase.enableAnonymousUsers | quote }}
+  ENABLE_PHONE_SIGNUP: {{ .Values.config.supabase.enablePhoneSignup | quote }}
+  ENABLE_PHONE_AUTOCONFIRM: {{ .Values.config.supabase.enablePhoneAutoconfirm | quote }}
+  INVITE_CODE: {{ .Values.config.supabase.inviteCode | quote }}
+  MAILER_URLPATHS_CONFIRMATION: {{ .Values.config.supabase.mailerUrlpathsConfirmation | quote }}
+  MAILER_URLPATHS_INVITE: {{ .Values.config.supabase.mailerUrlpathsInvite | quote }}
+  MAILER_URLPATHS_RECOVERY: {{ .Values.config.supabase.mailerUrlpathsRecovery | quote }}
+  MAILER_URLPATHS_EMAIL_CHANGE: {{ .Values.config.supabase.mailerUrlpathsEmailChange | quote }}
+  SUPABASE_POSTGRES_HOST: {{ .Values.config.supabase.postgresHost | quote }}
+  SUPABASE_POSTGRES_DB: {{ .Values.config.supabase.postgresDb | quote }}
+  SUPABASE_POSTGRES_PORT: {{ .Values.config.supabase.postgresPort | quote }}
+  ADDITIONAL_REDIRECT_URLS: {{ .Values.config.supabase.additionalRedirectUrls | quote }}
+
+  # Data Processing Service Configuration
+  REDIS_PORT: {{ .Values.config.redis.port | quote }}
+  FLOWER_PORT: {{ .Values.config.dataProcess.flowerPort | quote }}
+  RAY_DASHBOARD_PORT: {{ .Values.config.dataProcess.rayDashboardPort | quote }}
+  RAY_DASHBOARD_HOST: {{ .Values.config.dataProcess.rayDashboardHost | quote }}
+  RAY_ACTOR_NUM_CPUS: {{ .Values.config.dataProcess.rayActorNumCpus | quote }}
+  RAY_NUM_CPUS: {{ .Values.config.dataProcess.rayNumCpus | quote }}
+  RAY_OBJECT_STORE_MEMORY_GB: {{ .Values.config.dataProcess.rayObjectStoreMemoryGb | quote }}
+  RAY_TEMP_DIR: {{ .Values.config.dataProcess.rayTempDir | quote }}
+  RAY_LOG_LEVEL: {{ .Values.config.dataProcess.rayLogLevel | quote }}
+  DISABLE_RAY_DASHBOARD: {{ .Values.config.dataProcess.disableRayDashboard | quote }}
+  DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
+  DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
+  ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}
+  CELERY_WORKER_PREFETCH_MULTIPLIER: {{ .Values.config.dataProcess.celeryWorkerPrefetchMultiplier | quote }}
+  CELERY_TASK_TIME_LIMIT: {{ .Values.config.dataProcess.celeryTaskTimeLimit | quote }}
+  ELASTICSEARCH_REQUEST_TIMEOUT: {{ .Values.config.dataProcess.elasticsearchRequestTimeout | quote }}
+  QUEUES: {{ .Values.config.dataProcess.queues | quote }}
+  WORKER_NAME: {{ .Values.config.dataProcess.workerName | quote }}
+  WORKER_CONCURRENCY: {{ .Values.config.dataProcess.workerConcurrency | quote }}
+
+  # Telemetry and Monitoring Configuration
+  ENABLE_TELEMETRY: {{ ternary (get $monitoring "enabled") .Values.config.telemetry.enabled (hasKey $monitoring "enabled") | quote }}
+  MONITORING_PROVIDER: {{ default .Values.config.telemetry.provider $monitoring.provider | quote }}
+  MONITORING_PROJECT_NAME: {{ default .Values.config.telemetry.projectName $monitoring.projectName | quote }}
+  OTEL_SERVICE_NAME: {{ default .Values.config.telemetry.serviceName $monitoring.serviceName | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ default .Values.config.telemetry.otlpEndpoint $monitoring.otlpEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {{ default .Values.config.telemetry.otlpTracesEndpoint $monitoring.otlpTracesEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{ default .Values.config.telemetry.otlpMetricsEndpoint $monitoring.otlpMetricsEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: {{ default .Values.config.telemetry.otlpProtocol $monitoring.otlpProtocol | quote }}
+  OTEL_EXPORTER_OTLP_HEADERS: {{ default .Values.config.telemetry.otlpHeaders $monitoring.otlpHeaders | quote }}
+  OTEL_EXPORTER_OTLP_AUTHORIZATION: {{ default .Values.config.telemetry.otlpAuthorization $monitoring.otlpAuthorization | quote }}
+  OTEL_EXPORTER_OTLP_X_API_KEY: {{ default .Values.config.telemetry.otlpApiKey $monitoring.otlpApiKey | quote }}
+  OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION: {{ default .Values.config.telemetry.otlpLangfuseIngestionVersion $monitoring.otlpLangfuseIngestionVersion | quote }}
+  LANGSMITH_API_KEY: {{ default .Values.config.telemetry.langsmithApiKey $monitoring.langsmithApiKey | quote }}
+  LANGSMITH_PROJECT: {{ default .Values.config.telemetry.langsmithProject $monitoring.langsmithProject | quote }}
+  OTEL_EXPORTER_OTLP_METRICS_ENABLED: {{ ternary (get $monitoring "otlpMetricsEnabled") .Values.config.telemetry.otlpMetricsEnabled (hasKey $monitoring "otlpMetricsEnabled") | quote }}
+  MONITORING_INSTRUMENT_REQUESTS: {{ ternary (get $monitoring "instrumentRequests") .Values.config.telemetry.instrumentRequests (hasKey $monitoring "instrumentRequests") | quote }}
+  MONITORING_FASTAPI_INCLUDED_URLS: {{ default .Values.config.telemetry.fastapiIncludedUrls $monitoring.fastapiIncludedUrls | quote }}
+  MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}
+  MONITORING_FASTAPI_EXCLUDE_SPANS: {{ default .Values.config.telemetry.fastapiExcludeSpans $monitoring.fastapiExcludeSpans | quote }}
+  MONITORING_DASHBOARD_URL: {{ default .Values.config.telemetry.dashboardUrl $monitoring.dashboardUrl | quote }}
+  TELEMETRY_SAMPLE_RATE: {{ default .Values.config.telemetry.telemetrySampleRate $monitoring.telemetrySampleRate | quote }}
+  MONITORING_TRACE_CONTENT_MODE: {{ default .Values.config.telemetry.traceContentMode $monitoring.traceContentMode | quote }}
+  MONITORING_TRACE_MAX_CHARS: {{ default .Values.config.telemetry.traceMaxChars $monitoring.traceMaxChars | quote }}
+  MONITORING_TRACE_MAX_ITEMS: {{ default .Values.config.telemetry.traceMaxItems $monitoring.traceMaxItems | quote }}
+
+  # Market Backend Address
+  MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}
+
+  # Skip proxy
+  skip_proxy: {{ .Values.config.skipProxy | quote }}
+  UMASK: {{ .Values.config.umask | quote }}
+  SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
+
+  # MCP Container Image
+  NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}
+
+  # Kubernetes Deployment Mode
+  IS_DEPLOYED_BY_KUBERNETES: {{ .Values.config.isDeployedByKubernetes | quote }}
+  KUBERNETES_NAMESPACE: {{ .Values.global.namespace | quote }}
+
+
+  # ===== OAuth Configuration =====
+  # GitHub OAuth - get credentials from https://github.com/settings/developers
+  GITHUB_OAUTH_CLIENT_ID: {{ .Values.config.oauth.githubClientId | quote }}
+  GITHUB_OAUTH_CLIENT_SECRET: {{ .Values.config.oauth.githubClientSecret | quote }}
+  # GDE OAuth
+  GDE_URL: {{ .Values.config.oauth.gdeUrl | quote }}
+  GDE_OAUTH_CLIENT_ID: {{ .Values.config.oauth.gdeClientId | quote }}
+  GDE_OAUTH_CLIENT_SECRET: {{ .Values.config.oauth.gdeClientSecret | quote }}
+  # WeChat OAuth (set ENABLE_WECHAT_OAUTH=true to enable)
+  ENABLE_WECHAT_OAUTH: {{ .Values.config.oauth.enableWechat | quote }}
+  WECHAT_OAUTH_APP_ID: {{ .Values.config.oauth.wechatClientId | quote }}
+  WECHAT_OAUTH_APP_SECRET: {{ .Values.config.oauth.wechatClientSecret | quote }}
+  # Base URL for OAuth callback (e.g., http://localhost:3000 for local dev)
+  OAUTH_SSL_VERIFY: {{ .Values.config.oauth.sslVerify | quote }}
+  OAUTH_CA_BUNDLE: {{ .Values.config.oauth.caBundle | quote }}
+  OAUTH_CALLBACK_BASE_URL: {{ .Values.config.oauth.callbackBaseUrl | quote }}
+
+  # ===== CAS SSO Configuration =====
+  CAS_ENABLED: {{ .Values.config.cas.enabled | quote }}
+  CAS_SERVER_URL: {{ .Values.config.cas.serverUrl | quote }}
+  CAS_VALIDATE_PATH: {{ .Values.config.cas.validatePath | quote }}
+  CAS_CALLBACK_BASE_URL: {{ .Values.config.cas.callbackBaseUrl | quote }}
+  CAS_LOGIN_MODE: {{ .Values.config.cas.loginMode | quote }}
+  CAS_USER_ATTRIBUTE: {{ .Values.config.cas.userAttribute | quote }}
+  CAS_EMAIL_ATTRIBUTE: {{ .Values.config.cas.emailAttribute | quote }}
+  CAS_ROLE_ATTRIBUTE: {{ .Values.config.cas.roleAttribute | quote }}
+  CAS_TENANT_ATTRIBUTE: {{ .Values.config.cas.tenantAttribute | quote }}
+  CAS_ROLE_MAP_JSON: {{ .Values.config.cas.roleMapJson | quote }}
+  CAS_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.sessionMaxAgeSeconds | quote }}
+  LOCAL_SESSION_MAX_AGE_SECONDS: {{ .Values.config.cas.localSessionMaxAgeSeconds | quote }}
+  CAS_RENEW_BEFORE_SECONDS: {{ .Values.config.cas.renewBeforeSeconds | quote }}
+  CAS_RENEW_TIMEOUT_SECONDS: {{ .Values.config.cas.renewTimeoutSeconds | quote }}
+  CAS_SYNTHETIC_EMAIL_DOMAIN: {{ .Values.config.cas.syntheticEmailDomain | quote }}
+  CAS_LOGOUT_URL: {{ .Values.config.cas.logoutUrl | quote }}
+  CAS_SSL_VERIFY: {{ .Values.config.cas.sslVerify | quote }}
+  CAS_CA_BUNDLE: {{ .Values.config.cas.caBundle | quote }}

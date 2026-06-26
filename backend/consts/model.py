@@ -1,8 +1,8 @@
 from enum import Enum
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Literal
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
@@ -138,6 +138,56 @@ class ModelRequest(BaseModel):
     access_token: Optional[str] = None
     timeout_seconds: Optional[int] = None
     concurrency_limit: Optional[int] = None
+    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
+    context_window_tokens: Optional[int] = None
+    max_input_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    default_output_reserve_tokens: Optional[int] = None
+    tokenizer_family: Optional[str] = None
+    capacity_source: Optional[str] = None
+    capability_profile_version: Optional[str] = None
+
+
+class CapacitySuggestionFields(BaseModel):
+    context_window_tokens: Optional[int] = None
+    max_input_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    default_output_reserve_tokens: Optional[int] = None
+    tokenizer_family: Optional[str] = None
+
+
+class ModelCapacitySuggestionRequest(BaseModel):
+    model_name: str = Field(..., min_length=1, max_length=512)
+    base_url: Optional[str] = None
+    provider_hint: Optional[str] = None
+    api_key: Optional[str] = None
+    model_type: Optional[str] = None
+
+
+class ModelCapacitySuggestionResponse(BaseModel):
+    suggestions: Optional[CapacitySuggestionFields] = None
+    match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "none"]
+    match_confidence: Optional[Literal["high", "medium", "low"]] = None
+    match_explanation: str
+    suggested_provider: Optional[str] = None
+    canonical_model_name: Optional[str] = None
+    capability_profile_version: Optional[str] = None
+    capacity_source_on_accept: Optional[Literal["operator"]] = None
+
+
+class CapacityCoverageBareModel(BaseModel):
+    model_id: int
+    model_name: str
+    model_factory: Optional[str] = None
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    max_tokens: Optional[int] = None
+    suggestion_available: bool = False
+
+
+class CapacityCoverageResponse(BaseModel):
+    total_llm_vlm: int
+    bare_count: int
+    bare_models: List[CapacityCoverageBareModel] = Field(default_factory=list)
 
 
 class ProviderModelRequest(BaseModel):
@@ -230,6 +280,24 @@ class HistoryItem(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
 
 
+class AgentToolParamsRequest(BaseModel):
+    """Request-scoped tool parameter overrides for a single agent."""
+
+    tools: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Mapping from tool identifier to request-scoped override params",
+    )
+
+
+class ToolParamsRequest(BaseModel):
+    """Request-scoped tool parameter overrides for main and managed agents."""
+
+    agents: Dict[str, AgentToolParamsRequest] = Field(
+        default_factory=dict,
+        description="Mapping from agent identifier to tool parameter overrides",
+    )
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -238,8 +306,10 @@ class AgentRequest(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
     model_id: Optional[int] = None
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
+    tool_params: Optional[ToolParamsRequest] = None
 
 
 class MessageUnit(BaseModel):
@@ -414,12 +484,47 @@ class OptimizePromptSectionRequest(BaseModel):
     section_title: str
     current_content: str
     feedback: str
+    mode: Literal["general", "insert", "select"] = "general"
+    start_pos: Optional[int] = Field(None, description="Start position for insert/select mode")
+    end_pos: Optional[int] = Field(None, description="End position for insert/select mode")
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
         None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
     knowledge_base_display_names: Optional[List[str]] = Field(
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
+
+
+class BadCaseItem(BaseModel):
+    question: str
+    answer: str
+    label: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class OptimizePromptBadCaseRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    current_content: str
+    bad_cases: List[BadCaseItem]
+    section_type: str
+    section_title: str
+    tool_ids: Optional[List[int]] = Field(None)
+    sub_agent_ids: Optional[List[int]] = Field(None)
+    knowledge_base_display_names: Optional[List[str]] = Field(None)
+
+
+class OptimizeFromDebugSelected(BaseModel):
+    user_question: str
+    assistant_answer: str
+
+
+class OptimizePromptFromDebugRequest(BaseModel):
+    agent_id: int
+    model_id: int
+    feedback: str
+    selected: OptimizeFromDebugSelected
+    history: Optional[List[HistoryItem]] = None
 
 
 class GenerateTitleRequest(BaseModel):
@@ -438,6 +543,7 @@ class AgentInfoRequest(BaseModel):
     model_name: Optional[str] = None
     model_id: Optional[int] = None
     max_steps: Optional[int] = Field(default=None, ge=1, le=30)
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
@@ -454,9 +560,17 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    verification_config: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
     version_no: int = 0
+
+    @field_validator("verification_config", mode="before")
+    @classmethod
+    def normalize_verification_config(cls, value):
+        if value is None:
+            return None
+        return AgentVerificationConfig.model_validate(value).model_dump()
 
 
 class AgentIDRequest(BaseModel):
@@ -522,13 +636,16 @@ class MessageIdRequest(BaseModel):
 
 class ExportAndImportAgentInfo(BaseModel):
     agent_id: int
+    tenant_id: Optional[str] = None
     name: str
     display_name: Optional[str] = None
     description: str
     business_description: str
     author: Optional[str] = None
     max_steps: int
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: bool
+    verification_config: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
     constraint_prompt: Optional[str] = None
     few_shots_prompt: Optional[str] = None
@@ -556,6 +673,47 @@ class ExportAndImportDataFormat(BaseModel):
     agent_id: int
     agent_info: Dict[str, ExportAndImportAgentInfo]
     mcp_info: List[MCPInfo]
+
+
+class AgentRepositorySnapshot(ExportAndImportDataFormat):
+    """Frozen marketplace snapshot: export format plus optional skill ZIP payloads."""
+    skills: Optional[List["SkillZipEntry"]] = None
+
+
+class AgentRepositoryListingCreateRequest(BaseModel):
+    """Request body for creating a marketplace listing from an agent version."""
+    icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
+    downloads: int = Field(0, ge=0, description="Initial download/copy count for card display")
+    tags: Optional[List[str]] = Field(None, description="Marketplace tags")
+    category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
+    tool_count: Optional[int] = Field(
+        None, ge=0, description="Total tool count across all agents in the bundle"
+    )
+
+
+class AgentRepositoryCategoryItem(BaseModel):
+    """Marketplace category option for agent repository filtering."""
+    id: int
+    key: str
+    name: str
+
+
+class AgentRepositoryListingDetailResponse(BaseModel):
+    """Detailed marketplace listing payload for repository detail view."""
+    agent_repository_id: int
+    agent_id: Optional[int] = None
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    author: Optional[str] = None
+    icon: Optional[str] = None
+    status: str
+    version_label: Optional[str] = None
+    downloads: int = 0
+    created_at: Optional[str] = None
+    model_name: Optional[str] = None
+    duty_prompt: Optional[str] = None
+    tools: List[str] = Field(default_factory=list)
 
 
 class SkillZipEntry(BaseModel):

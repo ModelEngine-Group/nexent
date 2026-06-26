@@ -11,14 +11,14 @@ on:
     paths:
       - 'backend/**'
       - 'sdk/**'
-      - 'make/mcp/**'
+      - 'deploy/images/dockerfiles/mcp/**'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
       - 'sdk/**'
-      - 'make/mcp/**'
+      - 'deploy/images/dockerfiles/mcp/**'
       - '.github/workflows/**'
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build MCP image (amd64) and load locally
         run: |
-          docker build --platform linux/amd64 -t nexent/nexent-mcp:dev-amd64 -f make/mcp/Dockerfile .
+          docker build --platform linux/amd64 -t nexent/nexent-mcp:dev-amd64 -f deploy/images/dockerfiles/mcp/Dockerfile .
 
   build-mcp-arm64:
     runs-on: ubuntu-24.04-arm
@@ -38,6 +38,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Build MCP image (arm64) and load locally
         run: |
-          docker build --platform linux/arm64 -t nexent/nexent-mcp:dev-arm64 -f make/mcp/Dockerfile .
+          docker build --platform linux/arm64 -t nexent/nexent-mcp:dev-arm64 -f deploy/images/dockerfiles/mcp/Dockerfile .
 
 

@@ -18,17 +18,17 @@
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/docker
+cd nexent
 ```
 
-> **💡 提示**: `deploy.sh` 会在 `docker/.env` 不存在时自动从 `.env.example` 复制一份。若无特殊需求，可直接部署；若需要配置语音模型（STT/TTS），请部署前或部署后修改 `docker/.env` 中的相关参数。
+> **💡 提示**: `deploy.sh` 使用项目根目录 `.env` 作为运行配置。已有 `.env` 会原样保留；如果不存在，会优先复用已有 `docker/.env`，再回退到 `.env.example` 或 `docker/.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `.env` 中的相关参数。
 
 ### 2. 部署选项
 
 运行以下命令开始部署：
 
 ```bash
-bash deploy.sh
+bash deploy.sh docker
 ```
 
 执行此命令后，系统会通过 Bash TUI 选择部署参数。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
@@ -36,8 +36,8 @@ bash deploy.sh
 **组件组合:**
 - **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
 - **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
-- **data-process（可选）**: 数据处理服务
-- **supabase（可选）**: 启用用户、租户和认证能力
+- **data-process（默认选中，可选）**: 数据处理服务
+- **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
@@ -54,19 +54,19 @@ bash deploy.sh
 
 ```bash
 # 默认组件组合，development 端口策略，标准镜像源
-bash deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-bash deploy.sh --components infrastructure,application,supabase,data-process,terminal
+bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
 
 # 使用中国大陆镜像源
-bash deploy.sh --image-source mainland
+bash deploy.sh docker --image-source mainland
 
 # 使用本地 latest 镜像
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
-部署成功后，非敏感部署选项会保存到 `docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 
 #### ⚠️ 重要提示
@@ -148,7 +148,52 @@ Nexent 使用 Docker volumes 进行数据持久化：
 
 默认 `dataDir` 为 `./volumes`（可在 `.env` 中配置 `ROOT_DIR`）。
 
-卸载由 `docker/uninstall.sh` 负责。默认交互询问是否删除持久化数据；也可使用 `--delete-volumes true|false`、`--remove-volumes`、`--keep-volumes`，或使用 `bash uninstall.sh delete-all` 删除容器和持久化数据。
+### 卸载 Docker 部署
+
+请在仓库根目录使用统一卸载入口：
+
+```bash
+# 停止并删除容器；是否删除持久化数据由交互确认
+bash uninstall.sh docker
+
+# 非交互卸载并保留数据
+bash uninstall.sh docker --keep-volumes
+
+# 删除 Docker volumes 和 ROOT_DIR 下的 Nexent 数据
+bash uninstall.sh docker --delete-volumes true
+
+# 完整清理：容器和持久化数据都会删除
+bash uninstall.sh docker delete-all
+```
+
+Docker 卸载脚本会读取 `.env` 中的 `ROOT_DIR` 并清理 Compose 资源。删除数据时会移除 `postgresql`、`elasticsearch`、`redis`、`minio`、`volumes`、`openssh-server`、`scripts`、`skills` 等服务目录；如果后续要复用已有数据，请选择保留 volumes。
+
+### 离线镜像包
+
+需要把镜像和部署脚本搬到离线机器时，可使用 `deploy/offline/build_offline_package.sh`：
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target docker \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package/docker
+```
+
+包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`.env.example` 和 `deploy/sql`，不会包含本地 `.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+
+在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
+
+```bash
+cd offline-package/docker
+bash deploy.sh --load-images docker \
+  --version v2.2.1 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general
+```
 
 ## 🔌 端口映射
 
@@ -171,14 +216,14 @@ Nexent 使用 Docker volumes 进行数据持久化：
 
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `docker/.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `docker/docker-compose-monitoring.yml` 中对应的观测组件。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
 
 ```bash
-cd nexent/docker
-bash deploy.sh
+cd nexent
+bash deploy.sh docker
 ```
 
-如果本地已有 `docker/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
+如果本地已有 `deploy/docker/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
 
 支持的 provider：
 
@@ -194,7 +239,7 @@ bash deploy.sh
 如需调整端口、镜像版本或 Langfuse 初始账号，请先复制并编辑监控环境变量：
 
 ```bash
-cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
+cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
 ```
 
 常用变量：
@@ -207,7 +252,7 @@ cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | 本地 Langfuse 初始管理员账号 |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | 本地 Grafana 管理员账号 |
 
-选择 `langsmith` provider 前，请先在 `docker/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `docker/.env` 中调整 OTLP 目标地址：
+选择 `langsmith` provider 前，请先在 `deploy/docker/assets/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `.env` 中调整 OTLP 目标地址：
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -224,10 +269,10 @@ MONITORING_DASHBOARD_URL=
 OAuth 登录依赖 `supabase` 组件。启用第三方登录时，请同时部署 `supabase`，并将 `OAUTH_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址。
 
 ```bash
-bash deploy.sh --components infrastructure,application,supabase
+bash deploy.sh docker --components infrastructure,application,supabase
 ```
 
-Docker 部署在 `docker/.env` 中配置 OAuth：
+Docker 部署在 `.env` 中配置 OAuth：
 
 ```bash
 # Web 入口地址。回调完整路径会自动拼接为：
@@ -268,6 +313,111 @@ Provider 启用规则：
 | WeChat | `ENABLE_WECHAT_OAUTH=true`、`WECHAT_OAUTH_APP_ID`、`WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 本地默认回调示例为 `http://localhost:3000/api/user/oauth/callback?provider=github`。生产环境应改为公网 HTTPS 域名，例如 `https://nexent.example.com/api/user/oauth/callback?provider=github`，并在 OAuth provider 控制台中登记相同地址。
+
+### CAS 登录配置
+
+CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `CAS_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`CAS_SERVER_URL` 是 CAS Server 根地址，也不要带结尾 `/`。
+
+Docker 部署在 `.env` 中配置 CAS：
+
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=http://localhost:8080/cas
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://localhost:3000
+
+# disabled: 禁用 CAS 登录入口和自动跳转
+# button: 在登录页显示 CAS 登录按钮
+# force: 未登录访问 Nexent 时自动跳转到 CAS
+CAS_LOGIN_MODE=force
+
+# 为空时使用 <cas:user>；填写 userName 时从 <cas:attributes><cas:userName> 取用户标识
+CAS_USER_ATTRIBUTE=
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=role
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+
+# 为空时 Nexent 主动退出不会调用 CAS Server 登出接口。
+# 可配置为 /logout，系统会基于 CAS_SERVER_URL 拼接。
+CAS_LOGOUT_URL=/logout
+CAS_SSL_VERIFY=true
+CAS_CA_BUNDLE=
+```
+
+常用 CAS 地址：
+
+| 用途 | 地址 |
+|------|------|
+| Nexent 登录入口 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service 回调 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS 无感续期回调 | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS 单点登出回调 | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+Apereo CAS 使用 JSON Service Registry 时，可以新增一个服务注册文件，例如 `Nexent-10001.json`。文件需要放到 CAS 部署配置的 service registry 目录中，`id` 必须全局唯一。下面是本地 Docker 示例：
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:3000/api/user/cas/logout_callback"
+}
+```
+
+生产环境建议保持 `CAS_SSL_VERIFY=true`；自签名证书优先配置 `CAS_CA_BUNDLE`，仅本地验证时再临时设置 `CAS_SSL_VERIFY=false`。
+
+#### CAS对接ModelEngine
+当使用CAS协议对接ModelEngine时，可以使用如下配置部署Nexent：
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=https://<ModelEngine IP>:5443/SSOSvr
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://<Nexent IP>:3000
+CAS_LOGIN_MODE=force
+CAS_USER_ATTRIBUTE=userName
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=userType
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+CAS_LOGOUT_URL=/logout?service=http://<Nexent IP>:3000
+CAS_SSL_VERIFY=false
+CAS_CA_BUNDLE=
+```
+
+同时，需要进入oms容器添加cas client的注册配置文件，参考如下步骤：
+```bash
+# 创建注册配置文件，将json部分输入文件并保存
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:3000/api/user/cas/logout_callback"
+}
+
+# 执行如下命令，将配置文件拷贝到容器中
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+```
 
 ### 北向接口配置 (NORTHBOUND_EXTERNAL_URL)
 

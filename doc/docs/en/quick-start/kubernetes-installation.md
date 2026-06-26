@@ -27,7 +27,7 @@ kubectl get nodes
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
+cd nexent
 ```
 
 ### 3. Deployment
@@ -35,7 +35,7 @@ cd nexent/k8s/helm
 Run the deployment script:
 
 ```bash
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
@@ -43,8 +43,8 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 **Deployment Components:**
 - **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
 - **application (selected by default, optional)**: config, runtime, mcp, northbound, web
-- **data-process (optional)**: data processing service
-- **supabase (optional)**: enables user, tenant, and authentication features
+- **data-process (selected by default, optional)**: data processing service
+- **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
 
@@ -57,7 +57,9 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
 
-After a successful deployment, non-sensitive choices are saved to `k8s/helm/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+Kubernetes uses the same project root `.env` as Docker. Existing `.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing `docker/.env`, then fall back to `.env.example` or `docker/.env.example`.
+
+After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 ### ⚠️ Important Notes
 
@@ -80,7 +82,7 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
 # Step 3: Re-deploy and record the su account password
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 ### 4. Access Your Installation
@@ -155,44 +157,96 @@ Nexent uses PersistentVolumes for data persistence:
 | Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
 | MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
 | Supabase DB (when `supabase` is selected) | nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
+| Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
+| Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
-Helm uninstall does not delete local hostPath data by default. Use `./uninstall.sh --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent-data/nexent-*`, or `--keep-local-data` to preserve them explicitly.
+Helm uninstall does not delete local hostPath data by default. Use `bash deploy/k8s/uninstall.sh --delete-local-data true` or `bash uninstall.sh k8s --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`; use `--keep-local-data` to preserve them explicitly.
+
+### Uninstall Kubernetes Deployment
+
+Use the root uninstall entrypoint from the repository root:
+
+```bash
+# Remove Helm release; prompts before deleting namespace or local data in interactive shells
+bash uninstall.sh k8s
+
+# Clean only Helm release state, useful for stuck releases
+bash uninstall.sh k8s clean
+
+# Remove Helm release and namespace, but keep local hostPath data
+bash uninstall.sh k8s delete --keep-local-data
+
+# Delete known local hostPath data after uninstall
+bash uninstall.sh k8s --delete-local-data true
+
+# Full cleanup: Helm release, namespace, and local hostPath data
+bash uninstall.sh k8s delete-all
+```
+
+`--delete-data` and `--delete-volumes` are compatibility options for Helm-managed resources. For local disks, use `--delete-local-data` or `--keep-local-data`; `delete-all --keep-local-data` removes the namespace while preserving local volume contents.
+
+### Offline Image Package
+
+Build a Kubernetes offline package from the repository root:
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target k8s \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package/k8s
+```
+
+The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `manifest.yaml`, and `checksums.txt`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory. On a single-node Docker-backed cluster, you can load and deploy directly:
+
+```bash
+cd offline-package/k8s
+bash deploy.sh --load-images k8s \
+  --version v2.2.1 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general
+```
+
+For multi-node clusters, load the images on every node that may run Nexent Pods, or push the loaded images to an internal registry and deploy with matching image settings.
 
 ## 🔧 Deployment Commands
 
 ```bash
 # Deploy with interactive prompts
-./deploy.sh
+bash deploy.sh k8s
 
 # Non-interactive deployment with the default component set
-./deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
-# Enable user/tenant features, data processing, and terminal
-./deploy.sh --components infrastructure,application,supabase,data-process,terminal
+# Add the terminal tool to the default component set
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
 
 # Deploy with mainland China image sources
-./deploy.sh --image-source mainland
+bash deploy.sh k8s --image-source mainland
 
 # Use local latest images
-./deploy.sh --image-source local-latest
+bash deploy.sh k8s --image-source local-latest
 
 # Clean helm state only (fixes stuck releases)
-./uninstall.sh clean
+bash uninstall.sh k8s clean
 
 # Uninstall; local data is preserved by default, with interactive prompts for namespace and local data deletion
-./uninstall.sh
+bash uninstall.sh k8s
 
 # Uninstall and delete the namespace
-./uninstall.sh --delete-namespace true
+bash uninstall.sh k8s --delete-namespace true
 
 # Uninstall and delete local hostPath data
-./uninstall.sh --delete-local-data true
+bash uninstall.sh k8s --delete-local-data true
 
 # Complete uninstall including namespace and local hostPath data
-./uninstall.sh delete-all
+bash uninstall.sh k8s delete-all
 
 # Complete uninstall but preserve local hostPath data
-./uninstall.sh delete-all --keep-local-data
+bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
 ## 🔧 Advanced Configuration
@@ -202,11 +256,11 @@ Helm uninstall does not delete local hostPath data by default. Use `./uninstall.
 Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script renders runtime Helm values for `global.monitoring.enabled`, `global.monitoring.provider`, and `global.monitoring.dashboardUrl`, and enables the `nexent-monitoring` subchart.
 
 ```bash
-cd nexent/k8s/helm
-./deploy.sh
+cd nexent
+bash deploy.sh k8s
 ```
 
-If `k8s/helm/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+If `deploy/k8s/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
 
 Supported providers:
 
@@ -219,7 +273,7 @@ Supported providers:
 | `grafana` | Local Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | Local Zipkin | `http://localhost:30011` |
 
-Before choosing the `langsmith` provider, configure `global.monitoring.langsmithApiKey` and `global.monitoring.langsmithProject` in `k8s/helm/nexent/values.yaml`. To change local Grafana, Langfuse, or dashboard ports, adjust the values file first, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
+Before choosing the `langsmith` provider, configure `global.monitoring.langsmithApiKey` and `global.monitoring.langsmithProject` in `deploy/deploy/k8s/helm/nexent/values.yaml`. To change local Grafana, Langfuse, or dashboard ports, adjust the values file first, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
 
 Common Helm values:
 
@@ -248,7 +302,7 @@ kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
 OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `config.oauth.callbackBaseUrl` to the browser-accessible Nexent Web URL.
 
 ```bash
-./deploy.sh --components infrastructure,application,supabase
+bash deploy.sh k8s --components infrastructure,application,supabase
 ```
 
 Kubernetes writes OAuth settings into backend environment variables through `nexent-common` `config.oauth.*` values:
@@ -290,6 +344,122 @@ Provider callback URLs:
 | WeChat | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 For local NodePort, a GitHub callback example is `http://localhost:30000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain and register the exact same URL in the OAuth provider console.
+
+### CAS Login Configuration
+
+CAS SSO does not require the `supabase` component. Set `nexent-common.config.cas.callbackBaseUrl` to the browser-accessible Nexent Web URL without a trailing `/`. `nexent-common.config.cas.serverUrl` is the CAS Server root URL and should also not include a trailing `/`.
+
+Kubernetes writes CAS settings into backend environment variables through `nexent-common` `config.cas.*` values:
+
+```bash
+helm upgrade --install nexent nexent \
+  --namespace nexent --create-namespace \
+  --set nexent-common.config.cas.enabled=true \
+  --set nexent-common.config.cas.serverUrl=https://cas.example.com/cas \
+  --set nexent-common.config.cas.callbackBaseUrl=https://nexent.example.com \
+  --set nexent-common.config.cas.loginMode=force \
+  --set nexent-common.config.cas.logoutUrl=/logout
+```
+
+Configurable CAS values:
+
+| Value | Environment variable | Description |
+|-------|----------------------|-------------|
+| `nexent-common.config.cas.enabled` | `CAS_ENABLED` | Enables CAS |
+| `nexent-common.config.cas.serverUrl` | `CAS_SERVER_URL` | CAS Server root URL |
+| `nexent-common.config.cas.validatePath` | `CAS_VALIDATE_PATH` | serviceValidate path, default `/p3/serviceValidate` |
+| `nexent-common.config.cas.callbackBaseUrl` | `CAS_CALLBACK_BASE_URL` | Web entry URL; CAS callback paths are appended automatically |
+| `nexent-common.config.cas.loginMode` | `CAS_LOGIN_MODE` | `disabled`, `button`, or `force` |
+| `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | User identifier attribute. Empty means use `<cas:user>` |
+| `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | Email attribute |
+| `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | Role attribute |
+| `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | Tenant attribute |
+| `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | JSON mapping from CAS roles to Nexent roles |
+| `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | Maximum local CAS session lifetime |
+| `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent local session lifetime |
+| `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | Trigger silent renewal within this many seconds before expiry |
+| `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | Silent renewal timeout |
+| `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | Domain used when CAS does not return an email |
+| `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS logout URL. Empty means Nexent logout will not call the CAS Server logout endpoint |
+| `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | Whether to verify CAS Server TLS certificates |
+| `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | Custom CA bundle path |
+
+Common CAS URLs:
+
+| Purpose | URL |
+|---------|-----|
+| Nexent login entry | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS silent renewal callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS single logout callback | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+For Apereo CAS JSON Service Registry, create a service registration file such as `Nexent-10001.json` in the service registry directory configured by your CAS deployment. The `id` must be globally unique. This is a local NodePort example:
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:30000/api/user/cas/logout_callback"
+}
+```
+
+In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
+
+#### CAS Integration with ModelEngine
+
+When integrating with ModelEngine through the CAS protocol, use a values file to configure Nexent. This avoids complex command-line escaping for `CAS_ROLE_MAP_JSON`.
+
+Create `cas-modelengine-values.yaml`:
+
+```yaml
+nexent-common:
+  config:
+    cas:
+      enabled: true
+      serverUrl: "https://<ModelEngine IP>:5443/SSOSvr"
+      validatePath: "/p3/serviceValidate"
+      callbackBaseUrl: "http://<Nexent IP>:30000"
+      loginMode: "force"
+      userAttribute: "userName"
+      emailAttribute: "email"
+      roleAttribute: "userType"
+      tenantAttribute: "tenant_id"
+      roleMapJson: '{"1":"ADMIN","3":"DEV"}'
+      sessionMaxAgeSeconds: 3600
+      localSessionMaxAgeSeconds: 3600
+      renewBeforeSeconds: 300
+      renewTimeoutSeconds: 10
+      syntheticEmailDomain: "cas.local"
+      logoutUrl: "/logout?service=http://<Nexent IP>:30000"
+      sslVerify: false
+      caBundle: ""
+```
+
+You also need to add a CAS client service registration file in the OMS container. Use the following steps as a reference:
+
+```bash
+# Create the registration file, paste the JSON content into it, and save it.
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:30000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:30000/api/user/cas/logout_callback"
+}
+
+# Run the following command to copy the registration file into the container.
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+```
 
 ## 🔍 Troubleshooting
 

@@ -18,17 +18,17 @@
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/docker
+cd nexent
 ```
 
-> **💡 Tip**: `deploy.sh` automatically copies `.env.example` to `docker/.env` when `docker/.env` does not exist. If you need to configure voice models (STT/TTS), update the related values in `docker/.env` before or after deployment.
+> **Tip**: Docker and Kubernetes use the project root `.env`. Existing `.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing `docker/.env`, then fall back to `.env.example` or `docker/.env.example`. If you need to configure voice models (STT/TTS), update the related values in `.env` before or after deployment.
 
 ### 2. Deployment Options
 
 Run the following command to start deployment:
 
 ```bash
-bash deploy.sh
+bash deploy.sh docker
 ```
 
 After running the command, the script opens Bash TUI menus for deployment options. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
@@ -36,8 +36,8 @@ After running the command, the script opens Bash TUI menus for deployment option
 **Deployment Components:**
 - **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
 - **application (selected by default, optional)**: config, runtime, mcp, northbound, web
-- **data-process (optional)**: data processing service
-- **supabase (optional)**: enables user, tenant, and authentication features
+- **data-process (selected by default, optional)**: data processing service
+- **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
 
@@ -54,19 +54,19 @@ You can also pass options directly:
 
 ```bash
 # Default component set, development port policy, standard image source
-bash deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
-# Enable user/tenant features, data processing, and terminal
-bash deploy.sh --components infrastructure,application,supabase,data-process,terminal
+# Add the terminal tool to the default component set
+bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
 
 # Use mainland China image sources
-bash deploy.sh --image-source mainland
+bash deploy.sh docker --image-source mainland
 
 # Use local latest images
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
-After a successful deployment, non-sensitive choices are saved to `docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 #### ⚠️ Important Notes
 
@@ -152,7 +152,52 @@ Nexent uses Docker volumes for data persistence:
 
 Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `.env`).
 
-Uninstall is handled by `docker/uninstall.sh`. It prompts before deleting persistent data by default; you can also pass `--delete-volumes true|false`, `--remove-volumes`, `--keep-volumes`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
+### Uninstall Docker Deployment
+
+Use the root uninstall entrypoint from the repository root:
+
+```bash
+# Stop and remove containers; keep persistent data unless you confirm deletion
+bash uninstall.sh docker
+
+# Non-interactive uninstall that keeps data
+bash uninstall.sh docker --keep-volumes
+
+# Delete Docker volumes and Nexent data under ROOT_DIR
+bash uninstall.sh docker --delete-volumes true
+
+# Full cleanup: containers plus persistent data
+bash uninstall.sh docker delete-all
+```
+
+The Docker uninstall script reads `.env` to resolve `ROOT_DIR` and removes Compose resources. Data deletion removes service directories such as `postgresql`, `elasticsearch`, `redis`, `minio`, `volumes`, `openssh-server`, `scripts`, and `skills`; keep volumes when you plan to redeploy with existing data.
+
+### Offline Image Package
+
+Use `deploy/offline/build_offline_package.sh` when you need to move images and deployment scripts to an offline host:
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target docker \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package/docker
+```
+
+The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `.env.example`, and `deploy/sql`. It does not include local `.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+
+On the target host, keep the deployment options consistent with the package manifest:
+
+```bash
+cd offline-package/docker
+bash deploy.sh --load-images docker \
+  --version v2.2.1 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general
+```
 
 ## 🔌 Port Mapping
 
@@ -175,14 +220,14 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `docker/.env`, then starts the matching observability services from `docker/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
 
 ```bash
-cd nexent/docker
-bash deploy.sh
+cd nexent
+bash deploy.sh docker
 ```
 
-If `docker/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
+If `deploy/docker/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
 
 Supported providers:
 
@@ -198,7 +243,7 @@ Supported providers:
 To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
 
 ```bash
-cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
+cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
 ```
 
 Common variables:
@@ -211,7 +256,7 @@ Common variables:
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
 
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `docker/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `docker/.env`:
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `.env`:
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -228,10 +273,10 @@ MONITORING_DASHBOARD_URL=
 OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `OAUTH_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL.
 
 ```bash
-bash deploy.sh --components infrastructure,application,supabase
+bash deploy.sh docker --components infrastructure,application,supabase
 ```
 
-For Docker, configure OAuth in `docker/.env`:
+For Docker, configure OAuth in `.env`:
 
 ```bash
 # Web entry URL. The full callback path is generated as:
@@ -272,6 +317,114 @@ Provider enablement rules:
 | WeChat | `ENABLE_WECHAT_OAUTH=true`, `WECHAT_OAUTH_APP_ID`, `WECHAT_OAUTH_APP_SECRET` | `{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider=wechat` |
 
 For local Docker, a GitHub callback example is `http://localhost:3000/api/user/oauth/callback?provider=github`. In production, use a public HTTPS domain such as `https://nexent.example.com/api/user/oauth/callback?provider=github` and register the exact same URL in the OAuth provider console.
+
+### CAS Login Configuration
+
+CAS SSO does not require the `supabase` component. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
+
+For Docker, configure CAS in `.env`:
+
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=http://localhost:8080/cas
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://localhost:3000
+
+# disabled: disable the CAS login entry and automatic redirects
+# button: show CAS as an optional login button
+# force: redirect unauthenticated Nexent users to CAS automatically
+CAS_LOGIN_MODE=force
+
+# Empty means use <cas:user>; set userName to read <cas:attributes><cas:userName>
+CAS_USER_ATTRIBUTE=
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=role
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+
+# Empty means Nexent logout will not call the CAS Server logout endpoint.
+# /logout is resolved against CAS_SERVER_URL.
+CAS_LOGOUT_URL=/logout
+CAS_SSL_VERIFY=true
+CAS_CA_BUNDLE=
+```
+
+Common CAS URLs:
+
+| Purpose | URL |
+|---------|-----|
+| Nexent login entry | `{CAS_CALLBACK_BASE_URL}/api/user/cas/login?redirect=/` |
+| CAS service callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/callback` |
+| CAS silent renewal callback | `{CAS_CALLBACK_BASE_URL}/api/user/cas/renew_callback` |
+| CAS single logout callback | `POST {CAS_CALLBACK_BASE_URL}/api/user/cas/logout_callback` |
+
+For Apereo CAS JSON Service Registry, create a service registration file such as `Nexent-10001.json` in the service registry directory configured by your CAS deployment. The `id` must be globally unique. This is a local Docker example:
+
+```json
+{
+  "@class": "org.apereo.cas.services.RegexRegisteredService",
+  "serviceId": "http://localhost:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 10001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://localhost:3000/api/user/cas/logout_callback"
+}
+```
+
+In production, keep `CAS_SSL_VERIFY=true`; for self-signed certificates, prefer `CAS_CA_BUNDLE` and only use `CAS_SSL_VERIFY=false` for local testing.
+
+#### CAS Integration with ModelEngine
+
+When integrating with ModelEngine through the CAS protocol, deploy Nexent with the following configuration:
+
+```bash
+CAS_ENABLED=true
+CAS_SERVER_URL=https://<ModelEngine IP>:5443/SSOSvr
+CAS_VALIDATE_PATH=/p3/serviceValidate
+CAS_CALLBACK_BASE_URL=http://<Nexent IP>:3000
+CAS_LOGIN_MODE=force
+CAS_USER_ATTRIBUTE=userName
+CAS_EMAIL_ATTRIBUTE=email
+CAS_ROLE_ATTRIBUTE=userType
+CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
+CAS_SESSION_MAX_AGE_SECONDS=3600
+LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_RENEW_BEFORE_SECONDS=300
+CAS_RENEW_TIMEOUT_SECONDS=10
+CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
+CAS_LOGOUT_URL=/logout?service=http://<Nexent IP>:3000
+CAS_SSL_VERIFY=false
+CAS_CA_BUNDLE=
+```
+
+You also need to add a CAS client service registration file in the OMS container. Use the following steps as a reference:
+
+```bash
+# Create the registration file, paste the JSON content into it, and save it.
+vim Nexent-10000001.json
+{
+  "@class": "org.apereo.cas.services.CasRegisteredService",
+  "serviceId": "http://<Nexent IP>:3000.*",
+  "name": "Nexent CAS Client",
+  "id": 1000001,
+  "description": "Nexent CAS SSO client",
+  "evaluationOrder": 1,
+  "logoutType": "BACK_CHANNEL",
+  "logoutUrl": "http://<Nexent IP>:3000/api/user/cas/logout_callback"
+}
+
+# Run the following command to copy the registration file into the container.
+kubectl cp Nexent-10000001.json model-engine/$(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}'):/opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --no-headers | awk '{print $1}') -- chown tomcat:fusioncube /opt/huawei/fce/apps/platform/webapps/SSOSvr/WEB-INF/classes/services/Nexent-10000001.json
+```
 
 ### Northbound Interface Configuration (NORTHBOUND_EXTERNAL_URL)
 

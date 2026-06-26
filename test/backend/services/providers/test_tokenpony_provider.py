@@ -69,6 +69,49 @@ class TestTokenPonyModelProvider:
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
         assert result[0]["max_tokens"] == 4096
+        assert "capacity_source" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_get_models_llm_surfaces_capacity_hints(self, mocker: MockFixture):
+        """Provider token metadata is returned as advisory capacity hints."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "claude-3-opus",
+                    "object": "model",
+                    "owned_by": "openai",
+                    "context_window": 128000,
+                    "max_completion_tokens": "16384",
+                    "tokenizer_family": "o200k_base",
+                }
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            return_value=mock_cm
+        )
+
+        provider = TokenPonyModelProvider()
+        result = await provider.get_models({
+            "model_type": "llm",
+            "api_key": "test-api-key",
+        })
+
+        assert result[0]["context_window_tokens"] == 128000
+        assert result[0]["max_output_tokens"] == 16384
+        assert result[0]["tokenizer_family"] == "o200k_base"
+        assert result[0]["capacity_source"] == "provider_candidate"
 
     @pytest.mark.asyncio
     async def test_get_models_embedding_success(self, mocker: MockFixture):
@@ -828,4 +871,3 @@ class TestTokenPonyModelProvider:
 
         assert len(result) == 1
         assert result[0]["max_tokens"] == 4096
-

@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import {
   AgentConfigUpdate,
+  DEFAULT_AGENT_VERIFICATION_CONFIG,
   PromptTemplate,
 } from "@/types/agentConfig";
 import {
@@ -153,6 +154,15 @@ export default function AgentGenerateDetail({}) {
     }));
   }, [filteredGroups]);
 
+  const selectedMainAgentModel = useMemo(() => {
+    return availableLlmModels.find(
+      (model) =>
+        model.id === editedAgent.model_id ||
+        model.displayName === editedAgent.model ||
+        model.name === editedAgent.model
+    );
+  }, [availableLlmModels, editedAgent.model, editedAgent.model_id]);
+
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
@@ -163,6 +173,7 @@ export default function AgentGenerateDetail({}) {
       mainAgentModel: editedAgent.model,
       mainAgentModelId: editedAgent.model_id,
       mainAgentMaxStep: editedAgent.max_step || 15,
+      requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
@@ -170,6 +181,7 @@ export default function AgentGenerateDetail({}) {
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
       provideRunSummary: editedAgent.provide_run_summary || false,
+      verificationEnabled: editedAgent.verification_config?.enabled ?? false,
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:editedAgent.business_logic_model_name,
       businessLogicModelId: editedAgent.business_logic_model_id,
@@ -179,6 +191,15 @@ export default function AgentGenerateDetail({}) {
     form.setFieldsValue(initialAgentInfo);
 
   }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
+
+  // Re-validate requested output tokens when the selected model's max changes,
+  // so switching to a model with a lower cap surfaces the violation immediately
+  // instead of waiting until save.
+  useEffect(() => {
+    if (form.getFieldValue("requestedOutputTokens") != null) {
+      form.validateFields(["requestedOutputTokens"]).catch(() => {});
+    }
+  }, [form, selectedMainAgentModel?.maxOutputTokens]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -233,6 +254,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(type);
     setOptimizeModalOpen(true);
   };
+
 
   const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
     return (
@@ -392,6 +414,7 @@ export default function AgentGenerateDetail({}) {
     setOptimizeModalType(null);
   };
 
+
   const handleSaveExpandModal = (content: string) => {
     switch (expandModalType) {
       case 'duty':
@@ -447,27 +470,35 @@ export default function AgentGenerateDetail({}) {
     }
   };
 
-  const getStoreFieldKey = (type: 'duty' | 'constraint' | 'few-shots') => {
-    switch (type) {
-      case "duty":
-        return "duty_prompt";
-      case "constraint":
-        return "constraint_prompt";
-      case "few-shots":
-        return "few_shots_prompt";
-    }
-  };
+  const handleReplaceOptimizedContent = (
+    content: string,
+    sectionType: "duty" | "constraint" | "few_shots"
+  ) => {
+    const value = content.trim();
 
-  const handleReplaceOptimizedContent = (content: string) => {
-    if (!optimizeModalType) {
+    if (!value) {
+      handleCloseOptimizeModal();
       return;
     }
 
-    const formFieldKey = getPromptFieldKey(optimizeModalType);
-    const storeFieldKey = getStoreFieldKey(optimizeModalType);
+    const fieldMap = {
+      duty: {
+        formField: "dutyPrompt" as const,
+        storeField: "duty_prompt" as const,
+      },
+      constraint: {
+        formField: "constraintPrompt" as const,
+        storeField: "constraint_prompt" as const,
+      },
+      few_shots: {
+        formField: "fewShotsPrompt" as const,
+        storeField: "few_shots_prompt" as const,
+      },
+    };
 
-    form.setFieldsValue({ [formFieldKey]: content });
-    updateAgentConfig({ [storeFieldKey]: content } as AgentConfigUpdate);
+    const { formField, storeField } = fieldMap[sectionType];
+    form.setFieldsValue({ [formField]: value });
+    updateAgentConfig({ [storeField]: value } as AgentConfigUpdate);
     handleCloseOptimizeModal();
   };
 
@@ -863,7 +894,7 @@ export default function AgentGenerateDetail({}) {
                       </Row>
 
                       <Row gutter={16}>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="mainAgentMaxStep"
                             label={t("businessLogic.config.maxSteps")}
@@ -891,7 +922,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="provideRunSummary"
                             label={t("agent.provideRunSummary")}
@@ -909,6 +940,80 @@ export default function AgentGenerateDetail({}) {
                               ]}
                               onChange={(value) => {
                                 updateAgentConfig({ provide_run_summary: value });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item
+                            name="verificationEnabled"
+                            label={t("agent.verification")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.verification.error"),
+                              },
+                            ]}
+                          >
+                            <Select
+                              options={[
+                                { value: true, label: t("common.yes") },
+                                { value: false, label: t("common.no") },
+                              ]}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  verification_config: {
+                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+                                    enabled: value,
+                                  },
+                                });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <Form.Item
+                            name="requestedOutputTokens"
+                            label={t("agent.requestedOutputTokens")}
+                            tooltip={t("agent.requestedOutputTokens.tooltip")}
+                            rules={[
+                              {
+                                type: "number",
+                                min: 1,
+                                message: t("agent.requestedOutputTokens.error"),
+                              },
+                              ...(selectedMainAgentModel?.maxOutputTokens
+                                ? [
+                                    {
+                                      type: "number" as const,
+                                      max: selectedMainAgentModel.maxOutputTokens,
+                                      message: t(
+                                        "agent.requestedOutputTokens.maxError",
+                                        { max: selectedMainAgentModel.maxOutputTokens }
+                                      ),
+                                    },
+                                  ]
+                                : []),
+                            ]}
+                          >
+                            <InputNumber
+                              min={1}
+                              max={selectedMainAgentModel?.maxOutputTokens}
+                              precision={0}
+                              placeholder={
+                                selectedMainAgentModel?.defaultOutputReserveTokens
+                                  ? String(selectedMainAgentModel.defaultOutputReserveTokens)
+                                  : undefined
+                              }
+                              style={{ width: "100%" }}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  requested_output_tokens:
+                                    typeof value === "number" ? value : null,
+                                });
                               }}
                             />
                           </Form.Item>
