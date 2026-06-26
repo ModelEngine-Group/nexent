@@ -39,6 +39,7 @@ from database.user_tenant_db import get_user_tenant_by_user_id
 logger = logging.getLogger("mcp_management_service")
 
 MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/servers"
+MCP_SMITHERY_BASE_URL = "https://api.smithery.ai/servers"
 MCP_REVIEW_PENDING = "pending"
 MCP_REVIEW_APPROVED = "approved"
 MCP_REVIEW_REJECTED = "rejected"
@@ -466,7 +467,7 @@ async def list_my_community_mcp_services(
 # Registry Functions
 # ---------------------------------------------------------------------------
 
-async def list_registry_mcp_services(
+async def _list_official_registry_mcp_services(
     *,
     search: str | None = None,
     include_deleted: bool = False,
@@ -516,3 +517,200 @@ async def list_registry_mcp_services(
         "servers": raw_servers if isinstance(raw_servers, list) else [],
         "metadata": metadata,
     }
+
+
+async def _list_smithery_registry_mcp_services(
+    *,
+    search: str | None = None,
+    cursor: str | None = None,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    """List MCP services from the Smithery registry.
+
+    Args:
+        search: Search keyword (searches by displayName/qualifiedName client-side)
+        cursor: Smithery page number (cursor is "page-N")
+        limit: Items per page
+
+    Returns:
+        Dictionary with servers and metadata compatible with the official registry format
+    """
+    page = 1
+    if cursor and cursor.startswith("page-"):
+        try:
+            page = int(cursor.split("page-", 1)[1])
+        except (ValueError, IndexError):
+            page = 1
+
+    params: Dict[str, Any] = {"pageSize": limit}
+    request_url = f"{MCP_SMITHERY_BASE_URL}?{urlencode(params)}&page={page}"
+    timeout = aiohttp.ClientTimeout(total=20)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    }
+
+    async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+        async with session.get(request_url, headers=headers) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"Smithery request failed with status {response.status}")
+            payload = await response.json(content_type=None)
+
+    raw_servers = payload.get("servers") if isinstance(payload, dict) else []
+    pagination = payload.get("pagination") if isinstance(payload, dict) else {}
+
+    if not isinstance(raw_servers, list):
+        return {"servers": [], "metadata": {}}
+
+    total_pages = int(pagination.get("totalPages", 0)) if pagination else 0
+
+    # Transform Smithery format to the frontend's expected format
+    transformed = []
+    for server in raw_servers:
+        qualified_name = server.get("qualifiedName") or server.get("displayName") or ""
+        display_name = server.get("displayName") or qualified_name
+        description = server.get("description") or ""
+        connections = server.get("connections") or []
+
+        # Map connections to remotes
+        remotes = []
+        for conn in connections:
+            if isinstance(conn, dict) and conn.get("deploymentUrl"):
+                remotes.append({
+                    "type": conn.get("type", "unknown"),
+                    "url": conn.get("deploymentUrl"),
+                })
+
+        # Apply client-side search filter since Smithery doesn't support server-side search
+        if search:
+            search_lower = search.lower()
+            if search_lower not in qualified_name.lower() and search_lower not in display_name.lower() and search_lower not in description.lower():
+                continue
+
+        transformed.append({
+            "server": {
+                "name": display_name,
+                "qualifiedName": qualified_name,
+                "description": description,
+                "remotes": remotes,
+                "packages": [],
+            },
+            "_meta": {
+                "source": "smithery",
+                "qualifiedName": qualified_name,
+            },
+        })
+
+    next_cursor = f"page-{page + 1}" if page < total_pages else None
+
+    return {
+        "servers": transformed,
+        "metadata": {"nextCursor": next_cursor},
+    }
+
+
+async def _get_smithery_server_detail(
+    qualified_name: str,
+) -> Dict[str, Any] | None:
+    """Fetch detail for a single Smithery server by qualifiedName.
+
+    The Smithery detail endpoint returns connections (with deployment URLs)
+    and tools, which are not available in the list endpoint.
+
+    Args:
+        qualified_name: The Smithery qualifiedName (e.g. "exa", "@smithery-ai/server-slack")
+
+    Returns:
+        Transformed server dict matching RegistryMcpCard format, or None if not found
+    """
+    request_url = f"{MCP_SMITHERY_BASE_URL}/{qualified_name}"
+    timeout = aiohttp.ClientTimeout(total=15)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    }
+
+    async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+        async with session.get(request_url, headers=headers) as response:
+            if response.status == 404:
+                return None
+            if response.status >= 400:
+                raise RuntimeError(f"Smithery detail request failed with status {response.status}")
+            server = await response.json(content_type=None)
+
+    if not isinstance(server, dict):
+        return None
+
+    qualified_name = server.get("qualifiedName") or ""
+    display_name = server.get("displayName") or qualified_name
+    description = server.get("description") or ""
+    connections = server.get("connections") or []
+
+    remotes = []
+    for conn in connections:
+        if isinstance(conn, dict) and conn.get("deploymentUrl"):
+            remotes.append({
+                "type": conn.get("type", "unknown"),
+                "url": conn.get("deploymentUrl"),
+            })
+
+    return {
+        "server": {
+            "name": display_name,
+            "qualifiedName": qualified_name,
+            "description": description,
+            "remotes": remotes,
+            "packages": [],
+        },
+        "_meta": {
+            "source": "smithery",
+            "qualifiedName": qualified_name,
+        },
+    }
+
+
+async def list_registry_mcp_services(
+    *,
+    search: str | None = None,
+    include_deleted: bool = False,
+    updated_since: str | None = None,
+    version: str | None = None,
+    cursor: str | None = None,
+    limit: int = 30,
+    source: str = "official",
+    detail_qualified_name: str | None = None,
+) -> Dict[str, Any]:
+    """List MCP services from the configured registry source.
+
+    Args:
+        search: Search keyword
+        include_deleted: Include deleted records
+        updated_since: Filter by update time
+        version: Filter by version
+        cursor: Pagination cursor
+        limit: Items per page
+        source: Registry source ("official" or "smithery")
+        detail_qualified_name: Fetch detail for a single server by qualifiedName (Smithery only)
+
+    Returns:
+        Dictionary with servers and metadata
+    """
+    if detail_qualified_name and source == "smithery":
+        server = await _get_smithery_server_detail(detail_qualified_name)
+        return {
+            "servers": [server] if server else [],
+            "metadata": {},
+        }
+
+    if source == "smithery":
+        return await _list_smithery_registry_mcp_services(
+            search=search,
+            cursor=cursor,
+            limit=limit,
+        )
+    return await _list_official_registry_mcp_services(
+        search=search,
+        include_deleted=include_deleted,
+        updated_since=updated_since,
+        version=version,
+        cursor=cursor,
+        limit=limit,
+    )

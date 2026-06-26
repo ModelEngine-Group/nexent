@@ -1296,6 +1296,7 @@ class RegistryListQuery(BaseModel):
     version: Optional[str] = Field(None, description="Filter by version")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
+    source: str = Field(default="official", description="Registry source: official or smithery")
 
     @field_validator("search", "updated_since", "version", "cursor", mode="before")
     @classmethod

@@ -4,6 +4,7 @@ import tempfile
 import asyncio
 import socket
 import random
+import httpx
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
@@ -47,14 +48,40 @@ logger = logging.getLogger("remote_mcp_service")
 
 async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
     """Check if an MCP server is healthy and reachable."""
-    try:
-        url_stripped = remote_mcp_server.strip()
-        headers = {}
-        if authorization_token:
-            headers["Authorization"] = authorization_token
-        if custom_headers:
-            headers.update(custom_headers)
+    url_stripped = remote_mcp_server.strip()
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
 
+    # Try full MCP protocol health check first
+    mcp_ok = await _mcp_protocol_health_check(url_stripped, headers)
+    if mcp_ok:
+        return True
+
+    # Fallback: simple HTTP GET to verify server reachability (may require auth)
+    try:
+        timeout = httpx.Timeout(10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(url_stripped, headers=headers, follow_redirects=True)
+            # Any HTTP response means the server is alive (even 401/403)
+            logger.info(f"MCP server HTTP health check returned {response.status_code} for {url_stripped}")
+            return True
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        logger.error(f"MCP server unreachable via HTTP: {e}")
+        raise MCPConnectionError("MCP server is unreachable")
+    except httpx.TimeoutException as e:
+        logger.error(f"MCP server HTTP health check timed out: {e}")
+        raise MCPConnectionError("MCP_HEALTH_TIMEOUT")
+    except Exception as e:
+        logger.error(f"MCP server HTTP health check failed: {e}")
+        raise MCPConnectionError(f"MCP connection failed: {e}")
+
+
+async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> bool:
+    """Try to establish an MCP protocol-level connection to the server."""
+    try:
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
                 url=url_stripped,
@@ -68,7 +95,6 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
                 httpx_client_factory=create_httpx_client
             )
         else:
-            # Default to StreamableHttpTransport for unrecognized formats
             transport = StreamableHttpTransport(
                 url=url_stripped,
                 headers=headers,
@@ -80,11 +106,8 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
             connected = client.is_connected()
             return connected
     except BaseException as e:
-        logger.error(f"Remote MCP server health check failed: {e}", exc_info=True)
-        error_message = str(e).strip() or repr(e)
-        if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in error_message.lower():
-            raise MCPConnectionError("MCP_HEALTH_TIMEOUT")
-        raise MCPConnectionError(error_message)
+        logger.debug(f"MCP protocol health check failed (will try HTTP fallback): {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------

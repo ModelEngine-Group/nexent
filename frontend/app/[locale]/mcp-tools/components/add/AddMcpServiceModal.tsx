@@ -8,6 +8,7 @@ import {
 import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./registry/AddMcpServiceRegistrySection";
 import AddMcpServiceCommunitySection from "./community/AddMcpServiceCommunitySection";
+import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 
 interface AddMcpServiceModalProps {
   open: boolean;
@@ -22,6 +23,7 @@ export default function AddMcpServiceModal({
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
   const [tab, setTab] = useState<McpSource>(initialTab);
+  const { enableUploadImage } = useMcpServerList({ enabled: open });
 
   useEffect(() => {
     if (open) setTab(initialTab);
@@ -84,6 +86,7 @@ export default function AddMcpServiceModal({
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
           <AddMcpServiceLocalSection
             active={tab === McpSource.LOCAL}
+            enableUploadImage={enableUploadImage}
             onAdded={onClose}
           />
           <AddMcpServiceRegistrySection

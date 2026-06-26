@@ -11,10 +11,10 @@ import {
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
-import { McpDeploymentType, McpSource } from "@/const/mcpTools";
+import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
-import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
+import { uploadMcpImage } from "@/services/mcpService";
 
 interface UseMcpAddLocalParams {
   onSuccess: () => void;
@@ -39,7 +39,8 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
 
     const isContainer = draft.deploymentType === McpDeploymentType.CONTAINER;
     const isApi = draft.deploymentType === McpDeploymentType.API;
-    if (isContainer) {
+    const isLocalImage = draft.deploymentType === McpDeploymentType.LOCAL_IMAGE;
+    if (isContainer || isLocalImage) {
       const available = await checkContainerPortAvailable(draft.containerPort);
       if (!available) {
         message.error(
@@ -78,7 +79,27 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
 
     setSubmitting(true);
     try {
-      if (isContainer) {
+      if (isLocalImage) {
+        const file = draft.uploadImageFile;
+        if (!file) {
+          message.error(t("mcpConfig.message.uploadImageFileRequired"));
+          return false;
+        }
+        if (!file.name.endsWith(".tar")) {
+          message.error(t("mcpConfig.message.uploadImageInvalidFileType"));
+          return false;
+        }
+        if (!draft.containerPort || draft.containerPort < 1 || draft.containerPort > 65535) {
+          message.error(t("mcpConfig.message.uploadImageValidPortRequired"));
+          return false;
+        }
+
+        const envVars = draft.authorizationToken?.trim()
+          ? JSON.stringify({ authorization_token: draft.authorizationToken.trim() })
+          : undefined;
+
+        await uploadMcpImage(file, draft.containerPort, trimmedName, envVars);
+      } else if (isContainer) {
         const mcpConfig = parseContainerMcpConfigJson(draft.containerConfigJson);
         if (!mcpConfig) {
           message.error(t("mcpTools.add.error.containerJsonInvalid"));

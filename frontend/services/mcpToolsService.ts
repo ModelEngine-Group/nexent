@@ -70,6 +70,7 @@ export const fetchRegistryMcpCards = async (params: {
   version?: string;
   updatedSince?: string;
   includeDeleted?: boolean;
+  source?: string;
 }) => {
   const query = new URLSearchParams();
   query.set("limit", "30");
@@ -85,6 +86,9 @@ export const fetchRegistryMcpCards = async (params: {
   query.set("include_deleted", params.includeDeleted ? "true" : "false");
   if (params.cursor) {
     query.set("cursor", params.cursor);
+  }
+  if (params.source) {
+    query.set("source", params.source);
   }
 
   const result = await listRegistryMcpTools(query);
@@ -288,7 +292,9 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       updatedAt: s.update_time,
       tags: s.tags || [],
       transportType:
-        s.config_json !== undefined && s.config_json !== null
+        (s.config_json !== undefined && s.config_json !== null) ||
+        (s.container_id !== undefined && s.container_id !== null) ||
+        (s.container_port !== undefined && s.container_port !== null)
           ? McpTransportType.CONTAINER
           : McpTransportType.URL,
       serverUrl: s.mcp_url,
@@ -335,6 +341,30 @@ export const listRegistryMcpTools = async (query: URLSearchParams) => {
   } catch (error) {
     log.error("listRegistryMcpTools failed", error);
     throw error;
+  }
+};
+
+export const fetchRegistryServerDetail = async (
+  source: string,
+  qualifiedName: string
+): Promise<RegistryMcpCard | null> => {
+  try {
+    const query = new URLSearchParams();
+    query.set("source", source);
+    query.set("qualified_name", qualifiedName);
+    const response = await fetchWithAuth(
+      `${API_ENDPOINTS.mcpTools.registryServerDetail}?${query.toString()}`
+    );
+    const data = await parseJson<{
+      servers?: RegistryMcpCard[];
+    }>(response);
+    if (data?.servers?.length) {
+      return data.servers[0];
+    }
+    return null;
+  } catch (error) {
+    log.error("fetchRegistryServerDetail failed", error);
+    return null;
   }
 };
 

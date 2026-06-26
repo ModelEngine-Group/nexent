@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Radio } from "antd";
+import { Alert, Button, Form, Input, Modal, Radio, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import type {
   RegistryMcpCard,
@@ -14,6 +14,7 @@ import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
 import ContainerPortField from "../../shared/ContainerPortField";
 import { McpTransportType } from "@/const/mcpTools";
+import { fetchRegistryServerDetail } from "@/services/mcpToolsService";
 
 interface AddMcpServiceRegistrySectionProps {
   active: boolean;
@@ -25,8 +26,30 @@ export default function AddMcpServiceRegistrySection({
   onAdded,
 }: AddMcpServiceRegistrySectionProps) {
   const [selected, setSelected] = useState<RegistryMcpCard | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<RegistryMcpCard | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const browser = useMcpRegistryBrowser(active);
   const quickAdd = useMcpRegistryQuickAdd({ onSuccess: onAdded });
+
+  const handleSelect = async (service: RegistryMcpCard) => {
+    const isSmithery = (service._meta as Record<string, unknown> | undefined)?.source === "smithery";
+    const qualifiedName = String((service._meta as Record<string, unknown> | undefined)?.qualifiedName || service.server?.qualifiedName || "");
+    if (isSmithery && qualifiedName) {
+      setDetailLoading(true);
+      setSelected(service);
+      const detail = await fetchRegistryServerDetail("smithery", qualifiedName);
+      setSelectedDetail(detail);
+      setDetailLoading(false);
+    } else {
+      setSelected(service);
+      setSelectedDetail(service);
+    }
+  };
+
+  const handleCloseDetail = () => {
+    setSelected(null);
+    setSelectedDetail(null);
+  };
 
   if (!active) return null;
 
@@ -38,6 +61,7 @@ export default function AddMcpServiceRegistrySection({
           version={browser.filters.version}
           updatedSince={browser.filters.updatedSince}
           includeDeleted={browser.filters.includeDeleted}
+          source={browser.filters.source}
           page={browser.page}
           resultCount={browser.services.length}
           onSearchChange={(value) => browser.updateFilter("search", value)}
@@ -48,6 +72,7 @@ export default function AddMcpServiceRegistrySection({
           onIncludeDeletedChange={(value) =>
             browser.updateFilter("includeDeleted", value)
           }
+          onSourceChange={(value) => browser.updateFilter("source", value)}
         />
 
         <McpRegistryCardList
@@ -57,15 +82,21 @@ export default function AddMcpServiceRegistrySection({
           hasNextPage={browser.hasNextPage}
           onPrevPage={browser.prevPage}
           onNextPage={browser.nextPage}
-          onSelect={setSelected}
+          onSelect={handleSelect}
           onQuickAdd={quickAdd.open}
         />
       </div>
 
-      {selected ? (
+      {detailLoading ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+          <Spin size="large" />
+        </div>
+      ) : null}
+
+      {selected && selectedDetail && !detailLoading ? (
         <McpRegistryDetailModal
-          service={selected}
-          onClose={() => setSelected(null)}
+          service={selectedDetail}
+          onClose={handleCloseDetail}
           onQuickAdd={quickAdd.open}
         />
       ) : null}

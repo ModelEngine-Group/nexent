@@ -19,7 +19,11 @@
       "Bash(npm *)",
       "Bash(git diff *)",
       "Bash(python *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "WebSearch",
+      "WebFetch(domain:smithery.ai)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:2000]\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:3000]\\)\")"
     ]
   }
 }

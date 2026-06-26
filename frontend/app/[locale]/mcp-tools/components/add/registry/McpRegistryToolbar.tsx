@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DatePicker, Dropdown, Input, Select, Switch } from "antd";
+import { Segmented } from "antd";
 import type { MenuProps } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
@@ -10,12 +11,14 @@ interface McpRegistryToolbarProps {
   version: string;
   updatedSince: string;
   includeDeleted: boolean;
+  source: string;
   page: number;
   resultCount: number;
   onSearchChange: (value: string) => void;
   onVersionChange: (value: string) => void;
   onUpdatedSinceChange: (value: string) => void;
   onIncludeDeletedChange: (value: boolean) => void;
+  onSourceChange: (value: string) => void;
 }
 
 /**
@@ -28,12 +31,14 @@ export default function McpRegistryToolbar({
   version,
   updatedSince,
   includeDeleted,
+  source,
   page,
   resultCount,
   onSearchChange,
   onVersionChange,
   onUpdatedSinceChange,
   onIncludeDeletedChange,
+  onSourceChange,
 }: McpRegistryToolbarProps) {
   const { t } = useTranslation("common");
   const [versionMode, setVersionMode] = useState<McpVersionFilterMode>(
@@ -87,59 +92,20 @@ export default function McpRegistryToolbar({
     onVersionChange(mode === McpVersionFilterMode.LATEST ? "latest" : "");
   };
 
+  const isOfficial = source === "official";
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-        <Input
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={t("mcpTools.registry.searchPlaceholder")}
-          allowClear
-          className="h-9 rounded-md border border-slate-200 text-sm lg:flex-1"
-        />
-        <div className="flex flex-wrap gap-2 lg:flex-none">
-          <Select
-            value={versionMode}
-            onChange={handleVersionModeChange}
-            className="h-9 min-w-[120px] flex-1 rounded-md border border-slate-200 text-sm lg:flex-none lg:w-32"
-            popupMatchSelectWidth={false}
-            options={[
-              {
-                label: t("mcpTools.registry.versionAll"),
-                value: McpVersionFilterMode.ALL,
-              },
-              {
-                label: t("mcpTools.registry.versionLatest"),
-                value: McpVersionFilterMode.LATEST,
-              },
-            ]}
-          />
-          <DatePicker
-            value={updatedSinceDateValue}
-            onChange={(value) =>
-              onUpdatedSinceChange(value ? value.toISOString() : "")
-            }
-            allowClear
-            className="h-9 min-w-[160px] flex-1 rounded-md border border-slate-200 text-sm lg:flex-none lg:w-44"
-            placeholder={t("mcpTools.registry.updatedSincePlaceholder")}
-          />
-          <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5">
-            <span className="text-xs text-slate-500">
-              {t("mcpTools.registry.includeDeleted")}
-            </span>
-            <Switch
-              size="small"
-              checked={includeDeleted}
-              onChange={onIncludeDeletedChange}
-            />
-          </div>
-        </div>
-      </div>
-
+      {/* Source switcher */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-slate-400">
-          {t("mcpTools.registry.pageResult", { page, count: resultCount })}
-        </span>
+        <Segmented
+          value={source}
+          onChange={(value) => onSourceChange(String(value))}
+          options={[
+            { label: t("mcpTools.registry.source.official"), value: "official" },
+            { label: "Smithery", value: "smithery" },
+          ]}
+        />
         <Dropdown
           menu={{ items: marketMenuItems }}
           trigger={["hover"]}
@@ -149,6 +115,61 @@ export default function McpRegistryToolbar({
             {t("mcpTools.registry.market.more")}
           </span>
         </Dropdown>
+      </div>
+
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <Input
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t("mcpTools.registry.searchPlaceholder")}
+          allowClear
+          className="h-9 rounded-md border border-slate-200 text-sm lg:flex-1"
+        />
+        {isOfficial ? (
+          <div className="flex flex-wrap gap-2 lg:flex-none">
+            <Select
+              value={versionMode}
+              onChange={handleVersionModeChange}
+              className="h-9 min-w-[120px] flex-1 rounded-md border border-slate-200 text-sm lg:flex-none lg:w-32"
+              popupMatchSelectWidth={false}
+              options={[
+                {
+                  label: t("mcpTools.registry.versionAll"),
+                  value: McpVersionFilterMode.ALL,
+                },
+                {
+                  label: t("mcpTools.registry.versionLatest"),
+                  value: McpVersionFilterMode.LATEST,
+                },
+              ]}
+            />
+            <DatePicker
+              value={updatedSinceDateValue}
+              onChange={(value) =>
+                onUpdatedSinceChange(value ? value.toISOString() : "")
+              }
+              allowClear
+              className="h-9 min-w-[160px] flex-1 rounded-md border border-slate-200 text-sm lg:flex-none lg:w-44"
+              placeholder={t("mcpTools.registry.updatedSincePlaceholder")}
+            />
+            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5">
+              <span className="text-xs text-slate-500">
+                {t("mcpTools.registry.includeDeleted")}
+              </span>
+              <Switch
+                size="small"
+                checked={includeDeleted}
+                onChange={onIncludeDeletedChange}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-slate-400">
+          {t("mcpTools.registry.pageResult", { page, count: resultCount })}
+        </span>
       </div>
     </div>
   );

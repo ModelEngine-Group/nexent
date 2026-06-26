@@ -254,6 +254,7 @@ export interface LocalAddMcpDraft {
   openApiJson?: string;
   containerConfigJson: string;
   containerPort?: number;
+  uploadImageFile?: File | null;
   tags: string[];
   version?: string;
 }

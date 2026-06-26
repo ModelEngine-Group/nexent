@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Alert, Button, Form, Input } from "antd";
+import { Alert, Button, Form, Input, Upload } from "antd";
+import type { UploadFile } from "antd";
 import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { McpDeploymentType, McpTransportType } from "@/const/mcpTools";
@@ -43,16 +44,19 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   openApiJson: "",
   containerConfigJson: "",
   containerPort: undefined,
+  uploadImageFile: null,
   tags: [],
 });
 
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
+  enableUploadImage?: boolean;
   onAdded: () => void;
 }
 
 export default function AddMcpServiceLocalSection({
   active,
+  enableUploadImage = false,
   onAdded,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
@@ -74,6 +78,23 @@ export default function AddMcpServiceLocalSection({
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
   };
+
+  const deploymentOptions = enableUploadImage
+    ? DEPLOYMENT_OPTIONS
+    : DEPLOYMENT_OPTIONS.filter(
+        (option) => option.value !== McpDeploymentType.LOCAL_IMAGE
+      );
+
+  const uploadFileList: UploadFile[] = draft.uploadImageFile
+    ? [
+        {
+          uid: "local-image",
+          name: draft.uploadImageFile.name,
+          status: "done",
+          originFileObj: draft.uploadImageFile as UploadFile["originFileObj"],
+        },
+      ]
+    : [];
 
   const bindField = <K extends keyof LocalAddMcpDraft>(key: K) => ({
     value: draft[key],
@@ -113,8 +134,7 @@ export default function AddMcpServiceLocalSection({
   const isRemoteLink = deploymentType === McpDeploymentType.REMOTE_LINK;
   const isContainer = deploymentType === McpDeploymentType.CONTAINER;
   const isApi = deploymentType === McpDeploymentType.API;
-  const isUnsupported =
-    deploymentType === McpDeploymentType.LOCAL_IMAGE;
+  const isLocalImage = deploymentType === McpDeploymentType.LOCAL_IMAGE;
 
   return (
     <div className="flex h-full flex-col">
@@ -130,7 +150,7 @@ export default function AddMcpServiceLocalSection({
             {t("mcpTools.detail.addMethod")}
           </label>
           <div className="grid grid-cols-4 gap-3">
-            {DEPLOYMENT_OPTIONS.map(({ value, labelKey, Icon }) => {
+            {deploymentOptions.map(({ value, labelKey, Icon }) => {
               const selected = deploymentType === value;
               return (
                 <button
@@ -139,10 +159,18 @@ export default function AddMcpServiceLocalSection({
                   onClick={() => {
                     setDeploymentType(value);
                     const nextTransport =
-                      value === McpDeploymentType.CONTAINER
+                      value === McpDeploymentType.CONTAINER ||
+                      value === McpDeploymentType.LOCAL_IMAGE
                         ? McpTransportType.CONTAINER
                         : McpTransportType.URL;
-                    patchDraft({ deploymentType: value, transportType: nextTransport });
+                    patchDraft({
+                      deploymentType: value,
+                      transportType: nextTransport,
+                      uploadImageFile:
+                        value === McpDeploymentType.LOCAL_IMAGE
+                          ? draft.uploadImageFile
+                          : null,
+                    });
                     form.setFieldValue("transportType", nextTransport);
                   }}
                   className={`flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm transition ${
@@ -158,15 +186,6 @@ export default function AddMcpServiceLocalSection({
             })}
           </div>
         </div>
-
-        {isUnsupported ? (
-          <Alert
-            type="info"
-            showIcon
-            message={t("mcpTools.addModal.unsupportedTitle")}
-            description={t("mcpTools.addModal.unsupportedDescription")}
-          />
-        ) : null}
 
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -323,6 +342,88 @@ export default function AddMcpServiceLocalSection({
           </div>
         ) : null}
 
+        {isLocalImage ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              {t("mcpTools.detail.serviceConfigTitle")}
+            </label>
+            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-normal text-slate-500">
+                  {t("mcpConfig.uploadImage.filePlaceholder")}
+                </label>
+                <Form.Item
+                  name="uploadImageFile"
+                  className="mb-0"
+                  rules={[
+                    {
+                      required: true,
+                      message: t("mcpConfig.message.uploadImageFileRequired"),
+                    },
+                    {
+                      validator: (_, value: File | null | undefined) => {
+                        if (value && !value.name.endsWith(".tar")) {
+                          return Promise.reject(
+                            new Error(t("mcpConfig.message.uploadImageInvalidFileType"))
+                          );
+                        }
+                        return Promise.resolve();
+                      },
+                    },
+                  ]}
+                >
+                  <Upload
+                    beforeUpload={() => false}
+                    accept=".tar"
+                    maxCount={1}
+                    fileList={uploadFileList}
+                    onRemove={() => {
+                      patchDraft({ uploadImageFile: null });
+                      form.setFieldValue("uploadImageFile", null);
+                    }}
+                    onChange={(info) => {
+                      const file = info.fileList[0]?.originFileObj ?? null;
+                      patchDraft({ uploadImageFile: file as File | null });
+                      form.setFieldValue("uploadImageFile", file);
+                    }}
+                  >
+                    <Button>{t("mcpConfig.uploadImage.button.selectFile")}</Button>
+                  </Upload>
+                </Form.Item>
+                <p className="mt-1 text-xs text-slate-400">
+                  {t("mcpConfig.uploadImage.fileHint")}
+                </p>
+              </div>
+
+              <Form.Item name="containerPort" rules={rules.containerPort} className="mb-0">
+                <div>
+                  <ContainerPortField
+                    scope="local"
+                    containerPort={draft.containerPort}
+                    setContainerPort={(value) => {
+                      patchDraft({ containerPort: value });
+                      form.setFieldValue("containerPort", value);
+                    }}
+                  />
+                </div>
+              </Form.Item>
+
+              <div>
+                <label className="mb-1 block text-sm font-normal text-slate-500">
+                  {t("mcpTools.addModal.bearerTokenOptional")}
+                </label>
+                <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0">
+                  <Input
+                    {...bindField("authorizationToken")}
+                    className="w-full rounded-md"
+                    placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
+                  />
+                </Form.Item>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-[1fr_160px] gap-4">
           <TagEditor
             title={t("mcpTools.detail.tags")}
@@ -347,7 +448,7 @@ export default function AddMcpServiceLocalSection({
 
       <div className="sticky bottom-0 flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
         <div />
-        <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isUnsupported}>
+        <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isLocalImage && !draft.uploadImageFile}>
           {t("mcpTools.addModal.saveAndAdd")}
         </Button>
       </div>
