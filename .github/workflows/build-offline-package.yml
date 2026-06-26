@@ -100,17 +100,16 @@ jobs:
             --include-source "${{ inputs.include_source }}" \
             --image-source "${{ inputs.image_source }}" \
             --components "${{ inputs.components }}" \
-            --target "${{ inputs.target }}"
+            --target "${{ inputs.target }}" \
+            --compress true
 
 
 
-      - name: Create zip package
+      - name: Show zip package
         run: |
           PACKAGE_NAME="${{ steps.set-vars.outputs.package-name }}"
 
-          (cd offline-output && zip -r "../${PACKAGE_NAME}.zip" .)
-
-          echo "Package created: ${PACKAGE_NAME}.zip"
+          echo "Package created by build script: ${PACKAGE_NAME}.zip"
 
           ls -lh "${PACKAGE_NAME}.zip"
 

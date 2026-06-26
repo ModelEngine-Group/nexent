@@ -226,4 +226,19 @@ assert_eq "value2" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "SINGLE_
 deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED" "value"
 assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should normalize unquoted identical values"
 
+GENERATE_ENV_TEST_ROOT="$TMP_DIR/generate-env-root"
+mkdir -p "$GENERATE_ENV_TEST_ROOT/docker"
+printf 'FROM_GENERATE_DOCKER=yes\n' > "$GENERATE_ENV_TEST_ROOT/docker/.env"
+printf 'FROM_GENERATE_EXAMPLE=yes\n' > "$GENERATE_ENV_TEST_ROOT/.env.example"
+(
+  NEXENT_GENERATE_ENV_SKIP_MAIN=true
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/../docker/generate_env.sh"
+  ENV_FILE="$GENERATE_ENV_TEST_ROOT/.env"
+  ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/.env.example"
+  LEGACY_ENV="$GENERATE_ENV_TEST_ROOT/docker/.env"
+  LEGACY_ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/docker/.env.example"
+  prepare_env_file >/dev/null
+)
+assert_contains "$(cat "$GENERATE_ENV_TEST_ROOT/.env")" "FROM_GENERATE_DOCKER=yes" "generate_env should migrate docker/.env before .env.example"
 echo "All deployment common tests passed."
