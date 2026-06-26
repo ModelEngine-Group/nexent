@@ -14,8 +14,8 @@ Follow these steps to upgrade Nexent safely:
 
 Before updating, record the current deployment version and data directory information.
 
-- Current Deployment Version Location: APP_VERSION in backend/consts/const.py
-- Data Directory Location: ROOT_DIR in docker/.env
+- Current Deployment Version Location: root VERSION
+- Data Directory Location: ROOT_DIR in .env
 
 **Code downloaded via git**
 
@@ -32,17 +32,17 @@ git pull
 
 ## 🔄 Step 2: Execute the Upgrade
 
-Navigate to the docker directory of the updated code and run the upgrade script:
+From the repository root of the updated code, run the Docker deployment entrypoint:
 
 ```bash
-bash upgrade.sh
+bash deploy.sh docker
 ```
 
 If deploy.options is missing, the script will prompt you to select deployment settings again, such as components, port policy, and image source. Choose the same options you used for the previous deployment.
 
 >💡 Tip
-> If `docker/.env` is missing, the deploy script automatically copies it from `.env.example`.
-> If you need to configure voice models (STT/TTS), add the relevant variables to `docker/.env`. We will provide a front-end configuration interface as soon as possible.
+> Existing `.env` is kept as-is. If it is missing, the deploy script first reuses an existing `docker/.env`, then falls back to `.env.example` or `docker/.env.example`.
+> If you need to configure voice models (STT/TTS), add the relevant variables to `.env`. We will provide a front-end configuration interface as soon as possible.
 
 
 ## 🌐 Step 3: Verify the deployment
@@ -82,74 +82,12 @@ docker system prune -af
 
 ---
 
-## 🗄️ Manual Database Update
+## 🗄️ Database Migrations
 
-If some SQL files fail to execute during the upgrade, you can perform the update manually.
+SQL migrations are no longer executed manually. In Docker, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies `*.sql` files from `deploy/sql/migrations/` in filename order; the other backend containers only wait for migration records to reach the target state. SQL is mounted from `deploy/sql` into `/opt/nexent/sql`, so SQL-only changes require rerunning deployment, not rebuilding images.
 
-### ✅ Method A: Use a SQL editor (recommended)
-
-1. Open your SQL client and create a new PostgreSQL connection.
-2. Retrieve connection settings from `/nexent/docker/.env`:
-   - Host
-   - Port
-   - Database
-   - User
-   - Password
-3. Test the connection. When successful, you should see tables under the `nexent` schema.
-4. Open a new query window.
-5. Navigate to the /nexent/docker/sql directory and open the failed SQL file(s) to view the script.
-6. Execute the failed SQL file(s) and any subsequent version SQL files in order.
-
-> ⚠️ Important
-> - Always back up the database first, especially in production.
-> - Run scripts sequentially to avoid dependency issues.
-> - `.env` keys may be named `POSTGRES_HOST`, `POSTGRES_PORT`, and so on—map them accordingly in your SQL client.
-
-### 🧰 Method B: Use the command line (no SQL client required)
-
-1. Switch to the Docker directory:
-
-   ```bash
-   cd nexent/docker
-   ```
-
-2. Read database connection details from `.env`, for example:
-
-   ```bash
-   POSTGRES_HOST=localhost
-   POSTGRES_PORT=5432
-   POSTGRES_DB=nexent
-   POSTGRES_USER=root
-   POSTGRES_PASSWORD=your_password
-   ```
-
-3. Execute SQL files sequentially (host machine example):
-
-   ```bash
-   # execute the following commands (please replace the placeholders with your actual values)
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.1_1030-update.sql
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.2_1105-update.sql
-   ```
-
-   Execute the corresponding scripts for your deployment versions in version order.
+The migration runner uses each SQL filename as the migration ID in `nexent.schema_migrations`. If a recorded file has the same checksum, it is skipped; if the checksum changes, the same file is rerun and the checksum, execution time, app version, and source file are updated.
 
 > 💡 Tips
-> - Load environment variables first if they are defined in `.env`:
->
->   **Windows PowerShell:**
->   ```powershell
->   Get-Content .env | Where-Object { $_ -notmatch '^#' -and $_ -match '=' } | ForEach-Object { $key, $value = $_ -split '=', 2; [Environment]::SetEnvironmentVariable($key.Trim(), $value.Trim(), 'Process') }
->   ```
->
->   **Linux/WSL:**
->   ```bash
->   export $(grep -v '^#' .env | xargs)
->   # Or use set -a to automatically export all variables
->   set -a; source .env; set +a
->   ```
->
-> - Create a backup before running migrations:
->
->   ```bash
->   docker exec -i nexent-postgres pg_dump -U [YOUR_POSTGRES_USER] [YOUR_POSTGRES_DB] > backup_$(date +%F).sql
->   ```
+> - Always back up the database before upgrading, especially in production.
+> - Check backend container logs for `[sql-migrations]` entries if a service fails during startup.

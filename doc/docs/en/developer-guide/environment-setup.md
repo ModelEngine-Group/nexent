@@ -21,9 +21,8 @@ Use this guide to prepare your environment before developing with Nexent. It sep
 Before backend work, start core services (PostgreSQL, Redis, Elasticsearch, MinIO, etc.).
 
 ```bash
-# Run from the docker directory at the project root
-cd docker
-./deploy.sh --components infrastructure --port-policy development
+# Run from the repository root
+bash deploy.sh docker --components infrastructure --port-policy development
 ```
 
 :::: info Important Notes

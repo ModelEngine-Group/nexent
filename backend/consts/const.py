@@ -168,6 +168,12 @@ PERMISSION_PRIVATE = "PRIVATE"
 # Response flag when system prompts are withheld from non-ASSET_OWNER callers.
 AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
 
+# W11 capacity suggestion rollout flags.
+CAPACITY_SUGGESTION_ENABLED = os.getenv(
+    "CAPACITY_SUGGESTION_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+CAPACITY_VISIBILITY_ENABLED = os.getenv(
+    "CAPACITY_VISIBILITY_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+
 
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")

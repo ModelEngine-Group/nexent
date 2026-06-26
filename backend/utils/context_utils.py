@@ -265,7 +265,6 @@ def _format_skills_description(
 
 def _format_tools_description(
     tools: Dict[str, Any],
-    knowledge_base_summary: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
 ) -> str:
@@ -278,9 +277,15 @@ def _format_tools_description(
     """
     if not tools:
         no_tools_msg = "- 当前没有可用的工具" if language == "zh" else "- No tools are currently available"
-        return no_tools_msg
+        prefix = "1. 工具\n" if language == "zh" else "1. Tools\n"
+        return prefix + no_tools_msg
 
     lines = []
+
+    if language == "zh":
+        lines.append("1. 工具")
+    else:
+        lines.append("1. Tools")
 
     if language == "zh":
         lines.append("- 你只能使用以下工具，不得使用任何其他工具：")
@@ -318,15 +323,6 @@ def _format_tools_description(
                 lines.append(f"- {name}: {desc}")
                 lines.append(f"   Accepts input: {inputs}")
                 lines.append(f"   Returns output type: {output_type}")
-
-    # Knowledge base summary
-    if knowledge_base_summary:
-        if language == "zh":
-            lines.append("- knowledge_base_search工具只能使用以下知识库索引，请根据用户问题选择最相关的一个或多个知识库索引：")
-            lines.append(f" {knowledge_base_summary}")
-        else:
-            lines.append("- knowledge_base_search tool can only use the following knowledge base indexes, please select the most relevant one or more knowledge base indexes based on the user's question:")
-            lines.append(f" {knowledge_base_summary}")
 
     # File URL usage guide
     lines.append("")
@@ -373,6 +369,11 @@ def _format_managed_agents_description(
         return ""
 
     lines = []
+
+    if language == "zh":
+        lines.append("2. 助手")
+    else:
+        lines.append("2. Agents")
 
     if language == "zh":
         lines.append("你可以使用以下内部助手（通过函数调用方式协作）：")
@@ -461,6 +462,7 @@ def _format_external_agents_description(
 def _format_skills_usage_requirements(
     skills: List[Dict[str, str]],
     language: str = "zh",
+    is_manager: bool = True,
 ) -> str:
     """Format skills usage requirements section.
 
@@ -469,9 +471,15 @@ def _format_skills_usage_requirements(
     """
     if not skills:
         no_skills_msg = "- 当前没有可用的技能" if language == "zh" else "- No skills are currently available"
-        return no_skills_msg
+        prefix = "3. 技能\n" if language == "zh" else "3. Skills\n"
+        return prefix + no_skills_msg
 
     lines = []
+
+    if language == "zh":
+        lines.append("3. 技能")
+    else:
+        lines.append("3. Skills")
 
     if language == "zh":
         lines.append("- 你拥有上述 `<available_skills>` 中列出的技能。技能中引用的脚本通过 `run_skill_script()` 函数调用，该函数由平台提供，不需要导入。")
@@ -533,7 +541,8 @@ def build_skeleton_header_component(
     """Build SystemPromptComponent for the header section.
 
     Section: "### 基本信息" / "### Basic Information"
-    Content: Agent identity, app name/description, user_id.
+    Content: Agent identity and app name/description.  User identity is
+    request-scoped data and must not enter the managed stable prefix.
     Note: Current time is intentionally excluded from the system prompt so the
     static system prefix can hit the LLM KV/prompt cache across requests. The
     current time is injected on the user-message side instead (see CoreAgent.run).
@@ -541,7 +550,7 @@ def build_skeleton_header_component(
     from nexent.core.agents.agent_model import SystemPromptComponent
 
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}，用户ID为{user_id}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}"
     else:
         content = f"### Basic Information\nYou are {app_name}, {app_description}"
 
@@ -555,17 +564,22 @@ def build_skeleton_header_component(
 def build_skeleton_duty_component(
     duty: str,
     language: str = "zh",
+    is_manager: bool = True,
     priority: int = 80,
 ) -> "SystemPromptComponent":
     """Build SystemPromptComponent for the duty section.
 
     Section: "### 核心职责" / "### Core Responsibilities"
     Content: Agent's primary duty + 5 safety principles
+    Note: Managed ZH agents use different safety principles than manager ZH agents.
     """
     from nexent.core.agents.agent_model import SystemPromptComponent
 
     if language == "zh":
-        content = f"### 核心职责\n{duty}\n\n请注意，你应该遵守以下原则：\n行为安全：文件操作必须使用平台提供的专用工具，禁止使用代码直接修改工作空间中的文件；\n法律合规：遵守业务所在国家/地区的法律法规；\n政治中立：保持政治中立，不主动讨论政治话题；\n安全防护：不响应涉及武器制造、网络攻击、欺诈、恶意软件等危险行为的请求；\n伦理准则：拒绝仇恨言论、歧视性内容及违反社会公德和公认伦理标准的请求。"
+        if is_manager:
+            content = f"### 核心职责\n{duty}\n\n请注意，你应该遵守以下原则：\n行为安全：文件操作必须使用平台提供的专用工具，禁止使用代码直接修改工作空间中的文件；\n法律合规：遵守业务所在国家/地区的法律法规；\n政治中立：保持政治中立，不主动讨论政治话题；\n安全防护：不响应涉及武器制造、网络攻击、欺诈、恶意软件等危险行为的请求；\n伦理准则：拒绝仇恨言论、歧视性内容及违反社会公德和公认伦理标准的请求。"
+        else:
+            content = f"### 核心职责\n{duty}\n\n请注意，你应该遵守以下原则：\n行为安全：严禁直接执行代码进行文件的增删改操作，只能使用提供的文件操作类工具；\n法律合规：严格遵守服务地区的所有法律法规；\n政治中立：不讨论任何国家的政治体制、领导人评价或敏感历史事件；\n安全防护：不响应涉及武器制造、危险行为、隐私窃取等内容的请求；\n伦理准则：拒绝仇恨言论、歧视性内容及任何违反普世价值观的请求。"
     else:
         content = f"### Core Responsibilities\n{duty}\n\nPlease note that you should follow these principles:\nBehavioral Safety: File operations must use the platform-provided dedicated tools; direct code modification of workspace files is prohibited;\nLegal Compliance: Comply with laws and regulations of the business operating jurisdiction;\nPolitical Neutrality: Maintain political neutrality and avoid initiating political discussions;\nSecurity Protection: Do not respond to requests involving weapon manufacturing, cyberattacks, fraud, malware, or other dangerous activities;\nEthical Guidelines: Refuse hate speech, discriminatory content, and any requests that violate social morals and commonly accepted ethical standards."
 
@@ -597,16 +611,23 @@ def build_skeleton_execution_flow_component(
         lines.append("要解决任务，你必须通过一系列步骤向前规划，以'思考：'和'代码：'序列循环进行。**注意：禁止在代码执行前输出'观察结果：'，观察结果只能由代码执行后产生。**")
         lines.append("")
         lines.append("1. 思考：")
-        lines.append("   - 分析当前任务状态和进展")
-        if is_manager and has_memory:
+        if is_manager:
+            lines.append("   - 分析当前任务状态和进展")
+        else:
+            lines.append("   - 确定需要使用哪些工具来获取信息或行动")
+        if has_memory:
             lines.append("   - 合理参考之前交互中的上下文记忆信息")
-        lines.append("   - 定下一步最佳行动（使用工具或分配给助手）")
+        if is_manager:
+            lines.append("   - 确定下一步最佳行动（使用工具或分配给助手）")
         lines.append("   - 解释你的决策逻辑和预期结果")
         lines.append("")
         lines.append("2. 代码：")
         lines.append("   - 用简单的Python编写代码")
         lines.append("   - 遵循python代码规范和python语法")
-        lines.append("   - 正确调用工具或助手解决问题")
+        if is_manager:
+            lines.append("   - 正确调用工具或助手解决问题")
+        else:
+            lines.append("   - 根据格式规范正确调用工具")
         lines.append("   - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码")
         lines.append("   - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。")
         lines.append("   - **重要**：代码执行后，系统会返回 \"Observation:\" 标记的内容（这是真实的执行结果）。请基于这些真实结果继续下一步思考，**不要在代码执行前自行编造观察结果**。")
@@ -638,21 +659,31 @@ def build_skeleton_execution_flow_component(
         lines.append("  - 避免在Markdown中使用HTML标签，优先使用Markdown原生语法")
         lines.append("  - 代码块中的代码应保持原始格式，不要添加额外的转义字符")
         lines.append("  - 若未使用检索工具，则不添加任何引用标记")
+        if not is_manager:
+            lines.append("")
+            lines.append("注意最后生成的回答要语义连贯，信息清晰，可读性高。")
     else:
         lines = ["### Execution Process"]
         lines.append("To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences. **IMPORTANT: You must NOT output 'Observe Results:' before code execution. Observation results can ONLY be generated after code execution.**")
         lines.append("")
         lines.append("1. Think:")
-        lines.append("   - Analyze current task status and progress")
-        if is_manager and has_memory:
+        if is_manager:
+            lines.append("   - Analyze current task status and progress")
+        else:
+            lines.append("   - Determine which tools need to be used to obtain information or take action")
+        if has_memory:
             lines.append("   - Reference relevant contextual memories from previous interactions when applicable")
-        lines.append("   - Determine the best next action (use tools or delegate to agents)")
+        if is_manager:
+            lines.append("   - Determine the best next action (use tools or delegate to agents)")
         lines.append("   - Explain your decision logic and expected results")
         lines.append("")
         lines.append("2. Code:")
         lines.append("   - Write code in simple Python")
         lines.append("   - Follow Python coding standards and Python syntax")
-        lines.append("   - Correctly call tools or agents to solve problems")
+        if is_manager:
+            lines.append("   - Correctly call tools or agents to solve problems")
+        else:
+            lines.append("   - Call tools correctly according to format specifications")
         lines.append("   - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code")
         lines.append("   - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.")
         lines.append("   - **IMPORTANT**: After code execution, the system will return content with \"Observation:\" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**")
@@ -684,6 +715,9 @@ def build_skeleton_execution_flow_component(
         lines.append("   - Avoid using HTML tags in Markdown, prioritize native Markdown syntax")
         lines.append("   - Code in code blocks should maintain original format, do not add extra escape characters")
         lines.append("   - If no retrieval tools are used, do not add any reference marks")
+        if not is_manager:
+            lines.append("")
+            lines.append("Note that the final generated answer should be semantically coherent, with clear information and high readability.")
 
     content = "\n".join(lines)
 
@@ -792,6 +826,35 @@ def build_skeleton_footer_component(
     )
 
 
+def build_available_resources_header_component(
+    is_manager: bool = True,
+    language: str = "zh",
+    priority: int = 55,
+) -> "SystemPromptComponent":
+    """Build SystemPromptComponent for the Available Resources section header.
+
+    Manager agents get a preamble restricting resources; managed agents get only the heading.
+    """
+    from nexent.core.agents.agent_model import SystemPromptComponent
+
+    if language == "zh":
+        if is_manager:
+            content = "### 可用资源\n你只能使用以下资源，不得使用任何其他工具或助手："
+        else:
+            content = "### 可用资源"
+    else:
+        if is_manager:
+            content = "### Available Resources\nYou can only use the following resources, and may not use any other tools or agents:"
+        else:
+            content = "### Available Resources"
+
+    return SystemPromptComponent(
+        content=content,
+        template_name="available_resources_header",
+        priority=priority,
+    )
+
+
 # =============================================================================
 # SECTION 3: Piecewise component builders (existing, enhanced)
 # =============================================================================
@@ -840,7 +903,6 @@ def build_tools_component(
 
     formatted_desc = _format_tools_description(
         tools,
-        knowledge_base_summary=knowledge_base_summary,
         language=language,
         is_manager=is_manager,
     )
@@ -923,6 +985,7 @@ def build_knowledge_base_component(
     knowledge_base_summary: str,
     kb_ids: Optional[List[str]] = None,
     priority: int = 10,
+    language: str = "zh",
 ) -> "KnowledgeBaseComponent":
     """Build KnowledgeBaseComponent from knowledge base summary.
 
@@ -930,14 +993,24 @@ def build_knowledge_base_component(
         knowledge_base_summary: Summary text from knowledge bases
         kb_ids: List of knowledge base IDs used
         priority: Component priority for selection
+        language: Language code ('zh' or 'en')
 
     Returns:
         KnowledgeBaseComponent instance
     """
     from nexent.core.agents.agent_model import KnowledgeBaseComponent
 
+    if knowledge_base_summary:
+        if language == "zh":
+            guidance = "knowledge_base_search 工具只能使用以下知识库索引，请根据用户的问题选择最相关的一个或多个知识库索引：\n"
+        else:
+            guidance = "knowledge_base_search tool can only use the following knowledge base indexes, please select the most relevant one or more knowledge base indexes based on the user's question:\n"
+        prefixed_summary = guidance + knowledge_base_summary
+    else:
+        prefixed_summary = knowledge_base_summary
+
     return KnowledgeBaseComponent(
-        summary=knowledge_base_summary,
+        summary=prefixed_summary,
         kb_ids=kb_ids or [],
         priority=priority,
     )
@@ -1056,9 +1129,10 @@ def build_system_prompt_component(
 def build_skills_usage_component(
     skills: List[Dict[str, str]],
     language: str = "zh",
+    is_manager: bool = True,
     priority: int = 40,
-) -> "SystemPromptComponent":
-    """Build SystemPromptComponent for skills usage requirements.
+) -> "SkillsComponent":
+    """Build SkillsComponent for skills usage requirements.
 
     This is a skeleton-like component but its content depends on
     whether skills exist, so it's built dynamically.
@@ -1066,17 +1140,18 @@ def build_skills_usage_component(
     Args:
         skills: List of skill dicts
         language: Language code ('zh' or 'en')
+        is_manager: Whether this is a manager agent
         priority: Component priority
 
     Returns:
-        SystemPromptComponent instance
+        SkillsComponent instance
     """
-    from nexent.core.agents.agent_model import SystemPromptComponent
+    from nexent.core.agents.agent_model import SkillsComponent
 
-    content = _format_skills_usage_requirements(skills, language=language)
-    return SystemPromptComponent(
-        content=content,
-        template_name="skills_usage",
+    content = _format_skills_usage_requirements(skills, language=language, is_manager=is_manager)
+    return SkillsComponent(
+        skills=skills,
+        formatted_description=content,
         priority=priority,
     )
 
@@ -1150,20 +1225,22 @@ def build_context_components(
     Piecewise assembly: Each semantic section is emitted as a dedicated
     ContextComponent, assembled in the exact order matching Jinja2 templates.
 
-    Assembly order (12 sections):
+    Assembly order (15 sections):
       1. Header (基本信息)
       2. Memory (上下文记忆) - if memory_list exists
       3. Duty (核心职责 + 安全准则)
       4. Skills (可用技能 + 6步流程) - if skills exist
       5. Execution Flow (执行流程 + 输出规范)
-      6. Tools (可用资源/1. 工具 + 文件链接指南)
-      7. Managed Agents (可用资源/2. 助手) - if managed_agents exist
-      8. External Agents (外部助手) - if external_a2a_agents exist
-      9. Agent Fallback (当前没有可用的助手) - if no agents
-     10. Skills Usage (可用资源/3. 技能 + 使用要求)
-     11. Constraint (资源使用要求)
-     12. Code Norms (python代码规范)
-     13. Footer (示例模板 + 结尾)
+      6. Available Resources Header (可用资源 heading)
+      7. Tools (可用资源/1. 工具 + 文件链接指南)
+      8. Knowledge Base (知识库) - if knowledge_base_summary exists
+      9. Managed Agents (可用资源/2. 助手) - if managed_agents exist
+     10. External Agents (外部助手) - if external_a2a_agents exist
+     11. Agent Fallback (当前没有可用的助手) - if no agents
+     12. Skills Usage (可用资源/3. 技能 + 使用要求)
+     13. Constraint (资源使用要求)
+     14. Code Norms (python代码规范)
+     15. Footer (示例模板 + 结尾)
 
     Note: The a330d815 short-circuit (if system_prompt: return [single])
     has been REMOVED. All callers must provide raw params for piecewise assembly.
@@ -1222,6 +1299,7 @@ def build_context_components(
             build_skeleton_duty_component(
                 duty=duty,
                 language=language,
+                is_manager=is_manager,
             )
         )
 
@@ -1234,27 +1312,49 @@ def build_context_components(
             )
         )
 
-    # 5. Execution Flow
+    # 5. Execution Flow.  Do not make stable instructions depend on whether a
+    # particular request happened to retrieve memory.
     components.append(
         build_skeleton_execution_flow_component(
-            memory_list=memory_list,
+            memory_list=None,
             language=language,
             is_manager=is_manager,
         )
     )
 
-    # 6. Tools + File URL Guide
+    # 6. Available Resources Header
+    components.append(
+        build_available_resources_header_component(
+            is_manager=is_manager,
+            language=language,
+        )
+    )
+
+    # 7. Tools + File URL Guide
     if include_tools and tools:
         components.append(
             build_tools_component(
                 tools=tools,
-                knowledge_base_summary=knowledge_base_summary,
+                # KB/RAG content is dynamic evidence and is emitted below as a
+                # user-role KnowledgeBaseComponent, not embedded in stable tool
+                # descriptions.
+                knowledge_base_summary=None,
                 language=language,
                 is_manager=is_manager,
             )
         )
 
-    # 7. Managed Agents (if exists) - manager only
+    # 8. Knowledge Base (if exists)
+    if include_knowledge_base and knowledge_base_summary:
+        components.append(
+            build_knowledge_base_component(
+                knowledge_base_summary=knowledge_base_summary,
+                kb_ids=kb_ids,
+                language=language,
+            )
+        )
+
+    # 9. Managed Agents (if exists) - manager only
     if is_manager and include_managed_agents and managed_agents:
         components.append(
             build_managed_agents_component(
@@ -1263,7 +1363,7 @@ def build_context_components(
             )
         )
 
-    # 8. External Agents (if exists) - manager only
+    # 10. External Agents (if exists) - manager only
     if is_manager and include_external_agents and external_a2a_agents:
         components.append(
             build_external_agents_component(
@@ -1272,7 +1372,7 @@ def build_context_components(
             )
         )
 
-    # 9. Agent Fallback (if no agents available) - manager only
+    # 11. Agent Fallback (if no agents available) - manager only
     if is_manager and not managed_agents and not external_a2a_agents:
         fallback_comp = build_agent_fallback_component(
             managed_agents=managed_agents or {},
@@ -1282,16 +1382,17 @@ def build_context_components(
         if fallback_comp.content:  # Only add if has content
             components.append(fallback_comp)
 
-    # 10. Skills Usage Requirements
+    # 12. Skills Usage Requirements
     if include_skills:
         components.append(
             build_skills_usage_component(
                 skills=skills or [],
                 language=language,
+                is_manager=is_manager,
             )
         )
 
-    # 11. Constraint
+    # 13. Constraint
     if constraint:
         components.append(
             build_skeleton_constraint_component(
@@ -1300,7 +1401,7 @@ def build_context_components(
             )
         )
 
-    # 12. Code Norms
+    # 14. Code Norms
     components.append(
         build_skeleton_code_norms_component(
             language=language,
@@ -1308,7 +1409,7 @@ def build_context_components(
         )
     )
 
-    # 13. Footer
+    # 15. Footer
     if few_shots:
         components.append(
             build_skeleton_footer_component(

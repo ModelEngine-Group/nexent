@@ -215,13 +215,16 @@ def test_create_or_update_tool_by_tool_info_update_existing(monkeypatch, mock_se
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
         "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj)
 
     tool_info = MagicMock()
     tool_info.__dict__ = {"agent_id": 1, "tool_id": 1}
 
     result = create_or_update_tool_by_tool_info(tool_info, "tenant1", "user1")
 
-    assert result == mock_tool_instance
+    # Result is now as_dict() of the tool_instance
+    assert isinstance(result, dict)
 
 
 def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session):
@@ -263,6 +266,8 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
 
     monkeypatch.setattr(
         "backend.database.tool_db.ToolInstance", MockToolInstanceClass)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj)
 
     session.add = MagicMock()
     session.flush = MagicMock()
@@ -272,7 +277,8 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
 
     result = create_or_update_tool_by_tool_info(tool_info, "tenant1", "user1")
 
-    assert isinstance(result, MockToolInstanceClass)
+    # Result is now as_dict() of the tool_instance (a dict)
+    assert isinstance(result, dict)
     session.add.assert_called_once()
     session.flush.assert_called_once()
 

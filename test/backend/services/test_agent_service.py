@@ -632,6 +632,10 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
     result = await get_creating_sub_agent_info_impl(authorization="Bearer token")
 
     # Assert
+    # W2 added `requested_output_tokens` to the response shape at
+    # agent_service.py:1112. The mocked `search_agent_info` payload does not
+    # include the key, so `agent_info.get("requested_output_tokens")` is None
+    # in the returned dict.
     expected_result = {
         "agent_id": 456,
         "name": "agent_name",
@@ -641,6 +645,7 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
         "model_name": "test_model",
         "model_id": None,
         "max_steps": 5,
+        "requested_output_tokens": None,
         "business_description": "Sub agent",
         "duty_prompt": "Sub duty prompt",
         "constraint_prompt": "Sub constraint prompt",
@@ -3727,6 +3732,7 @@ def mock_agent_request():
         query="test query",
         history=[],
         minio_files=[],
+        requested_output_tokens=4096,
         is_debug=False,
     )
 
@@ -3766,7 +3772,21 @@ async def test_prepare_agent_run(
     assert memory_context == mock_memory_context
     mock_build_memory_context.assert_called_once_with(
         "test_user", "test_tenant", 1, skip_query=False)
-    mock_create_run_info.assert_called_once()
+    mock_create_run_info.assert_called_once_with(
+        agent_id=1,
+        minio_files=[],
+        query="test query",
+        history=[],
+        tenant_id="test_tenant",
+        user_id="test_user",
+        language="zh",
+        allow_memory_search=True,
+        is_debug=False,
+        override_version_no=None,
+        override_model_id=None,
+        requested_output_tokens=4096,
+        tool_params=None,
+    )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
 
@@ -9204,6 +9224,24 @@ def test_get_agent_call_relationship_impl_deep_recursion(mock_query_sub, mock_se
     assert "sub_agents" in result
 
 
+# W2 introduced `_validate_requested_output_tokens_for_agent` on the
+# update/import path. The existing update_agent_info_impl_* / import_agent_*
+# tests build their request via `MagicMock(spec=AgentInfoRequest)` and never
+# wire `.requested_output_tokens = None`, so the validator either fails the
+# `> max_output_tokens` comparison on two MagicMocks or AttributeErrors on the
+# field. None of these tests are about output-reservation behavior, so we
+# autouse-stub the validator for this section. Tests that need to exercise
+# the validator can still `mock.patch` it locally; module-level autouse loses
+# to per-test patches.
+@pytest.fixture(autouse=True)
+def _stub_requested_output_tokens_validator():
+    with patch(
+        "backend.services.agent_service._validate_requested_output_tokens_for_agent",
+        return_value=None,
+    ):
+        yield
+
+
 # Tests for update_agent_info_impl skill handling exception
 @patch("backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info")
 @patch("backend.services.agent_service.skill_db.query_skill_instances_by_agent_id")
@@ -10037,7 +10075,18 @@ async def test_import_agent_by_agent_id_publish_version_error(
     mock_agent_info.business_logic_model_name = None
     mock_agent_info.prompt_template_id = None
     mock_agent_info.prompt_template_name = None
+    # W2 added `requested_output_tokens` to ExportAndImportAgentInfo and
+    # import_agent_by_agent_id reads it directly at agent_service.py:1874.
+    # MagicMock(spec=...) on a Pydantic v2 model does not always expose
+    # field-level attributes through dir(), so the access AttributeErrors
+    # unless we set it explicitly.
+    mock_agent_info.requested_output_tokens = None
 
+    # Configure the three patched mocks so the flow reaches the publish branch:
+    # - query_all_tools() must return an iterable (empty list -> no tool loop)
+    # - create_agent(...) must return a dict so `new_agent["agent_id"]` is an int
+    # - publish_version_impl(...) must raise so the under-test exception handler
+    #   at agent_service.py:1899-1901 actually fires
     mock_query_tools.return_value = []
     mock_create.return_value = {"agent_id": 100}
     mock_publish.side_effect = Exception("Publish error")
