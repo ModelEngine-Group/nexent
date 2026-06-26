@@ -425,6 +425,8 @@ from backend.agents.create_agent_info import (
     _normalize_tool_params_request,
     _get_agent_tool_overrides,
     _merge_tool_params,
+    _resolve_input_budget,
+    _resolve_safe_input_budget,
 )
 
 # Import HistoryItem for testing (from mocked consts.model)
@@ -438,6 +440,33 @@ ToolParamsRequest = sys.modules["consts.model"].ToolParamsRequest
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
+
+
+class TestResolveInputBudget:
+    """Tests for W1/W2 budget resolver hand-off."""
+
+    def test_resolve_input_budget_returns_monitoring_dict_then_resolver_snapshot(self):
+        """The caller needs monitoring fields for AgentConfig and the raw snapshot for W2."""
+        model_info = {
+            "model_factory": "openai",
+            "model_name": "gpt-4o",
+            "context_window_tokens": 32768,
+            "max_output_tokens": 4096,
+        }
+
+        input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
+        safe_budget_snapshot = _resolve_safe_input_budget(
+            capacity_snapshot=resolved_capacity_snapshot,
+            tenant_id="tenant_1",
+            agent_requested_output_tokens=None,
+            request_requested_output_tokens=None,
+        )
+
+        assert input_budget == resolved_capacity_snapshot.provider_input_limit_tokens
+        assert isinstance(capacity_snapshot, dict)
+        assert capacity_snapshot["capacity_fingerprint"] == resolved_capacity_snapshot.fingerprint
+        assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
+        assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
 
 
 class TestGetSkillsForTemplate:
