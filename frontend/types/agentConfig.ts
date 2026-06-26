@@ -14,6 +14,7 @@ export type AgentConfigUpdate = Partial<Pick<
   | "model"
   | "model_id"
   | "max_step"
+  | "requested_output_tokens"
   | "provide_run_summary"
   | "description"
   | "duty_prompt"
@@ -51,7 +52,7 @@ export interface AgentVerificationConfig {
 }
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
-  enabled: true,
+  enabled: false,
   step_verification_enabled: true,
   final_verification_enabled: true,
   llm_verification_enabled: true,
@@ -81,6 +82,7 @@ export interface Agent {
   model: string;
   model_id?: number;
   max_step: number;
+  requested_output_tokens?: number | null;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;

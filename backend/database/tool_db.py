@@ -47,6 +47,13 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
     tool_info_dict = tool_info.__dict__ | {
         "tenant_id": tenant_id, "user_id": user_id, "version_no": version_no}
 
+    # Filter out null values from params to avoid saving nulls to database
+    if 'params' in tool_info_dict and tool_info_dict['params'] is not None:
+        tool_info_dict['params'] = {
+            k: v for k, v in tool_info_dict['params'].items()
+            if v is not None
+        }
+
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
         # Note: Do not filter by user_id to avoid creating duplicate instances
@@ -71,7 +78,7 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
             session.add(new_tool_instance)
             session.flush()  # Flush to get the ID
             tool_instance = new_tool_instance
-        return tool_instance
+        return as_dict(tool_instance)
 
 
 def query_all_tools(tenant_id: str):
@@ -258,7 +265,11 @@ def add_tool_field(tool_info):
         tool_params = tool.params
         for ele in tool_params:
             param_name = ele["name"]
-            ele["default"] = tool_info["params"].get(param_name)
+            instance_value = tool_info["params"].get(param_name)
+            # Only set default if instance value is not None
+            # This prevents null values from being saved to database and returned as defaults
+            if instance_value is not None:
+                ele["default"] = instance_value
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
         

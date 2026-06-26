@@ -7,17 +7,15 @@ import { Menu, ConfigProvider } from "antd";
 import {
   Bot,
   Globe,
-  Zap,
   Settings,
   BookOpen,
-  User,
   Database,
-  ShoppingBag,
   Code,
   Home,
   Puzzle,
-  Activity,
   Building2,
+  Zap,
+  Inbox,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -42,6 +40,14 @@ interface RouteConfig {
   Icon: React.ComponentType<{ className?: string }>;
   labelKey: string;
   order: number;
+  parentKey?: string | null;
+}
+
+/**
+ * Processed route with children for nested menus
+ */
+interface ProcessedRoute extends RouteConfig {
+  children: RouteConfig[];
 }
 
 /**
@@ -49,55 +55,100 @@ interface RouteConfig {
  * All available routes with their metadata
  */
 const ROUTE_CONFIG: RouteConfig[] = [
-  { path: "/", Icon: Home, labelKey: "sidebar.homePage", order: 0 },
-  { path: "/chat", Icon: Bot, labelKey: "sidebar.startChat", order: 1 },
-  { path: "/setup", Icon: Zap, labelKey: "sidebar.quickConfig", order: 2 },
-  { path: "/space", Icon: Globe, labelKey: "sidebar.agentSpace", order: 3 },
   {
-    path: "/market",
-    Icon: ShoppingBag,
-    labelKey: "sidebar.agentMarket",
-    order: 4,
-  },
-  { path: "/agents", Icon: Code, labelKey: "sidebar.agentDev", order: 5 },
-  {
-    path: "/knowledges",
-    Icon: BookOpen,
-    labelKey: "sidebar.knowledgeBase",
-    order: 6,
+    path: "/",
+    Icon: Home,
+    labelKey: "sidebar.homePage",
+    order: 0,
+    parentKey: null,
   },
   {
-    path: "/mcp-tools",
-    Icon: Puzzle,
-    labelKey: "sidebar.mcpToolsManagement",
-    order: 7,
+    path: "/chat",
+    Icon: Bot,
+    labelKey: "sidebar.startChat",
+    order: 1,
+    parentKey: null,
   },
+  // Agent Development submenu
   {
-    path: "/monitoring",
-    Icon: Activity,
-    labelKey: "sidebar.monitoringManagement",
-    order: 8,
+    path: "/agent-dev",
+    Icon: Code,
+    labelKey: "sidebar.agentDev",
+    order: 2,
+    parentKey: null,
   },
   {
     path: "/models",
     Icon: Settings,
-    labelKey: "sidebar.modelManagement",
-    order: 9,
+    labelKey: "sidebar.modelConfig",
+    order: 3,
+    parentKey: "/agent-dev",
+  },
+  {
+    path: "/knowledges",
+    Icon: BookOpen,
+    labelKey: "sidebar.knowledgeBaseConfig",
+    order: 4,
+    parentKey: "/agent-dev",
+  },
+  {
+    path: "/agents",
+    Icon: Bot,
+    labelKey: "sidebar.agentConfig",
+    order: 5,
+    parentKey: "/agent-dev",
   },
   {
     path: "/memory",
     Icon: Database,
-    labelKey: "sidebar.memoryManagement",
-    order: 10,
+    labelKey: "sidebar.memoryConfig",
+    order: 6,
+    parentKey: "/agent-dev",
   },
-  { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 11 },
+  // Resource Space submenu
   {
-    path: "/tenant-resources",
-    Icon: Building2,
-    labelKey: "sidebar.tenantResources",
-    order: 12,
+    path: "/resource-space",
+    Icon: Globe,
+    labelKey: "sidebar.resourceSpace",
+    order: 7,
+    parentKey: null,
   },
-  { path: "/asset-owner-resources", Icon: Building2, labelKey: "sidebar.assetOwnerResources", order: 13 },
+  {
+    path: "/agent-space",
+    Icon: Bot,
+    labelKey: "sidebar.agentSpace",
+    order: 8,
+    parentKey: "/resource-space",
+  },
+  {
+    path: "/mcp-space",
+    Icon: Puzzle,
+    labelKey: "sidebar.mcpSpace",
+    order: 9,
+    parentKey: "/resource-space",
+  },
+  {
+    path: "/skill-space",
+    Icon: Zap,
+    labelKey: "sidebar.skillSpace",
+    order: 10,
+    parentKey: "/resource-space",
+  },
+  // Management menus
+  {
+    path: "/resource-manage",
+    Icon: Building2,
+    labelKey: "sidebar.resourceManage",
+    order: 11,
+    parentKey: null,
+  },
+  {
+    path: "/owner-manage",
+    Icon: Building2,
+    labelKey: "sidebar.ownerManage",
+    order: 12,
+    parentKey: null,
+  },
 ];
 
 /**
@@ -118,16 +169,27 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   const pathname = usePathname();
 
   const [selectedKey, setSelectedKey] = useState("/");
+  const [openKeys, setOpenKeys] = useState<string[]>([]);
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
     string | null
   >(null);
   const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
 
-  // Update selected key when pathname changes
+  // Find parent key for a given path
+  const findParentKey = (path: string): string | null => {
+    const route = ROUTE_CONFIG.find((r) => r.path === path);
+    return route?.parentKey || null;
+  };
+
+  // Update selected key and expand parent menu when pathname changes
   useEffect(() => {
     const currentPath = getEffectiveRoutePath(pathname);
-    const matchedKey = ROUTE_PATHS.includes(currentPath) ? currentPath : "/";
-    setSelectedKey(matchedKey);
+    const matchedKey = ROUTE_PATHS.includes(currentPath) ? currentPath : null;
+    setSelectedKey(matchedKey || "");
+
+    // Auto-expand parent menu when visiting child page
+    const parentKey = findParentKey(currentPath);
+    setOpenKeys(parentKey ? [parentKey] : []);
   }, [pathname]);
 
   // Listen for login success event and navigate to pending path
@@ -160,15 +222,38 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   }, []);
 
   // Filter and sort routes based on accessibleRoutes from authorization context
-  const accessibleMenuItems = useMemo((): RouteConfig[] => {
+  // Build nested menu structure with parent-child relationships
+  const accessibleMenuItems = useMemo((): ProcessedRoute[] => {
     if (!accessibleRoutes || accessibleRoutes.length === 0) {
-      // If no accessibleRoutes available, show all routes (fallback)
       return [];
     }
 
-    return ROUTE_CONFIG.filter((route) =>
+    const filtered = ROUTE_CONFIG.filter((route) =>
       accessibleRoutes.includes(route.path)
-    ).sort((a, b) => a.order - b.order);
+    );
+
+    // Separate root items and children
+    const rootItems = filtered
+      .filter((route) => !route.parentKey || route.parentKey === null)
+      .sort((a, b) => a.order - b.order);
+
+    const childrenByParent = new Map<string, RouteConfig[]>();
+    filtered
+      .filter((route) => route.parentKey && route.parentKey !== null)
+      .sort((a, b) => a.order - b.order)
+      .forEach((route) => {
+        const parent = route.parentKey!;
+        if (!childrenByParent.has(parent)) {
+          childrenByParent.set(parent, []);
+        }
+        childrenByParent.get(parent)!.push(route);
+      });
+
+    // Build nested structure
+    return rootItems.map((root) => ({
+      ...root,
+      children: childrenByParent.get(root.path) || [],
+    }));
   }, [accessibleRoutes]);
 
   /**
@@ -207,8 +292,48 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     };
   };
 
-  // Generate menu items from accessible routes
-  const menuItems: MenuProps["items"] = accessibleMenuItems.map(createMenuItem);
+  // Build menu items from accessible routes with nested submenus
+  const buildMenuItems = (): MenuProps["items"] => {
+    return accessibleMenuItems.map((item) => {
+      // If this item has children, create a submenu
+      if (item.children && item.children.length > 0) {
+        return {
+          key: item.path,
+          icon: <item.Icon className="w-4 h-4" />,
+          label: t(item.labelKey),
+          children: item.children.map((child) => ({
+            key: child.path,
+            icon: <child.Icon className="w-4 h-4" />,
+            label: t(child.labelKey),
+            onClick: () => {
+              setSelectedKey(child.path);
+              if (!isAuthenticated && !isSpeedMode && child.path !== "/") {
+                setPendingNavigationPath(child.path);
+                casService.getConfig().then((config) => {
+                  if (
+                    !authFlowState.isExplicitLogoutInProgress() &&
+                    config.enabled &&
+                    config.login_mode === "force"
+                  ) {
+                    casService.startLogin(child.path);
+                    return;
+                  }
+                  openAuthPromptModal();
+                });
+                return;
+              }
+              router.push(child.path);
+            },
+          })),
+        };
+      }
+
+      // Regular menu item
+      return createMenuItem(item);
+    });
+  };
+
+  const menuItems: MenuProps["items"] = buildMenuItems();
 
   return (
     <ConfigProvider>
@@ -226,6 +351,8 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
               mode="inline"
               inlineCollapsed={isCollapsed}
               selectedKeys={[selectedKey]}
+              openKeys={openKeys}
+              onOpenChange={setOpenKeys}
               items={menuItems}
               className="bg-transparent border-r-0 h-full"
             />

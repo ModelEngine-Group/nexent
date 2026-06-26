@@ -815,7 +815,8 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-            image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            image_to_text_model = get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id)
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -832,7 +833,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id)
             model_display_name = getattr(
                 video_understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -849,7 +851,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            long_text_to_text_model = get_llm_model(tenant_id=tenant_id, model_id=selected_model_id)
             llm_display_name = getattr(
                 long_text_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)

@@ -74,6 +74,10 @@ def bootstrap_test_env() -> Dict[str, Any]:
     nexent_module = _create_module("nexent", MessageObserver=MagicMock())
     _create_module("nexent.core")
     _create_module("nexent.core.models", OpenAIVLModel=MagicMock())
+    
+    mock_model_management_db = types.ModuleType("database.model_management_db")
+    mock_model_management_db.get_model_by_model_id = MagicMock(return_value=None)
+    sys.modules["database.model_management_db"] = mock_model_management_db
 
     return {
         "mock_const": mock_const,
