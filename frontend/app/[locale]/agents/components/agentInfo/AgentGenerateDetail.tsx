@@ -166,12 +166,33 @@ export default function AgentGenerateDetail({}) {
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
+    // Build mainAgentModels array from model_ids (preferred) and resolve display names
+    // against the available LLM list. When model_ids is empty, fall back to deriving
+    // a single model entry from the legacy `model` name (kept for backward compatibility).
+    const modelIds = (editedAgent.model_ids || []).filter((id: unknown) => Number.isFinite(Number(id)));
+    const mainAgentModelIds: number[] = modelIds.map((id: unknown) => Number(id));
+    let mainAgentModels: string[] = mainAgentModelIds
+      .map((id: number) => availableLlmModels.find((m) => m.id === id)?.displayName)
+      .filter(Boolean) as string[];
+
+    // Backward compatibility: if model_ids is empty but a legacy `model` name is present,
+    // try to resolve a matching model to keep the UI populated.
+    if (mainAgentModels.length === 0 && editedAgent.model) {
+      const matched = availableLlmModels.find(
+        (m) => m.name === editedAgent.model || m.displayName === editedAgent.model
+      );
+      if (matched) {
+        mainAgentModels = [matched.displayName];
+        mainAgentModelIds.push(matched.id);
+      }
+    }
+
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
       agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
-      mainAgentModel: editedAgent.model,
-      mainAgentModelId: editedAgent.model_id,
+      mainAgentModels: mainAgentModels,
+      mainAgentModelIds: mainAgentModelIds,
       mainAgentMaxStep: editedAgent.max_step || 15,
       requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
       agentDescription: editedAgent.description || "",
@@ -190,7 +211,7 @@ export default function AgentGenerateDetail({}) {
     };
     form.setFieldsValue(initialAgentInfo);
 
-  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
+  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels]);
 
   // Re-validate requested output tokens when the selected model's max changes,
   // so switching to a model with a lower cap surfaces the violation immediately
@@ -828,7 +849,7 @@ export default function AgentGenerateDetail({}) {
                       </Can>
 
                       <Row gutter={16}>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="agentAuthor"
                             label={t("agent.author")}
@@ -847,14 +868,19 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={12}>
+                        <Col span={16}>
                           <Form.Item
-                            name="mainAgentModel"
+                            name="mainAgentModels"
                             label={t("businessLogic.config.model")}
                             rules={[
                               {
                                 required: true,
                                 message: t("businessLogic.config.modelPlaceholder"),
+                              },
+                              {
+                                type: "array",
+                                max: 5,
+                                message: t("businessLogic.config.modelMax5"),
                               },
                             ]}
                             help={
@@ -863,21 +889,25 @@ export default function AgentGenerateDetail({}) {
                             }
                           >
                             <Select
+                              mode="multiple"
                               placeholder={t("businessLogic.config.modelPlaceholder")}
-                              value={form.getFieldValue("mainAgentModel") || editedAgent.model || ""}
-                              onChange={(value) => {
-                                const selectedModel = availableLlmModels.find(
-                                  (m) => m.displayName === value
+                              value={form.getFieldValue("mainAgentModels") || []}
+                              onChange={(values: string[]) => {
+                                const selectedModels = availableLlmModels.filter(
+                                  (m) => values.includes(m.displayName)
                                 );
+                                const modelIds = selectedModels.map((m) => m.id);
                                 form.setFieldsValue({
-                                  mainAgentModel: value,
-                                  mainAgentModelId: selectedModel?.id || 0,
+                                  mainAgentModels: values,
+                                  mainAgentModelIds: modelIds,
                                 });
                                 updateAgentConfig({
-                                  model: value,
-                                  model_id: selectedModel?.id || 0,
+                                  model: values[0] || "",
+                                  model_ids: modelIds,
                                 });
                               }}
+                              maxTagCount={3}
+                              maxTagTextLength={12}
                             >
                               {availableLlmModels.map((model) => (
                                 <Select.Option

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { searchAgentInfo } from "@/services/agentConfigService";
 
-export function useAgentInfo(agentId: number | null) {
+export function useAgentInfo(agentId: number | null | undefined) {
 	const queryClient = useQueryClient();
 
 	const query = useQuery({

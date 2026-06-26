@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Input, Select, Switch } from "antd";
@@ -8,6 +8,7 @@ import { Input, Select, Switch } from "antd";
 import { conversationService } from "@/services/conversationService";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
+import { ChatModelSelector } from "@/app/chat/components/chatModelSelector";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import log from "@/lib/logger";
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/lib/agentDebugErrorCache";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import DebugMessageList from "./DebugMessageList";
 import DebugOptimizeModal from "./DebugOptimizeModal";
 import { useCompareStream } from "./useCompareStream";
@@ -41,6 +43,10 @@ interface AgentDebuggingProps {
   onOpenCompare?: () => void;
   compareDisabled?: boolean;
   isCompareMode?: boolean;
+  modelIds?: number[];
+  modelNames?: string[];
+  selectedModelId?: number | null;
+  onModelSelect?: (modelId: number | null) => void;
 }
 
 // Main component Props interface
@@ -67,7 +73,16 @@ function AgentDebugging({
   onOpenCompare,
   compareDisabled,
   isCompareMode,
-}: AgentDebuggingProps) {
+  modelIds,
+  modelNames,
+  selectedModelId,
+  onModelSelect,
+}: AgentDebuggingProps & {
+  modelIds: number[];
+  modelNames: string[];
+  selectedModelId: number | null;
+  onModelSelect: (modelId: number | null) => void;
+}) {
   const { t } = useTranslation();
   const isInputDisabled = isStreaming || (isCompareMode && isCompareStreaming);
 
@@ -96,7 +111,18 @@ function AgentDebugging({
           placeholder={t("agent.debug.placeholder")}
           onPressEnter={onSend}
           disabled={isInputDisabled}
+          className="flex-1"
         />
+        {/* Model selector for debug mode */}
+        {!isCompareMode && modelIds && modelIds.length > 0 && (
+          <ChatModelSelector
+            modelIds={modelIds}
+            modelNames={modelNames}
+            selectedModelId={selectedModelId}
+            onModelSelect={onModelSelect || (() => {})}
+            disabled={isInputDisabled}
+          />
+        )}
         <span className="px-2 py-1 text-xs rounded-md bg-gray-100 text-gray-600 whitespace-nowrap">
           {isCompareMode
             ? t("agent.debug.compareMode", "Compare mode")
@@ -152,11 +178,17 @@ function AgentDebugging({
  * Debug configuration main component
  */
 export default function DebugConfig({ agentId }: DebugConfigProps) {
+  const parsedAgentId =
+    agentId === undefined || agentId === null || Number.isNaN(Number(agentId))
+      ? undefined
+      : Number(agentId);
   const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [inputQuestion, setInputQuestion] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const { availableLlmModels } = useModelList();
+  const { agentInfo } = useAgentInfo(parsedAgentId);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -178,10 +210,28 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const [compareRightModelId, setCompareRightModelId] = useState<number | null>(null);
   const hasMultipleLlmModels = availableLlmModels.length >= 2;
 
-  const parsedAgentId =
-    agentId === undefined || agentId === null || Number.isNaN(Number(agentId))
-      ? undefined
-      : Number(agentId);
+  // Derive debug model selector options from search_info's model_ids,
+  // resolving display names against the already-loaded model list.
+  const debugModelIds = useMemo<number[]>(() => agentInfo?.model_ids ?? [], [agentInfo]);
+  const debugModelNames = useMemo(() => {
+    return debugModelIds.map((id: number) => {
+      const model = availableLlmModels.find((m) => m.id === id);
+      return model?.displayName || model?.name || String(id);
+    });
+  }, [debugModelIds, availableLlmModels]);
+  const defaultModelId = useMemo(() => {
+    const ids = debugModelIds;
+    if (ids.length === 0) return null;
+    return ids[0];
+  }, [debugModelIds]);
+
+  // Initialize selectedModelId when agent info becomes available
+  useEffect(() => {
+    if (debugModelIds.length > 0 && selectedModelId === null) {
+      setSelectedModelId(defaultModelId);
+    }
+  }, [debugModelIds.length, defaultModelId, selectedModelId]);
+
   const comparePersistenceKey =
     parsedAgentId === undefined
       ? "debug-compare:anonymous"
@@ -294,20 +344,23 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       return;
     }
 
+    const agentConfiguredIds = debugModelIds.filter((id) =>
+      availableLlmModels.some((m) => m.id === id)
+    );
+
     const defaultModelId =
-      editedAgent.model_id && editedAgent.model_id !== 0
-        ? editedAgent.model_id
+      debugModelIds.length > 0
+        ? debugModelIds[0]
         : null;
-    const fallbackLeftModelId = availableLlmModels[0]?.id ?? null;
     const leftModelId =
-      defaultModelId && availableLlmModels.some((m) => m.id === defaultModelId)
+      defaultModelId && agentConfiguredIds.includes(defaultModelId)
         ? defaultModelId
-        : fallbackLeftModelId;
+        : agentConfiguredIds[0] ?? availableLlmModels[0]?.id ?? null;
     const rightModelId =
       availableLlmModels.find((m) => m.id !== leftModelId)?.id ?? null;
 
     setCompareLeftModelId((prev) => {
-      if (prev && availableLlmModels.some((m) => m.id === prev)) return prev;
+      if (prev && agentConfiguredIds.includes(prev)) return prev;
       return leftModelId;
     });
     setCompareRightModelId((prev) => {
@@ -316,7 +369,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       }
       return rightModelId;
     });
-  }, [availableLlmModels, hasMultipleLlmModels, editedAgent.model_id]);
+  }, [availableLlmModels, debugModelIds, hasMultipleLlmModels]);
 
   // Reset timeout timer
   const resetTimeout = () => {
@@ -441,6 +494,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
             })),
           is_debug: true, // Add debug mode flag
           agent_id: agentIdValue, // Use the properly parsed agent_id
+          model_id: selectedModelId ?? undefined,
         },
         abortControllerRef.current.signal
       ); // Pass AbortSignal
@@ -529,12 +583,23 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
             <span className="text-xs text-gray-500">
               {t("agent.debug.compareDefault", "Default model")}
             </span>
-            <div className="px-3 py-2 border border-gray-200 rounded-md text-sm bg-gray-50 text-gray-700">
-              {(() => {
-                const model = availableLlmModels.find((m) => m.id === compareLeftModelId);
-                return model ? model.displayName || model.name : editedAgent.model || "-";
-              })()}
-            </div>
+            <Select
+              value={compareLeftModelId ?? undefined}
+              onChange={(value) => setCompareLeftModelId(value)}
+              options={debugModelIds
+                .map((id) => {
+                  const model = availableLlmModels.find((m) => m.id === id);
+                  return model
+                    ? { value: model.id, label: model.displayName || model.name }
+                    : null;
+                })
+                .filter(
+                  (opt): opt is { value: number; label: string } => opt !== null
+                )}
+              placeholder={t("agent.debug.compareSelectModel", "Select model")}
+              disabled={isCompareStreaming}
+              allowClear={false}
+            />
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-xs text-gray-500">
@@ -629,7 +694,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     history: Array<{ role: string; content: string }>;
   }) => {
     if (!parsedAgentId) return;
-    if (!editedAgent?.model_id) return;
+    if (!editedAgent?.model_ids || editedAgent.model_ids.length === 0) return;
 
     const duty = (editedAgent?.duty_prompt || "").trim();
     const constraint = (editedAgent?.constraint_prompt || "").trim();
@@ -712,7 +777,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       <DebugOptimizeModal
         open={debugOptimizeOpen}
         agentId={parsedAgentId ?? 0}
-        modelId={editedAgent?.model_id ?? 0}
+        modelId={editedAgent?.model_ids?.[0] ?? 0}
         userQuestion={debugOptimizeSelected?.userQuestion || ""}
         assistantAnswer={debugOptimizeSelected?.assistantAnswer || ""}
         history={debugOptimizeSelected?.history || []}
@@ -746,6 +811,10 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         onOpenCompare={toggleComparePanel}
         compareDisabled={isCompareStreaming}
         isCompareMode={isComparePanelOpen}
+        modelIds={debugModelIds}
+        modelNames={debugModelNames}
+        selectedModelId={selectedModelId}
+        onModelSelect={setSelectedModelId}
       />
     </div>
   );

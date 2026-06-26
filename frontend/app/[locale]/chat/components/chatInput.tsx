@@ -26,6 +26,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
+import { ChatModelSelector } from "./chatModelSelector";
 import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
 import { TokenMetrics } from "@/types/chat";
 
@@ -134,10 +135,15 @@ interface ChatInputProps {
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[], modelIds?: number[], modelNames?: string[]) => void;
   latestMetrics?: TokenMetrics | null;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
+  agentModelIds?: number[];
+  agentModelNames?: string[];
+  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  selectedModelId?: number | null;
+  onModelSelect?: (modelId: number | null) => void;
 }
 
 export function ChatInput({
@@ -159,6 +165,11 @@ export function ChatInput({
   latestMetrics = null,
   agentGreeting = null,
   agentExampleQuestions = [],
+  agentModelIds = [],
+  agentModelNames = [],
+  availableModels = [],
+  selectedModelId = null,
+  onModelSelect,
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -863,14 +874,24 @@ export function ChatInput({
         />
       </div>
       <div className="h-12 bg-slate-100 relative">
-        {/* Agent selector on the left */}
-        <div className="absolute left-5 top-[40%] -translate-y-1/2">
+        {/* Agent and model selectors on the left */}
+        <div className="absolute left-5 top-[40%] -translate-y-1/2 flex items-center gap-2">
           <ChatAgentSelector
             selectedAgentId={selectedAgentId}
             onAgentSelect={onAgentSelect || (() => {})}
             disabled={isLoading || isStreaming}
             isInitialMode={isInitialMode}
           />
+          {/* Model selector - show when agent is selected and has models */}
+          {selectedAgentId && agentModelIds.length > 0 && (
+            <ChatModelSelector
+              modelIds={agentModelIds}
+              modelNames={agentModelNames}
+              selectedModelId={selectedModelId}
+              onModelSelect={onModelSelect || (() => {})}
+              disabled={isLoading || isStreaming}
+            />
+          )}
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
