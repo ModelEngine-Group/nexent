@@ -71,30 +71,101 @@ const PdfViewer = dynamic(
   }
 );
 
+type FilePreviewCommonProps = Pick<
+  FilePreviewProps,
+  "open" | "onClose" | "previewContext"
+>;
+
+type LocalFilePreviewDrawerProps = FilePreviewCommonProps & {
+  source: "local";
+  file: File;
+};
+
+type RemoteFilePreviewDrawerProps = FilePreviewCommonProps & {
+  source?: "remote";
+  objectName: string;
+  fileName: string;
+  fileType?: string;
+  fileSize?: number;
+};
+
+type NormalizedFilePreviewProps = FilePreviewCommonProps & {
+  source: "local" | "remote";
+  localFile: File | null;
+  objectName: string;
+  fileName: string;
+  providedFileType?: string;
+  fileSize?: number;
+};
+
 export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
-  const { open, onClose, previewContext } = props;
+  if (props.source === "local") {
+    return <LocalFilePreviewDrawer {...props} />;
+  }
+
+  return <RemoteFilePreviewDrawer {...props} />;
+}
+
+function LocalFilePreviewDrawer(props: Readonly<LocalFilePreviewDrawerProps>) {
+  const { file, open, onClose, previewContext } = props;
+
+  return (
+    <FilePreviewDrawerContent
+      open={open}
+      onClose={onClose}
+      previewContext={previewContext}
+      source="local"
+      localFile={file}
+      objectName=""
+      fileName={file.name}
+      providedFileType={file.type}
+      fileSize={file.size}
+    />
+  );
+}
+
+function RemoteFilePreviewDrawer(
+  props: Readonly<RemoteFilePreviewDrawerProps>
+) {
+  const {
+    objectName,
+    fileName,
+    fileType,
+    fileSize,
+    open,
+    onClose,
+    previewContext,
+  } = props;
+
+  return (
+    <FilePreviewDrawerContent
+      open={open}
+      onClose={onClose}
+      previewContext={previewContext}
+      source="remote"
+      localFile={null}
+      objectName={objectName}
+      fileName={fileName}
+      providedFileType={fileType}
+      fileSize={fileSize}
+    />
+  );
+}
+
+function FilePreviewDrawerContent(props: Readonly<NormalizedFilePreviewProps>) {
+  const {
+    open,
+    onClose,
+    previewContext,
+    source,
+    localFile,
+    objectName,
+    fileName,
+    providedFileType,
+    fileSize,
+  } = props;
   const { t } = useTranslation("common");
-  const isLocalSource = props.source === "local";
-  const localFile = isLocalSource ? props.file : null;
-  const objectName = !isLocalSource ? props.objectName : "";
-  const fileName =
-    isLocalSource && localFile
-      ? localFile.name
-      : "fileName" in props
-        ? props.fileName
-        : "";
-  const providedFileType =
-    isLocalSource && localFile
-      ? localFile.type
-      : "fileType" in props
-        ? props.fileType
-        : undefined;
-  const fileSize =
-    isLocalSource && localFile
-      ? localFile.size
-      : "fileSize" in props
-        ? props.fileSize
-        : undefined;
+  const isLocalSource = source === "local";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string>("");
@@ -112,6 +183,9 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [imageReadyForDisplay, setImageReadyForDisplay] = useState(false);
+  const [imageTransformTransitionEnabled, setImageTransformTransitionEnabled] =
+    useState(false);
   const [imageNaturalSize, setImageNaturalSize] = useState({
     width: 0,
     height: 0,
@@ -328,8 +402,16 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
 
   useEffect(() => {
     if (!open) return;
-    if (imageNaturalSize.width === 0 || imageNaturalSize.height === 0) return;
-    if (imageViewportSize.width === 0 || imageViewportSize.height === 0) return;
+    if (imageNaturalSize.width === 0 || imageNaturalSize.height === 0) {
+      setImageReadyForDisplay(false);
+      setImageTransformTransitionEnabled(false);
+      return;
+    }
+    if (imageViewportSize.width === 0 || imageViewportSize.height === 0) {
+      setImageReadyForDisplay(false);
+      setImageTransformTransitionEnabled(false);
+      return;
+    }
     const normalizedRotation = ((imageRotation % 360) + 360) % 360;
     const isQuarterTurn =
       normalizedRotation === 90 || normalizedRotation === 270;
@@ -347,7 +429,21 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
     } else {
       setImageBaseMode("actual");
     }
+    setImageReadyForDisplay(true);
   }, [open, imageNaturalSize, imageViewportSize, imageRotation]);
+
+  useEffect(() => {
+    if (!imageReadyForDisplay) {
+      setImageTransformTransitionEnabled(false);
+      return;
+    }
+
+    const frameId = requestAnimationFrame(() => {
+      setImageTransformTransitionEnabled(true);
+    });
+
+    return () => cancelAnimationFrame(frameId);
+  }, [imageReadyForDisplay, previewUrl]);
 
   const handleImageViewportRef = useCallback((el: HTMLDivElement | null) => {
     imageViewportResizeObserverRef.current?.disconnect();
@@ -401,7 +497,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         return;
       }
 
-      event.preventDefault();
+      const target = event.target;
+      if (!(target instanceof Node) || !event.currentTarget.contains(target)) {
+        return;
+      }
 
       const currentScale = imageScaleRef.current;
       const zoomFactor = Math.exp(-event.deltaY * 0.0015);
@@ -413,6 +512,8 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       if (nextScale === currentScale) {
         return;
       }
+
+      event.preventDefault();
 
       const rect = event.currentTarget.getBoundingClientRect();
       const cursorX = event.clientX - rect.left - rect.width / 2;
@@ -702,6 +803,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           }
 
           if (detectedFileType === "image" || detectedFileType === "pdf") {
+            if (detectedFileType === "image") {
+              setImageReadyForDisplay(false);
+              setImageTransformTransitionEnabled(false);
+              setImageNaturalSize({ width: 0, height: 0 });
+            }
             localPreviewUrl = URL.createObjectURL(localFile);
             setPreviewUrl(localPreviewUrl);
             previewUrlRef.current = localPreviewUrl;
@@ -767,6 +873,11 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
           if (isTooLargeToPreview) {
             setLoading(false);
             return;
+          }
+          if (detectedFileType === "image") {
+            setImageReadyForDisplay(false);
+            setImageTransformTransitionEnabled(false);
+            setImageNaturalSize({ width: 0, height: 0 });
           }
           const previousPreviewUrl = previewUrlRef.current;
           if (previousPreviewUrl.startsWith("blob:")) {
@@ -846,6 +957,8 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
       setImageNaturalSize({ width: 0, height: 0 });
       setImageViewportSize({ width: 0, height: 0 });
       setImageBaseMode("fit");
+      setImageReadyForDisplay(false);
+      setImageTransformTransitionEnabled(false);
       handleImagePanReset();
       setTextContent("");
       setTxtLines([]);
@@ -1007,10 +1120,12 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
               <div
                 style={{
                   transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${effectiveImageScale}) rotate(${imageRotation}deg)`,
+                  opacity: imageReadyForDisplay ? 1 : 0,
                   willChange: "transform",
-                  transition: isImageDragging
-                    ? "none"
-                    : "transform 0.2s ease-in-out",
+                  transition:
+                    isImageDragging || !imageTransformTransitionEnabled
+                      ? "none"
+                      : "transform 0.2s ease-in-out",
                 }}
               >
                 <img
@@ -1033,7 +1148,7 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         </div>
       </div>
 
-      {!imageLoadError && (
+      {!imageLoadError && imageReadyForDisplay && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
           <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm border border-gray-200/60 rounded-full shadow-lg px-3 py-1">
             <button

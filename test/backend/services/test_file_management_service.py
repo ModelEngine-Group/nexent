@@ -1880,10 +1880,15 @@ class TestConvertOfficeToCachedPdf:
         """If a lock for object_name already exists, it is reused."""
         import asyncio as _asyncio
         import backend.services.file_management_service as _svc
-        from backend.services.file_management_service import _convert_office_to_cached_pdf
+        from backend.services.file_management_service import (
+            ConversionLockEntry,
+            _convert_office_to_cached_pdf,
+        )
 
         existing_lock = _asyncio.Lock()
-        _svc._conversion_locks["docs/existing.docx"] = existing_lock
+        _svc._conversion_locks["docs/existing.docx"] = ConversionLockEntry(
+            lock=existing_lock
+        )
 
         try:
             with patch('backend.services.file_management_service._is_pdf_cache_valid', return_value=True):
@@ -1896,3 +1901,81 @@ class TestConvertOfficeToCachedPdf:
             _svc._conversion_locks.pop("docs/existing.docx", None)
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_lock_entry_is_kept_until_waiting_requests_finish(self):
+        """Concurrent requests for the same object keep one lock entry until all requests finish."""
+        import asyncio as _asyncio
+        import backend.services.file_management_service as _svc
+        from backend.services.file_management_service import _convert_office_to_cached_pdf
+
+        object_name = "docs/concurrent.docx"
+        pdf_object_name = "preview/converted/docs/concurrent_deadbeef.pdf"
+        temp_pdf_object_name = "preview/converting/docs/concurrent_deadbeef.pdf.tmp"
+        release_conversion = _asyncio.Event()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = ""
+
+        async def wait_for_release(*args, **kwargs):
+            await release_conversion.wait()
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=wait_for_release)
+
+        mock_http_ctx = MagicMock()
+        mock_http_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_http_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        cache_valid_results = iter([False, True])
+
+        def cache_valid_side_effect(*args, **kwargs):
+            return next(cache_valid_results)
+
+        _svc._conversion_locks.pop(object_name, None)
+        try:
+            with patch(
+                'backend.services.file_management_service._is_pdf_cache_valid',
+                side_effect=cache_valid_side_effect,
+            ), \
+                 patch('httpx.AsyncClient', return_value=mock_http_ctx), \
+                 patch(
+                     'backend.services.file_management_service.copy_file',
+                     return_value={'success': True},
+                 ), \
+                 patch('backend.services.file_management_service.delete_file'), \
+                 patch('backend.services.file_management_service.file_exists', return_value=False):
+
+                first_task = _asyncio.create_task(
+                    _convert_office_to_cached_pdf(
+                        object_name,
+                        pdf_object_name,
+                        temp_pdf_object_name,
+                    )
+                )
+
+                while object_name not in _svc._conversion_locks:
+                    await _asyncio.sleep(0)
+
+                second_task = _asyncio.create_task(
+                    _convert_office_to_cached_pdf(
+                        object_name,
+                        pdf_object_name,
+                        temp_pdf_object_name,
+                    )
+                )
+
+                while _svc._conversion_locks[object_name].ref_count < 2:
+                    await _asyncio.sleep(0)
+
+                assert _svc._conversion_locks[object_name].lock.locked()
+
+                release_conversion.set()
+                await _asyncio.gather(first_task, second_task)
+
+            assert object_name not in _svc._conversion_locks
+            mock_client.post.assert_called_once()
+        finally:
+            _svc._conversion_locks.pop(object_name, None)
