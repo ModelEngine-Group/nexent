@@ -60,7 +60,7 @@ fi
 # deploy/docker/assets/scripts or from the copied ROOT_DIR/scripts directory.
 ENV_FILE="${DEPLOYMENT_ROOT_ENV:-}"
 if [ -z "$ENV_FILE" ]; then
-    for candidate in "${SCRIPT_DIR}/../../../env/.env" "${SCRIPT_DIR}/../../../../.env" "${SCRIPT_DIR}/../../../.env" "${SCRIPT_DIR}/../../.env"; do
+    for candidate in "${SCRIPT_DIR}/../../../env/.env" "${SCRIPT_DIR}/../../../../docker/.env"; do
         if [ -f "$candidate" ]; then
             ENV_FILE="$candidate"
             break

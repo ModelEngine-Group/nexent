@@ -21,7 +21,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing legacy root `.env` or `docker/.env`, then fall back to `deploy/env/.env.example` or legacy templates. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
+> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
 
 ### 2. Deployment Options
 
