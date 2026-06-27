@@ -4,6 +4,7 @@ from apps.app_factory import create_app
 from apps.agent_app import agent_runtime_router as agent_router
 from apps.voice_app import voice_runtime_router as voice_router
 from apps.conversation_management_app import router as conversation_management_router
+from apps.conversation_share_app import router as conversation_share_router
 from apps.memory_config_app import router as memory_config_router
 from apps.file_management_app import file_management_runtime_router as file_management_router
 from apps.skill_app import skill_creator_router
@@ -20,6 +21,7 @@ app.add_middleware(ExceptionHandlerMiddleware)
 
 app.include_router(agent_router)
 app.include_router(conversation_management_router)
+app.include_router(conversation_share_router)
 app.include_router(memory_config_router)
 app.include_router(file_management_router)
 app.include_router(voice_router)

@@ -1,12 +1,12 @@
-import { API_ENDPOINTS, ApiError } from './api';
+import { API_ENDPOINTS, ApiError } from "./api";
 
-import { chatConfig } from '@/const/chatConfig';
+import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
   ConversationListItem,
-  ApiConversationResponse
-} from '@/types/conversation';
-import { getAuthHeaders, fetchWithAuth } from '@/lib/auth';
+  ApiConversationResponse,
+} from "@/types/conversation";
+import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -15,7 +15,7 @@ const fetch = fetchWithAuth;
 // This helper function now ALWAYS connects through the current host and port.
 // This relies on our custom `server.js` to handle the proxying in all environments.
 const getWebSocketUrl = (endpoint: string): string => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}${endpoint}`;
   log.log(`[WebSocket] Connecting via server proxy: ${wsUrl}`);
   return wsUrl;
@@ -26,7 +26,7 @@ export const conversationService = {
   async getList(): Promise<ConversationListItem[]> {
     const response = await fetch(API_ENDPOINTS.conversation.list);
 
-    const data = await response.json() as ConversationListResponse;
+    const data = (await response.json()) as ConversationListResponse;
 
     if (data.code === 0) {
       return data.data || [];
@@ -38,10 +38,10 @@ export const conversationService = {
   // Create new conversation
   async create(title?: string) {
     const response = await fetch(API_ENDPOINTS.conversation.create, {
-      method: 'PUT',
+      method: "PUT",
       headers: getAuthHeaders(),
       body: JSON.stringify({
-        title: title || "new conversation"
+        title: title || "new conversation",
       }),
     });
 
@@ -57,7 +57,7 @@ export const conversationService = {
   // Rename conversation
   async rename(conversationId: number, name: string) {
     const response = await fetch(API_ENDPOINTS.conversation.rename, {
-      method: 'POST',
+      method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         conversation_id: conversationId,
@@ -75,13 +75,19 @@ export const conversationService = {
   },
 
   // Get conversation details
-  async getDetail(conversationId: number, signal?: AbortSignal): Promise<ApiConversationResponse> {
+  async getDetail(
+    conversationId: number,
+    signal?: AbortSignal
+  ): Promise<ApiConversationResponse> {
     try {
-      const response = await fetch(API_ENDPOINTS.conversation.detail(conversationId), {
-        method: 'GET',
-        headers: getAuthHeaders(),
-        signal,
-      });
+      const response = await fetch(
+        API_ENDPOINTS.conversation.detail(conversationId),
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+          signal,
+        }
+      );
 
       // If the signal is aborted before the request returns, return early
       if (signal?.aborted) {
@@ -97,19 +103,69 @@ export const conversationService = {
       throw new ApiError(data.code, data.message);
     } catch (error: any) {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
-      if (error instanceof Error && error.name === 'AbortError' || signal?.aborted) {
+      if (
+        (error instanceof Error && error.name === "AbortError") ||
+        signal?.aborted
+      ) {
         return { code: -1, message: "请求已取消", data: [] };
       }
       throw error;
     }
   },
 
+  async createShare(params: {
+    conversationId: number;
+    mode: "all" | "selected";
+    selected_user_message_ids?: number[];
+    expire_time?: string | null;
+  }) {
+    const response = await fetch(
+      API_ENDPOINTS.share.createConversation(params.conversationId),
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          mode: params.mode,
+          selected_user_message_ids: params.selected_user_message_ids || [],
+          expire_time: params.expire_time || null,
+        }),
+      }
+    );
+
+    const data = await response.json();
+    if (data.code === 0) {
+      return data.data;
+    }
+    throw new ApiError(
+      data.code || -1,
+      data.message || data.detail || "Failed to create share"
+    );
+  },
+
+  async getShare(shareId: string, signal?: AbortSignal) {
+    const response = await fetch(API_ENDPOINTS.share.detail(shareId), {
+      method: "GET",
+      signal,
+    });
+    const data = await response.json();
+    if (data.code === 0) {
+      return data.data;
+    }
+    throw new ApiError(
+      data.code || -1,
+      data.message || data.detail || "Failed to load share"
+    );
+  },
+
   // Delete conversation
   async delete(conversationId: number) {
-    const response = await fetch(API_ENDPOINTS.conversation.delete(conversationId), {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      API_ENDPOINTS.conversation.delete(conversationId),
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }
+    );
 
     const data = await response.json();
 
@@ -123,17 +179,20 @@ export const conversationService = {
   // Stop conversation agent
   async stop(conversationId: number) {
     const response = await fetch(API_ENDPOINTS.agent.stop(conversationId), {
-      method: 'GET',
+      method: "GET",
       headers: getAuthHeaders(),
     });
 
     const data = await response.json();
 
-    if (data.status === 'success') {
+    if (data.status === "success") {
       return true;
     }
 
-    throw new ApiError(data.code || -1, data.message || data.detail || '停止失败');
+    throw new ApiError(
+      data.code || -1,
+      data.message || data.detail || "停止失败"
+    );
   },
 
   // STT related functionality
@@ -148,7 +207,7 @@ export const conversationService = {
       const pcmData = new Int16Array(inputData.length);
       for (let i = 0; i < inputData.length; i++) {
         const s = Math.max(-1, Math.min(1, inputData[i]));
-        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
       return pcmData;
     },
@@ -162,7 +221,7 @@ export const conversationService = {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-        }
+        },
       };
     },
 
@@ -171,7 +230,7 @@ export const conversationService = {
       return {
         sampleRate: 16000,
       };
-    }
+    },
   },
 
   // Add TTS related functionality
@@ -195,8 +254,18 @@ export const conversationService = {
       // Play audio (main entry)
       const playAudio = async (
         text: string,
-        onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void,
-        ttsConfig?: { tenant_id?: string; model_name?: string; model_factory?: string; api_key?: string; model_appid?: string; access_token?: string; base_url?: string }
+        onStatusChange?: (
+          status: (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus]
+        ) => void,
+        ttsConfig?: {
+          tenant_id?: string;
+          model_name?: string;
+          model_factory?: string;
+          api_key?: string;
+          model_appid?: string;
+          access_token?: string;
+          base_url?: string;
+        }
       ): Promise<void> => {
         if (!text) return;
 
@@ -243,10 +312,10 @@ export const conversationService = {
                     audioChunksRef.current.push(uint8Array);
                   }
                 }
-              } else if (typeof event.data === 'string') {
+              } else if (typeof event.data === "string") {
                 try {
                   const data = JSON.parse(event.data);
-                  if (data.status === 'completed') {
+                  if (data.status === "completed") {
                     if (isStreamingPlaybackRef.current) {
                       await finalizeStreamingPlayback();
                     } else {
@@ -254,7 +323,10 @@ export const conversationService = {
                         playAudioChunks(onStatusChange);
                       } else {
                         onStatusChange?.(chatConfig.ttsStatus.ERROR);
-                        setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
+                        setTimeout(
+                          () => onStatusChange?.(chatConfig.ttsStatus.IDLE),
+                          2000
+                        );
                       }
                     }
 
@@ -266,7 +338,10 @@ export const conversationService = {
                     }, 100);
                   } else if (data.error) {
                     onStatusChange?.(chatConfig.ttsStatus.ERROR);
-                    setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
+                    setTimeout(
+                      () => onStatusChange?.(chatConfig.ttsStatus.IDLE),
+                      2000
+                    );
                     cleanupStreamingPlayback();
                     if (wsRef.current) {
                       wsRef.current.close();
@@ -292,11 +367,13 @@ export const conversationService = {
             wsRef.current = null;
             if (event.code !== 1000) {
               onStatusChange?.(chatConfig.ttsStatus.ERROR);
-              setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
+              setTimeout(
+                () => onStatusChange?.(chatConfig.ttsStatus.IDLE),
+                2000
+              );
               cleanupStreamingPlayback();
             }
           };
-
         } catch (error) {
           onStatusChange?.(chatConfig.ttsStatus.ERROR);
           setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
@@ -305,7 +382,11 @@ export const conversationService = {
       };
 
       // Initialize streaming playback
-      const initStreamingPlayback = async (onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void): Promise<void> => {
+      const initStreamingPlayback = async (
+        onStatusChange?: (
+          status: (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus]
+        ) => void
+      ): Promise<void> => {
         return new Promise((resolve, reject) => {
           try {
             const mediaSource = new MediaSource();
@@ -321,50 +402,48 @@ export const conversationService = {
             audioRef.current = audio;
 
             audio.oncanplay = () => {
-              onStatusChange?.('playing');
+              onStatusChange?.("playing");
             };
 
             audio.onended = () => {
-              onStatusChange?.('idle');
+              onStatusChange?.("idle");
               cleanupStreamingPlayback();
             };
 
             audio.onerror = () => {
-              onStatusChange?.('error');
-              setTimeout(() => onStatusChange?.('idle'), 2000);
+              onStatusChange?.("error");
+              setTimeout(() => onStatusChange?.("idle"), 2000);
               cleanupStreamingPlayback();
             };
 
-            mediaSource.addEventListener('sourceopen', () => {
+            mediaSource.addEventListener("sourceopen", () => {
               try {
-                const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
                 sourceBufferRef.current = sourceBuffer;
 
-                sourceBuffer.addEventListener('updateend', () => {
+                sourceBuffer.addEventListener("updateend", () => {
                   processPendingChunks();
                 });
 
-                sourceBuffer.addEventListener('error', () => {
-                  onStatusChange?.('error');
-                  setTimeout(() => onStatusChange?.('idle'), 2000);
+                sourceBuffer.addEventListener("error", () => {
+                  onStatusChange?.("error");
+                  setTimeout(() => onStatusChange?.("idle"), 2000);
                 });
 
                 isStreamingPlaybackRef.current = true;
                 resolve();
-
               } catch (error) {
                 reject(error);
               }
             });
 
-            mediaSource.addEventListener('sourceclose', () => {
+            mediaSource.addEventListener("sourceclose", () => {
               isStreamingPlaybackRef.current = false;
             });
 
-            mediaSource.addEventListener('error', (e) => {
+            mediaSource.addEventListener("error", (e) => {
               reject(e);
             });
-
           } catch (error) {
             reject(error);
           }
@@ -372,7 +451,12 @@ export const conversationService = {
       };
 
       // Process streaming audio chunks
-      const handleStreamingAudioChunk = async (chunk: Uint8Array, onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void) => {
+      const handleStreamingAudioChunk = async (
+        chunk: Uint8Array,
+        onStatusChange?: (
+          status: (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus]
+        ) => void
+      ) => {
         if (!isStreamingPlaybackRef.current || !sourceBufferRef.current) {
           pendingChunksRef.current.push(chunk);
           return;
@@ -382,12 +466,18 @@ export const conversationService = {
           if (sourceBufferRef.current.updating) {
             pendingChunksRef.current.push(chunk);
           } else {
-            sourceBufferRef.current.appendBuffer(chunk.buffer.slice(0) as ArrayBuffer);
+            sourceBufferRef.current.appendBuffer(
+              chunk.buffer.slice(0) as ArrayBuffer
+            );
 
-            if (audioRef.current && audioRef.current.paused && audioRef.current.readyState >= 2) {
+            if (
+              audioRef.current &&
+              audioRef.current.paused &&
+              audioRef.current.readyState >= 2
+            ) {
               try {
                 await audioRef.current.play();
-                onStatusChange?.('playing');
+                onStatusChange?.("playing");
               } catch (playError) {
                 // Auto-play failed
               }
@@ -404,14 +494,20 @@ export const conversationService = {
 
       // Process pending audio chunks
       const processPendingChunks = () => {
-        if (!sourceBufferRef.current || sourceBufferRef.current.updating || pendingChunksRef.current.length === 0) {
+        if (
+          !sourceBufferRef.current ||
+          sourceBufferRef.current.updating ||
+          pendingChunksRef.current.length === 0
+        ) {
           return;
         }
 
         try {
           const chunk = pendingChunksRef.current.shift();
           if (chunk) {
-            sourceBufferRef.current.appendBuffer(chunk.buffer.slice(0) as ArrayBuffer);
+            sourceBufferRef.current.appendBuffer(
+              chunk.buffer.slice(0) as ArrayBuffer
+            );
           }
         } catch (error) {
           // Processing error
@@ -424,7 +520,10 @@ export const conversationService = {
           const waitForPending = () => {
             return new Promise<void>((resolve) => {
               const checkPending = () => {
-                if (pendingChunksRef.current.length === 0 || !sourceBufferRef.current?.updating) {
+                if (
+                  pendingChunksRef.current.length === 0 ||
+                  !sourceBufferRef.current?.updating
+                ) {
                   resolve();
                 } else {
                   setTimeout(checkPending, 100);
@@ -437,7 +536,10 @@ export const conversationService = {
           await waitForPending();
         }
 
-        if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open') {
+        if (
+          mediaSourceRef.current &&
+          mediaSourceRef.current.readyState === "open"
+        ) {
           try {
             mediaSourceRef.current.endOfStream();
           } catch (error) {
@@ -457,7 +559,7 @@ export const conversationService = {
 
         if (mediaSourceRef.current) {
           try {
-            if (mediaSourceRef.current.readyState === 'open') {
+            if (mediaSourceRef.current.readyState === "open") {
               mediaSourceRef.current.endOfStream();
             }
           } catch (error) {
@@ -466,7 +568,7 @@ export const conversationService = {
           mediaSourceRef.current = null;
         }
 
-        if (audioRef.current && audioRef.current.src.startsWith('blob:')) {
+        if (audioRef.current && audioRef.current.src.startsWith("blob:")) {
           URL.revokeObjectURL(audioRef.current.src);
         }
       };
@@ -474,8 +576,18 @@ export const conversationService = {
       // Traditional playback method
       const playAudioTraditional = async (
         text: string,
-        onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void,
-        ttsConfig?: { tenant_id?: string; model_name?: string; model_factory?: string; api_key?: string; model_appid?: string; access_token?: string; base_url?: string }
+        onStatusChange?: (
+          status: (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus]
+        ) => void,
+        ttsConfig?: {
+          tenant_id?: string;
+          model_name?: string;
+          model_factory?: string;
+          api_key?: string;
+          model_appid?: string;
+          access_token?: string;
+          base_url?: string;
+        }
       ) => {
         audioChunksRef.current = [];
         const wsUrl = getWebSocketUrl(API_ENDPOINTS.tts.ws);
@@ -501,10 +613,10 @@ export const conversationService = {
               if (uint8Array.length > 0) {
                 audioChunksRef.current.push(uint8Array);
               }
-            } else if (typeof event.data === 'string') {
+            } else if (typeof event.data === "string") {
               try {
                 const data = JSON.parse(event.data);
-                if (data.status === 'completed') {
+                if (data.status === "completed") {
                   setTimeout(() => {
                     if (wsRef.current) {
                       wsRef.current.close();
@@ -516,11 +628,17 @@ export const conversationService = {
                     playAudioChunks(onStatusChange);
                   } else {
                     onStatusChange?.(chatConfig.ttsStatus.ERROR);
-                    setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
+                    setTimeout(
+                      () => onStatusChange?.(chatConfig.ttsStatus.IDLE),
+                      2000
+                    );
                   }
                 } else if (data.error) {
                   onStatusChange?.(chatConfig.ttsStatus.ERROR);
-                  setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
+                  setTimeout(
+                    () => onStatusChange?.(chatConfig.ttsStatus.IDLE),
+                    2000
+                  );
                   if (wsRef.current) {
                     wsRef.current.close();
                     wsRef.current = null;
@@ -546,14 +664,20 @@ export const conversationService = {
       };
 
       // Play audio chunks (traditional mode)
-      const playAudioChunks = (onStatusChange?: (status: typeof chatConfig.ttsStatus[keyof typeof chatConfig.ttsStatus]) => void) => {
+      const playAudioChunks = (
+        onStatusChange?: (
+          status: (typeof chatConfig.ttsStatus)[keyof typeof chatConfig.ttsStatus]
+        ) => void
+      ) => {
         if (audioChunksRef.current.length === 0) {
-          onStatusChange?.('idle');
+          onStatusChange?.("idle");
           return;
         }
 
         try {
-          const validChunks = audioChunksRef.current.filter(chunk => chunk && chunk.length > 0);
+          const validChunks = audioChunksRef.current.filter(
+            (chunk) => chunk && chunk.length > 0
+          );
 
           if (validChunks.length === 0) {
             onStatusChange?.(chatConfig.ttsStatus.ERROR);
@@ -566,10 +690,13 @@ export const conversationService = {
 
           for (let i = 0; i < validChunks.length; i++) {
             const chunk = validChunks[i];
-            const hashData = chunk.length > 32 ?
-              Array.from(chunk.slice(0, 16)).concat(Array.from(chunk.slice(-16))) :
-              Array.from(chunk);
-            const hash = hashData.join(',');
+            const hashData =
+              chunk.length > 32
+                ? Array.from(chunk.slice(0, 16)).concat(
+                    Array.from(chunk.slice(-16))
+                  )
+                : Array.from(chunk);
+            const hash = hashData.join(",");
 
             if (!chunkHashes.has(hash)) {
               chunkHashes.add(hash);
@@ -577,7 +704,10 @@ export const conversationService = {
             }
           }
 
-          const totalLength = uniqueChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+          const totalLength = uniqueChunks.reduce(
+            (sum, chunk) => sum + chunk.length,
+            0
+          );
           const combinedArray = new Uint8Array(totalLength);
           let offset = 0;
 
@@ -592,7 +722,10 @@ export const conversationService = {
             offset += chunk.length;
           }
 
-          const finalArray = offset === totalLength ? combinedArray : combinedArray.slice(0, offset);
+          const finalArray =
+            offset === totalLength
+              ? combinedArray
+              : combinedArray.slice(0, offset);
 
           if (finalArray.length < 100) {
             onStatusChange?.(chatConfig.ttsStatus.ERROR);
@@ -600,10 +733,12 @@ export const conversationService = {
             return;
           }
 
-          const hasValidMP3Header = finalArray.length >= 3 && (
-            (finalArray[0] === 0xFF && (finalArray[1] & 0xE0) === 0xE0) ||
-            (finalArray[0] === 0x49 && finalArray[1] === 0x44 && finalArray[2] === 0x33)
-          );
+          const hasValidMP3Header =
+            finalArray.length >= 3 &&
+            ((finalArray[0] === 0xff && (finalArray[1] & 0xe0) === 0xe0) ||
+              (finalArray[0] === 0x49 &&
+                finalArray[1] === 0x44 &&
+                finalArray[2] === 0x33));
 
           if (!hasValidMP3Header) {
             onStatusChange?.(chatConfig.ttsStatus.ERROR);
@@ -611,7 +746,7 @@ export const conversationService = {
             return;
           }
 
-          const audioBlob = new Blob([finalArray], { type: 'audio/mpeg' });
+          const audioBlob = new Blob([finalArray], { type: "audio/mpeg" });
           const audioUrl = URL.createObjectURL(audioBlob);
 
           if (audioRef.current) {
@@ -623,7 +758,7 @@ export const conversationService = {
           audioRef.current = audio;
 
           audio.oncanplay = () => {
-            onStatusChange?.('playing');
+            onStatusChange?.("playing");
           };
 
           audio.onended = () => {
@@ -641,15 +776,20 @@ export const conversationService = {
             audioChunksRef.current = [];
           };
 
-          audio.play().then(() => {
-            onStatusChange?.('playing');
-          }).catch(() => {
-            onStatusChange?.(chatConfig.ttsStatus.ERROR);
-            setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
-            URL.revokeObjectURL(audioUrl);
-            audioChunksRef.current = [];
-          });
-
+          audio
+            .play()
+            .then(() => {
+              onStatusChange?.("playing");
+            })
+            .catch(() => {
+              onStatusChange?.(chatConfig.ttsStatus.ERROR);
+              setTimeout(
+                () => onStatusChange?.(chatConfig.ttsStatus.IDLE),
+                2000
+              );
+              URL.revokeObjectURL(audioUrl);
+              audioChunksRef.current = [];
+            });
         } catch (error) {
           onStatusChange?.(chatConfig.ttsStatus.ERROR);
           setTimeout(() => onStatusChange?.(chatConfig.ttsStatus.IDLE), 2000);
@@ -682,22 +822,27 @@ export const conversationService = {
       return {
         playAudio,
         stopAudio,
-        cleanup
+        cleanup,
       };
-    }
+    },
   },
 
   // Add file preprocess method
-  async preprocessFiles(query: string, files: File[], conversationId?: number, signal?: AbortSignal): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  async preprocessFiles(
+    query: string,
+    files: File[],
+    conversationId?: number,
+    signal?: AbortSignal
+  ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
     try {
       // Use FormData to handle file upload
       const formData = new FormData();
-      formData.append('query', query);
+      formData.append("query", query);
 
       // Add files
       if (files && files.length > 0) {
-        files.forEach(file => {
-          formData.append('files', file);
+        files.forEach((file) => {
+          formData.append("files", file);
         });
       }
 
@@ -708,7 +853,7 @@ export const conversationService = {
       }
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         body: formData,
         signal,
       });
@@ -717,10 +862,9 @@ export const conversationService = {
       if (!response.ok) {
         // Handle specific HTTP status codes with error codes for internationalization
         if (response.status === 413) {
-          throw new Error('REQUEST_ENTITY_TOO_LARGE');
+          throw new Error("REQUEST_ENTITY_TOO_LARGE");
         } else {
-          throw new Error('FILE_PARSING_FAILED');
-
+          throw new Error("FILE_PARSING_FAILED");
         }
       }
 
@@ -731,8 +875,8 @@ export const conversationService = {
       return response.body.getReader();
     } catch (error) {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Request has been aborted');
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error("Request has been aborted");
       }
       // Other errors are thrown normally
       throw error;
@@ -740,25 +884,28 @@ export const conversationService = {
   },
 
   // Add run agent method
-  async runAgent(params: {
-    query: string;
-    conversation_id: number;
-    history: Array<{ role: string; content: string; }>;
-    files?: File[];  // Add optional files parameter
-    minio_files?: Array<{
-      object_name?: string;
-      name: string;
-      type: string;
-      size: number;
-      url?: string;
-      presigned_url?: string;
-      description?: string;
-    }>; // Complete attachment information object array
-    agent_id?: number; // Add agent_id parameter
-    model_id?: number; // Optional model override
-    version_no?: number; // Optional version override
-    is_debug?: boolean; // Add debug mode parameter
-  }, signal?: AbortSignal) {
+  async runAgent(
+    params: {
+      query: string;
+      conversation_id: number;
+      history: Array<{ role: string; content: string }>;
+      files?: File[];
+      minio_files?: Array<{
+        object_name?: string;
+        name: string;
+        type: string;
+        size: number;
+        url?: string;
+        presigned_url?: string;
+        description?: string;
+      }>;
+      agent_id?: number; // Add agent_id parameter
+      model_id?: number; // Optional model override
+      version_no?: number; // Optional version override
+      is_debug?: boolean; // Add debug mode parameter
+    },
+    signal?: AbortSignal
+  ) {
     try {
       // Construct request parameters
       const requestParams: any = {
@@ -781,7 +928,7 @@ export const conversationService = {
       }
 
       const response = await fetch(API_ENDPOINTS.agent.run, {
-        method: 'POST',
+        method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(requestParams),
         signal,
@@ -794,9 +941,9 @@ export const conversationService = {
       return response.body.getReader();
     } catch (error: any) {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
-      if (error instanceof Error && error.name === 'AbortError') {
-        log.log('Agent请求已被取消');
-        throw new Error('请求已被取消');
+      if (error instanceof Error && error.name === "AbortError") {
+        log.log("Agent请求已被取消");
+        throw new Error("请求已被取消");
       }
       // Other errors are thrown normally
       throw error;
@@ -804,12 +951,9 @@ export const conversationService = {
   },
 
   // Generate conversation title from user question
-  async generateTitle(params: {
-    conversation_id: number;
-    question: string;
-  }) {
+  async generateTitle(params: { conversation_id: number; question: string }) {
     const response = await fetch(API_ENDPOINTS.conversation.generateTitle, {
-      method: 'POST',
+      method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(params),
     });
@@ -824,9 +968,12 @@ export const conversationService = {
   },
 
   // Like/dislike message
-  async updateOpinion(params: { message_id: number; opinion: 'Y' | 'N' | null }) {
+  async updateOpinion(params: {
+    message_id: number;
+    opinion: "Y" | "N" | null;
+  }) {
     const response = await fetch(API_ENDPOINTS.conversation.opinion, {
-      method: 'POST',
+      method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(params),
     });
@@ -840,12 +987,12 @@ export const conversationService = {
   // Get message_id by conversationId and messageIndex
   async getMessageId(conversationId: number, messageIndex: number) {
     const response = await fetch(API_ENDPOINTS.conversation.messageId, {
-      method: 'POST',
+      method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         conversation_id: conversationId,
-        message_index: messageIndex
-      })
+        message_index: messageIndex,
+      }),
     });
 
     const data = await response.json();
