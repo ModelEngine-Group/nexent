@@ -1889,18 +1889,18 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
-    # Auto-publish initial version v1 for market-imported agents
+    # Auto-publish initial version V1 for market-imported agents
     try:
         publish_version_impl(
             agent_id=new_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            version_name="v1",
+            version_name="V1",
             release_note="Initial version from Agent Market"
         )
     except Exception as e:
         logger.warning(
-            f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
+            f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 

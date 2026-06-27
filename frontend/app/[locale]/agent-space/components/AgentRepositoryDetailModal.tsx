@@ -12,15 +12,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type {
-  AgentRepositoryListingDetail,
-  AgentRepositoryListingStatus,
-} from "@/types/agentRepository";
+import type { AgentDetailModalData } from "@/lib/agentRepositoryDetail";
+import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
 
 interface AgentRepositoryDetailModalProps {
   open: boolean;
   onClose: () => void;
-  detail: AgentRepositoryListingDetail | null | undefined;
+  detail: AgentDetailModalData | null | undefined;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -139,7 +137,9 @@ export function AgentRepositoryDetailModal({
                   <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                     {title}
                   </h2>
-                  <StatusBadge status={detail.status} />
+                  {detail.status ? (
+                    <StatusBadge status={detail.status} />
+                  ) : null}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                   {detail.model_name ? (
@@ -151,14 +151,12 @@ export function AgentRepositoryDetailModal({
                   {detail.version_label ? (
                     <span>{detail.version_label}</span>
                   ) : null}
-                  {downloads > 0 ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Download className="size-3.5" aria-hidden />
-                      {t("agentRepository.detail.downloads", {
-                        count: downloads.toLocaleString(),
-                      })}
-                    </span>
-                  ) : null}
+                  <span className="inline-flex items-center gap-1">
+                    <Download className="size-3.5" aria-hidden />
+                    {t("agentRepository.detail.downloads", {
+                      count: downloads.toLocaleString(),
+                    })}
+                  </span>
                   {createdAtText ? (
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="size-3.5" aria-hidden />
