@@ -155,13 +155,14 @@ export default function AgentGenerateDetail({}) {
   }, [filteredGroups]);
 
   const selectedMainAgentModel = useMemo(() => {
+    const primaryModelId = editedAgent.model_ids?.[0];
     return availableLlmModels.find(
       (model) =>
-        model.id === editedAgent.model_id ||
+        model.id === primaryModelId ||
         model.displayName === editedAgent.model ||
         model.name === editedAgent.model
     );
-  }, [availableLlmModels, editedAgent.model, editedAgent.model_id]);
+  }, [availableLlmModels, editedAgent.model, editedAgent.model_ids]);
 
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
