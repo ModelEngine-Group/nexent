@@ -166,15 +166,17 @@ export default function AgentRepositoryPage() {
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
 
   useEffect(() => {
-    if (tab === AgentRepositoryTab.REPOSITORY) {
-      void refetch();
-    }
-    if (tab === AgentRepositoryTab.MINE) {
-      void refetchMine();
-    }
-    if (tab === AgentRepositoryTab.REVIEW) {
-      void refetchReview();
-    }
+    const refreshActiveTab = async () => {
+      if (tab === AgentRepositoryTab.REPOSITORY) {
+        await refetch();
+      } else if (tab === AgentRepositoryTab.MINE) {
+        await refetchMine();
+      } else if (tab === AgentRepositoryTab.REVIEW) {
+        await refetchReview();
+      }
+    };
+
+    refreshActiveTab().catch(() => {});
   }, [tab, refetch, refetchMine, refetchReview]);
 
   const detailOpen = detailSource !== null;
@@ -241,11 +243,11 @@ export default function AgentRepositoryPage() {
 
   const refetchDetail = () => {
     if (detailSource?.kind === "repository") {
-      void refetchRepositoryDetail();
+      refetchRepositoryDetail().catch(() => {});
       return;
     }
     if (detailSource?.kind === "mine") {
-      void refetchMineVersionDetail();
+      refetchMineVersionDetail().catch(() => {});
     }
   };
 
