@@ -93,7 +93,7 @@ def _to_summary_item(
         "status": record.get("status"),
         "category_id": record.get("category_id"),
         "tags": record.get("tags") or [],
-        "tool_count": record.get("tool_count"),
+        "tool_count": record.get("tool_count") or 0,
         "version_label": record.get("version_name"),
         "icon": record.get("icon"),
         "downloads": downloads,
@@ -497,6 +497,24 @@ def _extract_tool_names(root_agent: Dict[str, Any]) -> List[str]:
     return tools
 
 
+def _count_tools_in_snapshot(agent_info_json: Any) -> int:
+    """Count tools across all agents in a frozen repository snapshot."""
+    if not isinstance(agent_info_json, dict):
+        return 0
+    agent_info_map = agent_info_json.get("agent_info")
+    if not isinstance(agent_info_map, dict):
+        return 0
+
+    total = 0
+    for agent in agent_info_map.values():
+        if not isinstance(agent, dict):
+            continue
+        tools = agent.get("tools")
+        if isinstance(tools, list):
+            total += len(tools)
+    return total
+
+
 def _serialize_created_at(create_time: Any) -> Optional[str]:
     """Serialize DB create_time to an ISO string for API consumers."""
     if create_time is None:
@@ -828,6 +846,7 @@ async def _build_repository_data_from_agent(
         "version_name": version_name,
         "agent_info_json": agent_info_json,
         "status": STATUS_PENDING_REVIEW,
+        "tool_count": _count_tools_in_snapshot(agent_info_json),
     }
 
     if card_fields:
@@ -883,7 +902,7 @@ async def create_agent_repository_listing_impl(
     else:
         repository_id = int(existing["agent_repository_id"])
         updates: Dict[str, Any] = {"status": STATUS_PENDING_REVIEW}
-        for key in ("icon", "tags", "category_id"):
+        for key in ("icon", "tags", "category_id", "tool_count"):
             if key in repository_data:
                 updates[key] = repository_data[key]
         affected = update_agent_repository_by_id(

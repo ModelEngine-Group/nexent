@@ -1233,6 +1233,47 @@ def test_resolve_submitter_email_uses_user_tenant_email():
         assert ars._resolve_submitter_email("user_a") == "dev@example.com"
 
 
+def test_count_tools_in_snapshot_single_agent():
+    snapshot = {
+        "agent_id": 1,
+        "agent_info": {
+            "1": {
+                "agent_id": 1,
+                "tools": [{"name": "tool_a"}, {"name": "tool_b"}],
+            }
+        },
+        "mcp_info": [],
+    }
+    assert ars._count_tools_in_snapshot(snapshot) == 2
+
+
+def test_count_tools_in_snapshot_multi_agent_bundle():
+    snapshot = {
+        "agent_id": 1,
+        "agent_info": {
+            "1": {"agent_id": 1, "tools": [{"name": "tool_a"}]},
+            "2": {"agent_id": 2, "tools": [{"name": "tool_b"}, {"name": "tool_c"}]},
+        },
+        "mcp_info": [],
+    }
+    assert ars._count_tools_in_snapshot(snapshot) == 3
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        None,
+        "invalid",
+        {},
+        {"agent_info": None},
+        {"agent_info": {"1": "not-a-dict"}},
+        {"agent_info": {"1": {"tools": "not-a-list"}}},
+    ],
+)
+def test_count_tools_in_snapshot_invalid_input(snapshot):
+    assert ars._count_tools_in_snapshot(snapshot) == 0
+
+
 @pytest.mark.asyncio
 async def test_build_repository_data_from_agent_merges_card_fields():
     card_fields = {
@@ -1268,6 +1309,67 @@ async def test_build_repository_data_from_agent_merges_card_fields():
     assert repository_data["category_id"] == 3
     assert repository_data["tags"] == ["数据", "自定义标签"]
     assert repository_data["downloads"] == 10
+    assert repository_data["tool_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_build_repository_data_from_agent_computes_tool_count():
+    agent_info_json = {
+        "agent_id": 1,
+        "agent_info": {
+            "1": {"agent_id": 1, "tools": [{"name": "tool_a"}, {"name": "tool_b"}]},
+            "2": {"agent_id": 2, "tools": [{"name": "tool_c"}]},
+        },
+        "mcp_info": [],
+    }
+    with patch.object(
+        ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
+    ), patch.object(
+        ars, "_validate_create_listing_permission"
+    ), patch.object(
+        ars, "_build_agent_info_json", new_callable=AsyncMock, return_value=agent_info_json
+    ), patch.object(
+        ars, "search_version_by_version_no", return_value={"version_name": "v1"}
+    ), patch.object(
+        ars, "_resolve_submitter_email", return_value="submitter@example.com"
+    ):
+        repository_data = await ars._build_repository_data_from_agent(
+            agent_id=1,
+            tenant_id="tenant_a",
+            user_id="user_a",
+            version_no=1,
+        )
+
+    assert repository_data["tool_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_build_repository_data_from_agent_card_fields_override_tool_count():
+    agent_info_json = {
+        "agent_id": 1,
+        "agent_info": {"1": {"agent_id": 1, "tools": [{"name": "tool_a"}]}},
+        "mcp_info": [],
+    }
+    with patch.object(
+        ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
+    ), patch.object(
+        ars, "_validate_create_listing_permission"
+    ), patch.object(
+        ars, "_build_agent_info_json", new_callable=AsyncMock, return_value=agent_info_json
+    ), patch.object(
+        ars, "search_version_by_version_no", return_value={"version_name": "v1"}
+    ), patch.object(
+        ars, "_resolve_submitter_email", return_value="submitter@example.com"
+    ):
+        repository_data = await ars._build_repository_data_from_agent(
+            agent_id=1,
+            tenant_id="tenant_a",
+            user_id="user_a",
+            version_no=1,
+            card_fields={"tool_count": 99},
+        )
+
+    assert repository_data["tool_count"] == 99
 
 
 @pytest.mark.asyncio
@@ -1388,6 +1490,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "icon": "🤖",
             "category_id": 1,
             "tags": ["营销"],
+            "tool_count": 3,
         }
         mock_get_by_agent_id.return_value = {"agent_repository_id": 42}
         mock_update_by_id.return_value = 1
@@ -1424,6 +1527,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "icon": "🤖",
             "tags": ["营销"],
             "category_id": 1,
+            "tool_count": 3,
         },
     )
     mock_reset_status.assert_has_calls(
@@ -1720,6 +1824,41 @@ async def test_build_repository_data_from_agent_allows_asset_owner_sub_agent():
 
     assert repository_data["agent_id"] == 1
     assert repository_data["status"] == "pending_review"
+
+
+def test_list_repository_listings_includes_tool_count():
+    records = [
+        {
+            **_repository_record(agent_repository_id=1, agent_id=10, status="shared"),
+            "tool_count": 2,
+        }
+    ]
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars,
+        "sum_agent_repository_downloads_by_agent_ids",
+        return_value={10: 0},
+    ):
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    assert result["items"][0]["tool_count"] == 2
+
+
+def test_list_repository_listings_defaults_null_tool_count_to_zero():
+    records = [_repository_record(agent_repository_id=1, agent_id=10, status="shared")]
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars,
+        "sum_agent_repository_downloads_by_agent_ids",
+        return_value={10: 0},
+    ):
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    assert result["items"][0]["tool_count"] == 0
 
 
 def test_list_repository_listings_returns_agent_level_download_totals():
