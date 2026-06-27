@@ -91,10 +91,7 @@ deployment_ensure_root_env() {
   local env_dir="$project_root/deploy/env"
   local root_env="$env_dir/.env"
   local root_example="$env_dir/.env.example"
-  local legacy_root_env="$project_root/.env"
-  local legacy_root_example="$project_root/.env.example"
-  local legacy_docker_env="$docker_dir/.env"
-  local legacy_docker_example="$docker_dir/.env.example"
+  local docker_env="$docker_dir/.env"
 
   mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
@@ -104,15 +101,9 @@ deployment_ensure_root_env() {
     return 0
   fi
 
-  if [ -f "$legacy_root_env" ]; then
-    cp "$legacy_root_env" "$root_env"
-    deployment_log "✅ Created deploy/env/.env from legacy root .env"
-    return 0
-  fi
-
-  if [ -f "$legacy_docker_env" ]; then
-    cp "$legacy_docker_env" "$root_env"
-    deployment_log "✅ Created deploy/env/.env from legacy docker/.env"
+  if [ -f "$docker_env" ]; then
+    cp "$docker_env" "$root_env"
+    deployment_log "✅ Created deploy/env/.env from docker/.env"
     return 0
   fi
 
@@ -122,19 +113,7 @@ deployment_ensure_root_env() {
     return 0
   fi
 
-  if [ -f "$legacy_root_example" ]; then
-    cp "$legacy_root_example" "$root_env"
-    deployment_log "✅ Created deploy/env/.env from legacy root .env.example"
-    return 0
-  fi
-
-  if [ -f "$legacy_docker_example" ]; then
-    cp "$legacy_docker_example" "$root_env"
-    deployment_log "✅ Created deploy/env/.env from legacy docker/.env.example"
-    return 0
-  fi
-
-  deployment_error "deploy/env/.env not found and no .env.example template is available"
+  deployment_error "deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available"
   return 1
 }
 

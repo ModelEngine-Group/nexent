@@ -8,10 +8,7 @@ DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="${DEPLOYMENT_ROOT_ENV:-$DEPLOY_ROOT/env/.env}"
 ENV_EXAMPLE="$DEPLOY_ROOT/env/.env.example"
-LEGACY_ROOT_ENV="$PROJECT_ROOT/.env"
-LEGACY_ROOT_EXAMPLE="$PROJECT_ROOT/.env.example"
-LEGACY_ENV="$PROJECT_ROOT/docker/.env"
-LEGACY_ENV_EXAMPLE="$PROJECT_ROOT/docker/.env.example"
+DOCKER_ENV="$PROJECT_ROOT/docker/.env"
 
 if [ "${NEXENT_GENERATE_ENV_SKIP_MAIN:-false}" != "true" ]; then
   echo "   📁 Target .env location: $ENV_FILE"
@@ -47,28 +44,16 @@ prepare_env_file() {
 
   if [ -f "$ENV_FILE" ]; then
     echo "   ✅ Using existing deploy/env/.env"
-  elif [ -f "$LEGACY_ROOT_ENV" ]; then
-    echo "   deploy/env/.env not found, copying legacy root .env..."
-    cp "$LEGACY_ROOT_ENV" "$ENV_FILE"
-    echo "   Created deploy/env/.env from legacy root .env"
-  elif [ -f "$LEGACY_ENV" ]; then
+  elif [ -f "$DOCKER_ENV" ]; then
     echo "   deploy/env/.env not found, copying docker/.env..."
-    cp "$LEGACY_ENV" "$ENV_FILE"
+    cp "$DOCKER_ENV" "$ENV_FILE"
     echo "   Created deploy/env/.env from docker/.env"
   elif [ -f "$ENV_EXAMPLE" ]; then
     echo "   📋 deploy/env/.env not found, copying .env.example..."
     cp "$ENV_EXAMPLE" "$ENV_FILE"
     echo "   ✅ Created deploy/env/.env from .env.example"
-  elif [ -f "$LEGACY_ROOT_EXAMPLE" ]; then
-    echo "   📋 deploy/env/.env not found, copying legacy root .env.example..."
-    cp "$LEGACY_ROOT_EXAMPLE" "$ENV_FILE"
-    echo "   ✅ Created deploy/env/.env from legacy root .env.example"
-  elif [ -f "$LEGACY_ENV_EXAMPLE" ]; then
-    echo "   📋 deploy/env/.env not found, copying docker/.env.example..."
-    cp "$LEGACY_ENV_EXAMPLE" "$ENV_FILE"
-    echo "   ✅ Created deploy/env/.env from docker/.env.example"
   else
-    echo "   ERROR Neither deploy/env/.env nor deploy/env/.env.example nor legacy .env files exist"
+    echo "   ERROR Neither deploy/env/.env nor docker/.env nor deploy/env/.env.example exists"
     ERROR_OCCURRED=1
     return 1
   fi
