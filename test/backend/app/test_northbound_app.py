@@ -432,6 +432,141 @@ def test_run_chat_with_tool_params():
         assert resp.status_code == 200
 
 
+def test_run_chat_with_model_id():
+    """Test run chat with a custom model_id to override the agent's default model."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+
+        mock_ctx.return_value = MagicMock()
+        mock_run.return_value = MagicMock()
+
+        resp = client.post(
+            "/nb/v1/chat/run",
+            json={
+                "agent_name": "general-assistant",
+                "query": "Hello with custom model",
+                "model_id": 123,
+            },
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["model_id"] == 123
+
+
+def test_run_chat_with_model_id_and_attachments():
+    """Test run chat with both model_id override and file attachments."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+
+        mock_ctx.return_value = MagicMock()
+        mock_run.return_value = MagicMock()
+
+        resp = client.post(
+            "/nb/v1/chat/run",
+            json={
+                "agent_name": "general-assistant",
+                "query": "Summarize with custom model",
+                "attachments": ["s3://nexent/attachments/file.pdf"],
+                "model_id": 456,
+            },
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["model_id"] == 456
+        assert kwargs["attachments"] == ["s3://nexent/attachments/file.pdf"]
+
+
+def test_run_chat_with_model_id_and_tool_params():
+    """Test run chat with model_id override combined with tool parameter overrides."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+
+        mock_ctx.return_value = MagicMock()
+        mock_run.return_value = MagicMock()
+
+        resp = client.post(
+            "/nb/v1/chat/run",
+            json={
+                "agent_name": "general-assistant",
+                "query": "Search with custom model",
+                "model_id": 789,
+                "tool_params": {
+                    "agents": {
+                        "general-assistant": {
+                            "tools": {
+                                "knowledge_base_search": {
+                                    "top_k": 10,
+                                }
+                            }
+                        }
+                    }
+                },
+            },
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["model_id"] == 789
+        assert kwargs["tool_params"] is not None
+
+
+def test_run_chat_with_model_id_and_conversation_id():
+    """Test run chat with model_id override and existing conversation."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+
+        mock_ctx.return_value = MagicMock()
+        mock_run.return_value = MagicMock()
+
+        resp = client.post(
+            "/nb/v1/chat/run",
+            json={
+                "agent_name": "general-assistant",
+                "query": "Continue conversation with custom model",
+                "conversation_id": 999,
+                "model_id": 321,
+            },
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["model_id"] == 321
+        assert kwargs["conversation_id"] == 999
+
+
+def test_run_chat_model_id_null_uses_agent_default():
+    """Test that omitting model_id (null) preserves the agent's default model behavior."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+
+        mock_ctx.return_value = MagicMock()
+        mock_run.return_value = MagicMock()
+
+        resp = client.post(
+            "/nb/v1/chat/run",
+            json={
+                "agent_name": "general-assistant",
+                "query": "Hello without model_id",
+            },
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["model_id"] is None
+
+
 def test_run_chat_permission_error():
     """Test run chat returns 403 when permission denied."""
     with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \

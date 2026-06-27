@@ -89,7 +89,7 @@ export interface ChatAgentSelectorProps {
     agentId: string | null,
     greetingMessage?: string,
     exampleQuestions?: string[]
-  ) => void;
+  , modelIds?: number[], modelNames?: string[]) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
 }
@@ -236,7 +236,9 @@ export interface ChatStreamMainProps {
   onAgentSelect?: (
     agentId: string | null,
     greetingMessage?: string,
-    exampleQuestions?: string[]
+    exampleQuestions?: string[],
+    modelIds?: number[],
+    modelNames?: string[]
   ) => void;
   onCitationHover?: () => void;
   onScroll?: () => void;
@@ -246,6 +248,11 @@ export interface ChatStreamMainProps {
   selectedShareMessageIds?: Set<number>;
   onToggleShareMessage?: (messageId: number) => void;
   readOnly?: boolean;
+  agentModelIds?: number[];
+  agentModelNames?: string[];
+  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  selectedModelId?: number | null;
+  onModelSelect?: (modelId: number | null) => void;
 }
 
 // Card item type for task window

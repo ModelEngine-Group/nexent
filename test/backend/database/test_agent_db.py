@@ -118,8 +118,7 @@ class MockAgent:
         self.business_logic_model_name = None
         self.description = None
         self.author = None
-        self.model_id = None
-        self.model_name = None
+        self.model_ids = None
         self.max_steps = 5
         self.duty_prompt = None
         self.constraint_prompt = None

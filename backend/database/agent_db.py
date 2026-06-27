@@ -220,8 +220,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "display_name": new_agent.display_name,
             "description": new_agent.description,
             "author": new_agent.author,
-            "model_id": new_agent.model_id,
-            "model_name": new_agent.model_name,
             "max_steps": new_agent.max_steps,
             "duty_prompt": new_agent.duty_prompt,
             "constraint_prompt": new_agent.constraint_prompt,

@@ -50,6 +50,11 @@ export function ChatStreamMain({
   selectedShareMessageIds,
   onToggleShareMessage,
   readOnly = false,
+  agentModelIds,
+  agentModelNames,
+  availableModels,
+  selectedModelId,
+  onModelSelect,
 }: ChatStreamMainProps) {
   const { t } = useTranslation();
   // Animation variants for ChatInput
@@ -374,6 +379,11 @@ export function ChatStreamMain({
                         latestMetrics={latestMetrics}
                         agentGreeting={agentGreeting}
                         agentExampleQuestions={agentExampleQuestions}
+                        agentModelIds={agentModelIds}
+                        agentModelNames={agentModelNames}
+                        availableModels={availableModels}
+                        selectedModelId={selectedModelId}
+                        onModelSelect={onModelSelect}
                       />
                     </motion.div>
                   </AnimatePresence>
@@ -493,6 +503,11 @@ export function ChatStreamMain({
               latestMetrics={latestMetrics}
               agentGreeting={agentGreeting}
               agentExampleQuestions={agentExampleQuestions}
+              agentModelIds={agentModelIds}
+              agentModelNames={agentModelNames}
+              availableModels={availableModels}
+              selectedModelId={selectedModelId}
+              onModelSelect={onModelSelect}
             />
           </motion.div>
         </AnimatePresence>

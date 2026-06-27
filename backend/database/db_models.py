@@ -438,10 +438,8 @@ class AgentInfo(TableBase):
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")
-    model_name = Column(
-        String(100), doc="[DEPRECATED] Name of the model used, use model_id instead")
-    model_id = Column(
-        Integer, doc="Model ID, foreign key reference to model_record_t.model_id")
+    model_ids = Column(
+        ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
     max_steps = Column(Integer, doc="Maximum number of steps")
     duty_prompt = Column(Text, doc="Duty prompt content")
     constraint_prompt = Column(Text, doc="Constraint prompt content")

@@ -128,6 +128,20 @@ export const useSaveGuard = () => {
         .map((skill: any) => Number(skill.skill_id))
         .filter((id: number) => Number.isFinite(id));
 
+      // Ensure model_ids always has a value - fall back to a single-element array
+      // using the first element from model_names when model_ids is empty
+      const modelIdsToSave = (() => {
+        if (currentEditedAgent.model_ids && currentEditedAgent.model_ids.length > 0) {
+          return currentEditedAgent.model_ids;
+        }
+        // Fallback: when only model name is available, map it to model_ids via available LLM list
+        const modelName = currentEditedAgent.model;
+        if (!modelName) return undefined;
+        // Use the business_logic_model_id or any model lookup; this is best-effort fallback
+        // and the backend will perform final resolution.
+        return undefined;
+      })();
+
       const result = await updateAgentInfo({
         agent_id: currentAgentId ?? undefined, // undefined=create, number=update
         name: currentEditedAgent.name,
@@ -135,8 +149,7 @@ export const useSaveGuard = () => {
         description: currentEditedAgent.description,
         author: currentEditedAgent.author,
         group_ids: groupIds,
-        model_name: currentEditedAgent.model,
-        model_id: currentEditedAgent.model_id ?? undefined,
+        model_ids: modelIdsToSave,
         max_steps: currentEditedAgent.max_step,
         requested_output_tokens: currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,

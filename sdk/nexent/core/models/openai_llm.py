@@ -41,7 +41,7 @@ class OpenAIModel(OpenAIServerModel):
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-ssl_verify=True, model_factory: Optional[str] = None,
+                 ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,

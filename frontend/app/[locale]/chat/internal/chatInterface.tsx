@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
+import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
@@ -71,6 +72,9 @@ export function ChatInterface() {
 
   // Use conversation management hook
   const conversationManagement = useConversationManagement();
+
+  // Use model list hook for model selection
+  const { models: availableModels } = useModelList();
 
   // For each conversation, maintain independent SSE connections and states
   const [streamingConversations, setStreamingConversations] = useState<
@@ -138,6 +142,9 @@ export function ChatInterface() {
     Set<number>
   >(new Set());
   const [isCreatingShare, setIsCreatingShare] = useState(false);
+  const [agentModelIds, setAgentModelIds] = useState<number[]>([]);
+  const [agentModelNames, setAgentModelNames] = useState<string[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
 
   useEffect(() => {
     sessionMessagesRef.current = sessionMessages;
@@ -147,10 +154,13 @@ export function ChatInterface() {
     agentId: string | null,
     greeting?: string,
     exampleQuestions?: string[]
-  ) => {
+  , modelIds?: number[], modelNames?: string[]) => {
     setSelectedAgentId(agentId);
     setAgentGreeting(greeting || null);
     setAgentExampleQuestions(exampleQuestions || []);
+    setAgentModelIds(modelIds || []);
+    setAgentModelNames(modelNames || []);
+    setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
   };
 
   useEffect(() => {
@@ -546,6 +556,11 @@ export function ChatInterface() {
       // Only add agent_id if it's not null
       if (selectedAgentId !== null) {
         runAgentParams.agent_id = Number(selectedAgentId);
+      }
+
+      // Add selected model_id for agent run
+      if (selectedModelId !== null) {
+        runAgentParams.model_id = selectedModelId;
       }
 
       const reader = await conversationService.runAgent(
@@ -1539,8 +1554,13 @@ export function ChatInterface() {
               shareMode={isShareMode}
               selectedShareMessageIds={selectedShareMessageIds}
               onToggleShareMessage={toggleShareMessage}
-            />
-          </div>
+                agentModelIds={agentModelIds}
+                agentModelNames={agentModelNames}
+                availableModels={availableModels}
+                selectedModelId={selectedModelId}
+                onModelSelect={setSelectedModelId}
+              />
+            </div>
 
           <ChatRightPanel
             messages={currentMessages}

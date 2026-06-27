@@ -121,6 +121,7 @@
   "chatInput.send": "发送",
   "chatInput.remove": "移除",
   "chatInput.wsConnectionEstablished": "WebSocket 连接已建立",
+  "chatInput.selectModel": "选择模型",
 
   "chatLeftSidebar.rename": "重命名",
   "chatLeftSidebar.delete": "删除",
@@ -1017,6 +1018,7 @@
   "businessLogic.config.title": "配置智能体能力",
   "businessLogic.config.model": "大语言模型",
   "businessLogic.config.modelPlaceholder": "请选择模型",
+  "businessLogic.config.modelMax5": "最多支持选择5个模型",
   "businessLogic.config.maxSteps": "智能体运行最大步骤数",
   "businessLogic.config.button.generatePrompt": "生成智能体",
   "businessLogic.config.button.generating": "智能生成提示词中...",
