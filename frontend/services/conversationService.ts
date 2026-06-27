@@ -746,13 +746,14 @@ export const conversationService = {
     history: Array<{ role: string; content: string; }>;
     files?: File[];  // Add optional files parameter
     minio_files?: Array<{
-      object_name: string;
+      object_name?: string;
       name: string;
       type: string;
       size: number;
       url?: string;
-      description?: string; // Add file description field
-    }>; // Update to complete attachment information object array
+      presigned_url?: string;
+      description?: string;
+    }>; // Complete attachment information object array
     agent_id?: number; // Add agent_id parameter
     model_id?: number; // Optional model override
     version_no?: number; // Optional version override

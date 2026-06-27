@@ -47,3 +47,18 @@ def prepare_messages_for_completion(normalized_messages: List[Any], model_factor
         return prepared
     return normalized_messages
 
+
+def prepare_messages_for_smolagents_text_flattening(normalized_messages: List[Any]) -> List[Any]:
+    """
+    Normalize message content for smolagents' flatten_messages_as_text path.
+
+    smolagents expects each message content to be a list whose first item is a
+    text dict when flatten_messages_as_text=True. Plain string content otherwise
+    fails with TypeError: string indices must be integers.
+    """
+    for msg in normalized_messages:
+        if isinstance(msg, dict):
+            msg["content"] = [{"type": "text", "text": _flatten_content(msg.get("content"))}]
+        else:
+            msg.content = [{"type": "text", "text": _flatten_content(getattr(msg, "content", None))}]
+    return normalized_messages

@@ -183,6 +183,7 @@ export const useSaveGuard = () => {
         model_name: currentEditedAgent.model,
         model_id: currentEditedAgent.model_id ?? undefined,
         max_steps: currentEditedAgent.max_step,
+        requested_output_tokens: currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,
@@ -241,12 +242,23 @@ export const useSaveGuard = () => {
         await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
 
         // Refresh cache
+        // Refresh cache
         await queryClient.invalidateQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
         await queryClient.refetchQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
+
+        // CRITICAL: Update store with the latest data from cache after saving tool configs
+        // This ensures that on subsequent saves, the tool initParams reflect the latest
+        // values that were saved (including any defaults merged by the backend)
+        const latestAgentData = queryClient.getQueryData(["agentInfo", finalAgentId]);
+        if (latestAgentData && typeof latestAgentData === 'object' && 'tools' in latestAgentData) {
+          const latestTools = (latestAgentData as any).tools || [];
+          // Update editedAgent with the latest tools from cache
+          useAgentConfigStore.getState().updateTools(latestTools);
+        }
 
         // CRITICAL: Update store with the latest data from cache after saving tool configs
         // This ensures that on subsequent saves, the tool initParams reflect the latest
@@ -266,6 +278,8 @@ export const useSaveGuard = () => {
         // Also invalidate the agents list cache to ensure the list reflects any changes
         queryClient.invalidateQueries({ queryKey: ["agents"] });
 
+        // Mark as saved (this will sync editedAgent to baselineAgent)
+        useAgentConfigStore.getState().markAsSaved();
         // Mark as saved (this will sync editedAgent to baselineAgent)
         useAgentConfigStore.getState().markAsSaved();
         return true;

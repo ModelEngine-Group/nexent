@@ -15,7 +15,7 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ## 快速启动
 
 ```bash
-cd docker
+cd deploy/docker
 [ -f .env ] || cp .env.example .env
 cp monitoring/monitoring.env.example monitoring/monitoring.env
 
@@ -44,7 +44,7 @@ MONITORING_PROVIDER=otlp
 | `grafana` | `./start-monitoring.sh --stack grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
 | `zipkin` | `./start-monitoring.sh --stack zipkin` | Collector + Zipkin | 本地 trace 查询 |
 
-也可以在 `docker/monitoring/monitoring.env` 中设置默认形态：
+也可以在 `deploy/docker/assets/monitoring/monitoring.env` 中设置默认形态：
 
 ```bash
 MONITORING_PROVIDER=phoenix
@@ -55,7 +55,7 @@ MONITORING_PROVIDER=phoenix
 Phoenix 本地部署使用 `arizephoenix/phoenix` 镜像，默认 UI 端口为 `6006`，gRPC OTLP 端口映射为 `4319`，数据持久化到 Docker volume `phoenix-data`。
 
 ```bash
-cd docker
+cd deploy/docker
 ./start-monitoring.sh --stack phoenix
 ```
 
@@ -81,7 +81,7 @@ OTEL_EXPORTER_OTLP_METRICS_ENABLED=false
 Langfuse 本地部署使用 v3 架构：Web、Worker、Postgres、ClickHouse、MinIO、Redis。默认 UI 端口为 `3001`，初始化项目和 API Key 来自 `monitoring.env`。
 
 ```bash
-cd docker
+cd deploy/docker
 ./start-monitoring.sh --stack langfuse
 ```
 
@@ -98,7 +98,7 @@ cd docker
 LangSmith 支持通过在线 OTLP endpoint 摄取 traces。Nexent 可以先把 OTLP 发到本地 Collector，再由 Collector 转发到 LangSmith，业务服务无需直接保存 LangSmith API Key。
 
 ```bash
-cd docker
+cd deploy/docker
 vim monitoring/monitoring.env
 
 MONITORING_PROVIDER=langsmith
@@ -126,7 +126,7 @@ LangSmith 当前配置只转发 traces，OTLP metrics 会留在 Collector debug 
 Grafana 本地部署使用 Grafana Tempo 存储 traces，并启用 Tempo `metrics-generator` 的 `local-blocks` processor 支持 Grafana trace breakdown 中的 TraceQL metrics 查询。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 通过 OTLP gRPC 转发到 Tempo；OTLP metrics 只进入 Collector debug pipeline，不提供独立指标存储或指标 dashboard。
 
 ```bash
-cd docker
+cd deploy/docker
 ./start-monitoring.sh --stack grafana
 ```
 
@@ -152,7 +152,7 @@ Grafana 会自动预置 Tempo datasource，并加载 `Nexent Agent Trace Monitor
 Zipkin 本地部署使用 `openzipkin/zipkin` 镜像。Collector 接收 Nexent 后端的 OTLP traces/metrics，其中 traces 转发到 Zipkin v2 spans endpoint；OTLP metrics 当前只进入 Collector debug pipeline。
 
 ```bash
-cd docker
+cd deploy/docker
 ./start-monitoring.sh --stack zipkin
 ```
 
@@ -435,11 +435,11 @@ service:
 
 本地 Phoenix 和 Langfuse 分别使用独立 Collector 配置：
 
-- `docker/monitoring/otel-collector-phoenix-config.yml`
-- `docker/monitoring/otel-collector-langfuse-config.yml`
-- `docker/monitoring/otel-collector-langsmith-config.yml`
+- `deploy/docker/assets/monitoring/otel-collector-phoenix-config.yml`
+- `deploy/docker/assets/monitoring/otel-collector-langfuse-config.yml`
+- `deploy/docker/assets/monitoring/otel-collector-langsmith-config.yml`
 
-基础 debug 配置见 `docker/monitoring/otel-collector-config.yml`。
+基础 debug 配置见 `deploy/docker/assets/monitoring/otel-collector-config.yml`。
 
 ## 优雅降级
 

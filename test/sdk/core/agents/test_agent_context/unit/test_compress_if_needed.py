@@ -65,6 +65,20 @@ class TestCompressIfNeeded:
         )
         assert "Summary of earlier steps" in all_text
 
+    def test_soft_input_budget_triggers_compression_before_legacy_threshold(self):
+        cm = make_cm(enabled=True, threshold=999999, keep_recent_steps=2, keep_recent_pairs=1)
+        cm.config.soft_input_budget_tokens = 10
+        cm.config.hard_input_budget_tokens = 999999
+        memory = make_memory_mixed(n_prev_pairs=3, n_curr_actions=2)
+        original = make_original_messages(memory)
+        current_run_start_idx = 6
+        model = make_model('{"task_overview": "summary"}')
+
+        result = cm.compress_if_needed(model, memory, original, current_run_start_idx)
+
+        assert result is not None
+        model.assert_called_once()
+
     def test_run_boundary_clears_current_cache(self):
         """Switching run (current_run_start_idx changes) and ensuring no current summary triggers, current cache should be cleared."""
         cm = make_cm(enabled=True, threshold=1)

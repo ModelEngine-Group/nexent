@@ -9,12 +9,12 @@ on:
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
-      - 'make/terminal/**'
+      - 'deploy/images/dockerfiles/terminal/**'
       - '.github/workflows/**'
   push:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
-      - 'make/terminal/**'
+      - 'deploy/images/dockerfiles/terminal/**'
       - '.github/workflows/**'
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build terminal image (amd64) and load locally
         run: |
-          docker build --platform linux/amd64 -t nexent/nexent-ubuntu-terminal:dev-amd64 -f make/terminal/Dockerfile .
+          docker build --platform linux/amd64 -t nexent/nexent-ubuntu-terminal:dev-amd64 -f deploy/images/dockerfiles/terminal/Dockerfile .
 
   build-terminal-arm64:
     runs-on: ubuntu-24.04-arm
@@ -34,4 +34,4 @@ jobs:
         uses: actions/checkout@v4
       - name: Build terminal image (arm64) and load locally
         run: |
-          docker build --platform linux/arm64 -t nexent/nexent-ubuntu-terminal:dev-arm64 -f make/terminal/Dockerfile .
+          docker build --platform linux/arm64 -t nexent/nexent-ubuntu-terminal:dev-arm64 -f deploy/images/dockerfiles/terminal/Dockerfile .

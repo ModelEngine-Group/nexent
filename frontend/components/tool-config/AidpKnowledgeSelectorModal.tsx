@@ -14,6 +14,7 @@ import {
   message,
 } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
@@ -50,8 +51,12 @@ export default function AidpKnowledgeSelectorModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageItems, setPageItems] = useState<AidpKnowledgeBaseItem[]>([]);
   const [nextLink, setNextLink] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageItems, setPageItems] = useState<AidpKnowledgeBaseItem[]>([]);
+  const [nextLink, setNextLink] = useState<string | null>(null);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
   const [tempSelectedIds, setTempSelectedIds] = useState<string[]>([]);
 
   const nameMap = useRef<Map<string, string>>(new Map());
@@ -136,7 +141,18 @@ export default function AidpKnowledgeSelectorModal({
 
         if (nextUrl) {
           setNextLink(result.next_link ?? null);
+        const items: AidpKnowledgeBaseItem[] = result.value || [];
+
+        if (nextUrl) {
+          setNextLink(result.next_link ?? null);
         } else {
+          setNextLink(result.next_link ?? null);
+        }
+
+        for (const item of items) {
+          const id = String(item.kds_id);
+          if (!nameMap.current.has(id)) {
+            nameMap.current.set(id, item.kds_name || id);
           setNextLink(result.next_link ?? null);
         }
 
@@ -149,31 +165,41 @@ export default function AidpKnowledgeSelectorModal({
 
         setPageItems(items);
         setCurrentPage(pageNum);
+        setPageItems(items);
+        setCurrentPage(pageNum);
       } catch (error) {
         log.error("Failed to load AIDP knowledge bases:", error);
         message.error(t("toolConfig.aidp.selector.loadFailed"));
+        setPageItems([]);
+        setNextLink(null);
         setPageItems([]);
         setNextLink(null);
       } finally {
         setLoading(false);
       }
     },
-    [t]
+    [serverUrl, apiKey, t]
   );
 
   // ------------------------------------------------------------------
+  // Load first page when modal opens or credentials change
   // Load first page when modal opens or credentials change
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
     loadPage(1);
   }, [isOpen, serverUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    loadPage(1);
+  }, [isOpen, serverUrl, apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
+  // Keyword filter (client-side on current page)
   // Keyword filter (client-side on current page)
   // ------------------------------------------------------------------
   const filteredItems = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
+    if (!kw) return pageItems;
+    return pageItems.filter((item) => {
     if (!kw) return pageItems;
     return pageItems.filter((item) => {
       const n = String(item.kds_name || "").toLowerCase();
@@ -182,14 +208,22 @@ export default function AidpKnowledgeSelectorModal({
       return n.includes(kw) || i.includes(kw) || d.includes(kw);
     });
   }, [pageItems, keyword]);
+  }, [pageItems, keyword]);
 
   // ------------------------------------------------------------------
+  // Sync / Reload current page
   // Sync / Reload current page
   // ------------------------------------------------------------------
   const handleSync = () => {
     loadPage(currentPage);
   };
+  const handleSync = () => {
+    loadPage(currentPage);
+  };
 
+  // ------------------------------------------------------------------
+  // Toggle selection
+  // ------------------------------------------------------------------
   // ------------------------------------------------------------------
   // Toggle selection
   // ------------------------------------------------------------------
@@ -218,6 +252,9 @@ export default function AidpKnowledgeSelectorModal({
   const displayNames = tempSelectedIds.map(
     (id) => nameMap.current.get(id) || id
   );
+  const displayNames = tempSelectedIds.map(
+    (id) => nameMap.current.get(id) || id
+  );
 
   const renderRow = (item: AidpKnowledgeBaseItem) => {
     const id = String(item.kds_id);
@@ -227,9 +264,12 @@ export default function AidpKnowledgeSelectorModal({
     return (
       <div key={id} className="px-4 py-3">
         <div className="flex w-full items-start justify-between gap-4 flex-wrap">
+        <div className="flex w-full items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-start gap-2">
+            <div className="mb-1 flex items-start gap-2">
               <Checkbox
+                id={`aidp-kb-${id}`}
                 id={`aidp-kb-${id}`}
                 checked={checked}
                 disabled={disableUnchecked}
@@ -240,14 +280,24 @@ export default function AidpKnowledgeSelectorModal({
               <label
                 htmlFor={`aidp-kb-${id}`}
                 className="cursor-pointer break-all leading-5 min-w-0"
+                onChange={(e) => handleToggle(item, e.target.checked)}
+                className="shrink-0 mt-0.5"
+              />
+              <Tag className="shrink-0">{id}</Tag>
+              <label
+                htmlFor={`aidp-kb-${id}`}
+                className="cursor-pointer break-all leading-5 min-w-0"
               >
                 {item.kds_name || id}
+              </label>
               </label>
             </div>
             {item.description && (
               <Text type="secondary" className="break-words">{item.description}</Text>
+              <Text type="secondary" className="break-words">{item.description}</Text>
             )}
           </div>
+          <Space size={8} className="shrink-0">
           <Space size={8} className="shrink-0">
             <Tag>
               {t(
@@ -268,6 +318,8 @@ export default function AidpKnowledgeSelectorModal({
 
   const renderListContent = () => {
     if (loading && pageItems.length === 0) {
+  const renderListContent = () => {
+    if (loading && pageItems.length === 0) {
       return (
         <div className="flex justify-center py-12">
           <Spin />
@@ -275,10 +327,12 @@ export default function AidpKnowledgeSelectorModal({
       );
     }
     if (filteredItems.length === 0) {
+    if (filteredItems.length === 0) {
       return <Empty description={t("toolConfig.aidp.selector.empty")} />;
     }
     return (
       <div className="divide-y divide-gray-100 rounded-md border border-gray-200 bg-white">
+        {filteredItems.map(renderRow)}
         {filteredItems.map(renderRow)}
       </div>
     );
@@ -310,6 +364,9 @@ export default function AidpKnowledgeSelectorModal({
           onChange={(e) => {
             setKeyword(e.target.value);
           }}
+          onChange={(e) => {
+            setKeyword(e.target.value);
+          }}
           placeholder={t("toolConfig.aidp.selector.searchPlaceholder")}
         />
 
@@ -320,6 +377,7 @@ export default function AidpKnowledgeSelectorModal({
               max: maxSelect,
             })}
           </Text>
+          <Button onClick={handleSync}>
           <Button onClick={handleSync}>
             {t("knowledgeBase.button.sync")}
           </Button>
@@ -344,8 +402,25 @@ export default function AidpKnowledgeSelectorModal({
 
         <div style={{ minHeight: 420 }}>
           {renderListContent()}
+          {renderListContent()}
         </div>
 
+        <div className="flex items-center justify-center gap-4">
+          <Button
+            icon={<LeftOutlined />}
+            disabled={currentPage === 1 || loading}
+            onClick={() => loadPage(currentPage - 1)}
+          >
+            {t("filePreview.pdf.previousPage")}
+          </Button>
+          <Text type="secondary">{currentPage}</Text>
+          <Button
+            icon={<RightOutlined />}
+            disabled={!nextLink || loading}
+            onClick={() => loadPage(currentPage + 1)}
+          >
+            {t("filePreview.pdf.nextPage")}
+          </Button>
         <div className="flex items-center justify-center gap-4">
           <Button
             icon={<LeftOutlined />}
