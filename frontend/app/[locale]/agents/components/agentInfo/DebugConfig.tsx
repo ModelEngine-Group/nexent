@@ -99,7 +99,6 @@ function AgentDebugging({
   attachments,
   onFileSelect,
   onRemoveAttachment,
-}: AgentDebuggingProps) {
   modelIds,
   modelNames,
   selectedModelId,
@@ -327,11 +326,6 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   // Attachment state
   const [attachments, setAttachments] = useState<FilePreview[]>([]);
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
-
-  const parsedAgentId =
-    agentId === undefined || agentId === null || Number.isNaN(Number(agentId))
-      ? undefined
-      : Number(agentId);
 
   // Derive debug model selector options from search_info's model_ids,
   // resolving display names against the already-loaded model list.
