@@ -53,6 +53,23 @@ export const API_ENDPOINTS = {
     opinion: `${API_BASE_URL}/conversation/message/update_opinion`,
     messageId: `${API_BASE_URL}/conversation/message/id`,
   },
+  share: {
+    createConversation: (conversationId: number) =>
+      `${API_BASE_URL}/share/conversation/${conversationId}`,
+    detail: (shareId: string) => `${API_BASE_URL}/share/${shareId}`,
+    assetPreview: (shareId: string, assetId: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+      return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/preview${suffix}`;
+    },
+    assetDownload: (shareId: string, assetId: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+      return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/download${suffix}`;
+    },
+  },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     update: `${API_BASE_URL}/agent/update`,

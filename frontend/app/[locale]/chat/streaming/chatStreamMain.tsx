@@ -5,8 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
+import { Checkbox } from "antd";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
-import { ChatMessageType, ProcessedMessages, ChatStreamMainProps } from "@/types/chat";
+import {
+  ChatMessageType,
+  ProcessedMessages,
+  ChatStreamMainProps,
+} from "@/types/chat";
 
 import { ChatInput } from "../components/chatInput";
 import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
@@ -41,6 +46,10 @@ export function ChatStreamMain({
   onScroll,
   agentGreeting,
   agentExampleQuestions,
+  shareMode = false,
+  selectedShareMessageIds,
+  onToggleShareMessage,
+  readOnly = false,
 }: ChatStreamMainProps) {
   const { t } = useTranslation();
   // Animation variants for ChatInput
@@ -91,10 +100,8 @@ export function ChatStreamMain({
       }
     });
 
-    const { taskMessages: taskMsgs, conversationGroups } = transformMessagesToTaskMessages(
-      messages,
-      { includeCode: false }
-    );
+    const { taskMessages: taskMsgs, conversationGroups } =
+      transformMessagesToTaskMessages(messages, { includeCode: false });
 
     return {
       finalMessages: finalMsgs,
@@ -312,7 +319,7 @@ export function ChatStreamMain({
             ) : conversationLoadError ? (
               // when conversation load error, show error message
               <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
-                  <div className="text-center max-w-md">
+                <div className="text-center max-w-md">
                   <div className="text-red-500 text-sm mb-4">
                     {t("chatStreamMain.loadError")}
                   </div>
@@ -328,6 +335,12 @@ export function ChatStreamMain({
                   >
                     {t("chatStreamMain.retry")}
                   </Button>
+                </div>
+              </div>
+            ) : readOnly ? (
+              <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
+                <div className="text-gray-500 text-sm">
+                  {t("chatStreamMain.noMessages", "No messages")}
                 </div>
               </div>
             ) : (
@@ -370,7 +383,25 @@ export function ChatStreamMain({
           ) : (
             <>
               {processedMessages.finalMessages.map((message, index) => (
-                <div key={message.id || index} className="flex flex-col gap-2">
+                <div
+                  key={message.id || index}
+                  className="flex flex-col gap-2 relative"
+                >
+                  {shareMode &&
+                    message.role === MESSAGE_ROLES.USER &&
+                    typeof message.message_id === "number" && (
+                      <div className="absolute left-0 top-2 z-10">
+                        <Checkbox
+                          checked={
+                            selectedShareMessageIds?.has(message.message_id) ||
+                            false
+                          }
+                          onChange={() =>
+                            onToggleShareMessage?.(message.message_id!)
+                          }
+                        />
+                      </div>
+                    )}
                   <ChatStreamFinalMessage
                     message={message}
                     onSelectMessage={onSelectMessage}
@@ -379,6 +410,7 @@ export function ChatStreamMain({
                     imagesCount={message?.images?.length || 0}
                     onImageClick={onImageClick}
                     onOpinionChange={onOpinionChange}
+                    readOnly={readOnly}
                     index={index}
                     currentConversationId={currentConversationId}
                     onCitationHover={onCitationHover}
@@ -413,7 +445,7 @@ export function ChatStreamMain({
       )}
 
       {/* Scroll to bottom button - dynamically positioned based on ChatInput height */}
-        {showScrollButton && (
+      {showScrollButton && (
         <Button
           size="small"
           shape="circle"
@@ -421,7 +453,7 @@ export function ChatStreamMain({
           style={{
             // Position the button above the ChatInput with some margin
             // The ChatInput height changes from 130px (default) to up to 200px+ when textarea expands
-            bottom: `${chatInputHeight-15}px`
+            bottom: readOnly ? "1.5rem" : `${chatInputHeight - 15}px`,
           }}
           onClick={(e) => {
             e.preventDefault();
@@ -434,7 +466,7 @@ export function ChatStreamMain({
       )}
 
       {/* Input box in non-initial mode */}
-      {processedMessages.finalMessages.length > 0 && (
+      {!readOnly && processedMessages.finalMessages.length > 0 && (
         <AnimatePresence mode="wait">
           <motion.div
             key="regular-chat-input"
@@ -465,7 +497,6 @@ export function ChatStreamMain({
           </motion.div>
         </AnimatePresence>
       )}
-
     </div>
   );
 }
