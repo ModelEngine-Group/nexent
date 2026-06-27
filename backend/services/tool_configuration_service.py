@@ -500,9 +500,11 @@ async def list_all_tools(tenant_id: str):
     for tool in tools_info:
         tool_name = tool.get("name")
 
-        # Merge description_zh from SDK for local tools
-        if tool.get("source") == "local" and tool_name in local_tool_descriptions:
-            sdk_info = local_tool_descriptions[tool_name]
+        # Always use SDK inputs for local tools to stay in sync with current tool code
+        is_local = tool.get("source") == "local"
+        sdk_info = local_tool_descriptions.get(tool_name) if is_local else None
+
+        if is_local and sdk_info:
             description_zh = sdk_info.get("description_zh")
 
             # Merge params description_zh from SDK (independent of tool-level description_zh)
@@ -510,27 +512,26 @@ async def list_all_tools(tenant_id: str):
             if params:
                 for param in params:
                     if not param.get("description_zh"):
-                        # Find matching param in SDK
                         for sdk_param in sdk_info.get("params", []):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
 
-            # Use SDK full input schema for local tools to keep runtime inputs
-            # aligned with current tool code (instead of stale DB snapshots).
+            # Merge SDK inputs: use DB as base, merge description_zh for existing keys,
+            # add new keys from SDK. This ensures new inputs like kds_list appear even
+            # if the DB record was created before the field was added to the SDK.
             inputs_str = tool.get("inputs", "{}")
             try:
-                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else (inputs_str or {})
                 sdk_inputs = sdk_info.get("inputs", {})
 
                 if isinstance(inputs, dict):
-                    # Merge description_zh for existing inputs
                     for key, value in inputs.items():
-                        if isinstance(value, dict):
-                            if key in sdk_inputs and sdk_inputs[key].get("description_zh"):
-                                value["description_zh"] = sdk_inputs[key].get("description_zh")
+                        if isinstance(value, dict) and key in sdk_inputs:
+                            sdk_desc_zh = sdk_inputs[key].get("description_zh")
+                            if sdk_desc_zh:
+                                value["description_zh"] = sdk_desc_zh
 
-                    # Add new inputs from SDK that don't exist in DB
                     for key, sdk_value in sdk_inputs.items():
                         if key not in inputs:
                             inputs[key] = sdk_value

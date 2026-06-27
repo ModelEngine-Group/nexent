@@ -134,6 +134,8 @@ export default function ToolTestPanel({
   const formInitializedRef = useRef<boolean>(false);
   // Track the last known tool to detect tool changes
   const lastToolRef = useRef<string>("");
+  // Track the last config params JSON to detect config changes
+  const lastConfigParamsJsonRef = useRef<string>("");
   // Track previous manual input mode to detect transitions (for syncing testPanelKbIds)
   const prevManualInputModeRef = useRef(false);
 
@@ -172,13 +174,21 @@ export default function ToolTestPanel({
       return;
     }
 
-    // Detect if tool has changed
+    // Detect if tool has changed. Note: we intentionally do NOT include
+    // configParams in this check, because configParams is a parent-controlled
+    // object that gets rebuilt whenever the parent re-renders (e.g. when the
+    // user picks a knowledge base and the parent calls setCurrentParams).
+    // Treating that as a "tool change" would clobber the user's runtime
+    // input fields (e.g. resetting the "query" string they typed, which
+    // triggers "missing 1 required positional argument: 'query'" on submit).
     const currentToolName = tool.origin_name || tool.name || "";
     const toolChanged = lastToolRef.current !== currentToolName;
 
-    // Only re-initialize if the tool has changed, not just selectedKbIds
     if (toolChanged) {
       lastToolRef.current = currentToolName;
+      // Snapshot the current configParams so subsequent parent-driven
+      // updates don't accidentally re-trigger initialization logic.
+      lastConfigParamsJsonRef.current = JSON.stringify(configParams || []);
       formInitializedRef.current = false;
     }
 
@@ -219,34 +229,52 @@ export default function ToolTestPanel({
               parameterValues[paramName] = kbIds;
               formValues[`param_${paramName}`] = kbIds;
             }
-          } else if (
-            paramInfo &&
-            typeof paramInfo === "object" &&
-            paramInfo.default != null
-          ) {
-            // Store actual default value
-            parameterValues[paramName] = paramInfo.default;
-
-            // Convert to string for form display
-            switch (paramType) {
-              case "boolean":
-                formValues[`param_${paramName}`] = paramInfo.default ? "true" : "false";
-                break;
-              case "array":
-              case "object":
-                // JSON.stringify with indentation of 2 spaces for better readability
-                formValues[`param_${paramName}`] = JSON.stringify(
-                  paramInfo.default,
-                  null,
-                  2
-                );
-                break;
-              default:
-                formValues[`param_${paramName}`] = String(paramInfo.default);
-            }
           } else {
-            parameterValues[paramName] = "";
-            formValues[`param_${paramName}`] = "";
+            // Priority: configParams (user's saved value) > parsedInputs default
+            const configParam = (configParams || []).find((p) => p.name === paramName);
+            const hasSavedValue = configParam != null && configParam.value !== undefined && configParam.value !== null;
+
+            if (hasSavedValue) {
+              // Use saved value from configParams
+              const savedValue = configParam.value;
+              parameterValues[paramName] = savedValue;
+              switch (paramType) {
+                case "boolean":
+                  formValues[`param_${paramName}`] = savedValue ? "true" : "false";
+                  break;
+                case "array":
+                case "object":
+                  formValues[`param_${paramName}`] = JSON.stringify(savedValue, null, 2);
+                  break;
+                default:
+                  formValues[`param_${paramName}`] = String(savedValue);
+              }
+            } else if (
+              paramInfo &&
+              typeof paramInfo === "object" &&
+              paramInfo.default != null
+            ) {
+              // Store actual default value
+              parameterValues[paramName] = paramInfo.default;
+              switch (paramType) {
+                case "boolean":
+                  formValues[`param_${paramName}`] = paramInfo.default ? "true" : "false";
+                  break;
+                case "array":
+                case "object":
+                  formValues[`param_${paramName}`] = JSON.stringify(
+                    paramInfo.default,
+                    null,
+                    2
+                  );
+                  break;
+                default:
+                  formValues[`param_${paramName}`] = String(paramInfo.default);
+              }
+            } else {
+              parameterValues[paramName] = "";
+              formValues[`param_${paramName}`] = "";
+            }
           }
         });
 
@@ -259,11 +287,28 @@ export default function ToolTestPanel({
         // Mark form as initialized
         formInitializedRef.current = true;
       } else {
-        // Parsing returned empty object, treat as failed
+        // Parsing returned empty object - try to fall back to configParams so the
+        // form still has fields the user can edit (otherwise executeTest would
+        // send an empty inputs payload and the SDK forward() would error with
+        // "missing 1 required positional argument" for tools like knowledge_base_search).
+        const fallbackNames = (configParams || []).map((p) => p.name);
+        if (fallbackNames.length > 0) {
+          const parameterValues: Record<string, any> = {};
+          const formValues: Record<string, any> = {};
+          (configParams || []).forEach((p) => {
+            const value = p.value;
+            parameterValues[p.name] = value;
+            formValues[`param_${p.name}`] = value != null ? String(value) : "";
+          });
+          setParameterValues(parameterValues);
+          form.setFieldsValue(formValues);
+          setManualJsonInput(JSON.stringify(parameterValues, null, 2));
+        } else {
+          setParameterValues({});
+        }
         setParsedInputs({});
-        setParameterValues({});
         setIsManualInputMode(true);
-        setManualJsonInput("{}");
+        setManualJsonInput((prev) => (prev && prev !== "{}" ? prev : "{}"));
         formInitializedRef.current = true;
       }
     } catch (error) {
@@ -276,7 +321,7 @@ export default function ToolTestPanel({
       setManualJsonInput("{}");
       formInitializedRef.current = true;
     }
-  }, [tool, toolRequiresKbSelection, visible, form]);
+  }, [tool, toolRequiresKbSelection, visible, form, configParams]);
 
   // Sync KB selection with form values when the relevant IDs change.
   // - aidp_search: uses testPanelKbIds (independent test panel state)
@@ -285,17 +330,18 @@ export default function ToolTestPanel({
     if (!toolRequiresKbSelection) return;
 
     const isHaotianOrIdata = toolKbType === "haotian_search" || toolKbType === "idata_search";
-    const isAidp = toolKbType === "aidp_search";
+    const isAidpOrKbSearch = toolKbType === "aidp_search" || isKnowledgeBaseSearchTool;
 
     // Determine source of truth, field name, and state key for each tool type
     let ids: string[];
     let fieldName: string;
     let stateKey: string;
 
-    if (isAidp) {
+    if (isAidpOrKbSearch) {
+      // aidp_search and knowledge_base_search use independent test panel KB state
       ids = testPanelKbIds;
-      fieldName = "param_kds_list";
-      stateKey = "kds_list";
+      fieldName = toolKbType === "aidp_search" ? "param_kds_list" : "param_index_names";
+      stateKey = toolKbType === "aidp_search" ? "kds_list" : "index_names";
     } else if (isHaotianOrIdata) {
       ids = selectedKbIds;
       fieldName = "param_dataset_ids";
@@ -330,12 +376,17 @@ export default function ToolTestPanel({
   // Handle aidp_search testPanelKbIds that may arrive after initial form setup.
   // This runs when testPanelKbIds transitions from [] to non-empty so the form
   // and parameterValues are pre-populated before the user sees the panel.
+  // For both aidp_search and knowledge_base_search, when testPanelKbIds arrives
+  // (after modal reopens or parent sync), pre-populate the form and manual JSON.
   useEffect(() => {
-    if (!visible || toolKbType !== "aidp_search") return;
+    if (!visible) return;
     if (!toolRequiresKbSelection) return;
     if (testPanelKbIds.length === 0) return;
+    if (toolKbType !== "aidp_search" && !isKnowledgeBaseSearchTool) return;
 
-    const fieldName = "param_kds_list";
+    const fieldName = toolKbType === "aidp_search" ? "param_kds_list" : "param_index_names";
+    const stateKey = toolKbType === "aidp_search" ? "kds_list" : "index_names";
+
     const currentValue = form.getFieldValue(fieldName);
     const idsMatch =
       Array.isArray(currentValue) &&
@@ -345,11 +396,11 @@ export default function ToolTestPanel({
     if (idsMatch) return;
 
     form.setFieldValue(fieldName, testPanelKbIds);
-    setParameterValues((prev) => ({ ...prev, kds_list: testPanelKbIds }));
+    setParameterValues((prev) => ({ ...prev, [stateKey]: testPanelKbIds }));
     setManualJsonInput((prev) => {
       try {
         const parsed = JSON.parse(prev);
-        parsed.kds_list = testPanelKbIds;
+        parsed[stateKey] = testPanelKbIds;
         return JSON.stringify(parsed, null, 2);
       } catch {
         return prev;
@@ -357,15 +408,15 @@ export default function ToolTestPanel({
     });
   }, [testPanelKbIds, visible, toolKbType, toolRequiresKbSelection, form]);
 
-  // When switching back from manual mode to parsed mode, extract kds_list from
+  // When switching back from manual mode to parsed mode, extract kds_list/index_names from
   // the manual JSON and notify the parent so testPanelKbIds stays in sync.
   useEffect(() => {
     if (prevManualInputModeRef.current && !isManualInputMode) {
       // Transitioned from manual → parsed mode
-      if (toolKbType === "aidp_search" && onTestPanelKbIdsChange) {
+      if ((toolKbType === "aidp_search" || isKnowledgeBaseSearchTool) && onTestPanelKbIdsChange) {
         try {
           const parsed = JSON.parse(manualJsonInput);
-          const kbIds = parsed.kds_list;
+          const kbIds = toolKbType === "aidp_search" ? parsed.kds_list : parsed.index_names;
           if (Array.isArray(kbIds) && kbIds.length > 0) {
             onTestPanelKbIdsChange(kbIds, kbIds);
           }
@@ -387,7 +438,10 @@ export default function ToolTestPanel({
     if (!tool) return;
 
     // Validate that knowledge base is selected when required
-    const kbIds = toolKbType === "aidp_search" ? testPanelKbIds : selectedKbIds;
+    // For aidp_search and knowledge_base_search, use test panel's independent KB state
+    const kbIds = (toolKbType === "aidp_search" || isKnowledgeBaseSearchTool)
+      ? testPanelKbIds
+      : selectedKbIds;
     if (toolRequiresKbSelection && !isKnowledgeBaseSearchTool && kbIds.length === 0) {
       setTestResult(`Test failed: Please select at least one knowledge base`);
       return;
@@ -410,58 +464,116 @@ export default function ToolTestPanel({
           return;
         }
       } else {
-        // Use parsed parameters from form
+        // Use parsed parameters from form, iterating over parsedInputs keys.
+        // Fallback to configParams if parsedInputs is empty (e.g. knowledge_base_search
+        // whose DB inputs may be empty or stale).
         const formValues = form.getFieldsValue();
-        Object.keys(parameterValues).forEach((paramName) => {
+        const useConfigParamsFallback =
+          Object.keys(parsedInputs).length === 0;
+        const paramNames = useConfigParamsFallback
+          ? (configParams || []).map((p) => p.name)
+          : Object.keys(parsedInputs);
+
+        paramNames.forEach((paramName) => {
           const value = formValues[`param_${paramName}`];
           const paramInfo = parsedInputs[paramName];
-          const paramType = paramInfo?.type || DEFAULT_TYPE;
+          // When falling back to configParams (parsedInputs is empty), infer
+          // param type from the saved value's JS type since the SDK inputs
+          // definition isn't available in this branch.
+          const paramType =
+            paramInfo?.type ||
+            (useConfigParamsFallback && value !== undefined && value !== null
+              ? typeof value === "number"
+                ? "number"
+                : typeof value === "boolean"
+                ? "boolean"
+                : Array.isArray(value)
+                ? "array"
+                : "string"
+              : DEFAULT_TYPE);
 
-          // Check if this is a KB selector parameter (index_names/dataset_ids with KB selection enabled)
-          // Haotian uses dataset_ids, others use index_names
+          // If form value is empty (e.g. configParams fallback path), use
+          // the saved configParam value as the source of truth.
+          let effectiveValue = value;
+          if (useConfigParamsFallback && (value === undefined || value === "")) {
+            const cfg = (configParams || []).find((p) => p.name === paramName);
+            if (cfg && cfg.value !== undefined && cfg.value !== null) {
+              effectiveValue = cfg.value;
+            }
+          }
+
+          // KB selector params for non-knowledge_base_search tools
           const isKbSelectorParam =
             (paramName === "index_names" ||
               paramName === "dataset_ids" ||
               paramName === "kds_list") && toolRequiresKbSelection;
 
-          // Skip KB selector parameters - they will be handled separately
+          // For knowledge_base_search: index_names is a runtime input (not config).
+          // The KB selector uses testPanelKbIds (independent from config).
+          // Handle explicitly: read from form if available, else from testPanelKbIds.
+          if (isKnowledgeBaseSearchTool && paramName === "index_names") {
+            if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
+              toolParams.index_names = effectiveValue;
+            } else if (testPanelKbIds.length > 0) {
+              toolParams.index_names = testPanelKbIds;
+            }
+            return;
+          }
+
+          // For aidp_search kds_list: prioritize testPanelKbIds (from test panel KB selector)
+          // over form value (which may be [] from initialization timing).
+          // Fallback to form value if testPanelKbIds is also empty.
+          if (paramName === "kds_list" && toolKbType === "aidp_search") {
+            if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
+              toolParams[paramName] = effectiveValue;
+            } else if (testPanelKbIds.length > 0) {
+              toolParams[paramName] = testPanelKbIds;
+            }
+            return;
+          }
+
           if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
+            if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
+              toolParams[paramName] = effectiveValue;
+            } else {
+              const kbIds = paramName === "kds_list" && toolKbType === "aidp_search"
+                ? testPanelKbIds
+                : selectedKbIds;
+              toolParams[paramName] = kbIds;
+            }
             return;
           }
 
           // Handle string values
-          if (typeof value === "string" && value.trim() !== "") {
-            // Convert value to correct type based on parameter type from inputs
+          if (typeof effectiveValue === "string" && effectiveValue.trim() !== "") {
             switch (paramType) {
               case "integer":
               case "number":
-                const numValue = Number(value.trim());
+                const numValue = Number(effectiveValue.trim());
                 if (!isNaN(numValue)) {
                   toolParams[paramName] = numValue;
                 } else {
-                  toolParams[paramName] = value.trim(); // fallback to string if conversion fails
+                  toolParams[paramName] = effectiveValue.trim();
                 }
                 break;
               case "boolean":
-                toolParams[paramName] = value.trim().toLowerCase() === "true";
+                toolParams[paramName] = effectiveValue.trim().toLowerCase() === "true";
                 break;
               case "array":
               case "object":
                 try {
-                  toolParams[paramName] = JSON.parse(value.trim());
+                  toolParams[paramName] = JSON.parse(effectiveValue.trim());
                 } catch {
-                  toolParams[paramName] = value.trim(); // fallback to string if JSON parsing fails
+                  toolParams[paramName] = effectiveValue.trim();
                 }
                 break;
               default:
-                toolParams[paramName] = value.trim();
+                toolParams[paramName] = effectiveValue.trim();
             }
-          } else if (Array.isArray(value) && value.length > 0) {
-            // Handle array values (for non-KB selector array parameters)
-            toolParams[paramName] = value;
-          } else if (typeof value === "object" && value !== null) {
-            // Handle object values
-            toolParams[paramName] = value;
+          } else if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
+            toolParams[paramName] = effectiveValue;
+          } else if (typeof effectiveValue === "object" && effectiveValue !== null) {
+            toolParams[paramName] = effectiveValue;
           }
         });
       }
@@ -857,11 +969,11 @@ export default function ToolTestPanel({
                           {/* KB selector for knowledge_base_search tool */}
                           {isKnowledgeBaseSearchTool && paramName === "index_names" ? (
                             <KbSelectorDisplay
-                              selectedKbIds={selectedKbIds}
-                              selectedKbDisplayNames={selectedKbDisplayNames}
+                              selectedKbIds={testPanelKbIds}
+                              selectedKbDisplayNames={testPanelKbDisplayNames}
                               kbPlaceholder={kbPlaceholder}
                               onOpenKbSelector={onOpenKbSelector}
-                              onRemoveKb={onRemoveKb}
+                              onKbRemove={onTestPanelKbRemove}
                             />
                           ) : toolKbType === "aidp_search" && paramName === "kds_list" ? (
                             <KbSelectorDisplay

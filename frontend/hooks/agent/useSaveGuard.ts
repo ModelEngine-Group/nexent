@@ -9,6 +9,43 @@ import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 
 /**
+ * Coarse type check used to reject values that obviously don't match the
+ * declared parameter type. The backend will happily accept e.g. a string
+ * into an `int` field (Pydantic coerces, or in some cases passes it
+ * straight through to a downstream service that crashes with a cryptic
+ * number_format_exception). Doing this guard on the save path means a
+ * stale / wrongly-shaped value in the frontend state cannot be persisted
+ * to the database, so the next "Test" execution uses the backend default
+ * instead of the polluted value.
+ */
+function isValueCompatibleWithType(value: unknown, type: string | undefined): boolean {
+  if (type === undefined) return true;
+  switch (type) {
+    case "number":
+      // Accept actual numbers AND numeric strings, but reject obvious KB id
+      // strings that contain dashes — these never parse as numbers.
+      if (typeof value === "number") return Number.isFinite(value);
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed === "") return false;
+        return !Number.isNaN(Number(trimmed));
+      }
+      return false;
+    case "boolean":
+      return typeof value === "boolean" || value === "true" || value === "false";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "string":
+    default:
+      // For string-like params, anything other than null/undefined is acceptable;
+      // we already filtered those above.
+      return true;
+  }
+}
+
+/**
  * Batch update tool configurations for an agent
  * Handles create, update, and enable/disable operations
  *
@@ -41,11 +78,19 @@ async function batchUpdateToolConfigs(
     const toolId = parseInt(tool.id);
     const isEnabled = true; // Selected tools are always enabled
     // Only include params that have a defined value (not undefined or null)
-    // This ensures we don't save null values from form defaults or stale data
+    // and whose value actually matches the declared parameter type. The
+    // second check guards against stale/wrongly-shaped data being persisted
+    // — e.g. when a knowledge_base_search top_k slot was previously polluted
+    // with a KB id string, we want to drop it so the backend default kicks in
+    // instead of saving the wrong value again.
     const params = tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
-      if (param.value !== undefined && param.value !== null) {
-        acc[param.name] = param.value;
+      if (param.value === undefined || param.value === null) {
+        return acc;
       }
+      if (param.type && !isValueCompatibleWithType(param.value, param.type)) {
+        return acc;
+      }
+      acc[param.name] = param.value;
       return acc;
     }, {} as Record<string, any>) || {};
 
