@@ -307,6 +307,7 @@ async def test_create_model_records_accept_signal_when_present(client, auth_head
 
     payload = {
         **sample_model_data,
+        "model_factory": "huggingface",
         "context_window_tokens": 128000,
         "max_output_tokens": 16384,
         "capacity_source": "operator",
@@ -327,7 +328,7 @@ async def test_create_model_records_accept_signal_when_present(client, auth_head
     assert sent["max_output_tokens"] == 16384
 
     # Metric recorder called with the labels the SLO dashboard expects.
-    mock_record.assert_called_once_with("catalog_exact", payload["provider"])
+    mock_record.assert_called_once_with("catalog_exact", payload["model_factory"])
 
 
 @pytest.mark.asyncio
