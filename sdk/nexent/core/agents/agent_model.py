@@ -106,13 +106,19 @@ class ModelConfig(BaseModel):
     @model_validator(mode="after")
     def _backfill_max_output_from_legacy_max_tokens(self) -> "ModelConfig":
         if self.max_output_tokens is None and self.max_tokens is not None:
-            fallback = self.max_tokens
-            if (
-                self.context_window_tokens is not None
-                and fallback > self.context_window_tokens
-            ):
-                fallback = self.context_window_tokens - 1
-            self.max_output_tokens = max(fallback, 1)
+            # Heuristic: if max_tokens >= 32768, it's likely the old
+            # "total context window" semantics (pre-W1), not an output limit.
+            # Don't copy it directly; use a conservative default instead.
+            if self.max_tokens >= 32768:
+                self.max_output_tokens = 4096
+            else:
+                fallback = self.max_tokens
+                if (
+                    self.context_window_tokens is not None
+                    and fallback > self.context_window_tokens
+                ):
+                    fallback = self.context_window_tokens - 1
+                self.max_output_tokens = max(fallback, 1)
         return self
 
 
