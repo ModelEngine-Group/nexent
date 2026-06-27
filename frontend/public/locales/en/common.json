@@ -1046,7 +1046,7 @@
   "modelConfig.button.syncModelEngine": "Sync ModelEngine Models",
   "modelConfig.button.addCustomModel": "Add Model",
   "modelConfig.capacityCoverage.warning": "{{bareCount}} of {{total}} LLM/VLM models are missing capacity — output token cap is not enforced.",
-  "modelConfig.capacityCoverage.description": "{{suggestionCount}} have an approved catalog suggestion ready to apply. Click Manage, then click the warning icon on each affected row to repair.",
+  "modelConfig.capacityCoverage.description": "{{suggestionCount}} have an approved capacity suggestion ready to apply. Click Manage, then click the warning icon on each affected row to repair.",
   "modelConfig.capacityCoverage.manage": "Manage",
   "modelConfig.button.editCustomModel": "Edit or Delete Model",
   "modelConfig.button.checkConnectivity": "Check Model Connectivity",

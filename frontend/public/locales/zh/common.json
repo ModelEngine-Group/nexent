@@ -1017,7 +1017,7 @@
   "modelConfig.button.syncModelEngine": "同步ModelEngine模型",
   "modelConfig.button.addCustomModel": "添加模型",
   "modelConfig.capacityCoverage.warning": "{{total}} 个 LLM/VLM 模型中有 {{bareCount}} 个未配置容量，输出 token 限额未启用。",
-  "modelConfig.capacityCoverage.description": "其中 {{suggestionCount}} 个有已审核目录建议可一键应用。点击\"管理\"打开列表，逐行点击警告图标即可修复。",
+  "modelConfig.capacityCoverage.description": "其中 {{suggestionCount}} 个有已审核容量建议可一键应用。点击\"管理\"打开列表，逐行点击警告图标即可修复。",
   "modelConfig.capacityCoverage.manage": "管理",
   "modelConfig.button.editCustomModel": "修改或删除模型",
   "modelConfig.button.checkConnectivity": "检查模型连通性",
