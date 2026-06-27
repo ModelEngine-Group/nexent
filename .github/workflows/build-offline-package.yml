@@ -3,19 +3,45 @@ name: Build Offline Deployment Package
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Image version tag, e.g. v2.2.0 or latest'
+        required: false
+        default: ''
+      platform:
+        description: 'Target platform'
+        required: false
+        default: 'amd64'
+        type: choice
+        options:
+          - amd64
+          - arm64
+      image_source:
+        description: 'Image source'
+        required: false
+        default: 'general'
+        type: choice
+        options:
+          - general
+          - mainland
+      target:
+        description: 'Package target'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - docker
+          - k8s
+          - all
       include_source:
         description: 'Include source code in the package'
         required: false
-        default: true
+        default: false
         type: boolean
 
 jobs:
   build-offline-package:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [amd64, arm64]
-    
+
     steps:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
@@ -30,18 +56,20 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      
+
       - name: Set version and platform variables
         id: set-vars
         run: |
-          PLATFORM="${{ matrix.platform }}"
+          PLATFORM="${{ inputs.platform }}"
           REF_TYPE="${{ github.ref_type }}"
           REF_NAME="${{ github.ref_name }}"
-          
-          if [ "$REF_TYPE" = "tag" ]; then
+
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [ "$REF_TYPE" = "tag" ]; then
             VERSION="$REF_NAME"
           elif [ "$REF_TYPE" = "branch" ]; then
             if [ "$REF_NAME" = "main" ]; then
@@ -52,42 +80,50 @@ jobs:
           else
             VERSION="latest"
           fi
-          
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-offline-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
-      
+          echo "package-name=nexent-offline-${{ inputs.target }}-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Set deployment components
+        id: set-components
+        run: |
+          COMPONENTS="infrastructure,application,data-process,supabase,terminal"
+
+          echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
+          echo "Selected deployment components: $COMPONENTS"
+
       - name: Build offline package
         run: |
-          chmod +x scripts/offline/build_offline_package.sh
-          
-          ./scripts/offline/build_offline_package.sh \
+          chmod +x deploy/offline/build_offline_package.sh
+
+          ./deploy/offline/build_offline_package.sh \
             --version "${{ steps.set-vars.outputs.version }}" \
-            --platform "${{ matrix.platform }}" \
+            --platform "${{ steps.set-vars.outputs.platform }}" \
             --output-dir ./offline-output \
-            --include-source "${{ inputs.include_source }}"
-      
-      
-      
-      - name: Create ZIP package
+            --include-source "${{ inputs.include_source }}" \
+            --image-source "${{ inputs.image_source }}" \
+            --components "${{ steps.set-components.outputs.components }}" \
+            --target "${{ inputs.target }}" \
+            --compress true
+
+
+
+      - name: Show zip package
         run: |
           PACKAGE_NAME="${{ steps.set-vars.outputs.package-name }}"
-          
-          cd offline-output
-          zip -r "../${PACKAGE_NAME}.zip" .
-          cd ..
-          
-          echo "Package created: ${PACKAGE_NAME}.zip"
-          
+
+          echo "Package created by build script: ${PACKAGE_NAME}.zip"
+
           ls -lh "${PACKAGE_NAME}.zip"
-      
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.set-vars.outputs.package-name }}
           path: ${{ steps.set-vars.outputs.package-name }}.zip
           retention-days: 30
-      
+
       - name: Summary
         run: |
           echo ""
@@ -95,11 +131,14 @@ jobs:
           echo "Offline Package Build Summary"
           echo "========================================"
           echo "Version: ${{ steps.set-vars.outputs.version }}"
-          echo "Platform: ${{ matrix.platform }}"
+          echo "Platform: ${{ steps.set-vars.outputs.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
+          echo "Target: ${{ inputs.target }}"
+          echo "Components: ${{ steps.set-components.outputs.components }}"
+          echo "Image source: ${{ inputs.image_source }}"
           echo "Ref Type: ${{ github.ref_type }}"
           echo "Ref Name: ${{ github.ref_name }}"
           echo "========================================"
           echo ""
-          echo "Package contents:"
-          unzip -l "${{ steps.set-vars.outputs.package-name }}.zip" | head -50
+          echo "Package directory:"
+          ls -l .

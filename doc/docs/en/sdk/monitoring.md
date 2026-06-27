@@ -15,17 +15,17 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ## Quick Start
 
 ```bash
-cd docker
-[ -f .env ] || cp .env.example .env
-cp monitoring/monitoring.env.example monitoring/monitoring.env
+cd deploy/docker
+[ -f ../../.env ] || cp ../../.env.example ../../.env
+cp assets/monitoring/monitoring.env.example assets/monitoring/monitoring.env
 
-vim .env
+vim ../../.env
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 
-vim monitoring/monitoring.env
+vim assets/monitoring/monitoring.env
 MONITORING_PROVIDER=otlp
 
 ./start-monitoring.sh --stack collector
@@ -89,8 +89,8 @@ LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoin
 **Collector forwarding:**
 
 ```bash
-cd docker
-vim monitoring/monitoring.env
+cd deploy/docker
+vim assets/monitoring/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx
@@ -293,7 +293,7 @@ service:
       exporters: [otlphttp/langsmith, debug]
 ```
 
-See `docker/monitoring/otel-collector-config.yml` for full configuration with platform examples.
+See `deploy/docker/assets/monitoring/otel-collector-config.yml` for full configuration with platform examples.
 
 ## Graceful Degradation
 

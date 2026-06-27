@@ -148,6 +148,8 @@ def _build_token_estimation_stub() -> ModuleType:
 
 # ── 3. Register stub package hierarchy ───────────────────────
 
+_CONTEXT_RUNTIME_PACKAGE = "sdk.nexent.core.context_runtime"
+
 def _register_stub_packages():
     """Create empty parent ModuleType entries so the dotted import chain resolves."""
     for name in [
@@ -155,12 +157,22 @@ def _register_stub_packages():
         "sdk.nexent",
         "sdk.nexent.core",
         "sdk.nexent.core.agents",
+        _CONTEXT_RUNTIME_PACKAGE,
         "sdk.nexent.core.utils",
         "sdk.nexent.core.utils.observer",
         "sdk.nexent.core.agents.a2a_agent_proxy",
     ]:
         if name not in sys.modules:
             m = ModuleType(name)
+            if name in {
+                "sdk",
+                "sdk.nexent",
+                "sdk.nexent.core",
+                "sdk.nexent.core.agents",
+                _CONTEXT_RUNTIME_PACKAGE,
+                "sdk.nexent.core.utils",
+            }:
+                m.__path__ = []
             if name == "sdk.nexent.core.utils.observer":
                 m.MessageObserver = type("MessageObserver", (), {})
             if name == "sdk.nexent.core.agents.a2a_agent_proxy":
@@ -179,15 +191,41 @@ _register_stub_packages()
 
 # ── 3.5. Load summary_cache and summary_config modules ────────────────────
 
+def _repo_root() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here)))))
+
+
 def _locate_module(module_name: str) -> str:
     """Resolve the absolute path to a module in sdk/nexent/core/agents."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here)))))
+    repo = _repo_root()
     filename = module_name + ".py"
     target = os.path.join(repo, "sdk", "nexent", "core", "agents", filename)
     if not os.path.exists(target):
         raise FileNotFoundError(f"Cannot locate {filename}. Expected: {target}")
     return target
+
+
+def _locate_core_module(relative_path: str) -> str:
+    """Resolve a module path under sdk/nexent/core."""
+    target = os.path.join(_repo_root(), "sdk", "nexent", "core", *relative_path.split("/"))
+    if not os.path.exists(target):
+        raise FileNotFoundError(f"Cannot locate core module. Expected: {target}")
+    return target
+
+
+def _load_context_runtime_contracts():
+    """Load context_runtime.contracts before agent_context.py imports it."""
+    full_name = f"{_CONTEXT_RUNTIME_PACKAGE}.contracts"
+    if full_name in sys.modules:
+        return sys.modules[full_name]
+    target = _locate_core_module("context_runtime/contracts.py")
+    spec = importlib.util.spec_from_file_location(full_name, target)
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = _CONTEXT_RUNTIME_PACKAGE
+    sys.modules[full_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_summary_modules():
@@ -205,6 +243,7 @@ def _load_summary_modules():
 
 
 _load_summary_modules()
+_load_context_runtime_contracts()
 
 
 # ── 4. Load agent_context.py via importlib ────────────────────
