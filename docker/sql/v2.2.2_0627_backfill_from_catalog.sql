@@ -1104,7 +1104,7 @@ BEGIN
            LEAST(4096, COALESCE(context_window_tokens, 32768) - 1)),
            default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
            LEAST(4096, COALESCE(max_output_tokens, 4096))),
-           capacity_source = COALESCE(capacity_source, 'operator')
+           capacity_source = COALESCE(capacity_source, 'unknown')
      WHERE delete_flag = 'N'
        AND COALESCE(model_type, 'llm') IN ('llm', 'vlm')
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
