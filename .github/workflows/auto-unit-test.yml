@@ -95,11 +95,12 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: test/coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unittests
           name: codecov-umbrella
+          os: linux-arm64
           fail_ci_if_error: false
           verbose: true
