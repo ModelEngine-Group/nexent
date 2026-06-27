@@ -356,8 +356,8 @@ print_access_hints() {
 print_backend_hints() {
     echo ""
     echo "🔧 To enable monitoring in your Nexent backend:"
-    echo "   1. Set ENABLE_TELEMETRY=true in the project root .env"
-    echo "   2. Set MONITORING_PROVIDER=$BACKEND_MONITORING_PROVIDER in the project root .env"
+    echo "   1. Set ENABLE_TELEMETRY=true in the project deploy/env/.env"
+    echo "   2. Set MONITORING_PROVIDER=$BACKEND_MONITORING_PROVIDER in the project deploy/env/.env"
     echo "   3. Set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 for Docker services"
     echo "      or http://localhost:${OTEL_COLLECTOR_HTTP_PORT:-4318} for a backend running on the host"
     echo "   4. Set MONITORING_DASHBOARD_URL as shown above when a UI is available"

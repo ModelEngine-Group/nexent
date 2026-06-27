@@ -146,7 +146,7 @@ def run_agent(task_payload: Dict[str, Any]) -> Dict[str, Any]:
 
 ### Environment Variables
 1. Add new vars to `backend/consts/const.py`
-2. Update `.env.example`
+2. Update `deploy/env/.env.example`
 3. Remove all direct `os.getenv()`/`os.environ.get()` outside `const.py`
 4. Import from `consts.const` in backend modules
 5. Pass configuration as parameters to SDK

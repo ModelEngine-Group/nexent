@@ -21,7 +21,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **Tip**: Docker and Kubernetes use the project root `.env`. Existing `.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing `docker/.env`, then fall back to `.env.example` or `docker/.env.example`. If you need to configure voice models (STT/TTS), update the related values in `.env` before or after deployment.
+> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing legacy root `.env` or `docker/.env`, then fall back to `deploy/env/.env.example` or legacy templates. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
 
 ### 2. Deployment Options
 
@@ -150,7 +150,7 @@ Nexent uses Docker volumes for data persistence:
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
 | Supabase DB (when `supabase` is selected) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
-Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `.env`).
+Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `deploy/env/.env`).
 
 ### Uninstall Docker Deployment
 
@@ -170,7 +170,7 @@ bash uninstall.sh docker --delete-volumes true
 bash uninstall.sh docker delete-all
 ```
 
-The Docker uninstall script reads `.env` to resolve `ROOT_DIR` and removes Compose resources. Data deletion removes service directories such as `postgresql`, `elasticsearch`, `redis`, `minio`, `volumes`, `openssh-server`, `scripts`, and `skills`; keep volumes when you plan to redeploy with existing data.
+The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and removes Compose resources. Data deletion removes service directories such as `postgresql`, `elasticsearch`, `redis`, `minio`, `volumes`, `openssh-server`, `scripts`, and `skills`; keep volumes when you plan to redeploy with existing data.
 
 ### Offline Image Package
 
@@ -184,19 +184,16 @@ bash deploy/offline/build_offline_package.sh \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
   --compress true \
-  --output-dir offline-package/docker
+  --output-dir offline-package
 ```
 
-The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `.env.example`, and `deploy/sql`. It does not include local `.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
 On the target host, keep the deployment options consistent with the package manifest:
 
 ```bash
-cd offline-package/docker
-bash deploy.sh --load-images docker \
-  --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general
+cd offline-package
+bash deploy.sh --load-images docker
 ```
 
 ## 🔌 Port Mapping
@@ -220,7 +217,7 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `deploy/env/.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
 
 ```bash
 cd nexent
@@ -256,7 +253,7 @@ Common variables:
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
 
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `.env`:
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/.env`:
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -276,7 +273,7 @@ OAuth login requires the `supabase` component. When enabling third-party login, 
 bash deploy.sh docker --components infrastructure,application,supabase
 ```
 
-For Docker, configure OAuth in `.env`:
+For Docker, configure OAuth in `deploy/env/.env`:
 
 ```bash
 # Web entry URL. The full callback path is generated as:
@@ -322,7 +319,7 @@ For local Docker, a GitHub callback example is `http://localhost:3000/api/user/o
 
 CAS SSO does not require the `supabase` component. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
 
-For Docker, configure CAS in `.env`:
+For Docker, configure CAS in `deploy/env/.env`:
 
 ```bash
 CAS_ENABLED=true
@@ -435,7 +432,7 @@ If you need to use any of the following features, configure the `NORTHBOUND_EXTE
 
 **Configuration:**
 
-Set the publicly accessible URL in your `.env` file:
+Set the publicly accessible URL in your `deploy/env/.env` file:
 
 ```bash
 # Format: protocol://host:port/api

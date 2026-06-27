@@ -51,7 +51,7 @@ def get_env(key: str, default: str = "") -> str:
 def load_environment_from_host():
     """
     Load environment variables from host .env file.
-    Looks for the project root .env first, with docker/.env as a legacy fallback.
+    Looks for deploy/env/.env first, with legacy .env locations as fallbacks.
     """
     script_dir = Path(__file__).resolve().parent
     candidates = []
@@ -59,7 +59,7 @@ def load_environment_from_host():
     if explicit_env:
         candidates.append(Path(explicit_env))
     candidates.extend([
-        script_dir.parent.parent.parent.parent / ".env",  # deploy/docker/assets/scripts
+        script_dir.parent.parent.parent / "env" / ".env",  # deploy/env/.env
         script_dir.parent.parent.parent / ".env",
         script_dir.parent.parent / ".env",
         script_dir.parent / ".env",
@@ -94,7 +94,7 @@ def get_root_dir() -> str:
         if explicit_env:
             candidates.append(Path(explicit_env))
         candidates.extend([
-            script_dir.parent.parent.parent.parent / ".env",
+            script_dir.parent.parent.parent / "env" / ".env",
             script_dir.parent.parent.parent / ".env",
             script_dir.parent.parent / ".env",
             script_dir.parent / ".env",
