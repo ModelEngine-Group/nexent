@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
   mapAgentVersionDetail,
   mapRepositoryListingDetail,
@@ -23,9 +24,9 @@ describe("mapRepositoryListingDetail", () => {
 
     const result = mapRepositoryListingDetail(detail);
 
-    expect(result.status).toBe("shared");
-    expect(result.display_name).toBe("Agent One");
-    expect(result.tools).toEqual(["search", "calc"]);
+    assert.equal(result.status, "shared");
+    assert.equal(result.display_name, "Agent One");
+    assert.deepEqual(result.tools, ["search", "calc"]);
   });
 });
 
@@ -51,9 +52,9 @@ describe("mapAgentVersionDetail", () => {
 
     const result = mapAgentVersionDetail(detail);
 
-    expect(result.status).toBeUndefined();
-    expect(result.version_label).toBe("Draft");
-    expect(result.created_at).toBe("2026-01-01T00:00:00Z");
-    expect(result.tools).toEqual(["web_search", "calculator"]);
+    assert.equal(result.status, undefined);
+    assert.equal(result.version_label, "Draft");
+    assert.equal(result.created_at, "2026-01-01T00:00:00Z");
+    assert.deepEqual(result.tools, ["web_search", "calculator"]);
   });
 });
