@@ -16,11 +16,14 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
     if [ "$APT_MIRROR" = "tsinghua" ]; then \
-        rm -f /etc/apt/sources.list.d/* && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list; \
+        for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
+            [ -f "$apt_source" ] || continue; \
+            sed -i \
+                -e 's|https\?://deb.debian.org/debian-security|http://security.debian.org/debian-security|g' \
+                -e 's|https\?://security.debian.org/debian-security|http://security.debian.org/debian-security|g' \
+                -e 's|https\?://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+                "$apt_source"; \
+        done; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends curl postgresql-client
 

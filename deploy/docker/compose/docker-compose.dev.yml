@@ -51,7 +51,7 @@ services:
       PATH: "/usr/local/bin:/usr/bin/:/opt/backend/.venv/bin:${PATH}"
       VIRTUAL_ENV: "/opt/backend/.venv"
     env_file:
-      - ../../../.env
+      - ../../env/.env
     networks:
       - nexent
     user: root
