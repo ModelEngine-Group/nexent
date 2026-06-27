@@ -51,6 +51,31 @@ def _sql_str(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _split_repo_name(full_id: str) -> tuple[str, str]:
+    """Split a catalog's full model identifier into (model_repo, model_name).
+
+    The model_record_t table stores these as two columns. Catalog keys like
+    "Qwen/Qwen2.5-14B-Instruct" must be split on the first '/' to match;
+    bare names like "qwen-plus" or "gpt-4o" land with empty model_repo.
+    """
+    if "/" in full_id:
+        repo, name = full_id.split("/", 1)
+        return repo, name
+    return "", full_id
+
+
+def _sql_repo_match(repo: str) -> str:
+    """Build the WHERE fragment that matches the table's model_repo column.
+
+    Bare-name catalog entries (no '/') can land in the table as either
+    model_repo='' or model_repo IS NULL depending on the create path, so
+    accept both. Namespaced entries match the exact string.
+    """
+    if repo == "":
+        return "(model_repo IS NULL OR model_repo = '')"
+    return f"model_repo = '{_sql_str(repo)}'"
+
+
 def main() -> None:
     today = date.today().strftime("%Y-%m-%d")
     lines: list[str] = []
@@ -60,24 +85,43 @@ def main() -> None:
     lines.append(f"-- Catalog entries: {len(CATALOG)}")
     lines.append("--")
     lines.append("-- Migration kind: RECOMMENDED_DATA_FIX")
-    lines.append("-- Idempotent: COALESCE protects existing non-NULL values.")
+    lines.append("-- Idempotent: COALESCE + IS NULL guards protect existing values.")
     lines.append("-- Safe: enforces max_output < context_window via GREATEST/LEAST.")
     lines.append("--")
-    lines.append("-- Pre-run self-check:")
+    lines.append("-- Phases:")
+    lines.append("--   1a  Bare LLM/VLM rows that match a catalog entry by")
+    lines.append("--       (model_factory, model_repo, model_name) -> fill capacity")
+    lines.append("--       fields + tag capacity_source='profile' + profile_version.")
+    lines.append("--   1b  Already-filled rows that match a catalog entry AND whose")
+    lines.append("--       context_window_tokens and max_output_tokens exactly equal")
+    lines.append("--       the catalog values -> tag profile_version only. capacity_")
+    lines.append("--       source stays whatever it was (typically 'operator'); we")
+    lines.append("--       don't rewrite provenance, we just add the dispatch tag so")
+    lines.append("--       dispatch_profile_hit_total can fire.")
+    lines.append("--    2  Remaining bare LLM/VLM rows -> safe defaults.")
+    lines.append("--    3  Clamp default_output_reserve_tokens to <= max_output_tokens.")
     lines.append("--")
-    lines.append("--   SELECT model_id, model_name, model_factory,")
-    lines.append("--          context_window_tokens, max_output_tokens")
+    lines.append("-- Pre-run self-check (rows whose capability_profile_version is NULL):")
+    lines.append("--")
+    lines.append("--   SELECT model_id, model_repo, model_name, model_factory,")
+    lines.append("--          context_window_tokens, max_output_tokens, capability_profile_version")
     lines.append("--     FROM nexent.model_record_t")
     lines.append("--    WHERE delete_flag = 'N'")
     lines.append("--      AND COALESCE(model_type, 'llm') IN ('llm', 'vlm')")
-    lines.append("--      AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);")
-    lines.append("--")
-    lines.append("-- If the result is empty, this migration is a no-op.")
+    lines.append("--      AND capability_profile_version IS NULL;")
     lines.append("")
 
-    # Phase 1: catalog-driven backfill
+    # Group catalog by provider so the generated SQL has tidy section headers
+    from collections import defaultdict
+    by_provider: dict[str, list] = defaultdict(list)
+    for (provider, full_id), profile in CATALOG.items():
+        by_provider[provider].append((full_id, profile))
+
+    # --------------------------------------------------------------
+    # Phase 1a: catalog match + bare -> fill capacity + tag
+    # --------------------------------------------------------------
     lines.append("-- ============================================================")
-    lines.append("-- Phase 1: Backfill rows matching approved catalog entries")
+    lines.append("-- Phase 1a: Backfill bare rows that match approved catalog entries")
     lines.append("-- ============================================================")
     lines.append("")
     lines.append("DO $$")
@@ -86,20 +130,17 @@ def main() -> None:
     lines.append("    v_total   INTEGER := 0;")
     lines.append("BEGIN")
 
-    from collections import defaultdict
-    by_provider: dict[str, list] = defaultdict(list)
-    for (provider, model_name), profile in CATALOG.items():
-        by_provider[provider].append((model_name, profile))
-
     for provider in sorted(by_provider.keys()):
         entries = by_provider[provider]
         lines.append(f"    -- {provider} ({len(entries)} entries)")
-        for model_name, profile in entries:
+        for full_id, profile in entries:
             ctx = profile.context_window_tokens
             mout = profile.max_output_tokens
             reserve = profile.default_output_reserve_tokens
             version = _sql_str(profile.capability_profile_version)
-            escaped_model = _sql_str(model_name)
+            repo, name = _split_repo_name(full_id)
+            repo_match = _sql_repo_match(repo)
+            escaped_name = _sql_str(name)
 
             lines.append(f"    UPDATE nexent.model_record_t")
             lines.append(f"       SET context_window_tokens = COALESCE(context_window_tokens,")
@@ -111,14 +152,59 @@ def main() -> None:
             lines.append(f"           capacity_source = COALESCE(capacity_source, 'profile'),")
             lines.append(f"           capability_profile_version = COALESCE(capability_profile_version, '{version}')")
             lines.append(f"     WHERE LOWER(model_factory) = '{_sql_str(provider.lower())}'")
-            lines.append(f"       AND model_name = '{escaped_model}'")
+            lines.append(f"       AND {repo_match}")
+            lines.append(f"       AND model_name = '{escaped_name}'")
             lines.append(f"       AND delete_flag = 'N'")
             lines.append(f"       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);")
             lines.append(f"    GET DIAGNOSTICS v_updated = ROW_COUNT;")
             lines.append(f"    v_total := v_total + v_updated;")
             lines.append("")
 
-    lines.append("    RAISE NOTICE 'Catalog backfill: % row(s) updated', v_total;")
+    lines.append("    RAISE NOTICE 'Phase 1a catalog backfill (bare): % row(s) updated', v_total;")
+    lines.append("END $$;")
+    lines.append("")
+
+    # --------------------------------------------------------------
+    # Phase 1b: catalog match + already-filled values match catalog
+    #           -> tag profile_version only (don't touch capacity)
+    # --------------------------------------------------------------
+    lines.append("-- ============================================================")
+    lines.append("-- Phase 1b: Tag already-filled rows whose ctx/max_out exactly match")
+    lines.append("--           the catalog with capability_profile_version. Does not")
+    lines.append("--           rewrite capacity_source (operator intent preserved).")
+    lines.append("-- ============================================================")
+    lines.append("")
+    lines.append("DO $$")
+    lines.append("DECLARE")
+    lines.append("    v_updated INTEGER := 0;")
+    lines.append("    v_total   INTEGER := 0;")
+    lines.append("BEGIN")
+
+    for provider in sorted(by_provider.keys()):
+        entries = by_provider[provider]
+        lines.append(f"    -- {provider} ({len(entries)} entries)")
+        for full_id, profile in entries:
+            ctx = profile.context_window_tokens
+            mout = profile.max_output_tokens
+            version = _sql_str(profile.capability_profile_version)
+            repo, name = _split_repo_name(full_id)
+            repo_match = _sql_repo_match(repo)
+            escaped_name = _sql_str(name)
+
+            lines.append(f"    UPDATE nexent.model_record_t")
+            lines.append(f"       SET capability_profile_version = '{version}'")
+            lines.append(f"     WHERE LOWER(model_factory) = '{_sql_str(provider.lower())}'")
+            lines.append(f"       AND {repo_match}")
+            lines.append(f"       AND model_name = '{escaped_name}'")
+            lines.append(f"       AND delete_flag = 'N'")
+            lines.append(f"       AND context_window_tokens = {_sql_int(ctx)}")
+            lines.append(f"       AND max_output_tokens = {_sql_int(mout)}")
+            lines.append(f"       AND capability_profile_version IS NULL;")
+            lines.append(f"    GET DIAGNOSTICS v_updated = ROW_COUNT;")
+            lines.append(f"    v_total := v_total + v_updated;")
+            lines.append("")
+
+    lines.append("    RAISE NOTICE 'Phase 1b catalog tag (matching filled): % row(s) updated', v_total;")
     lines.append("END $$;")
     lines.append("")
 
@@ -148,30 +234,9 @@ def main() -> None:
     lines.append("END $$;")
     lines.append("")
 
-    # Phase 3: reconcile max_tokens
+    # Phase 3: clamp reserve to max_output
     lines.append("-- ============================================================")
-    lines.append("-- Phase 3: Reconcile legacy max_tokens with max_output_tokens")
-    lines.append("-- ============================================================")
-    lines.append("")
-    lines.append("DO $$")
-    lines.append("DECLARE")
-    lines.append("    v_updated INTEGER := 0;")
-    lines.append("BEGIN")
-    lines.append("    UPDATE nexent.model_record_t")
-    lines.append("       SET max_tokens = max_output_tokens")
-    lines.append("     WHERE delete_flag = 'N'")
-    lines.append("       AND max_output_tokens IS NOT NULL")
-    lines.append("       AND COALESCE(max_tokens, -1) <> max_output_tokens")
-    lines.append("       AND COALESCE(model_type, '') NOT IN ('embedding', 'multi_embedding');")
-    lines.append("")
-    lines.append("    GET DIAGNOSTICS v_updated = ROW_COUNT;")
-    lines.append("    RAISE NOTICE 'max_tokens reconcile: % row(s) updated', v_updated;")
-    lines.append("END $$;")
-    lines.append("")
-
-    # Phase 4: clamp reserve to max_output
-    lines.append("-- ============================================================")
-    lines.append("-- Phase 4: Clamp default_output_reserve_tokens to max_output_tokens")
+    lines.append("-- Phase 3: Clamp default_output_reserve_tokens to max_output_tokens")
     lines.append("-- ============================================================")
     lines.append("")
     lines.append("DO $$")
