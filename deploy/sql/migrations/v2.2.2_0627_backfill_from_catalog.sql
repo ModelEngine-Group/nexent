@@ -240,8 +240,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/kimi-k2.6@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'moonshotai/Kimi-K2.6'
+       AND model_repo = 'Pro/moonshotai'
+       AND model_name = 'Kimi-K2.6'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -376,8 +376,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3.2-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.2'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-V3.2'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -393,8 +393,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3.1-terminus-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-V3.1-Terminus'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -410,8 +410,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-r1-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-R1'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-R1'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -427,8 +427,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-V3'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -988,8 +988,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-5.1-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'zai-org/GLM-5.1'
+       AND model_repo = 'Pro/zai-org'
+       AND model_name = 'GLM-5.1'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -1073,8 +1073,8 @@ BEGIN
            capacity_source = COALESCE(capacity_source, c_source_profile),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/minimax-m2.5-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'MiniMaxAI/MiniMax-M2.5'
+       AND model_repo = 'Pro/MiniMaxAI'
+       AND model_name = 'MiniMax-M2.5'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -1335,8 +1335,8 @@ BEGIN
        SET capability_profile_version = 'silicon/kimi-k2.6@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'moonshotai/Kimi-K2.6'
+       AND model_repo = 'Pro/moonshotai'
+       AND model_name = 'Kimi-K2.6'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 262144
        AND max_output_tokens = 131072
@@ -1439,8 +1439,8 @@ BEGIN
        SET capability_profile_version = 'silicon/deepseek-v3.2-pro@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.2'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-V3.2'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
@@ -1452,8 +1452,8 @@ BEGIN
        SET capability_profile_version = 'silicon/deepseek-v3.1-terminus-pro@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-V3.1-Terminus'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
@@ -1465,8 +1465,8 @@ BEGIN
        SET capability_profile_version = 'silicon/deepseek-r1-pro@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-R1'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-R1'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 163840
        AND max_output_tokens = 16384
@@ -1478,8 +1478,8 @@ BEGIN
        SET capability_profile_version = 'silicon/deepseek-v3-pro@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3'
+       AND model_repo = 'Pro/deepseek-ai'
+       AND model_name = 'DeepSeek-V3'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
@@ -1907,8 +1907,8 @@ BEGIN
        SET capability_profile_version = 'silicon/glm-5.1-pro@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'zai-org/GLM-5.1'
+       AND model_repo = 'Pro/zai-org'
+       AND model_name = 'GLM-5.1'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 202752
        AND max_output_tokens = 131072
@@ -1972,8 +1972,8 @@ BEGIN
        SET capability_profile_version = 'silicon/minimax-m2.5-pro@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
-       AND model_repo = 'Pro'
-       AND model_name = 'MiniMaxAI/MiniMax-M2.5'
+       AND model_repo = 'Pro/MiniMaxAI'
+       AND model_name = 'MiniMax-M2.5'
        AND delete_flag = c_active_flag
        AND context_window_tokens = 204800
        AND max_output_tokens = 16384

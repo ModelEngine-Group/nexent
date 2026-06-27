@@ -54,12 +54,12 @@ def _sql_str(value: str) -> str:
 def _split_repo_name(full_id: str) -> tuple[str, str]:
     """Split a catalog's full model identifier into (model_repo, model_name).
 
-    The model_record_t table stores these as two columns. Catalog keys like
-    "Qwen/Qwen2.5-14B-Instruct" must be split on the first '/' to match;
-    bare names like "qwen-plus" or "gpt-4o" land with empty model_repo.
+    Must match backend/utils/model_name_utils.split_repo_name which splits
+    on the LAST '/' (rsplit). For 'Pro/deepseek-ai/DeepSeek-V3.2' this
+    yields repo='Pro/deepseek-ai', name='DeepSeek-V3.2'.
     """
     if "/" in full_id:
-        repo, name = full_id.split("/", 1)
+        repo, name = full_id.rsplit("/", 1)
         return repo, name
     return "", full_id
 
