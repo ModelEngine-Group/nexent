@@ -99,10 +99,13 @@ class ModelConfig(BaseModel):
     @model_validator(mode="after")
     def _backfill_max_output_from_legacy_max_tokens(self) -> "ModelConfig":
         if self.max_output_tokens is None and self.max_tokens is not None:
-            self.max_output_tokens = self.max_tokens
-        elif self.max_output_tokens is not None and self.max_tokens is None:
-            # Keep legacy attribute populated so callers reading it keep working.
-            self.max_tokens = self.max_output_tokens
+            fallback = self.max_tokens
+            if (
+                self.context_window_tokens is not None
+                and fallback > self.context_window_tokens
+            ):
+                fallback = self.context_window_tokens - 1
+            self.max_output_tokens = max(fallback, 1)
         return self
 
 
