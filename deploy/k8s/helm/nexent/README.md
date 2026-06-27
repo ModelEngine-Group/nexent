@@ -10,66 +10,68 @@ This directory contains a Helm chart for deploying Nexent on Kubernetes.
 
 ## Quick Start
 
-Navigate to the `deploy/k8s` directory and run the deployment script:
+From the repository root, run the root deployment entrypoint:
 
 ```bash
-cd deploy/k8s
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `./deploy.sh` | Deploy all K8s resources |
-| `./uninstall.sh` | Uninstall the Helm release; prompts before deleting namespace or local data |
-| `./uninstall.sh clean` | Clean Helm state only (fixes stuck releases) |
-| `./uninstall.sh delete` | Uninstall the Helm release and delete the namespace |
-| `./uninstall.sh delete-all` | Uninstall the Helm release, delete the namespace, and delete local PV data |
+| `bash deploy.sh k8s` | Deploy all K8s resources from the repository root |
+| `bash uninstall.sh k8s` | Uninstall the Helm release from the repository root; prompts before deleting namespace or local data |
+| `bash uninstall.sh k8s clean` | Clean Helm state only (fixes stuck releases) |
+| `bash uninstall.sh k8s delete` | Uninstall the Helm release and delete the namespace |
+| `bash uninstall.sh k8s delete-all` | Uninstall the Helm release, delete the namespace, and delete local PV data |
 
 ### Usage Examples
 
 ```bash
 # Interactive deployment (will prompt for all options)
-./deploy.sh
+bash deploy.sh k8s
 
 # Non-interactive deployment with the default component set
-./deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
-# Enable Supabase, data processing, and terminal
-./deploy.sh --components infrastructure,application,supabase,data-process,terminal
+# Add terminal to the default component set
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
 
 # Use mainland China image sources
-./deploy.sh --image-source mainland
+bash deploy.sh k8s --image-source mainland
 
 # Use local latest Nexent images
-./deploy.sh --image-source local-latest
+bash deploy.sh k8s --image-source local-latest
+
+# Use a specific StorageClass with the short alias
+bash deploy.sh k8s --sc fast-storage
 
 # Clean helm state (fixes stuck releases)
-./uninstall.sh clean
+bash uninstall.sh k8s clean
 
 # Uninstall but preserve data
-./uninstall.sh
+bash uninstall.sh k8s
 
 # Uninstall and keep local PV data without prompting
-./uninstall.sh --keep-local-data --keep-namespace
+bash uninstall.sh k8s --keep-local-data --keep-namespace
 
 # Delete namespace after uninstall
-./uninstall.sh --delete-namespace true
+bash uninstall.sh k8s --delete-namespace true
 
 # Delete local PV data after uninstall
-./uninstall.sh --delete-local-data true
+bash uninstall.sh k8s --delete-local-data true
 
 # Complete uninstall including namespace and local PV data
-./uninstall.sh delete-all
+bash uninstall.sh k8s delete-all
 
 # Complete uninstall but preserve local PV data
-./uninstall.sh delete-all --keep-local-data
+bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
-K8s deployments read runtime configuration from the project root `.env`, the same file used by Docker. The deploy script creates it from `.env.example`, or migrates an existing legacy `docker/.env` once when the root file is missing. Do not edit generated Helm values by hand; they are recreated from `.env` and deployment options.
+K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Existing `deploy/env/.env` is kept as-is. If it is missing, the deploy script first reuses an existing legacy root `.env` or `docker/.env`, then falls back to `deploy/env/.env.example` or legacy templates. Do not edit generated Helm values by hand; they are recreated from `deploy/env/.env` and deployment options.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required.
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
 ## Deploy Options
 
@@ -109,9 +111,38 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 | `--namespace` | Kubernetes namespace | Namespace name; default `nexent` |
 | `--release` | Helm release name | Release name; default `nexent` |
 
+## Offline Image Package
+
+Use the repository-level offline package builder when the target Kubernetes environment cannot pull images directly:
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target k8s \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package/k8s
+```
+
+Package contents include `images/*.tar`, `load-images.sh`, root `deploy.sh` and `uninstall.sh`, the filtered `deploy/` bundle for the selected target, `deploy/sql`, `manifest.yaml`, and `checksums.txt`. Local `deploy/env/.env`, `.env.generated`, and `deploy.options` are intentionally excluded. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+
+On a target host with access to the cluster, load images before deployment:
+
+```bash
+cd offline-package/k8s
+bash deploy.sh --load-images k8s \
+  --version v2.2.1 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general
+```
+
+For multi-node clusters, run `load-images.sh` on every node that may schedule Nexent Pods, or push the loaded images to an internal registry and deploy with matching image references.
+
 ## Deployment Components
 
-The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` is selected by default but can be disabled.
+The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application`, `data-process`, and `supabase` are selected by default and can be disabled for smaller deployments.
 
 | Component | Services |
 |-----------|----------|
@@ -122,7 +153,7 @@ The deployment script uses Bash TUI menus when running interactively. It first s
 | `terminal` | OpenSSH terminal tool |
 | `monitoring` | Optional monitoring chart; selecting it prompts for provider unless `--monitoring-provider` is passed |
 
-`application` does not include `data-process`. User and tenant features are enabled by selecting `supabase`; there is no separate user/tenant switch.
+`application` does not include `data-process`; it is a separate component even though it is selected by default. User and tenant features are enabled by selecting `supabase`; there is no separate user/tenant switch.
 
 ## Port Policy
 
@@ -175,7 +206,7 @@ After successful deployment:
 
 ### Preserved Data
 
-By default, `./uninstall.sh` removes the Helm release and preserves local PV data. It prompts before deleting the namespace or local PV contents. In non-interactive environments, both are preserved unless explicitly requested.
+By default, `bash uninstall.sh k8s` removes the Helm release and preserves local PV data. It prompts before deleting the namespace or local PV contents. In non-interactive environments, both are preserved unless explicitly requested.
 
 The following local PersistentVolumes can preserve data:
 
@@ -345,8 +376,8 @@ helm upgrade --install nexent nexent \
 If you see "Release does not exist" errors:
 
 ```bash
-./uninstall.sh clean
-./deploy.sh
+bash uninstall.sh k8s clean
+bash deploy.sh k8s
 ```
 
 ### Pods Not Starting
@@ -370,8 +401,7 @@ kubectl logs -n nexent -l app=nexent-elasticsearch
 Re-run the initialization script:
 
 ```bash
-cd deploy/k8s
-bash init-elasticsearch.sh
+bash deploy/k8s/init-elasticsearch.sh
 ```
 
 ### Clean Up Stale PersistentVolumes

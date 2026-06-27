@@ -201,29 +201,46 @@ if deployment_validate_password "Nex123"; then
 fi
 
 ENV_TEST_ROOT="$TMP_DIR/env-root"
-mkdir -p "$ENV_TEST_ROOT/docker"
+mkdir -p "$ENV_TEST_ROOT/docker" "$ENV_TEST_ROOT/deploy/env"
 printf 'FROM_DOCKER=yes\n' > "$ENV_TEST_ROOT/docker/.env"
-printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/.env.example"
+printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env.example"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
-assert_contains "$(cat "$ENV_TEST_ROOT/.env")" "FROM_DOCKER=yes" "root .env should migrate from docker/.env first"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_DOCKER=yes" "deploy/env/.env should migrate from docker/.env first"
 
-printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/.env"
+printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
-assert_contains "$(cat "$ENV_TEST_ROOT/.env")" "ROOT_ONLY=yes" "existing root .env should not be overwritten"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "ROOT_ONLY=yes" "existing deploy/env/.env should not be overwritten"
 
-deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "ROOT_ONLY" "updated"
-assert_contains "$(cat "$ENV_TEST_ROOT/.env")" 'ROOT_ONLY="updated"' "env updater should update root env values"
+deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "ROOT_ONLY" "updated"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" 'ROOT_ONLY="updated"' "env updater should update deploy env values"
 assert_eq "true" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should mark changed writes"
 
-ENV_CONTENT_BEFORE="$(cat "$ENV_TEST_ROOT/.env")"
-deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "ROOT_ONLY" "updated"
+ENV_CONTENT_BEFORE="$(cat "$ENV_TEST_ROOT/deploy/env/.env")"
+deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "ROOT_ONLY" "updated"
 assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should mark identical writes unchanged"
-assert_eq "$ENV_CONTENT_BEFORE" "$(cat "$ENV_TEST_ROOT/.env")" "env updater should not rewrite identical quoted values"
+assert_eq "$ENV_CONTENT_BEFORE" "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "env updater should not rewrite identical quoted values"
 
-printf 'UNQUOTED=value\nSINGLE_QUOTED='\''value2'\''\n' >> "$ENV_TEST_ROOT/.env"
-assert_eq "value" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED")" "env getter should read unquoted values"
-assert_eq "value2" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "SINGLE_QUOTED")" "env getter should read single-quoted values"
-deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED" "value"
+printf 'UNQUOTED=value\nSINGLE_QUOTED='\''value2'\''\n' >> "$ENV_TEST_ROOT/deploy/env/.env"
+assert_eq "value" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "UNQUOTED")" "env getter should read unquoted values"
+assert_eq "value2" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "SINGLE_QUOTED")" "env getter should read single-quoted values"
+deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "UNQUOTED" "value"
 assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should normalize unquoted identical values"
 
+GENERATE_ENV_TEST_ROOT="$TMP_DIR/generate-env-root"
+mkdir -p "$GENERATE_ENV_TEST_ROOT/docker" "$GENERATE_ENV_TEST_ROOT/deploy/env"
+printf 'FROM_GENERATE_DOCKER=yes\n' > "$GENERATE_ENV_TEST_ROOT/docker/.env"
+printf 'FROM_GENERATE_EXAMPLE=yes\n' > "$GENERATE_ENV_TEST_ROOT/deploy/env/.env.example"
+(
+  NEXENT_GENERATE_ENV_SKIP_MAIN=true
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/../docker/generate_env.sh"
+  ENV_FILE="$GENERATE_ENV_TEST_ROOT/deploy/env/.env"
+  ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/deploy/env/.env.example"
+  LEGACY_ROOT_ENV="$GENERATE_ENV_TEST_ROOT/.env"
+  LEGACY_ROOT_EXAMPLE="$GENERATE_ENV_TEST_ROOT/.env.example"
+  LEGACY_ENV="$GENERATE_ENV_TEST_ROOT/docker/.env"
+  LEGACY_ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/docker/.env.example"
+  prepare_env_file >/dev/null
+)
+assert_contains "$(cat "$GENERATE_ENV_TEST_ROOT/deploy/env/.env")" "FROM_GENERATE_DOCKER=yes" "generate_env should migrate docker/.env before deploy/env/.env.example"
 echo "All deployment common tests passed."

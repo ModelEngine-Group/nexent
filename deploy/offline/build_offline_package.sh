@@ -13,12 +13,14 @@ DEFAULT_PLATFORM="amd64"
 DEFAULT_OUTPUT_DIR="$PROJECT_ROOT/offline-package"
 DEFAULT_INCLUDE_SOURCE="false"
 DEFAULT_TARGET="all"
+DEFAULT_COMPRESS="false"
 
 VERSION=""
 PLATFORM=""
 OUTPUT_DIR=""
 INCLUDE_SOURCE=""
 TARGET=""
+COMPRESS=""
 DRY_RUN="false"
 COMMON_ARGS=()
 
@@ -51,6 +53,8 @@ show_help() {
   echo "                           Default: $DEFAULT_INCLUDE_SOURCE"
   echo "  --target TARGET         docker, k8s, or all"
   echo "                           Default: $DEFAULT_TARGET"
+  echo "  --compress BOOL        Create zip archive after package build (true or false)"
+  echo "                           Default: $DEFAULT_COMPRESS"
   echo "  --components LIST       Deployment components for image selection"
   echo "  --image-source SOURCE   general, mainland, or local-latest"
   echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
@@ -89,6 +93,10 @@ parse_args() {
         TARGET="$2"
         shift 2
         ;;
+      --compress)
+        COMPRESS="$2"
+        shift 2
+        ;;
       --dry-run)
         DRY_RUN="true"
         shift
@@ -122,6 +130,7 @@ parse_args() {
   OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
   INCLUDE_SOURCE="${INCLUDE_SOURCE:-$DEFAULT_INCLUDE_SOURCE}"
   TARGET="${TARGET:-$DEFAULT_TARGET}"
+  COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
 
   if [[ "$PLATFORM" != "amd64" && "$PLATFORM" != "arm64" ]]; then
     echo "Error: Platform must be 'amd64' or 'arm64'"
@@ -129,6 +138,10 @@ parse_args() {
   fi
   if [[ "$TARGET" != "docker" && "$TARGET" != "k8s" && "$TARGET" != "all" ]]; then
     echo "Error: Target must be 'docker', 'k8s', or 'all'"
+    exit 1
+  fi
+  if [[ "$COMPRESS" != "true" && "$COMPRESS" != "false" ]]; then
+    echo "Error: Compress must be 'true' or 'false'"
     exit 1
   fi
 }
@@ -156,6 +169,7 @@ show_dry_run_plan() {
     echo "Output directory: $OUTPUT_DIR"
     echo "Include source: $INCLUDE_SOURCE"
     echo "Target: $TARGET"
+    echo "Compress: $COMPRESS"
     echo "Components: $DEPLOYMENT_COMPONENTS"
     echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
     echo ""
@@ -210,6 +224,33 @@ get_third_party_images() {
   true
 }
 
+uses_latest_tag() {
+  local image="$1"
+  local tag="${image##*:}"
+  [[ "$tag" == "latest" ]]
+}
+
+image_exists_locally() {
+  local image="$1"
+  docker image inspect "$image" >/dev/null 2>&1
+}
+
+should_skip_pull() {
+  local image="$1"
+
+  if image_exists_locally "$image"; then
+    echo "Using existing local image without pulling: $image"
+    return 0
+  fi
+
+  if uses_latest_tag "$image"; then
+    echo "Skipping pull for latest image; expecting local image: $image"
+    return 0
+  fi
+
+  return 1
+}
+
 pull_with_retry() {
   local image="$1"
   local platform="$2"
@@ -244,6 +285,10 @@ pull_all_images() {
   nexent_images_str=$(get_nexent_images)
 
   while IFS= read -r image; do
+    if should_skip_pull "$image"; then
+      continue
+    fi
+
     pull_with_retry "$image" "$PLATFORM" || {
       echo "❌ Failed to pull Nexent image: $image"
       return 1
@@ -259,6 +304,10 @@ pull_all_images() {
   third_party_images_str=$(get_third_party_images)
 
   while IFS= read -r image; do
+    if should_skip_pull "$image"; then
+      continue
+    fi
+
     pull_with_retry "$image" "$PLATFORM" || {
       echo "❌ Failed to pull third-party image: $image"
       return 1
@@ -438,30 +487,6 @@ LOADSCRIPT
   echo "✅ Created: $load_script"
 }
 
-create_offline_install_script() {
-  local install_script="$OUTPUT_DIR/offline-install.sh"
-
-  echo ""
-  echo "========================================"
-  echo "Creating offline-install.sh script..."
-  echo "========================================"
-
-  cat > "$install_script" << 'INSTALLSCRIPT'
-#!/bin/bash
-
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-bash "$SCRIPT_DIR/load-images.sh"
-exec bash "$SCRIPT_DIR/deploy.sh" "$@"
-INSTALLSCRIPT
-
-  chmod +x "$install_script"
-
-  echo "✅ Created: $install_script"
-}
-
 copy_deployment_bundle() {
   echo ""
   echo "========================================"
@@ -471,12 +496,13 @@ copy_deployment_bundle() {
   cp "$PROJECT_ROOT/deploy.sh" "$OUTPUT_DIR/deploy.sh"
   cp "$PROJECT_ROOT/uninstall.sh" "$OUTPUT_DIR/uninstall.sh"
   cp "$PROJECT_ROOT/VERSION" "$OUTPUT_DIR/VERSION"
-  cp "$PROJECT_ROOT/.env.example" "$OUTPUT_DIR/.env.example"
 
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \
       --exclude='.DS_Store' \
       --exclude='deploy.options' \
+      --exclude='env/.env' \
+      --exclude='env/.env.bak' \
       --exclude='docker/.env.generated' \
       --exclude='k8s/helm/nexent/generated-values.yaml' \
       --exclude='k8s/helm/nexent/generated-runtime-values.yaml' \
@@ -488,7 +514,7 @@ copy_deployment_bundle() {
     find "$OUTPUT_DIR" -name '.DS_Store' -type f -delete 2>/dev/null || true
   fi
 
-  rm -f "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
+  rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
   rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-persistence-values.yaml"
   case "$TARGET" in
     docker) rm -rf "$OUTPUT_DIR/deploy/k8s" ;;
@@ -496,7 +522,7 @@ copy_deployment_bundle() {
   esac
 
   find "$OUTPUT_DIR" -name '.git' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" "$OUTPUT_DIR/offline-install.sh" 2>/dev/null || true
+  chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" 2>/dev/null || true
   find "$OUTPUT_DIR/deploy" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
   echo "✅ Deployment bundle copied"
@@ -555,6 +581,40 @@ create_checksums() {
   echo "✅ Created: $checksum_file"
 }
 
+offline_package_name() {
+  local safe_version="${VERSION//\//-}"
+  echo "nexent-offline-${TARGET}-${PLATFORM}-${safe_version}"
+}
+
+create_zip_package() {
+  if [[ "$COMPRESS" != "true" ]]; then
+    echo "Skipping zip archive creation (compress=false)"
+    return 0
+  fi
+
+  if ! command -v zip >/dev/null 2>&1; then
+    echo "❌ zip is required to create compressed package"
+    return 1
+  fi
+
+  local output_parent
+  local archive_file
+
+  output_parent="$(cd "$(dirname "$OUTPUT_DIR")" && pwd)"
+  archive_file="$output_parent/$(offline_package_name).zip"
+
+  echo ""
+  echo "========================================"
+  echo "Creating zip package..."
+  echo "========================================"
+
+  rm -f "$archive_file"
+  (cd "$OUTPUT_DIR" && zip -r "$archive_file" .)
+
+  echo "✅ Created: $archive_file"
+  ls -lh "$archive_file"
+}
+
 main() {
   parse_args "$@"
   prepare_deployment_image_config
@@ -572,6 +632,7 @@ main() {
   echo "Output directory: $OUTPUT_DIR"
   echo "Include source: $INCLUDE_SOURCE"
   echo "Target: $TARGET"
+  echo "Compress: $COMPRESS"
   echo "Components: $DEPLOYMENT_COMPONENTS"
   echo "Image source: $DEPLOYMENT_IMAGE_SOURCE"
   echo "========================================"
@@ -599,11 +660,6 @@ main() {
     exit 1
   }
 
-  create_offline_install_script || {
-    echo "❌ Offline install script creation failed, aborting"
-    exit 1
-  }
-
   copy_deployment_bundle || {
     echo "❌ Deployment bundle copy failed, aborting"
     exit 1
@@ -619,11 +675,19 @@ main() {
     exit 1
   }
 
+  create_zip_package || {
+    echo "❌ Zip package creation failed, aborting"
+    exit 1
+  }
+
   echo ""
   echo "========================================"
   echo "✅ Offline package build completed"
   echo "========================================"
   echo "Package contents available at: $OUTPUT_DIR"
+  if [[ "$COMPRESS" == "true" ]]; then
+    echo "Compressed package available at: $(cd "$(dirname "$OUTPUT_DIR")" && pwd)/$(offline_package_name).zip"
+  fi
   echo ""
 }
 

@@ -5,7 +5,7 @@ NAMESPACE=nexent
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ROOT_ENV_FILE="${ROOT_ENV_FILE:-$PROJECT_ROOT/.env}"
+ROOT_ENV_FILE="${ROOT_ENV_FILE:-$DEPLOY_ROOT/env/.env}"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then

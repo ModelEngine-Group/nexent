@@ -4,7 +4,11 @@ from pathlib import Path
 # Ensure sdk/ is on sys.path so package imports resolve in the test environment
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "sdk"))
 
-from nexent.core.models.message_utils import _flatten_content, prepare_messages_for_completion
+from nexent.core.models.message_utils import (
+    _flatten_content,
+    prepare_messages_for_completion,
+    prepare_messages_for_smolagents_text_flattening,
+)
 from types import SimpleNamespace
 
 
@@ -50,4 +54,13 @@ def test_prepare_messages_modelengine_with_objects_and_case_insensitive():
     assert prepared[0]["role"] == "system"
     assert "b" in prepared[1]["content"]
 
+
+def test_prepare_messages_for_smolagents_text_flattening_uses_text_part_shape():
+    obj1 = SimpleNamespace(role="system", content="SYS")
+    obj2 = SimpleNamespace(role="user", content=["a", {"text": "b"}])
+
+    prepared = prepare_messages_for_smolagents_text_flattening([obj1, obj2])
+
+    assert prepared[0].content == [{"type": "text", "text": "SYS"}]
+    assert prepared[1].content == [{"type": "text", "text": "ab"}]
 

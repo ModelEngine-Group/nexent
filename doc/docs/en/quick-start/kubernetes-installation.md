@@ -27,7 +27,7 @@ kubectl get nodes
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/deploy/k8s
+cd nexent
 ```
 
 ### 3. Deployment
@@ -35,7 +35,7 @@ cd nexent/deploy/k8s
 Run the deployment script:
 
 ```bash
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
@@ -43,8 +43,8 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 **Deployment Components:**
 - **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
 - **application (selected by default, optional)**: config, runtime, mcp, northbound, web
-- **data-process (optional)**: data processing service
-- **supabase (optional)**: enables user, tenant, and authentication features
+- **data-process (selected by default, optional)**: data processing service
+- **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
 
@@ -56,6 +56,8 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **general (default)**: uses standard public registries
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
+
+Kubernetes uses the same `deploy/env/.env` file as Docker. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing legacy root `.env` or `docker/.env`, then fall back to `deploy/env/.env.example` or legacy templates.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
@@ -80,7 +82,7 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
 # Step 3: Re-deploy and record the su account password
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 ### 4. Access Your Installation
@@ -155,44 +157,93 @@ Nexent uses PersistentVolumes for data persistence:
 | Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
 | MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
 | Supabase DB (when `supabase` is selected) | nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
+| Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
+| Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
-Helm uninstall does not delete local hostPath data by default. Use `./uninstall.sh --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent-data/nexent-*`, or `--keep-local-data` to preserve them explicitly.
+Helm uninstall does not delete local hostPath data by default. Use `bash deploy/k8s/uninstall.sh --delete-local-data true` or `bash uninstall.sh k8s --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`; use `--keep-local-data` to preserve them explicitly.
+
+### Uninstall Kubernetes Deployment
+
+Use the root uninstall entrypoint from the repository root:
+
+```bash
+# Remove Helm release; prompts before deleting namespace or local data in interactive shells
+bash uninstall.sh k8s
+
+# Clean only Helm release state, useful for stuck releases
+bash uninstall.sh k8s clean
+
+# Remove Helm release and namespace, but keep local hostPath data
+bash uninstall.sh k8s delete --keep-local-data
+
+# Delete known local hostPath data after uninstall
+bash uninstall.sh k8s --delete-local-data true
+
+# Full cleanup: Helm release, namespace, and local hostPath data
+bash uninstall.sh k8s delete-all
+```
+
+`--delete-data` and `--delete-volumes` are compatibility options for Helm-managed resources. For local disks, use `--delete-local-data` or `--keep-local-data`; `delete-all --keep-local-data` removes the namespace while preserving local volume contents.
+
+### Offline Image Package
+
+Build a Kubernetes offline package from the repository root:
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target k8s \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package
+```
+
+The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `manifest.yaml`, and `checksums.txt`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory. On a single-node Docker-backed cluster, you can load and deploy directly:
+
+```bash
+cd offline-package
+bash deploy.sh --load-images k8s
+```
+
+For multi-node clusters, load the images on every node that may run Nexent Pods, or push the loaded images to an internal registry and deploy with matching image settings.
 
 ## 🔧 Deployment Commands
 
 ```bash
 # Deploy with interactive prompts
-./deploy.sh
+bash deploy.sh k8s
 
 # Non-interactive deployment with the default component set
-./deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
-# Enable user/tenant features, data processing, and terminal
-./deploy.sh --components infrastructure,application,supabase,data-process,terminal
+# Add the terminal tool to the default component set
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
 
 # Deploy with mainland China image sources
-./deploy.sh --image-source mainland
+bash deploy.sh k8s --image-source mainland
 
 # Use local latest images
-./deploy.sh --image-source local-latest
+bash deploy.sh k8s --image-source local-latest
 
 # Clean helm state only (fixes stuck releases)
-./uninstall.sh clean
+bash uninstall.sh k8s clean
 
 # Uninstall; local data is preserved by default, with interactive prompts for namespace and local data deletion
-./uninstall.sh
+bash uninstall.sh k8s
 
 # Uninstall and delete the namespace
-./uninstall.sh --delete-namespace true
+bash uninstall.sh k8s --delete-namespace true
 
 # Uninstall and delete local hostPath data
-./uninstall.sh --delete-local-data true
+bash uninstall.sh k8s --delete-local-data true
 
 # Complete uninstall including namespace and local hostPath data
-./uninstall.sh delete-all
+bash uninstall.sh k8s delete-all
 
 # Complete uninstall but preserve local hostPath data
-./uninstall.sh delete-all --keep-local-data
+bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
 ## 🔧 Advanced Configuration
@@ -202,8 +253,8 @@ Helm uninstall does not delete local hostPath data by default. Use `./uninstall.
 Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script renders runtime Helm values for `global.monitoring.enabled`, `global.monitoring.provider`, and `global.monitoring.dashboardUrl`, and enables the `nexent-monitoring` subchart.
 
 ```bash
-cd nexent/deploy/k8s
-./deploy.sh
+cd nexent
+bash deploy.sh k8s
 ```
 
 If `deploy/k8s/deploy.options` already exists, the script asks whether to reuse local configuration. Choose to reconfigure/overwrite local configuration, then select `monitoring` in the component menu and manually choose `grafana`, `phoenix`, `langfuse`, `langsmith`, `zipkin`, or `otlp` in the provider menu.
@@ -248,7 +299,7 @@ kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
 OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `config.oauth.callbackBaseUrl` to the browser-accessible Nexent Web URL.
 
 ```bash
-./deploy.sh --components infrastructure,application,supabase
+bash deploy.sh k8s --components infrastructure,application,supabase
 ```
 
 Kubernetes writes OAuth settings into backend environment variables through `nexent-common` `config.oauth.*` values:

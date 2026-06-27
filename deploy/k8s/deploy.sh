@@ -25,7 +25,7 @@ GENERATED_VALUES="$CHART_DIR/generated-values.yaml"
 GENERATED_RUNTIME_VALUES="$CHART_DIR/generated-runtime-values.yaml"
 GENERATED_SECRETS_VALUES="$CHART_DIR/generated-secrets-values.yaml"
 GENERATED_PERSISTENCE_VALUES="$CHART_DIR/generated-persistence-values.yaml"
-ROOT_ENV_FILE="$PROJECT_ROOT/.env"
+ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 SQL_INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
 SUPABASE_SQL_DIR="$DEPLOY_ROOT/sql/supabase"
 
@@ -811,7 +811,7 @@ generate_supabase_secrets() {
     if [ -n "${JWT_SECRET:-}" ] && [ -n "${SECRET_KEY_BASE:-}" ] && [ -n "${VAULT_ENC_KEY:-}" ] && [ -n "${SUPABASE_KEY:-}" ] && [ -n "${SERVICE_ROLE_KEY:-}" ]; then
         SUPABASE_ANON_KEY="$SUPABASE_KEY"
         SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
-        echo "Using Supabase secrets from root .env."
+        echo "Using Supabase secrets from deploy/env/.env."
         echo ""
         echo "--------------------------------"
         echo ""
@@ -956,7 +956,7 @@ apply() {
     echo "  MinIO Access Key/Secret Key Setup"
     echo "=========================================="
     if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
-        echo "Using MinIO credentials from root .env."
+        echo "Using MinIO credentials from deploy/env/.env."
         echo "Access Key: $MINIO_ACCESS_KEY"
     elif load_existing_minio_secrets; then
         echo "Reusing existing MinIO credentials from Kubernetes secret."
@@ -985,7 +985,7 @@ apply() {
 
     if [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ]; then
         if [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
-            echo "Using ELASTICSEARCH_API_KEY from root .env."
+            echo "Using ELASTICSEARCH_API_KEY from deploy/env/.env."
         elif load_existing_elasticsearch_api_key; then
             echo "Reusing existing ELASTICSEARCH_API_KEY from Kubernetes secret."
         fi

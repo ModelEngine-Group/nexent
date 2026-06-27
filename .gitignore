@@ -78,5 +78,8 @@ sdk/benchmark/.env
 
 .pytest-tmp
 doc/mermaid
+_doc/
 
 .claude/skills/python-import-triage
+/deploy/env/.env
+/deploy/env/.env.bak

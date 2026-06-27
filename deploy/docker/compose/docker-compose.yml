@@ -98,7 +98,7 @@ services:
       skip_proxy: "true"
       UMASK: 0022
     env_file:
-      - ../../../.env
+      - ../../env/.env
     user: root
     depends_on:
       nexent-elasticsearch:
@@ -130,7 +130,7 @@ services:
       skip_proxy: "true"
       UMASK: 0022
     env_file:
-      - ../../../.env
+      - ../../env/.env
     user: root
     depends_on:
       nexent-elasticsearch:
@@ -162,7 +162,7 @@ services:
       skip_proxy: "true"
       UMASK: 0022
     env_file:
-      - ../../../.env
+      - ../../env/.env
     user: root
     depends_on:
       nexent-elasticsearch:
@@ -194,7 +194,7 @@ services:
       skip_proxy: "true"
       UMASK: 0022
     env_file:
-      - ../../../.env
+      - ../../env/.env
     user: root
     depends_on:
       nexent-elasticsearch:
@@ -249,7 +249,7 @@ services:
       PYTHONPATH: "/opt/backend"
       skip_proxy: "true"
     env_file:
-      - ../../../.env
+      - ../../env/.env
     depends_on:
       redis:
         condition: service_healthy

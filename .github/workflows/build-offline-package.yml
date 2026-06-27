@@ -23,10 +23,6 @@ on:
         options:
           - general
           - mainland
-      components:
-        description: 'Deployment components CSV'
-        required: false
-        default: 'infrastructure,application'
       target:
         description: 'Package target'
         required: false
@@ -89,6 +85,14 @@ jobs:
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
           echo "package-name=nexent-offline-${{ inputs.target }}-${PLATFORM}-${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Set deployment components
+        id: set-components
+        run: |
+          COMPONENTS="infrastructure,application,data-process,supabase,terminal"
+
+          echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
+          echo "Selected deployment components: $COMPONENTS"
+
       - name: Build offline package
         run: |
           chmod +x deploy/offline/build_offline_package.sh
@@ -99,18 +103,17 @@ jobs:
             --output-dir ./offline-output \
             --include-source "${{ inputs.include_source }}" \
             --image-source "${{ inputs.image_source }}" \
-            --components "${{ inputs.components }}" \
-            --target "${{ inputs.target }}"
+            --components "${{ steps.set-components.outputs.components }}" \
+            --target "${{ inputs.target }}" \
+            --compress true
 
 
 
-      - name: Create zip package
+      - name: Show zip package
         run: |
           PACKAGE_NAME="${{ steps.set-vars.outputs.package-name }}"
 
-          (cd offline-output && zip -r "../${PACKAGE_NAME}.zip" .)
-
-          echo "Package created: ${PACKAGE_NAME}.zip"
+          echo "Package created by build script: ${PACKAGE_NAME}.zip"
 
           ls -lh "${PACKAGE_NAME}.zip"
 
@@ -131,7 +134,7 @@ jobs:
           echo "Platform: ${{ steps.set-vars.outputs.platform }}"
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
           echo "Target: ${{ inputs.target }}"
-          echo "Components: ${{ inputs.components }}"
+          echo "Components: ${{ steps.set-components.outputs.components }}"
           echo "Image source: ${{ inputs.image_source }}"
           echo "Ref Type: ${{ github.ref_type }}"
           echo "Ref Name: ${{ github.ref_name }}"

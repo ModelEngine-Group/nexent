@@ -7,10 +7,11 @@
 # and return appropriate exit codes from functions
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ROOT_ENV_FILE="$PROJECT_ROOT/.env"
+DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 
-# Source environment variables if root .env file exists
+# Source environment variables if deploy/env/.env file exists
 if [ -f "$ROOT_ENV_FILE" ]; then
   set -a
   source "$ROOT_ENV_FILE"

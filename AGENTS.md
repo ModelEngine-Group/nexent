@@ -87,7 +87,7 @@ npm run check-all    # type-check + lint + format + build
 
 ```bash
 cd docker
-cp .env.example .env  # Fill required configs
+cp deploy/env/.env.example deploy/env/.env  # Fill required configs
 bash deploy.sh        # Interactive deployment
 ```
 

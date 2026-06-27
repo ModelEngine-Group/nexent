@@ -541,7 +541,8 @@ def build_skeleton_header_component(
     """Build SystemPromptComponent for the header section.
 
     Section: "### 基本信息" / "### Basic Information"
-    Content: Agent identity, app name/description, user_id.
+    Content: Agent identity and app name/description.  User identity is
+    request-scoped data and must not enter the managed stable prefix.
     Note: Current time is intentionally excluded from the system prompt so the
     static system prefix can hit the LLM KV/prompt cache across requests. The
     current time is injected on the user-message side instead (see CoreAgent.run).
@@ -549,7 +550,7 @@ def build_skeleton_header_component(
     from nexent.core.agents.agent_model import SystemPromptComponent
 
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}，用户ID为{user_id}"
+        content = f"### 基本信息\n你是{app_name}，{app_description}"
     else:
         content = f"### Basic Information\nYou are {app_name}, {app_description}"
 
@@ -1311,10 +1312,11 @@ def build_context_components(
             )
         )
 
-    # 5. Execution Flow
+    # 5. Execution Flow.  Do not make stable instructions depend on whether a
+    # particular request happened to retrieve memory.
     components.append(
         build_skeleton_execution_flow_component(
-            memory_list=memory_list,
+            memory_list=None,
             language=language,
             is_manager=is_manager,
         )
@@ -1333,7 +1335,10 @@ def build_context_components(
         components.append(
             build_tools_component(
                 tools=tools,
-                knowledge_base_summary=knowledge_base_summary,
+                # KB/RAG content is dynamic evidence and is emitted below as a
+                # user-role KnowledgeBaseComponent, not embedded in stable tool
+                # descriptions.
+                knowledge_base_summary=None,
                 language=language,
                 is_manager=is_manager,
             )
