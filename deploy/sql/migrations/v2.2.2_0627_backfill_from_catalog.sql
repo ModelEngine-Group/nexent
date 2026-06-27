@@ -1168,8 +1168,10 @@ END $$;
 
 -- ============================================================
 -- Phase 1b: Tag already-filled rows whose ctx/max_out exactly match
---           the catalog with capability_profile_version. Does not
---           rewrite capacity_source (operator intent preserved).
+--           the catalog with capability_profile_version. Upgrades
+--           capacity_source from 'default' to 'profile' (values now
+--           come from catalog, not system defaults). Preserves
+--           'operator' and other explicit sources.
 -- ============================================================
 
 DO $$
@@ -1179,797 +1181,863 @@ DECLARE
 BEGIN
     -- dashscope (4 entries)
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'dashscope/qwen-plus@1'
+       SET capability_profile_version = 'dashscope/qwen-plus@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'dashscope'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'qwen-plus'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'dashscope/qwen-plus@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'dashscope/qwen-turbo@1'
+       SET capability_profile_version = 'dashscope/qwen-turbo@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'dashscope'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'qwen-turbo'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'dashscope/qwen-turbo@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'dashscope/qwen3.7-max@1'
+       SET capability_profile_version = 'dashscope/qwen3.7-max@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'dashscope'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'qwen3.7-max'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 65536
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'dashscope/qwen3.7-max@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'dashscope/glm-5.1@1'
+       SET capability_profile_version = 'dashscope/glm-5.1@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'dashscope'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'glm-5.1'
        AND delete_flag = 'N'
        AND context_window_tokens = 200000
        AND max_output_tokens = 131072
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'dashscope/glm-5.1@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     -- deepseek (15 entries)
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-chat@2'
+       SET capability_profile_version = 'deepseek/deepseek-chat@2',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'deepseek-chat'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 384000
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-chat@2' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-reasoner@2'
+       SET capability_profile_version = 'deepseek/deepseek-reasoner@2',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'deepseek-reasoner'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 384000
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-reasoner@2' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v4-flash@1'
+       SET capability_profile_version = 'deepseek/deepseek-v4-flash@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'deepseek-v4-flash'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 384000
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v4-flash@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v4-pro@1'
+       SET capability_profile_version = 'deepseek/deepseek-v4-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'deepseek-v4-pro'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 384000
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v4-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v4-pro-sf@1'
+       SET capability_profile_version = 'deepseek/deepseek-v4-pro-sf@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-V4-Pro'
        AND delete_flag = 'N'
        AND context_window_tokens = 1048576
        AND max_output_tokens = 384000
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v4-pro-sf@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v4-flash-sf@1'
+       SET capability_profile_version = 'deepseek/deepseek-v4-flash-sf@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-V4-Flash'
        AND delete_flag = 'N'
        AND context_window_tokens = 1048576
        AND max_output_tokens = 384000
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v4-flash-sf@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.2@1'
+       SET capability_profile_version = 'deepseek/deepseek-v3.2@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-V3.2'
        AND delete_flag = 'N'
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.2@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.1-terminus@1'
+       SET capability_profile_version = 'deepseek/deepseek-v3.1-terminus@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-V3.1-Terminus'
        AND delete_flag = 'N'
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.1-terminus@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-r1@1'
+       SET capability_profile_version = 'deepseek/deepseek-r1@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-R1'
        AND delete_flag = 'N'
        AND context_window_tokens = 163840
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-r1@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3@1'
+       SET capability_profile_version = 'deepseek/deepseek-v3@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-V3'
        AND delete_flag = 'N'
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-r1-0528-qwen3-8b@1'
+       SET capability_profile_version = 'deepseek/deepseek-r1-0528-qwen3-8b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'deepseek-ai'
        AND model_name = 'DeepSeek-R1-0528-Qwen3-8B'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-r1-0528-qwen3-8b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.2-pro@1'
+       SET capability_profile_version = 'deepseek/deepseek-v3.2-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'Pro'
        AND model_name = 'deepseek-ai/DeepSeek-V3.2'
        AND delete_flag = 'N'
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.2-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.1-terminus-pro@1'
+       SET capability_profile_version = 'deepseek/deepseek-v3.1-terminus-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'Pro'
        AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
        AND delete_flag = 'N'
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.1-terminus-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-r1-pro@1'
+       SET capability_profile_version = 'deepseek/deepseek-r1-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'Pro'
        AND model_name = 'deepseek-ai/DeepSeek-R1'
        AND delete_flag = 'N'
        AND context_window_tokens = 163840
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-r1-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3-pro@1'
+       SET capability_profile_version = 'deepseek/deepseek-v3-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'deepseek'
        AND model_repo = 'Pro'
        AND model_name = 'deepseek-ai/DeepSeek-V3'
        AND delete_flag = 'N'
        AND context_window_tokens = 164000
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     -- openai (2 entries)
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'openai/gpt-4o@1'
+       SET capability_profile_version = 'openai/gpt-4o@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'openai'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'gpt-4o'
        AND delete_flag = 'N'
        AND context_window_tokens = 128000
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'openai/gpt-4o@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'openai/gpt-4.1@1'
+       SET capability_profile_version = 'openai/gpt-4.1@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'openai'
        AND (model_repo IS NULL OR model_repo = '')
        AND model_name = 'gpt-4.1'
        AND delete_flag = 'N'
        AND context_window_tokens = 1000000
        AND max_output_tokens = 32768
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'openai/gpt-4.1@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     -- silicon (45 entries)
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.6-27b@1'
+       SET capability_profile_version = 'silicon/qwen3.6-27b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.6-27B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 65536
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.6-27b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/kimi-k2.6@1'
+       SET capability_profile_version = 'silicon/kimi-k2.6@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Pro'
        AND model_name = 'moonshotai/Kimi-K2.6'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 131072
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/kimi-k2.6@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.6-35b-a3b@1'
+       SET capability_profile_version = 'silicon/qwen3.6-35b-a3b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.6-35B-A3B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.6-35b-a3b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.5-397b-a17b@1'
+       SET capability_profile_version = 'silicon/qwen3.5-397b-a17b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.5-397B-A17B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.5-397b-a17b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.5-122b-a10b@1'
+       SET capability_profile_version = 'silicon/qwen3.5-122b-a10b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.5-122B-A10B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.5-122b-a10b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.5-35b-a3b@1'
+       SET capability_profile_version = 'silicon/qwen3.5-35b-a3b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.5-35B-A3B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.5-35b-a3b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.5-27b@1'
+       SET capability_profile_version = 'silicon/qwen3.5-27b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.5-27B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.5-27b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.5-9b@1'
+       SET capability_profile_version = 'silicon/qwen3.5-9b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.5-9B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.5-9b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3.5-4b@1'
+       SET capability_profile_version = 'silicon/qwen3.5-4b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3.5-4B'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3.5-4b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-vl-32b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen3-vl-32b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-VL-32B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-vl-32b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-vl-32b-thinking@1'
+       SET capability_profile_version = 'silicon/qwen3-vl-32b-thinking@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-VL-32B-Thinking'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 32768
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-vl-32b-thinking@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-vl-8b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen3-vl-8b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-VL-8B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-vl-8b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-vl-8b-thinking@1'
+       SET capability_profile_version = 'silicon/qwen3-vl-8b-thinking@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-VL-8B-Thinking'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 32768
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-vl-8b-thinking@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-vl-30b-a3b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen3-vl-30b-a3b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-VL-30B-A3B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-vl-30b-a3b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-vl-30b-a3b-thinking@1'
+       SET capability_profile_version = 'silicon/qwen3-vl-30b-a3b-thinking@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-VL-30B-A3B-Thinking'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 32768
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-vl-30b-a3b-thinking@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-omni-30b-a3b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen3-omni-30b-a3b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-Omni-30B-A3B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-omni-30b-a3b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-omni-30b-a3b-thinking@1'
+       SET capability_profile_version = 'silicon/qwen3-omni-30b-a3b-thinking@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-Omni-30B-A3B-Thinking'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-omni-30b-a3b-thinking@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-omni-30b-a3b-captioner@1'
+       SET capability_profile_version = 'silicon/qwen3-omni-30b-a3b-captioner@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-Omni-30B-A3B-Captioner'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-omni-30b-a3b-captioner@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-coder-30b-a3b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen3-coder-30b-a3b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-Coder-30B-A3B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 65536
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-coder-30b-a3b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-30b-a3b-instruct-2507@1'
+       SET capability_profile_version = 'silicon/qwen3-30b-a3b-instruct-2507@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-30B-A3B-Instruct-2507'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-30b-a3b-instruct-2507@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-32b@1'
+       SET capability_profile_version = 'silicon/qwen3-32b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-32B'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-32b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-14b@1'
+       SET capability_profile_version = 'silicon/qwen3-14b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-14B'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-14b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen3-8b@1'
+       SET capability_profile_version = 'silicon/qwen3-8b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen3-8B'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen3-8b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen2.5-72b-instruct-128k@1'
+       SET capability_profile_version = 'silicon/qwen2.5-72b-instruct-128k@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen2.5-72B-Instruct-128K'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen2.5-72b-instruct-128k@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen2.5-72b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen2.5-72b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen2.5-72B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen2.5-72b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen2.5-32b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen2.5-32b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen2.5-32B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen2.5-32b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen2.5-14b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen2.5-14b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen2.5-14B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen2.5-14b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/qwen2.5-7b-instruct@1'
+       SET capability_profile_version = 'silicon/qwen2.5-7b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Qwen'
        AND model_name = 'Qwen2.5-7B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/qwen2.5-7b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-4-32b-0414@1'
+       SET capability_profile_version = 'silicon/glm-4-32b-0414@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'THUDM'
        AND model_name = 'GLM-4-32B-0414'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-4-32b-0414@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-z1-9b-0414@1'
+       SET capability_profile_version = 'silicon/glm-z1-9b-0414@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'THUDM'
        AND model_name = 'GLM-Z1-9B-0414'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-z1-9b-0414@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-4-9b-0414@1'
+       SET capability_profile_version = 'silicon/glm-4-9b-0414@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'THUDM'
        AND model_name = 'GLM-4-9B-0414'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-4-9b-0414@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-5.2@1'
+       SET capability_profile_version = 'silicon/glm-5.2@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'zai-org'
        AND model_name = 'GLM-5.2'
        AND delete_flag = 'N'
        AND context_window_tokens = 1048576
        AND max_output_tokens = 131072
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-5.2@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-4.5v@1'
+       SET capability_profile_version = 'silicon/glm-4.5v@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'zai-org'
        AND model_name = 'GLM-4.5V'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-4.5v@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-4.5-air@1'
+       SET capability_profile_version = 'silicon/glm-4.5-air@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'zai-org'
        AND model_name = 'GLM-4.5-Air'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-4.5-air@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/glm-5.1-pro@1'
+       SET capability_profile_version = 'silicon/glm-5.1-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Pro'
        AND model_name = 'zai-org/GLM-5.1'
        AND delete_flag = 'N'
        AND context_window_tokens = 202752
        AND max_output_tokens = 131072
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/glm-5.1-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/seed-oss-36b-instruct@1'
+       SET capability_profile_version = 'silicon/seed-oss-36b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'ByteDance-Seed'
        AND model_name = 'Seed-OSS-36B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 524288
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/seed-oss-36b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/ling-flash-2.0@1'
+       SET capability_profile_version = 'silicon/ling-flash-2.0@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'inclusionAI'
        AND model_name = 'Ling-flash-2.0'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/ling-flash-2.0@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/ling-mini-2.0@1'
+       SET capability_profile_version = 'silicon/ling-mini-2.0@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'inclusionAI'
        AND model_name = 'Ling-mini-2.0'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/ling-mini-2.0@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/minimax-m2.5@1'
+       SET capability_profile_version = 'silicon/minimax-m2.5@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'MiniMaxAI'
        AND model_name = 'MiniMax-M2.5'
        AND delete_flag = 'N'
        AND context_window_tokens = 204800
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/minimax-m2.5@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/minimax-m2.5-pro@1'
+       SET capability_profile_version = 'silicon/minimax-m2.5-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Pro'
        AND model_name = 'MiniMaxAI/MiniMax-M2.5'
        AND delete_flag = 'N'
        AND context_window_tokens = 204800
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/minimax-m2.5-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/kimi-k2.7-code@1'
+       SET capability_profile_version = 'silicon/kimi-k2.7-code@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'moonshotai'
        AND model_name = 'Kimi-K2.7-Code'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 32768
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/kimi-k2.7-code@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/nex-n2-pro@1'
+       SET capability_profile_version = 'silicon/nex-n2-pro@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'nex-agi'
        AND model_name = 'Nex-N2-Pro'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/nex-n2-pro@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/step-3.5-flash@1'
+       SET capability_profile_version = 'silicon/step-3.5-flash@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'stepfun-ai'
        AND model_name = 'Step-3.5-Flash'
        AND delete_flag = 'N'
        AND context_window_tokens = 262144
        AND max_output_tokens = 16384
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/step-3.5-flash@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/hunyuan-mt-7b@1'
+       SET capability_profile_version = 'silicon/hunyuan-mt-7b@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'tencent'
        AND model_name = 'Hunyuan-MT-7B'
        AND delete_flag = 'N'
        AND context_window_tokens = 32768
        AND max_output_tokens = 2048
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/hunyuan-mt-7b@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
     UPDATE nexent.model_record_t
-       SET capability_profile_version = 'silicon/hunyuan-a13b-instruct@1'
+       SET capability_profile_version = 'silicon/hunyuan-a13b-instruct@1',
+           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'tencent'
        AND model_name = 'Hunyuan-A13B-Instruct'
        AND delete_flag = 'N'
        AND context_window_tokens = 131072
        AND max_output_tokens = 8192
-       AND capability_profile_version IS NULL;
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/hunyuan-a13b-instruct@1' AND capacity_source = 'default'));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 

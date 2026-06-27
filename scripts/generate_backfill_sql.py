@@ -166,12 +166,14 @@ def main() -> None:
 
     # --------------------------------------------------------------
     # Phase 1b: catalog match + already-filled values match catalog
-    #           -> tag profile_version only (don't touch capacity)
+    #           -> tag profile_version + upgrade capacity_source from 'default' to 'profile'
     # --------------------------------------------------------------
     lines.append("-- ============================================================")
     lines.append("-- Phase 1b: Tag already-filled rows whose ctx/max_out exactly match")
-    lines.append("--           the catalog with capability_profile_version. Does not")
-    lines.append("--           rewrite capacity_source (operator intent preserved).")
+    lines.append("--           the catalog with capability_profile_version. Upgrades")
+    lines.append("--           capacity_source from 'default' to 'profile' (values now")
+    lines.append("--           come from catalog, not system defaults). Preserves")
+    lines.append("--           'operator' and other explicit sources.")
     lines.append("-- ============================================================")
     lines.append("")
     lines.append("DO $$")
@@ -192,14 +194,15 @@ def main() -> None:
             escaped_name = _sql_str(name)
 
             lines.append(f"    UPDATE nexent.model_record_t")
-            lines.append(f"       SET capability_profile_version = '{version}'")
+            lines.append(f"       SET capability_profile_version = '{version}',")
+            lines.append(f"           capacity_source = CASE WHEN capacity_source = 'default' THEN 'profile' ELSE capacity_source END")
             lines.append(f"     WHERE LOWER(model_factory) = '{_sql_str(provider.lower())}'")
             lines.append(f"       AND {repo_match}")
             lines.append(f"       AND model_name = '{escaped_name}'")
             lines.append(f"       AND delete_flag = 'N'")
             lines.append(f"       AND context_window_tokens = {_sql_int(ctx)}")
             lines.append(f"       AND max_output_tokens = {_sql_int(mout)}")
-            lines.append(f"       AND capability_profile_version IS NULL;")
+            lines.append(f"       AND (capability_profile_version IS NULL OR (capability_profile_version = '{version}' AND capacity_source = 'default'));")
             lines.append(f"    GET DIAGNOSTICS v_updated = ROW_COUNT;")
             lines.append(f"    v_total := v_total + v_updated;")
             lines.append("")
