@@ -80,7 +80,7 @@ class ModelConfig(BaseModel):
         default=None,
     )
     capacity_source: Optional[str] = Field(
-        description="Source of the persisted capacity value: operator | profile | provider_candidate | legacy | unknown.",
+        description="Source of the persisted capacity value: operator | profile | provider_candidate | legacy | default | unknown.",
         default=None,
     )
     capability_profile_version: Optional[str] = Field(

@@ -199,7 +199,7 @@ class ModelRecord(TableBase):
     tokenizer_family = Column(
         String(100), doc="Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.")
     capacity_source = Column(
-        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.")
+        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, default, unknown.")
     capability_profile_version = Column(
         String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
 

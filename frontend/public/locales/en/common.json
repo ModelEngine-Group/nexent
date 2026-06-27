@@ -858,6 +858,7 @@
   "model.dialog.capacity.source.provider_candidate": "Provider Candidate",
   "model.dialog.capacity.source.legacy": "Legacy",
   "model.dialog.capacity.source.unknown": "Unknown",
+  "model.dialog.capacity.source.default": "System Default",
   "model.dialog.capacity.suggestion.title": "Capacity suggestion",
   "model.dialog.capacity.suggestion.hintAdd": "Suggested from the approved catalog after connectivity passes.",
   "model.dialog.capacity.suggestion.check": "Check",

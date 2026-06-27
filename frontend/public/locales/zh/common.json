@@ -829,6 +829,7 @@
   "model.dialog.capacity.source.provider_candidate": "供应商候选",
   "model.dialog.capacity.source.legacy": "旧字段",
   "model.dialog.capacity.source.unknown": "未知",
+  "model.dialog.capacity.source.default": "系统默认",
   "model.dialog.capacity.suggestion.title": "容量建议",
   "model.dialog.capacity.suggestion.hintAdd": "连通性测试通过后，自动从已审核目录给出容量建议。",
   "model.dialog.capacity.suggestion.check": "检查",

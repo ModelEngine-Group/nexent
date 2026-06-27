@@ -138,7 +138,7 @@ def main() -> None:
     lines.append(f"           LEAST({_sql_int(DEFAULT_MAX_OUTPUT)}, COALESCE(context_window_tokens, {_sql_int(DEFAULT_CONTEXT_WINDOW)}) - 1)),")
     lines.append(f"           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,")
     lines.append(f"           LEAST({_sql_int(DEFAULT_RESERVE)}, COALESCE(max_output_tokens, {_sql_int(DEFAULT_MAX_OUTPUT)}))),")
-    lines.append(f"           capacity_source = COALESCE(capacity_source, 'unknown')")
+    lines.append(f"           capacity_source = COALESCE(capacity_source, 'default')")
     lines.append("     WHERE delete_flag = 'N'")
     lines.append("       AND COALESCE(model_type, 'llm') IN ('llm', 'vlm')")
     lines.append("       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);")
