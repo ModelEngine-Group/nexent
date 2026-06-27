@@ -69,7 +69,7 @@ bash uninstall.sh k8s delete-all
 bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
-K8s deployments read runtime configuration from the project root `.env`, the same file used by Docker. Existing `.env` is kept as-is. If it is missing, the deploy script first reuses an existing legacy `docker/.env`, then falls back to `.env.example` or `docker/.env.example`. Do not edit generated Helm values by hand; they are recreated from `.env` and deployment options.
+K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Existing `deploy/env/.env` is kept as-is. If it is missing, the deploy script first reuses an existing legacy root `.env` or `docker/.env`, then falls back to `deploy/env/.env.example` or legacy templates. Do not edit generated Helm values by hand; they are recreated from `deploy/env/.env` and deployment options.
 
 When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
@@ -126,7 +126,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package/k8s
 ```
 
-Package contents include `images/*.tar`, `load-images.sh`, root `deploy.sh` and `uninstall.sh`, the filtered `deploy/` bundle for the selected target, `deploy/sql`, `manifest.yaml`, and `checksums.txt`. Local `.env`, `.env.generated`, and `deploy.options` are intentionally excluded. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+Package contents include `images/*.tar`, `load-images.sh`, root `deploy.sh` and `uninstall.sh`, the filtered `deploy/` bundle for the selected target, `deploy/sql`, `manifest.yaml`, and `checksums.txt`. Local `deploy/env/.env`, `.env.generated`, and `deploy.options` are intentionally excluded. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
 On a target host with access to the cluster, load images before deployment:
 

@@ -57,7 +57,7 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
 
-Kubernetes uses the same project root `.env` as Docker. Existing `.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing `docker/.env`, then fall back to `.env.example` or `docker/.env.example`.
+Kubernetes uses the same `deploy/env/.env` file as Docker. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing legacy root `.env` or `docker/.env`, then fall back to `deploy/env/.env.example` or legacy templates.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
