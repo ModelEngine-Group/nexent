@@ -14,6 +14,7 @@ import {
   checkSessionValid,
   getTokenExpiresAt,
 } from "@/lib/session";
+import { getEffectiveRoutePath } from "@/lib/auth";
 import { authFlowState } from "@/lib/authFlow";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
@@ -66,7 +67,9 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     if (typeof window === "undefined") return;
 
     const pathname = window.location.pathname;
-    if (pathname.includes("/oauth/complete")) return;
+    const effectivePath = getEffectiveRoutePath(pathname);
+    if (effectivePath === "/oauth/complete") return;
+    if (effectivePath.startsWith("/share/")) return;
 
     let cancelled = false;
     casService.getConfig().then((config) => {

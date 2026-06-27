@@ -175,10 +175,15 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Check if current route has access
   const cleanPath = getEffectiveRoutePath(pathname);
-  const hasAccess = accessibleRoutes.includes(cleanPath);
+  const isSharePage = cleanPath.startsWith("/share/");
+  const hasAccess = isSharePage || accessibleRoutes.includes(cleanPath);
 
   // Route guard
   useLayoutEffect(() => {
+    if (isSharePage) {
+      return;
+    }
+
     if (isLoading || !user || accessibleRoutes.length === 0 || pathname === lastCheckedPath) {
       return;
     }
@@ -195,7 +200,7 @@ export function useAuthorization(): AuthorizationContextType {
     }
 
     setLastCheckedPath(pathname);
-  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, router, openAuthzPromptModal]);
+  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, isSharePage, router, openAuthzPromptModal]);
 
   // Permission checking utilities
   const hasPermission = useCallback((permission: string): boolean => {

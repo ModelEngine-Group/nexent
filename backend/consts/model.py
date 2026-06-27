@@ -540,8 +540,7 @@ class AgentInfoRequest(BaseModel):
     description: Optional[str] = None
     business_description: Optional[str] = None
     author: Optional[str] = None
-    model_name: Optional[str] = None
-    model_id: Optional[int] = None
+    model_ids: Optional[List[int]] = None
     max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
@@ -652,8 +651,8 @@ class ExportAndImportAgentInfo(BaseModel):
     enabled: bool
     tools: List[ToolConfig]
     managed_agents: List[int]
-    model_id: Optional[int] = None
-    model_name: Optional[str] = None
+    model_ids: Optional[List[int]] = None
+    model_names: Optional[List[str]] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
     skill_names: Optional[List[str]] = None

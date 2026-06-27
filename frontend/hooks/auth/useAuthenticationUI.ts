@@ -35,6 +35,7 @@ export function useAuthenticationUI({
   const { message } = App.useApp();
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
+  const isSharePage = effectivePath.startsWith("/share/");
   const isRedirectingToCasRef = useRef(false);
 
   // UI state for modals - managed locally within the hook
@@ -48,7 +49,7 @@ export function useAuthenticationUI({
 
   const handleUnauthenticatedModalClose = () => {
     // Only emit back to home event and redirect if user is not authenticated
-    if (!isAuthenticated && !isSpeedMode) {
+    if (!isAuthenticated && !isSpeedMode && !isSharePage) {
       // Emit event to notify SideNavigation to reset selected key
       authEventUtils.emitBackToHome();
       // Redirect to home page if not already there
@@ -95,11 +96,12 @@ export function useAuthenticationUI({
 
   const openAuthPromptModal = useCallback(
     (redirect?: string) => {
+      if (isSharePage) return;
       redirectToCasIfForced(redirect || effectivePath).then((redirected) => {
         if (!redirected) setIsAuthPromptModalOpen(true);
       });
     },
-    [effectivePath, redirectToCasIfForced]
+    [effectivePath, isSharePage, redirectToCasIfForced]
   );
 
   const closeAuthPromptModal = useCallback(() => {
@@ -132,6 +134,7 @@ export function useAuthenticationUI({
 
   useEffect(() => {
     if (isSpeedMode) return;
+    if (isSharePage) return;
 
     const handleSessionExpired = () => {
       // Prevent showing session expired modal when login/register modal is already open.
@@ -168,6 +171,7 @@ export function useAuthenticationUI({
   }, [
     effectivePath,
     isSpeedMode,
+    isSharePage,
     redirectToCasIfForced,
     isLoginModalOpen,
     isRegisterModalOpen,
@@ -177,6 +181,7 @@ export function useAuthenticationUI({
   useEffect(() => {
     if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
+    if (isSharePage) return;
     if (isAuthChecking) return;
     if (isAuthenticated) {
       const oauthError = searchParams.get("oauth_error");
@@ -199,6 +204,7 @@ export function useAuthenticationUI({
     isLoginModalOpen,
     router,
     isOAuthCompletePage,
+    isSharePage,
     message,
     getOAuthErrorMessage,
   ]);
@@ -214,6 +220,7 @@ export function useAuthenticationUI({
   useEffect(() => {
     if (isSpeedMode) return;
     if (isOAuthCompletePage) return;
+    if (isSharePage) return;
     // Skip while checking auth state
     if (isAuthChecking) return;
     // Skip if user is authenticated
@@ -242,6 +249,7 @@ export function useAuthenticationUI({
     isLoginModalOpen,
     isRegisterModalOpen,
     isOAuthCompletePage,
+    isSharePage,
     redirectToCasIfForced,
   ]);
 

@@ -121,6 +121,7 @@
   "chatInput.send": "Send",
   "chatInput.remove": "Remove",
   "chatInput.wsConnectionEstablished": "WebSocket connection established",
+  "chatInput.selectModel": "Select Model",
 
   "chatLeftSidebar.rename": "Rename",
   "chatLeftSidebar.delete": "Delete",
@@ -1046,6 +1047,7 @@
   "businessLogic.config.title": "Configure Agent Capabilities",
   "businessLogic.config.model": "Model",
   "businessLogic.config.modelPlaceholder": "Please select a model",
+  "businessLogic.config.modelMax5": "Maximum 5 models supported",
   "businessLogic.config.maxSteps": "Max Steps of Agent Run",
   "businessLogic.config.button.generatePrompt": "Generate",
   "businessLogic.config.button.generating": "Generating...",

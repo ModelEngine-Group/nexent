@@ -17,7 +17,10 @@ import {
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button, message as antdMessage } from "antd";
-import { MarkdownRenderer, CodeBlock } from "@/components/common/markdownRenderer";
+import {
+  MarkdownRenderer,
+  CodeBlock,
+} from "@/components/common/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
   ChatMessageType,
@@ -335,6 +338,7 @@ type KnowledgeSiteInfo = {
   datamateFileId?: string;
   datamateBaseUrl?: string;
   objectName?: string;
+  downloadUrl?: string;
   canOpenWeb: boolean;
 };
 
@@ -527,6 +531,7 @@ const messageHandlers: MessageHandler[] = [
             datamateFileId,
             datamateBaseUrl,
             objectName,
+            downloadUrl: result.download_url,
             canOpenWeb,
           };
         }
@@ -565,6 +570,22 @@ const messageHandlers: MessageHandler[] = [
               filename: site.filename || undefined,
             });
           } else {
+            if (site.downloadUrl) {
+              const link = document.createElement("a");
+              link.href = site.downloadUrl;
+              link.download = site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
+              antdMessage.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            }
+
             // Check if URL is a direct http/https URL that can be accessed directly
             // Exclude backend API endpoints (containing /api/file/download/)
             if (
@@ -972,7 +993,8 @@ const messageHandlers: MessageHandler[] = [
           useDefaultIcon,
           isKnowledgeBase,
           filename,
-          canClick,
+          downloadUrl: result.download_url,
+          canClick: canClick || Boolean(result.download_url),
         };
       });
 
@@ -1033,7 +1055,12 @@ const messageHandlers: MessageHandler[] = [
                       : "none",
                   }}
                   onClick={() => {
-                    if (site.canClick && site.url) {
+                    if (site.downloadUrl) {
+                      const link = document.createElement("a");
+                      link.href = site.downloadUrl;
+                      link.download = site.filename || "download";
+                      link.click();
+                    } else if (site.canClick && site.url) {
                       window.open(site.url, "_blank", "noopener,noreferrer");
                     }
                   }}

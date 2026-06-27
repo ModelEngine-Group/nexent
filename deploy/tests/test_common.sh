@@ -202,10 +202,28 @@ fi
 
 ENV_TEST_ROOT="$TMP_DIR/env-root"
 mkdir -p "$ENV_TEST_ROOT/docker" "$ENV_TEST_ROOT/deploy/env"
+printf 'FROM_ROOT_SHOULD_NOT_COPY=yes\n' > "$ENV_TEST_ROOT/.env"
+printf 'FROM_ROOT_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$ENV_TEST_ROOT/.env.example"
 printf 'FROM_DOCKER=yes\n' > "$ENV_TEST_ROOT/docker/.env"
 printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env.example"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
 assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_DOCKER=yes" "deploy/env/.env should migrate from docker/.env first"
+if grep -q "FROM_ROOT_SHOULD_NOT_COPY" "$ENV_TEST_ROOT/deploy/env/.env"; then
+  echo "FAIL: deploy/env/.env should not migrate from root .env"
+  exit 1
+fi
+
+DOCKER_EXAMPLE_ONLY_ROOT="$TMP_DIR/docker-example-only-root"
+mkdir -p "$DOCKER_EXAMPLE_ONLY_ROOT/docker" "$DOCKER_EXAMPLE_ONLY_ROOT/deploy/env"
+printf 'FROM_DOCKER_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$DOCKER_EXAMPLE_ONLY_ROOT/docker/.env.example"
+if deployment_ensure_root_env "$DOCKER_EXAMPLE_ONLY_ROOT" "$DOCKER_EXAMPLE_ONLY_ROOT/docker" 2>/dev/null; then
+  echo "FAIL: deploy/env/.env should not migrate from docker/.env.example"
+  exit 1
+fi
+if [ -f "$DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env" ]; then
+  echo "FAIL: docker/.env.example should not create deploy/env/.env"
+  exit 1
+fi
 
 printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
@@ -228,6 +246,8 @@ assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should norma
 
 GENERATE_ENV_TEST_ROOT="$TMP_DIR/generate-env-root"
 mkdir -p "$GENERATE_ENV_TEST_ROOT/docker" "$GENERATE_ENV_TEST_ROOT/deploy/env"
+printf 'FROM_GENERATE_ROOT_SHOULD_NOT_COPY=yes\n' > "$GENERATE_ENV_TEST_ROOT/.env"
+printf 'FROM_GENERATE_ROOT_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$GENERATE_ENV_TEST_ROOT/.env.example"
 printf 'FROM_GENERATE_DOCKER=yes\n' > "$GENERATE_ENV_TEST_ROOT/docker/.env"
 printf 'FROM_GENERATE_EXAMPLE=yes\n' > "$GENERATE_ENV_TEST_ROOT/deploy/env/.env.example"
 (
@@ -236,11 +256,32 @@ printf 'FROM_GENERATE_EXAMPLE=yes\n' > "$GENERATE_ENV_TEST_ROOT/deploy/env/.env.
   source "$SCRIPT_DIR/../docker/generate_env.sh"
   ENV_FILE="$GENERATE_ENV_TEST_ROOT/deploy/env/.env"
   ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/deploy/env/.env.example"
-  LEGACY_ROOT_ENV="$GENERATE_ENV_TEST_ROOT/.env"
-  LEGACY_ROOT_EXAMPLE="$GENERATE_ENV_TEST_ROOT/.env.example"
-  LEGACY_ENV="$GENERATE_ENV_TEST_ROOT/docker/.env"
-  LEGACY_ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/docker/.env.example"
+  DOCKER_ENV="$GENERATE_ENV_TEST_ROOT/docker/.env"
   prepare_env_file >/dev/null
 )
 assert_contains "$(cat "$GENERATE_ENV_TEST_ROOT/deploy/env/.env")" "FROM_GENERATE_DOCKER=yes" "generate_env should migrate docker/.env before deploy/env/.env.example"
+if grep -q "FROM_GENERATE_ROOT_SHOULD_NOT_COPY" "$GENERATE_ENV_TEST_ROOT/deploy/env/.env"; then
+  echo "FAIL: generate_env should not migrate from root .env"
+  exit 1
+fi
+
+GENERATE_DOCKER_EXAMPLE_ONLY_ROOT="$TMP_DIR/generate-docker-example-only-root"
+mkdir -p "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/docker" "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env"
+printf 'FROM_GENERATE_DOCKER_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/docker/.env.example"
+if (
+  NEXENT_GENERATE_ENV_SKIP_MAIN=true
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/../docker/generate_env.sh"
+  ENV_FILE="$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env"
+  ENV_EXAMPLE="$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env.example"
+  DOCKER_ENV="$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/docker/.env"
+  prepare_env_file >/dev/null 2>&1
+); then
+  echo "FAIL: generate_env should not migrate from docker/.env.example"
+  exit 1
+fi
+if [ -f "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env" ]; then
+  echo "FAIL: generate_env should not create deploy/env/.env from docker/.env.example"
+  exit 1
+fi
 echo "All deployment common tests passed."
