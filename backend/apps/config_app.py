@@ -37,7 +37,6 @@ from apps.aidp_app import router as aidp_router
 from apps.cas_app import router as cas_router
 from consts.const import IS_SPEED_MODE
 from services.prompt_template_service import sync_system_default_prompt_template
-from services.catalog_backfill_service import backfill_capacity_from_catalog
 
 # Create logger instance
 logger = logging.getLogger("base_app")
@@ -54,16 +53,6 @@ async def sync_default_prompt_template_on_startup():
         logger.info("System default prompt template synced successfully.")
     except Exception as exc:
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
-
-
-@app.on_event("startup")
-async def backfill_capacity_on_startup():
-    """Backfill bare model capacity from the approved catalog on startup."""
-    try:
-        summary = backfill_capacity_from_catalog()
-        logger.info("Catalog capacity backfill complete: %s", summary)
-    except Exception as exc:
-        logger.error(f"Failed to backfill capacity from catalog: {str(exc)}")
 
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
