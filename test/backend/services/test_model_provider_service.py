@@ -464,6 +464,48 @@ async def test_prepare_model_dict_llm():
 
 
 @pytest.mark.asyncio
+async def test_prepare_model_dict_excludes_w11_accept_signal_fields():
+    """ModelRequest exposes accepted_suggestion_match_kind /
+    accepted_capability_profile_version for app-layer ingest but they are
+    audit-only and have no DB column. model_dump() must exclude them so
+    SQLAlchemy does not raise 'Unconsumed column names' on insert when the
+    batch_create path reuses prepare_model_dict.
+    """
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "gpt-4"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/gpt-4",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ):
+        mock_model_req_instance = mock.MagicMock()
+        mock_model_req_instance.model_dump.return_value = {
+            "model_factory": "openai",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+        }
+        mock_model_request.return_value = mock_model_req_instance
+
+        await prepare_model_dict(
+            "openai",
+            {"id": "openai/gpt-4", "model_type": "llm"},
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        _, dump_kwargs = mock_model_req_instance.model_dump.call_args
+        assert dump_kwargs.get("exclude") == {
+            "accepted_suggestion_match_kind",
+            "accepted_capability_profile_version",
+        }
+
+
+@pytest.mark.asyncio
 async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
     """Provider capacity candidates remain UI hints until an operator saves them.
 

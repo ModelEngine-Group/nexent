@@ -226,8 +226,14 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       width: 180,
       ellipsis: true,
       render: (displayName: string, record: UnifiedModelRow) => {
-        const isBareCapacity = record.id && bareModelIds.has(record.id) && (record.type === 'llm' || record.type === 'vlm');
-        
+        // bareModelIds comes from /capacity-coverage which already filters
+        // by CAPACITY_COVERAGE_MODEL_TYPES on the backend (llm/vlm/vlm2/vlm3).
+        // The earlier `type === 'llm' || 'vlm'` guard was a duplicated
+        // type list that drifted -- it silently hid the badge on vlm2
+        // (image-gen) and vlm3 (video-und) rows even when backend marked
+        // them bare. Drop the guard and trust the authoritative set.
+        const isBareCapacity = Boolean(record.id && bareModelIds.has(record.id));
+
         return (
           <div className="flex items-center">
             <span className="truncate">{displayName}</span>

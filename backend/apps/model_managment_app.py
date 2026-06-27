@@ -252,7 +252,18 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         batch_model_config = request.model_dump()
+        # Strip W11 accept-signal fields off every model entry before the
+        # batch reaches the service/DB layer. Same audit-only contract as
+        # the single-create path: pop now, emit the SLO counter on success.
+        accept_signals = [
+            signal
+            for model in batch_model_config.get("models", [])
+            if (signal := pop_capacity_accept_signal(model)) is not None
+        ]
         await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
+        provider = batch_model_config.get("provider")
+        for signal in accept_signals:
+            _record_capacity_suggestion_accept(signal["match_kind"], provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully"
         })
@@ -545,7 +556,18 @@ async def manage_create_model(
             f"Start to create model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}")
 
         model_data = request.model_dump(exclude={'tenant_id'})
+        # Strip W11 accept-signal fields before the dict reaches the
+        # service (which calls create_model_record -> SQLAlchemy insert).
+        # Without the pop, the fields would fall through to .values() and
+        # raise "Unconsumed column names"; without the recorder call,
+        # operator-accepted suggestions saved by SU/asset-owner via
+        # /manage/* would silently miss the accept_total SLO numerator.
+        accept_signal = pop_capacity_accept_signal(model_data)
         await create_model_for_tenant(user_id, request.tenant_id, model_data)
+        if accept_signal is not None:
+            _record_capacity_suggestion_accept(
+                accept_signal["match_kind"], request.model_factory
+            )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model created successfully",
             "data": {"tenant_id": request.tenant_id}
@@ -582,9 +604,16 @@ async def manage_update_model(
             f"current_display_name: {request.current_display_name}")
 
         model_data = request.model_dump(exclude={'tenant_id', 'current_display_name'}, exclude_unset=True)
+        # Same audit-only contract as /manage/create above: pop before
+        # the dict reaches update_model_record, emit after persist.
+        accept_signal = pop_capacity_accept_signal(model_data)
         await update_single_model_for_tenant(
             user_id, request.tenant_id, request.current_display_name, model_data
         )
+        if accept_signal is not None:
+            _record_capacity_suggestion_accept(
+                accept_signal["match_kind"], request.model_factory
+            )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully",
             "data": {"tenant_id": request.tenant_id}
@@ -666,7 +695,17 @@ async def manage_batch_create_models(
             f"provider: {request.provider}, type: {request.type}, models count: {len(request.models)}")
 
         batch_model_config = request.model_dump()
+        # Mirror /provider/batch_create: pop W11 accept-signal fields per
+        # model before the dict reaches the service/DB layer; emit the SLO
+        # counter only after the batch persist call succeeds.
+        accept_signals = [
+            signal
+            for model in batch_model_config.get("models", [])
+            if (signal := pop_capacity_accept_signal(model)) is not None
+        ]
         await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
+        for signal in accept_signals:
+            _record_capacity_suggestion_accept(signal["match_kind"], request.provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
             "data": {

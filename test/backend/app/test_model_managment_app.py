@@ -488,6 +488,55 @@ async def test_provider_batch_create_exception(client, auth_header, user_credent
     mock_batch.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_provider_batch_create_strips_accept_signal_and_records(
+    client, auth_header, user_credentials, mocker
+):
+    """Same audit-only contract as /create: per-model accept-signal fields
+    must be popped before the batch reaches the service layer (otherwise
+    SQLAlchemy raises 'Unconsumed column names' on insert), and the SLO
+    counter fires once per accepted row after the persist call succeeds.
+    """
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+
+    async def _batch(*args, **kwargs):
+        return None
+
+    mock_batch = mocker.patch(
+        'backend.apps.model_managment_app.batch_create_models_for_tenant',
+        side_effect=_batch,
+    )
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    payload = {
+        "models": [
+            {
+                "id": "prov/modelA",
+                "accepted_suggestion_match_kind": "catalog_exact",
+                "accepted_capability_profile_version": "prov/modelA@1",
+            },
+            {"id": "prov/modelB"},
+        ],
+        "provider": "prov",
+        "type": "llm",
+        "api_key": "k",
+    }
+    response = client.post(
+        "/model/provider/batch_create", json=payload, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    sent = mock_batch.await_args.args[2]
+    for model in sent["models"]:
+        assert "accepted_suggestion_match_kind" not in model
+        assert "accepted_capability_profile_version" not in model
+    mock_record.assert_called_once_with("catalog_exact", "prov")
+
+
 # Tests for /model/delete endpoint
 @pytest.mark.asyncio
 async def test_delete_model_success(client, auth_header, user_credentials, mocker):
@@ -1070,6 +1119,57 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
 
 
 @pytest.mark.asyncio
+async def test_manage_create_model_records_accept_signal_when_present(
+    client, auth_header, user_credentials, mocker
+):
+    """Same SLO contract as /create: when SU/asset-owner saves a model
+    through /manage/create with the accept signal in the payload, the
+    audit fields must be stripped before reaching the service and the
+    accept_total recorder must fire with provider=model_factory. Before
+    the fix the manage Pydantic schema did not declare the two fields,
+    so Pydantic silently dropped them and the SLO numerator missed
+    every accept that landed via the SU surface.
+    """
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+
+    async def _create(*args, **kwargs):
+        return None
+
+    mock_create = mocker.patch(
+        'backend.apps.model_managment_app.create_model_for_tenant',
+        side_effect=_create,
+    )
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "model_name": "gpt-4o",
+        "model_type": "llm",
+        "model_factory": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "k",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+    response = client.post(
+        "/model/manage/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    sent = mock_create.await_args.args[2]
+    assert "accepted_suggestion_match_kind" not in sent
+    assert "accepted_capability_profile_version" not in sent
+    mock_record.assert_called_once_with("catalog_exact", "openai")
+
+
+@pytest.mark.asyncio
 async def test_manage_create_model_conflict(client, auth_header, user_credentials, mocker):
     """Test model creation with conflict error."""
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
@@ -1146,6 +1246,54 @@ async def test_manage_update_model_success(client, auth_header, user_credentials
         "Old Model Name",
         ANY  # The dict may contain additional optional fields like chunk settings
     )
+
+
+@pytest.mark.asyncio
+async def test_manage_update_model_records_accept_signal_when_present(
+    client, auth_header, user_credentials, mocker
+):
+    """Mirror of test_manage_create_model_records_accept_signal_when_present
+    for the /manage/update path. The SU surface routes the same accept
+    signal through updateManageTenantModel; the recorder must fire with
+    provider=model_factory and the audit fields must not leak into the
+    DB update.
+    """
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+
+    async def _update(*args, **kwargs):
+        return None
+
+    mock_update = mocker.patch(
+        'backend.apps.model_managment_app.update_single_model_for_tenant',
+        side_effect=_update,
+    )
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "current_display_name": "GPT-4o",
+        "model_factory": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "k",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_fuzzy",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+    response = client.post(
+        "/model/manage/update", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    sent = mock_update.await_args.args[3]
+    assert "accepted_suggestion_match_kind" not in sent
+    assert "accepted_capability_profile_version" not in sent
+    mock_record.assert_called_once_with("catalog_fuzzy", "openai")
 
 
 @pytest.mark.asyncio
