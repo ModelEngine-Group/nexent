@@ -7,7 +7,8 @@ from urllib.parse import urljoin
 from jinja2 import Template, StrictUndefined
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
-from nexent.core.agents.agent_context import ContextManagerConfig
+from nexent.core.agents.summary_config import ContextManagerConfig
+from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
     ProviderCapabilityUnknown,
@@ -612,6 +613,8 @@ async def create_model_config_list(tenant_id):
                         model_factory=record.get("model_factory"),
                         timeout_seconds=record.get("timeout_seconds"),
                         concurrency_limit=record.get("concurrency_limit"),
+                        prompt_cache=resolve_prompt_cache_profile(
+                            record.get("model_factory")),
                         # W1 step 6: pass capacity columns through so SDK can
                         # honor operator-configured values end to end.
                         max_output_tokens=record.get("max_output_tokens"),
@@ -625,6 +628,8 @@ async def create_model_config_list(tenant_id):
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    main_prompt_cache = resolve_prompt_cache_profile(
+        main_model_config.get("model_factory"))
     model_list.append(
         ModelConfig(cite_name="main_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -634,7 +639,8 @@ async def create_model_config_list(tenant_id):
                     ssl_verify=main_model_config.get("ssl_verify", True),
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit")))
+                    concurrency_limit=main_model_config.get("concurrency_limit"),
+                    prompt_cache=main_prompt_cache))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -644,7 +650,8 @@ async def create_model_config_list(tenant_id):
                     ssl_verify=main_model_config.get("ssl_verify", True),
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit")))
+                    concurrency_limit=main_model_config.get("concurrency_limit"),
+                    prompt_cache=main_prompt_cache))
 
     return model_list
 
@@ -843,7 +850,11 @@ async def create_agent_config(
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")
 
-    # Assemble system_prompt
+    # Select the context path once.  Managed assembly receives raw components
+    # and must never consume a Jinja-rendered legacy prompt.
+    enable_context_manager = agent_info.get("enable_context_manager", False)
+
+    # Assemble legacy system_prompt only for the isolated fallback path.
     # Get skills list for prompt template
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
@@ -863,7 +874,11 @@ async def create_agent_config(
         "knowledge_base_summary": knowledge_base_summary,
         "user_id": user_id,
     }
-    system_prompt = Template(prompt_template["system_prompt"], undefined=StrictUndefined).render(render_kwargs)
+    system_prompt = ""
+    if not enable_context_manager:
+        system_prompt = Template(
+            prompt_template["system_prompt"], undefined=StrictUndefined
+        ).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None
@@ -907,12 +922,8 @@ async def create_agent_config(
         model_info.get("model_name") if model_info else model_name,
     )
 
-    # Use agent-level setting for context management, default to False.
-    # When ContextManager is disabled, do not attach context_components because
-    # downstream runtime may prefer component-based prompt assembly over the
-    # rendered system_prompt, causing the actual model input to diverge from the
-    # template output.
-    enable_context_manager = agent_info.get("enable_context_manager", True)
+    # Managed context assembly starts from raw sources.  No legacy rendered
+    # prompt is supplied on this path.
     context_components = []
     if enable_context_manager:
         context_components = build_context_components(
