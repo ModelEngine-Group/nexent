@@ -108,7 +108,7 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    -- deepseek (15 entries)
+    -- deepseek (4 entries)
     UPDATE nexent.model_record_t
        SET context_window_tokens = COALESCE(context_window_tokens,
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
@@ -177,193 +177,6 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(384000, COALESCE(context_window_tokens, 1048576) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(8192, COALESCE(max_output_tokens, 384000))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v4-pro-sf@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V4-Pro'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(384000, COALESCE(context_window_tokens, 1048576) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(8192, COALESCE(max_output_tokens, 384000))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v4-flash-sf@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V4-Flash'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 8192))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.2@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V3.2'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 8192))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.1-terminus@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V3.1-Terminus'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(163840, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(16384, COALESCE(context_window_tokens, 163840) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(8192, COALESCE(max_output_tokens, 16384))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-r1@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-R1'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 8192))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V3'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 16384))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-r1-0528-qwen3-8b@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-R1-0528-Qwen3-8B'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 8192))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.2-pro@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.2'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 8192))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.1-terminus-pro@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(163840, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(16384, COALESCE(context_window_tokens, 163840) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(8192, COALESCE(max_output_tokens, 16384))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-r1-pro@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-R1'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET context_window_tokens = COALESCE(context_window_tokens,
-           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
-           max_output_tokens = COALESCE(max_output_tokens,
-           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
-           LEAST(4096, COALESCE(max_output_tokens, 8192))),
-           capacity_source = COALESCE(capacity_source, c_source_profile),
-           capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3-pro@1')
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3'
-       AND delete_flag = c_active_flag
-       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
     -- openai (2 entries)
     UPDATE nexent.model_record_t
        SET context_window_tokens = COALESCE(context_window_tokens,
@@ -399,7 +212,7 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    -- silicon (45 entries)
+    -- silicon (56 entries)
     UPDATE nexent.model_record_t
        SET context_window_tokens = COALESCE(context_window_tokens,
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
@@ -429,6 +242,193 @@ BEGIN
      WHERE LOWER(model_factory) = 'silicon'
        AND model_repo = 'Pro'
        AND model_name = 'moonshotai/Kimi-K2.6'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(384000, COALESCE(context_window_tokens, 1048576) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v4-pro-sf@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V4-Pro'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(384000, COALESCE(context_window_tokens, 1048576) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v4-flash-sf@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V4-Flash'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3.2@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V3.2'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3.1-terminus@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V3.1-Terminus'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(163840, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(16384, COALESCE(context_window_tokens, 163840) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 16384))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-r1@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-R1'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V3'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-r1-0528-qwen3-8b@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-R1-0528-Qwen3-8B'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3.2-pro@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-V3.2'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3.1-terminus-pro@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(163840, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(16384, COALESCE(context_window_tokens, 163840) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 16384))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-r1-pro@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-R1'
+       AND delete_flag = c_active_flag
+       AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET context_window_tokens = COALESCE(context_window_tokens,
+           GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
+           max_output_tokens = COALESCE(max_output_tokens,
+           LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
+           capacity_source = COALESCE(capacity_source, c_source_profile),
+           capability_profile_version = COALESCE(capability_profile_version, 'silicon/deepseek-v3-pro@1')
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-V3'
        AND delete_flag = c_active_flag
        AND (context_window_tokens IS NULL OR max_output_tokens IS NULL);
     GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -1237,7 +1237,7 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    -- deepseek (15 entries)
+    -- deepseek (4 entries)
     UPDATE nexent.model_record_t
        SET capability_profile_version = 'deepseek/deepseek-chat@2',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
@@ -1290,149 +1290,6 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v4-pro-sf@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V4-Pro'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 1048576
-       AND max_output_tokens = 384000
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v4-pro-sf@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v4-flash-sf@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V4-Flash'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 1048576
-       AND max_output_tokens = 384000
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v4-flash-sf@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.2@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V3.2'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 164000
-       AND max_output_tokens = 8192
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.2@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.1-terminus@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V3.1-Terminus'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 164000
-       AND max_output_tokens = 8192
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.1-terminus@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-r1@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-R1'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 163840
-       AND max_output_tokens = 16384
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-r1@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-V3'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 164000
-       AND max_output_tokens = 8192
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-r1-0528-qwen3-8b@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'deepseek-ai'
-       AND model_name = 'DeepSeek-R1-0528-Qwen3-8B'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 131072
-       AND max_output_tokens = 16384
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-r1-0528-qwen3-8b@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.2-pro@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.2'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 164000
-       AND max_output_tokens = 8192
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.2-pro@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3.1-terminus-pro@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 164000
-       AND max_output_tokens = 8192
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3.1-terminus-pro@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-r1-pro@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-R1'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 163840
-       AND max_output_tokens = 16384
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-r1-pro@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
-    UPDATE nexent.model_record_t
-       SET capability_profile_version = 'deepseek/deepseek-v3-pro@1',
-           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
-     WHERE LOWER(model_factory) = 'deepseek'
-       AND model_repo = 'Pro'
-       AND model_name = 'deepseek-ai/DeepSeek-V3'
-       AND delete_flag = c_active_flag
-       AND context_window_tokens = 164000
-       AND max_output_tokens = 8192
-       AND (capability_profile_version IS NULL OR (capability_profile_version = 'deepseek/deepseek-v3-pro@1' AND capacity_source = c_source_default));
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    v_total := v_total + v_updated;
-
     -- openai (2 entries)
     UPDATE nexent.model_record_t
        SET capability_profile_version = 'openai/gpt-4o@1',
@@ -1460,7 +1317,7 @@ BEGIN
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
-    -- silicon (45 entries)
+    -- silicon (56 entries)
     UPDATE nexent.model_record_t
        SET capability_profile_version = 'silicon/qwen3.6-27b@1',
            capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
@@ -1484,6 +1341,149 @@ BEGIN
        AND context_window_tokens = 262144
        AND max_output_tokens = 131072
        AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/kimi-k2.6@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v4-pro-sf@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V4-Pro'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 1048576
+       AND max_output_tokens = 384000
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v4-pro-sf@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v4-flash-sf@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V4-Flash'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 1048576
+       AND max_output_tokens = 384000
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v4-flash-sf@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v3.2@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V3.2'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 164000
+       AND max_output_tokens = 8192
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v3.2@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v3.1-terminus@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V3.1-Terminus'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 164000
+       AND max_output_tokens = 8192
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v3.1-terminus@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-r1@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-R1'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 163840
+       AND max_output_tokens = 16384
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-r1@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v3@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-V3'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 164000
+       AND max_output_tokens = 8192
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v3@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-r1-0528-qwen3-8b@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'deepseek-ai'
+       AND model_name = 'DeepSeek-R1-0528-Qwen3-8B'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 131072
+       AND max_output_tokens = 16384
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-r1-0528-qwen3-8b@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v3.2-pro@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-V3.2'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 164000
+       AND max_output_tokens = 8192
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v3.2-pro@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v3.1-terminus-pro@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-V3.1-Terminus'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 164000
+       AND max_output_tokens = 8192
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v3.1-terminus-pro@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-r1-pro@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-R1'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 163840
+       AND max_output_tokens = 16384
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-r1-pro@1' AND capacity_source = c_source_default));
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    v_total := v_total + v_updated;
+
+    UPDATE nexent.model_record_t
+       SET capability_profile_version = 'silicon/deepseek-v3-pro@1',
+           capacity_source = CASE WHEN capacity_source = c_source_default THEN c_source_profile ELSE capacity_source END
+     WHERE LOWER(model_factory) = 'silicon'
+       AND model_repo = 'Pro'
+       AND model_name = 'deepseek-ai/DeepSeek-V3'
+       AND delete_flag = c_active_flag
+       AND context_window_tokens = 164000
+       AND max_output_tokens = 8192
+       AND (capability_profile_version IS NULL OR (capability_profile_version = 'silicon/deepseek-v3-pro@1' AND capacity_source = c_source_default));
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     v_total := v_total + v_updated;
 
