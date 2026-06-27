@@ -2,18 +2,6 @@ import { chatConfig } from "@/const/chatConfig";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  FileImageFilled,
-  FilePdfFilled,
-  FileWordFilled,
-  FileExcelFilled,
-  FilePptFilled,
-  FileTextFilled,
-  Html5Filled,
-  CodeFilled,
-  FileUnknownFilled,
-  FileZipFilled,
-} from "@ant-design/icons";
-import {
   convertImageUrlToApiUrl,
   extractObjectNameFromUrl,
 } from "@/services/storageService";
@@ -21,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { App } from "antd";
+import { getFileExtension, getFileIcon } from "@/lib/chat/fileIconUtils";
 
 // Selected file state for preview drawer
 interface SelectedFileState {
@@ -29,80 +18,6 @@ interface SelectedFileState {
   fileType?: string;
   fileSize?: number;
 }
-
-// Get file extension
-const getFileExtension = (filename: string): string => {
-  return filename
-    .slice(((filename.lastIndexOf(".") - 1) >>> 0) + 2)
-    .toLowerCase();
-};
-
-// Get file icon function - consistent with the input box component
-const getFileIcon = (name: string, contentType?: string) => {
-  const extension = getFileExtension(name);
-  const fileType = contentType || "";
-  const iconSize = 32;
-
-  // Image file - using lucide-react
-  if (
-    fileType.startsWith("image/") ||
-    ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension)
-  ) {
-    return <FileImageFilled size={iconSize} color="#8e44ad" />;
-  }
-
-  // Identify by extension name
-  // Document file
-  if (chatConfig.fileIcons.pdf.includes(extension)) {
-    return <FilePdfFilled size={iconSize} color="#e74c3c" />;
-  }
-  if (chatConfig.fileIcons.word.includes(extension)) {
-    return (
-      <FileWordFilled size={iconSize} color="#3498db" />
-    );
-  }
-  if (chatConfig.fileIcons.text.includes(extension)) {
-    return <FileTextFilled size={iconSize} color="#7f8c8d" />;
-  }
-  if (chatConfig.fileIcons.markdown.includes(extension)) {
-    return <FileTextFilled size={iconSize} color="#34495e" />;
-  }
-  // Table file
-  if (chatConfig.fileIcons.excel.includes(extension)) {
-    return <FileExcelFilled size={iconSize} color="#27ae60" />;
-  }
-  // Presentation file
-  if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    return <FilePptFilled size={iconSize} color="#e67e22" />;
-  }
-
-  // Code file
-  if (chatConfig.fileIcons.html.includes(extension)) {
-    return <Html5Filled size={iconSize} color="#e67e22" />;
-  }
-  if (chatConfig.fileIcons.code.includes(extension)) {
-    return <CodeFilled size={iconSize} color="#f39c12" />;
-  }
-  if (chatConfig.fileIcons.json.includes(extension)) {
-    return <CodeFilled size={iconSize} color="#f1c40f" />;
-  }
-
-  // Audio and video files are uploaded as regular attachments for multimodal tools.
-  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
-    return <FileTextFilled size={iconSize} color="#16a085" />;
-  }
-  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
-    return <FileTextFilled size={iconSize} color="#8e44ad" />;
-  }
-
-  // Compressed file
-  if (chatConfig.fileIcons.compressed.includes(extension)) {
-    return <FileZipFilled size={iconSize} color="#f39c12" />;
-  }
-
-  // Default file icon
-  return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
-};
 
 // Format file size
 const formatFileSize = (size: number): string => {
