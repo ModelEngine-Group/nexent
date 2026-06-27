@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import os
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -47,8 +48,15 @@ upload_dir = Path(UPLOAD_FOLDER)
 upload_dir.mkdir(exist_ok=True)
 upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 
+
+@dataclass
+class ConversionLockEntry:
+    lock: asyncio.Lock
+    ref_count: int = 0
+
+
 # Per-file locks prevent duplicate conversions of the same file
-_conversion_locks: dict[str, asyncio.Lock] = {}
+_conversion_locks: dict[str, ConversionLockEntry] = {}
 _conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
@@ -599,12 +607,14 @@ async def _convert_office_to_cached_pdf(
     """
     # Get or create a lock for this specific file to prevent duplicate conversions
     async with _conversion_locks_guard:
-        if object_name not in _conversion_locks:
-            _conversion_locks[object_name] = asyncio.Lock()
-        file_lock = _conversion_locks[object_name]
+        lock_entry = _conversion_locks.get(object_name)
+        if lock_entry is None:
+            lock_entry = ConversionLockEntry(lock=asyncio.Lock())
+            _conversion_locks[object_name] = lock_entry
+        lock_entry.ref_count += 1
 
     try:
-        async with file_lock:
+        async with lock_entry.lock:
             # Double-check: another request may have completed the conversion while we waited
             if _is_pdf_cache_valid(pdf_object_name):
                 return
@@ -655,6 +665,11 @@ async def _convert_office_to_cached_pdf(
                 raise OfficeConversionException(
                     "Office file conversion failed") from e
     finally:
-        # Clean up the file lock (prevents memory leak for many unique files)
+        # Clean up unused lock entries without replacing locks that still have waiters.
         async with _conversion_locks_guard:
-            _conversion_locks.pop(object_name, None)
+            lock_entry.ref_count -= 1
+            if (
+                lock_entry.ref_count == 0
+                and _conversion_locks.get(object_name) is lock_entry
+            ):
+                _conversion_locks.pop(object_name, None)
