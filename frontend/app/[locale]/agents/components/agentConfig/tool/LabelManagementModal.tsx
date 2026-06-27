@@ -138,8 +138,8 @@ export default function LabelManagementModal({
         columns={columns}
         rowKey="id"
         size="small"
-        pagination={{ pageSize: 15, size: "small" }}
-        scroll={{ y: 400 }}
+        pagination={{ pageSize: 25, size: "small" }}
+        scroll={{ y: 600 }}
       />
     </Modal>
   );

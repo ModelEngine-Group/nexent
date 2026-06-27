@@ -584,7 +584,7 @@
   "toolPool.duplicateToolName.confirm": "Continue",
   "toolPool.duplicateToolName.cancel": "Cancel",
   "toolPool.selectTools": "Select Tools",
-  "toolPool.searchToolsPlaceholder": "Search tools...",
+  "toolPool.searchToolsPlaceholder": "Search by name, description, or label...",
   "toolPool.noToolsSelected": "No tools selected yet, click Select Tools to add",
   "toolPool.configure": "Configure",
   "toolPool.remove": "Remove",

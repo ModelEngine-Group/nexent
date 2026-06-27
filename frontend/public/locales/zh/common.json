@@ -557,7 +557,7 @@
   "toolPool.duplicateToolName.confirm": "继续",
   "toolPool.duplicateToolName.cancel": "取消",
   "toolPool.selectTools": "选择工具",
-  "toolPool.searchToolsPlaceholder": "搜索工具名称或描述…",
+  "toolPool.searchToolsPlaceholder": "搜索工具名称、描述或标签…",
   "toolPool.noToolsSelected": "暂未选择工具，点击「选择工具」添加",
   "toolPool.configure": "配置",
   "toolPool.remove": "移除",

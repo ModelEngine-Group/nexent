@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Tabs, Input, Checkbox, Button } from "antd";
+import { Modal, Tabs, Input, Checkbox, Button, Select } from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
 
@@ -81,6 +81,18 @@ export default function SelectToolsDialog({
   const [activeTab, setActiveTab] = useState("local");
   const [activeCategory, setActiveCategory] = useState("");
 
+  // Collect all unique labels from available tools for filter dropdown
+  const allLabels = useMemo(() => {
+    const labelSet = new Set<string>();
+    availableTools.forEach((tool: any) => {
+      const labels = getToolLabels(tool);
+      labels.forEach((l: string) => labelSet.add(l));
+    });
+    return Array.from(labelSet).sort();
+  }, [availableTools]);
+
+  const [activeLabels, setActiveLabels] = useState<string[]>([]);
+
   // ToolConfigModal — handles add/update to store internally on save
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configTool, setConfigTool] = useState<Tool | null>(null);
@@ -113,22 +125,36 @@ export default function SelectToolsDialog({
     return result;
   }, [availableTools]);
 
-  // --- Filtered current tab data by search ---
+  // --- Filtered current tab data by search + labels (AND) ---
   const currentGroups = useMemo(() => {
     const groups = sourceGroups[activeTab] || [];
-    if (!search.trim()) return groups;
-    const kw = search.toLowerCase();
+    const kw = search.trim().toLowerCase();
+    const hasSearch = kw !== "";
+    const hasLabels = activeLabels.length > 0;
+
+    if (!hasSearch && !hasLabels) return groups;
+
+    const filterOne = (tool: any): boolean => {
+      // Search filter (OR across name/desc/tags)
+      if (hasSearch) {
+        const matchSearch =
+          tool.name.toLowerCase().includes(kw) ||
+          (tool.description && tool.description.toLowerCase().includes(kw)) ||
+          getToolLabels(tool).some((l: string) => l.toLowerCase().includes(kw));
+        if (!matchSearch) return false;
+      }
+      // Label filter (OR — tool must have at least one selected label)
+      if (hasLabels) {
+        const toolLabels = getToolLabels(tool);
+        if (!toolLabels.some((l: string) => activeLabels.includes(l))) return false;
+      }
+      return true;
+    };
+
     return groups
-      .map((g) => ({
-        ...g,
-        tools: g.tools.filter(
-          (t: any) =>
-            t.name.toLowerCase().includes(kw) ||
-            (t.description && t.description.toLowerCase().includes(kw))
-        ),
-      }))
+      .map((g) => ({ ...g, tools: g.tools.filter(filterOne) }))
       .filter((g) => g.tools.length > 0);
-  }, [sourceGroups, activeTab, search]);
+  }, [sourceGroups, activeTab, search, activeLabels]);
 
   const visibleCategories = useMemo(() => currentGroups.map((g) => g.category), [currentGroups]);
 
@@ -287,14 +313,33 @@ export default function SelectToolsDialog({
       >
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
 
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("toolPool.searchToolsPlaceholder")}
-            className="pl-9"
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-2 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("toolPool.searchToolsPlaceholder")}
+              className="pl-7"
+              allowClear
+            />
+          </div>
+          <Select
+            mode="multiple"
+            placeholder={t("toolPool.filterByLabel")}
+            value={activeLabels}
+            onChange={setActiveLabels}
+            className="min-w-[160px]"
+            options={allLabels.map((l: string) => {
+              // Count tools matching this label in the current source tab
+              const count = (sourceGroups[activeTab] || []).reduce(
+                (sum, g) => sum + g.tools.filter((t: any) => getToolLabels(t).includes(l)).length, 0
+              );
+              return { label: `${l} (${count})`, value: l };
+            })}
             allowClear
+            maxTagCount={1}
+            notFoundContent={allLabels.length === 0 ? t("toolPool.noLabelsAssigned") : undefined}
           />
         </div>
 
