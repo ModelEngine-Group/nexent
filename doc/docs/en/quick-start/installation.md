@@ -184,7 +184,7 @@ bash deploy/offline/build_offline_package.sh \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
   --compress true \
-  --output-dir offline-package/docker
+  --output-dir offline-package
 ```
 
 The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
@@ -192,11 +192,8 @@ The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `u
 On the target host, keep the deployment options consistent with the package manifest:
 
 ```bash
-cd offline-package/docker
-bash deploy.sh --load-images docker \
-  --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general
+cd offline-package
+bash deploy.sh --load-images docker
 ```
 
 ## 🔌 Port Mapping

@@ -180,7 +180,7 @@ bash deploy/offline/build_offline_package.sh \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
   --compress true \
-  --output-dir offline-package/docker
+  --output-dir offline-package
 ```
 
 包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
@@ -188,11 +188,8 @@ bash deploy/offline/build_offline_package.sh \
 在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
 
 ```bash
-cd offline-package/docker
-bash deploy.sh --load-images docker \
-  --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general
+cd offline-package
+bash deploy.sh --load-images docker
 ```
 
 ## 🔌 端口映射
