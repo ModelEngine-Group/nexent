@@ -1842,18 +1842,18 @@ export default function ToolConfigModal({
         className="tool-config-modal-content"
         wrapProps={{ style: { pointerEvents: "auto" } }}
         footer={
-          <div className="flex justify-end items-center">
-            {
+        <div className="flex items-center w-full">
+            <div className="flex-1 flex justify-start">
               <button
                 onClick={handleTestTool}
                 disabled={!tool}
-                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8 mr-auto"
+                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
               >
                 {testPanelVisible
                   ? t("toolConfig.button.closeTest")
                   : t("toolConfig.button.testTool")}
               </button>
-            }
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={handleClose}
