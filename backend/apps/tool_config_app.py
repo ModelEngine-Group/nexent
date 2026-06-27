@@ -1,8 +1,8 @@
 import logging
 from http import HTTPStatus
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Header, HTTPException, Body
+from fastapi import APIRouter, Header, HTTPException, Body, Query
 from fastapi.responses import JSONResponse
 
 from consts.exceptions import MCPConnectionError, NotFoundException
@@ -26,14 +26,17 @@ logger = logging.getLogger("tool_config_app")
 
 
 @router.get("/list")
-async def list_tools_api(authorization: Optional[str] = Header(None)):
+async def list_tools_api(
+    authorization: Optional[str] = Header(None),
+    labels: Optional[str] = Query(None, description="Comma-separated label strings to filter tools (OR match)")
+):
     """
-    List all system tools from PG dataset
+    List all system tools from PG dataset, optionally filtered by labels.
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        # now only admin can modify the tool, user_id is not used
-        return await list_all_tools(tenant_id=tenant_id)
+        label_list = [lbl.strip() for lbl in labels.split(",") if lbl.strip()] if labels else None
+        return await list_all_tools(tenant_id=tenant_id, labels=label_list)
     except Exception as e:
         logging.error(f"Failed to get tool info, error in: {str(e)}")
         raise HTTPException(
@@ -277,4 +280,36 @@ async def delete_openapi_service_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete OpenAPI service: {str(e)}"
+        )
+
+
+@router.put("/labels")
+async def update_tool_labels_api(
+    tool_id: int = Body(..., embed=True),
+    labels: List[str] = Body(..., embed=True),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Update labels for a specific tool. Replaces all labels with the provided list.
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        from database.tool_db import update_tool_labels
+        updated = update_tool_labels(tool_id, tenant_id, labels, user_id)
+        if not updated:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="Tool not found or access denied"
+            )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Labels updated successfully", "status": "success", "labels": labels}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update tool labels: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update tool labels: {str(e)}"
         )

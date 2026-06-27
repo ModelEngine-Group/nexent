@@ -87,6 +87,11 @@ export const fetchTools = async () => {
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
       category: tool.category,
+      labels: Array.isArray(tool.labels)
+        ? tool.labels
+        : typeof tool.labels === 'string'
+          ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+          : [],
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {

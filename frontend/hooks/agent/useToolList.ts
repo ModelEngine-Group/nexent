@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchTools } from "@/services/agentConfigService";
 import { useMemo } from "react";
-import { Tool, ToolGroup, ToolSubGroup } from "@/types/agentConfig";
+import { ToolGroup, ToolSubGroup } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 
 export function useToolList(options?: { enabled?: boolean; staleTime?: number }) {
@@ -28,11 +28,20 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 		return (tools as any[]).filter((tool) => tool.is_available !== false);
 	}, [tools]);
 
-	// Grouped tools helper function - returns a function that can be called with translation
-	// Default grouped tools without selected tool filtering
+	// Extract all unique labels from available tools (used by LabelManagementModal suggestions)
+	const allLabels = useMemo(() => {
+		const labelSet = new Set<string>();
+		availableTools.forEach((tool: any) => {
+			const labels = Array.isArray(tool.labels) ? tool.labels : [];
+			labels.forEach((l: string) => labelSet.add(l));
+		});
+		return Array.from(labelSet).sort();
+	}, [availableTools]);
+
+	// Grouped tools by source and usage
 	const groupedTools = useMemo(() => {
 		const groups: ToolGroup[] = [];
-		const groupMap = new Map<string, Tool[]>();
+		const groupMap = new Map<string, any[]>();
 	
 		// Group by source and usage
 		availableTools.forEach((tool) => {
@@ -68,7 +77,7 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 		  // Create secondary grouping for local tools
 		  let subGroups: ToolSubGroup[] | undefined;
 		  if (key === TOOL_SOURCE_TYPES.LOCAL) {
-			const categoryMap = new Map<string, Tool[]>();
+			const categoryMap = new Map<string, any[]>();
 	
 			sortedTools.forEach((tool) => {
 			  const category =
@@ -120,13 +129,14 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 		  };
 		  return getPriority(a.key) - getPriority(b.key);
 		});
-	  }, [tools]);
+	  }, [availableTools]);
 
 	return {
 		...query,
 		tools,
 		availableTools,
 		groupedTools,
+		allLabels,
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["tools"] }),
 	};
 }

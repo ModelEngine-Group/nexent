@@ -7,6 +7,8 @@ import CollaborativeAgent from "./agentConfig/CollaborativeAgent";
 import ToolManagement from "./agentConfig/ToolManagement";
 import SkillManagement from "./agentConfig/SkillManagement";
 import SkillBuildModal from "./agentConfig/SkillBuildModal";
+import SelectToolsDialog from "./agentConfig/tool/SelectToolsDialog";
+import LabelManagementModal from "./agentConfig/tool/LabelManagementModal";
 
 import { updateToolList } from "@/services/mcpService";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
@@ -16,7 +18,7 @@ import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 
-import { RefreshCw, Lightbulb, Plug, BlocksIcon, Globe } from "lucide-react";
+import { Wrench, RefreshCw, Lightbulb, Plug, BlocksIcon, Globe } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface AgentConfigCompProps {}
@@ -37,10 +39,12 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
   const [showA2ADiscovery, setShowA2ADiscovery] = useState(false);
+  const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
+  const [labelModalOpen, setLabelModalOpen] = useState(false);
   const showLegacyMcpConfig = false;
 
   // Use tool list hook for data management
-  const { groupedTools, invalidate } = useToolList();
+  const { invalidate, availableTools } = useToolList();
   const { groupedSkills, invalidate: invalidateSkills } = useSkillList();
   const { invalidate: invalidateExternalAgents } = useExternalAgents();
 
@@ -165,28 +169,40 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
 
           <Row gutter={[12, 12]} className="flex-shrink-0">
             <Col xs={24}>
-              <Flex justify="flex-end" align="center" gap={8}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<RefreshCw size={16} />}
-                  onClick={handleRefreshTools}
-                  loading={isRefreshing}
-                  className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
-                  title={t("toolManagement.refresh.title")}
-                >
-                  {t("toolManagement.refresh.button.refresh")}
-                </Button>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<Plug size={16} />}
-                  onClick={() => setIsMcpModalOpen(true)}
-                  className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
-                  title={t("toolManagement.mcp.title")}
-                >
-                  {t("toolManagement.mcp.button")}
-                </Button>
+              <Flex justify="space-between" align="center">
+                {/* Left: action text links (mirrors demo's Refresh / MCP Config pattern) */}
+                <div className="flex items-center gap-4 text-sm">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<RefreshCw size={16} />}
+                    onClick={handleRefreshTools}
+                    loading={isRefreshing}
+                    className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
+                  >
+                    {t("toolManagement.refresh.button.refresh")}
+                  </Button>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Plug size={16} />}
+                    onClick={() => setIsMcpModalOpen(true)}
+                    className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
+                  >
+                    {t("toolManagement.mcp.button")}
+                  </Button>
+                </div>
+                {/* Right: Select Tools button (mirrors demo) */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="small"
+                    icon={<Wrench size={14} />}
+                    onClick={() => setIsToolSelectOpen(true)}
+                    className="h-7 gap-1 text-xs bg-white border border-gray-200 hover:!border-gray-300 hover:!bg-gray-50"
+                  >
+                    {t("toolPool.selectTools")}
+                  </Button>
+                </div>
               </Flex>
             </Col>
           </Row>
@@ -194,7 +210,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
           <Row className="flex-1 min-h-0 mt-4 overflow-y-auto">
             <Col xs={24} className="h-full">
               <ToolManagement
-                toolGroups={groupedTools}
                 isCreatingMode={isCreatingMode}
                 currentAgentId={currentAgentId ?? undefined}
               />
@@ -246,6 +261,20 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
       </Flex>
 
       <McpConfigModal visible={isMcpModalOpen} onCancel={() => setIsMcpModalOpen(false)} />
+
+      <SelectToolsDialog
+        open={isToolSelectOpen}
+        onClose={() => setIsToolSelectOpen(false)}
+        onOpenManageLabels={() => setLabelModalOpen(true)}
+        isCreatingMode={isCreatingMode}
+        currentAgentId={currentAgentId ?? undefined}
+      />
+
+      <LabelManagementModal
+        open={labelModalOpen}
+        onClose={() => setLabelModalOpen(false)}
+        availableTools={availableTools}
+      />
 
       <SkillBuildModal
         isOpen={isSkillModalOpen}

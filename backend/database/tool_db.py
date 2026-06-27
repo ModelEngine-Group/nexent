@@ -136,6 +136,54 @@ def query_tools_by_ids(tool_id_list: List[int]):
         return [as_dict(tool) for tool in tools]
 
 
+def query_tools_by_labels(tenant_id: str, labels: List[str]):
+    """
+    Query ToolInfo by labels using OR match (tool has ANY of the requested labels).
+
+    Args:
+        tenant_id: Tenant ID for filtering
+        labels: List of label strings to filter by
+
+    Returns:
+        List of ToolInfo dicts matching any of the given labels
+    """
+    with get_db_session() as session:
+        query = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id,
+            ToolInfo.labels.op('?|')(labels)
+        )
+        tools = query.all()
+        return [as_dict(tool) for tool in tools]
+
+
+def update_tool_labels(tool_id: int, tenant_id: str, labels: List[str], user_id: str) -> bool:
+    """
+    Update labels for a specific tool. Replaces all existing labels.
+
+    Args:
+        tool_id: Tool ID to update
+        tenant_id: Tenant ID for access control
+        labels: New list of label strings
+        user_id: User performing the update
+
+    Returns:
+        True if updated, False if tool not found or access denied
+    """
+    with get_db_session() as session:
+        tool = session.query(ToolInfo).filter(
+            ToolInfo.tool_id == tool_id,
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y'
+        ).first()
+        if not tool:
+            return False
+        tool.labels = labels
+        tool.updated_by = user_id
+        session.flush()
+        return True
+
+
 def query_all_enabled_tool_instances(agent_id: int, tenant_id: str, version_no: int = 0):
     """
     Query enabled ToolInstance in the database.
@@ -243,6 +291,9 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 # by tool name and source to update the existing tool
                 existing_tool = existing_tool_dict[key]
                 for key, value in filtered_tool_data.items():
+                    # Preserve user-set labels; only overwrite if new labels are explicitly provided
+                    if key == "labels" and not value:
+                        continue
                     setattr(existing_tool, key, value)
                 existing_tool.updated_by = user_id
                 existing_tool.is_available = is_available
