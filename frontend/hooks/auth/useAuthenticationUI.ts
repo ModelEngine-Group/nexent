@@ -93,11 +93,14 @@ export function useAuthenticationUI({
     []
   );
 
-  const openAuthPromptModal = useCallback(() => {
-    redirectToCasIfForced(effectivePath).then((redirected) => {
-      if (!redirected) setIsAuthPromptModalOpen(true);
-    });
-  }, [effectivePath, redirectToCasIfForced]);
+  const openAuthPromptModal = useCallback(
+    (redirect?: string) => {
+      redirectToCasIfForced(redirect || effectivePath).then((redirected) => {
+        if (!redirected) setIsAuthPromptModalOpen(true);
+      });
+    },
+    [effectivePath, redirectToCasIfForced]
+  );
 
   const closeAuthPromptModal = useCallback(() => {
     setIsAuthPromptModalOpen(false);
