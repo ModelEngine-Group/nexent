@@ -88,11 +88,15 @@ deployment_password_validation_message() {
 deployment_ensure_root_env() {
   local project_root="$1"
   local docker_dir="${2:-$project_root/docker}"
-  local root_env="$project_root/.env"
-  local root_example="$project_root/.env.example"
+  local env_dir="$project_root/deploy/env"
+  local root_env="$env_dir/.env"
+  local root_example="$env_dir/.env.example"
+  local legacy_root_env="$project_root/.env"
+  local legacy_root_example="$project_root/.env.example"
   local legacy_docker_env="$docker_dir/.env"
   local legacy_docker_example="$docker_dir/.env.example"
 
+  mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
   export DEPLOYMENT_ROOT_ENV
 
@@ -100,25 +104,37 @@ deployment_ensure_root_env() {
     return 0
   fi
 
+  if [ -f "$legacy_root_env" ]; then
+    cp "$legacy_root_env" "$root_env"
+    deployment_log "✅ Created deploy/env/.env from legacy root .env"
+    return 0
+  fi
+
   if [ -f "$legacy_docker_env" ]; then
     cp "$legacy_docker_env" "$root_env"
-    deployment_log "✅ Created root .env from legacy docker/.env"
+    deployment_log "✅ Created deploy/env/.env from legacy docker/.env"
     return 0
   fi
 
   if [ -f "$root_example" ]; then
     cp "$root_example" "$root_env"
-    deployment_log "✅ Created root .env from .env.example"
+    deployment_log "✅ Created deploy/env/.env from deploy/env/.env.example"
+    return 0
+  fi
+
+  if [ -f "$legacy_root_example" ]; then
+    cp "$legacy_root_example" "$root_env"
+    deployment_log "✅ Created deploy/env/.env from legacy root .env.example"
     return 0
   fi
 
   if [ -f "$legacy_docker_example" ]; then
     cp "$legacy_docker_example" "$root_env"
-    deployment_log "✅ Created root .env from legacy docker/.env.example"
+    deployment_log "✅ Created deploy/env/.env from legacy docker/.env.example"
     return 0
   fi
 
-  deployment_error ".env not found and no .env.example template is available"
+  deployment_error "deploy/env/.env not found and no .env.example template is available"
   return 1
 }
 

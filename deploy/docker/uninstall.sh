@@ -9,7 +9,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ROOT_ENV_FILE="$PROJECT_ROOT/.env"
+ROOT_ENV_FILE="$PROJECT_ROOT/deploy/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 cd "$SCRIPT_DIR"
 

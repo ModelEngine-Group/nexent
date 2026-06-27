@@ -57,7 +57,7 @@ bash deploy.sh k8s
 - **mainland**: 使用中国大陆镜像源
 - **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
 
-Kubernetes 使用与 Docker 相同的项目根目录 `.env`。已有 `.env` 会原样保留；如果不存在，部署脚本会优先复用已有 `docker/.env`，再回退到 `.env.example` 或 `docker/.env.example`。
+Kubernetes 使用与 Docker 相同的`deploy/env/.env`。已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用旧的根目录 `.env` 或 `docker/.env`，再回退到 `deploy/env/.env.example` 或旧模板。
 
 部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
@@ -197,17 +197,14 @@ bash deploy/offline/build_offline_package.sh \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
   --compress true \
-  --output-dir offline-package/k8s
+  --output-dir offline-package
 ```
 
 包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`manifest.yaml` 和 `checksums.txt`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
 
 ```bash
-cd offline-package/k8s
-bash deploy.sh --load-images k8s \
-  --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general
+cd offline-package
+bash deploy.sh --load-images k8s
 ```
 
 多节点集群需要在每个可能运行 Nexent Pod 的节点上加载镜像，或将镜像推送到集群可访问的内部镜像仓库，再使用匹配的镜像参数部署。
