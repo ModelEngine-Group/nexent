@@ -32,7 +32,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'dashscope/qwen-plus@1')
      WHERE LOWER(model_factory) = 'dashscope'
@@ -47,7 +48,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'dashscope/qwen-turbo@1')
      WHERE LOWER(model_factory) = 'dashscope'
@@ -62,7 +64,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(65536, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 65536))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'dashscope/qwen3.7-max@1')
      WHERE LOWER(model_factory) = 'dashscope'
@@ -77,7 +80,8 @@ BEGIN
            GREATEST(200000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(131072, COALESCE(context_window_tokens, 200000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 131072))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'dashscope/glm-5.1@1')
      WHERE LOWER(model_factory) = 'dashscope'
@@ -93,7 +97,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(384000, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-chat@2')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -108,7 +113,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(384000, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-reasoner@2')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -123,7 +129,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(384000, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v4-flash@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -138,7 +145,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(384000, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v4-pro@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -153,7 +161,8 @@ BEGIN
            GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(384000, COALESCE(context_window_tokens, 1048576) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v4-pro-sf@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -168,7 +177,8 @@ BEGIN
            GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(384000, COALESCE(context_window_tokens, 1048576) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 384000))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v4-flash-sf@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -183,7 +193,8 @@ BEGIN
            GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.2@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -198,7 +209,8 @@ BEGIN
            GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.1-terminus@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -213,7 +225,8 @@ BEGIN
            GREATEST(163840, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 163840) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-r1@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -228,7 +241,8 @@ BEGIN
            GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -243,7 +257,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-r1-0528-qwen3-8b@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -258,7 +273,8 @@ BEGIN
            GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.2-pro@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -273,7 +289,8 @@ BEGIN
            GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3.1-terminus-pro@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -288,7 +305,8 @@ BEGIN
            GREATEST(163840, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 163840) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-r1-pro@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -303,7 +321,8 @@ BEGIN
            GREATEST(164000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 164000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'deepseek/deepseek-v3-pro@1')
      WHERE LOWER(model_factory) = 'deepseek'
@@ -319,7 +338,8 @@ BEGIN
            GREATEST(128000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 128000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'openai/gpt-4o@1')
      WHERE LOWER(model_factory) = 'openai'
@@ -334,7 +354,8 @@ BEGIN
            GREATEST(1000000, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(32768, COALESCE(context_window_tokens, 1000000) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 32768))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'openai/gpt-4.1@1')
      WHERE LOWER(model_factory) = 'openai'
@@ -350,7 +371,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(65536, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 65536))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.6-27b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -365,7 +387,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(131072, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 131072))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/kimi-k2.6@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -380,7 +403,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.6-35b-a3b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -395,7 +419,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.5-397b-a17b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -410,7 +435,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.5-122b-a10b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -425,7 +451,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.5-35b-a3b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -440,7 +467,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.5-27b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -455,7 +483,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.5-9b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -470,7 +499,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3.5-4b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -485,7 +515,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-vl-32b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -500,7 +531,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(32768, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 32768))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-vl-32b-thinking@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -515,7 +547,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-vl-8b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -530,7 +563,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(32768, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 32768))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-vl-8b-thinking@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -545,7 +579,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-vl-30b-a3b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -560,7 +595,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(32768, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 32768))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-vl-30b-a3b-thinking@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -575,7 +611,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-omni-30b-a3b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -590,7 +627,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-omni-30b-a3b-thinking@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -605,7 +643,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-omni-30b-a3b-captioner@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -620,7 +659,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(65536, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 65536))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-coder-30b-a3b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -635,7 +675,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-30b-a3b-instruct-2507@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -650,7 +691,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-32b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -665,7 +707,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-14b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -680,7 +723,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen3-8b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -695,7 +739,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen2.5-72b-instruct-128k@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -710,7 +755,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen2.5-72b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -725,7 +771,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen2.5-32b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -740,7 +787,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen2.5-14b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -755,7 +803,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/qwen2.5-7b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -770,7 +819,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-4-32b-0414@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -785,7 +835,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-z1-9b-0414@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -800,7 +851,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-4-9b-0414@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -815,7 +867,8 @@ BEGIN
            GREATEST(1048576, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(131072, COALESCE(context_window_tokens, 1048576) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 131072))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-5.2@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -830,7 +883,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-4.5v@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -845,7 +899,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-4.5-air@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -860,7 +915,8 @@ BEGIN
            GREATEST(202752, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(131072, COALESCE(context_window_tokens, 202752) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 131072))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/glm-5.1-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -875,7 +931,8 @@ BEGIN
            GREATEST(524288, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 524288) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/seed-oss-36b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -890,7 +947,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/ling-flash-2.0@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -905,7 +963,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/ling-mini-2.0@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -920,7 +979,8 @@ BEGIN
            GREATEST(204800, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 204800) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/minimax-m2.5@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -935,7 +995,8 @@ BEGIN
            GREATEST(204800, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 204800) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/minimax-m2.5-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -950,7 +1011,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(32768, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 8192),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(8192, COALESCE(max_output_tokens, 32768))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/kimi-k2.7-code@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -965,7 +1027,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/nex-n2-pro@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -980,7 +1043,8 @@ BEGIN
            GREATEST(262144, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(16384, COALESCE(context_window_tokens, 262144) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 16384))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/step-3.5-flash@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -995,7 +1059,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(2048, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 1024),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(1024, COALESCE(max_output_tokens, 2048))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/hunyuan-mt-7b@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -1010,7 +1075,8 @@ BEGIN
            GREATEST(131072, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(8192, COALESCE(context_window_tokens, 131072) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 8192))),
            capacity_source = COALESCE(capacity_source, 'profile'),
            capability_profile_version = COALESCE(capability_profile_version, 'silicon/hunyuan-a13b-instruct@1')
      WHERE LOWER(model_factory) = 'silicon'
@@ -1036,7 +1102,8 @@ BEGIN
            GREATEST(32768, COALESCE(max_output_tokens, 0) + 1)),
            max_output_tokens = COALESCE(max_output_tokens,
            LEAST(4096, COALESCE(context_window_tokens, 32768) - 1)),
-           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens, 4096),
+           default_output_reserve_tokens = COALESCE(default_output_reserve_tokens,
+           LEAST(4096, COALESCE(max_output_tokens, 4096))),
            capacity_source = COALESCE(capacity_source, 'operator')
      WHERE delete_flag = 'N'
        AND COALESCE(model_type, 'llm') IN ('llm', 'vlm')
@@ -1063,4 +1130,23 @@ BEGIN
 
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     RAISE NOTICE 'max_tokens reconcile: % row(s) updated', v_updated;
+END $$;
+
+-- ============================================================
+-- Phase 4: Clamp default_output_reserve_tokens to max_output_tokens
+-- ============================================================
+
+DO $$
+DECLARE
+    v_updated INTEGER := 0;
+BEGIN
+    UPDATE nexent.model_record_t
+       SET default_output_reserve_tokens = max_output_tokens
+     WHERE delete_flag = 'N'
+       AND default_output_reserve_tokens IS NOT NULL
+       AND max_output_tokens IS NOT NULL
+       AND default_output_reserve_tokens > max_output_tokens;
+
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    RAISE NOTICE 'reserve clamp: % row(s) updated', v_updated;
 END $$;
