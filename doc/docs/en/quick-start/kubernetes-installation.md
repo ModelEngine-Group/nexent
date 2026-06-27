@@ -57,7 +57,7 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **mainland**: uses mainland China mirrors
 - **local-latest**: uses local `latest` images and local-friendly pull policies for Nexent application images
 
-Kubernetes uses the same project root `.env` as Docker. Existing `.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing `docker/.env`, then fall back to `.env.example` or `docker/.env.example`.
+Kubernetes uses the same `deploy/env/.env` file as Docker. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse an existing legacy root `.env` or `docker/.env`, then fall back to `deploy/env/.env.example` or legacy templates.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/k8s/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
@@ -197,17 +197,14 @@ bash deploy/offline/build_offline_package.sh \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
   --compress true \
-  --output-dir offline-package/k8s
+  --output-dir offline-package
 ```
 
 The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `manifest.yaml`, and `checksums.txt`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory. On a single-node Docker-backed cluster, you can load and deploy directly:
 
 ```bash
-cd offline-package/k8s
-bash deploy.sh --load-images k8s \
-  --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
-  --image-source general
+cd offline-package
+bash deploy.sh --load-images k8s
 ```
 
 For multi-node clusters, load the images on every node that may run Nexent Pods, or push the loaded images to an internal registry and deploy with matching image settings.

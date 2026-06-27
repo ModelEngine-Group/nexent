@@ -17,7 +17,7 @@ DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 ORIGINAL_ARGS=("$@")
-ROOT_ENV_FILE="$PROJECT_ROOT/.env"
+ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
 SQL_DIR="$DEPLOY_ROOT/sql"
@@ -249,7 +249,7 @@ check_ports_in_env_files() {
   PORTS_TO_CHECK=()
   PORT_SOURCES=()
 
-  # Always include the root .env if present, plus image-source env variants.
+  # Always include the deploy/env/.env if present, plus image-source env variants.
   local env_files=()
   if [ -f "$ROOT_ENV_FILE" ]; then
     env_files+=("$ROOT_ENV_FILE")
@@ -444,7 +444,7 @@ persist_deploy_options() {
 
 generate_minio_ak_sk() {
   if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] && [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
-    echo "   MinIO credentials unchanged; reusing root .env values"
+    echo "   MinIO credentials unchanged; reusing deploy/env/.env values"
     export MINIO_ACCESS_KEY
     export MINIO_SECRET_KEY
     return 0
@@ -514,7 +514,7 @@ generate_supabase_keys() {
     && [ -n "${VAULT_ENC_KEY:-}" ] \
     && [ -n "${SUPABASE_KEY:-}" ] \
     && [ -n "${SERVICE_ROLE_KEY:-}" ]; then
-    echo "   Supabase secrets unchanged; reusing root .env values"
+    echo "   Supabase secrets unchanged; reusing deploy/env/.env values"
     return 0
   fi
 
@@ -593,7 +593,7 @@ generate_elasticsearch_api_key() {
 
 generate_env_for_infrastructure() {
   # Function to generate complete environment file for infrastructure mode using generate_env.sh
-  echo "🔑 Updating root .env for infrastructure mode..."
+  echo "🔑 Updating deploy/env/.env for infrastructure mode..."
   echo "   🚀 Running generate_env.sh..."
 
   # Check if generate_env.sh exists
@@ -609,14 +609,14 @@ generate_env_for_infrastructure() {
   export DEPLOYMENT_VERSION
 
   if DEPLOYMENT_ROOT_ENV="$ROOT_ENV_FILE" bash "$SCRIPT_DIR/generate_env.sh"; then
-      echo "   ✅ root .env updated successfully for infrastructure mode!"
+      echo "   ✅ deploy/env/.env updated successfully for infrastructure mode!"
       if [ -f "$ROOT_ENV_FILE" ]; then
           set -a
           source "$ROOT_ENV_FILE"
           set +a
-          echo "   ✅ Environment variables loaded from root .env"
+          echo "   ✅ Environment variables loaded from deploy/env/.env"
       else
-          echo "   ⚠️  Warning: root .env file not found after generation"
+          echo "   ⚠️  Warning: deploy/env/.env file not found after generation"
           return 1
       fi
   else
@@ -777,7 +777,7 @@ clean() {
 }
 
 update_env_var() {
-  # Function to update or add a key-value pair to root .env
+  # Function to update or add a key-value pair to deploy/env/.env
   local key="$1"
   local value="$2"
   deployment_update_env_var_file "$ROOT_ENV_FILE" "$key" "$value"
@@ -1493,7 +1493,7 @@ main_deploy() {
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $ROOT_ENV_FILE"
-    echo "💡 Use 'source .env' from the project root to load environment variables"
+    echo "💡 Use 'source deploy/env/.env' from the project root to load environment variables"
 
     # Pull MCP image for later use
     pull_mcp_image

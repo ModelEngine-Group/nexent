@@ -99,10 +99,10 @@ jobs:
           DEPLOYMENT_MODE: ${{ github.event.inputs.deployment_mode }}
         run: |
           cd $HOME/nexent
-          cp .env.example .env
+          cp deploy/env/.env.example deploy/env/.env
           
-          sed -i "s/APPID=.*/APPID=${{ secrets.VOICE_APPID }}/" .env
-          sed -i "s/TOKEN=.*/TOKEN=${{ secrets.VOICE_TOKEN }}/" .env
+          sed -i "s/APPID=.*/APPID=${{ secrets.VOICE_APPID }}/" deploy/env/.env
+          sed -i "s/TOKEN=.*/TOKEN=${{ secrets.VOICE_TOKEN }}/" deploy/env/.env
           
           if [ "$DEPLOYMENT_MODE" = "production" ]; then
             ./deploy.sh docker --mode 3 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-production-data"
