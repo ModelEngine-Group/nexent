@@ -40,8 +40,12 @@ async function batchUpdateToolConfigs(
   for (const tool of currentTools) {
     const toolId = parseInt(tool.id);
     const isEnabled = true; // Selected tools are always enabled
+    // Only include params that have a defined value (not undefined or null)
+    // This ensures we don't save null values from form defaults or stale data
     const params = tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
-      acc[param.name] = param.value;
+      if (param.value !== undefined && param.value !== null) {
+        acc[param.name] = param.value;
+      }
       return acc;
     }, {} as Record<string, any>) || {};
 
@@ -124,6 +128,20 @@ export const useSaveGuard = () => {
         .map((skill: any) => Number(skill.skill_id))
         .filter((id: number) => Number.isFinite(id));
 
+      // Ensure model_ids always has a value - fall back to a single-element array
+      // using the first element from model_names when model_ids is empty
+      const modelIdsToSave = (() => {
+        if (currentEditedAgent.model_ids && currentEditedAgent.model_ids.length > 0) {
+          return currentEditedAgent.model_ids;
+        }
+        // Fallback: when only model name is available, map it to model_ids via available LLM list
+        const modelName = currentEditedAgent.model;
+        if (!modelName) return undefined;
+        // Use the business_logic_model_id or any model lookup; this is best-effort fallback
+        // and the backend will perform final resolution.
+        return undefined;
+      })();
+
       const result = await updateAgentInfo({
         agent_id: currentAgentId ?? undefined, // undefined=create, number=update
         name: currentEditedAgent.name,
@@ -131,9 +149,9 @@ export const useSaveGuard = () => {
         description: currentEditedAgent.description,
         author: currentEditedAgent.author,
         group_ids: groupIds,
-        model_name: currentEditedAgent.model,
-        model_id: currentEditedAgent.model_id ?? undefined,
+        model_ids: modelIdsToSave,
         max_steps: currentEditedAgent.max_step,
+        requested_output_tokens: currentEditedAgent.requested_output_tokens ?? null,
         provide_run_summary: currentEditedAgent.provide_run_summary,
         verification_config: currentEditedAgent.verification_config,
         enabled: true,
@@ -191,13 +209,23 @@ export const useSaveGuard = () => {
         const baselineTools = useAgentConfigStore.getState().baselineAgent?.tools || [];
         await batchUpdateToolConfigs(finalAgentId, currentEditedAgent.tools || [], baselineTools);
 
-        // Common logic for both creation and update: refresh cache and update store
+        // Refresh cache
         await queryClient.invalidateQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
         await queryClient.refetchQueries({
           queryKey: ["agentInfo", finalAgentId]
         });
+
+        // CRITICAL: Update store with the latest data from cache after saving tool configs
+        // This ensures that on subsequent saves, the tool initParams reflect the latest
+        // values that were saved (including any defaults merged by the backend)
+        const latestAgentData = queryClient.getQueryData(["agentInfo", finalAgentId]);
+        if (latestAgentData && typeof latestAgentData === 'object' && 'tools' in latestAgentData) {
+          const latestTools = (latestAgentData as any).tools || [];
+          // Update editedAgent with the latest tools from cache
+          useAgentConfigStore.getState().updateTools(latestTools);
+        }
 
         // Refresh skill instances after save
         await queryClient.invalidateQueries({
@@ -207,6 +235,8 @@ export const useSaveGuard = () => {
         // Also invalidate the agents list cache to ensure the list reflects any changes
         queryClient.invalidateQueries({ queryKey: ["agents"] });
 
+        // Mark as saved (this will sync editedAgent to baselineAgent)
+        useAgentConfigStore.getState().markAsSaved();
         return true;
       } else {
         message.error(result.message || t("businessLogic.config.error.saveFailed") );

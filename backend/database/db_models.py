@@ -151,6 +151,62 @@ class ConversationSourceSearch(TableBase):
         30), doc="Simple tool identifier used to distinguish the index source in the summary text output by the large model")
 
 
+class ConversationShare(TableBase):
+    """
+    Public read-only snapshot of selected Q&A pairs from a conversation.
+    """
+    __tablename__ = "conversation_share_t"
+    __table_args__ = (
+        Index("idx_conversation_share_token", "share_token"),
+        Index("idx_conversation_share_conversation_id", "conversation_id"),
+        {"schema": SCHEMA},
+    )
+
+    share_id = Column(Integer, Sequence(
+        "conversation_share_t_share_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    share_token = Column(String(64), nullable=False, unique=True,
+                         doc="Opaque public share token")
+    conversation_id = Column(Integer, nullable=False,
+                             doc="Original conversation ID")
+    tenant_id = Column(String(100), doc="Tenant that created the share")
+    title = Column(String(200), doc="Snapshot title")
+    mode = Column(String(30), default="selected",
+                  doc="Share mode: all or selected")
+    selected_message_ids = Column(JSONB, doc="Selected original message IDs")
+    snapshot_json = Column(JSONB, nullable=False,
+                           doc="Frozen frontend-compatible conversation payload")
+    status = Column(String(30), default="active",
+                    doc="active or revoked")
+    expire_time = Column(TIMESTAMP(timezone=False),
+                         doc="Optional expiration time")
+
+
+class ConversationShareAsset(TableBase):
+    """
+    File objects allowed to be accessed through a public share token.
+    """
+    __tablename__ = "conversation_share_asset_t"
+    __table_args__ = (
+        Index("idx_conversation_share_asset_token", "share_token"),
+        Index("idx_conversation_share_asset_id", "asset_id"),
+        {"schema": SCHEMA},
+    )
+
+    share_asset_id = Column(Integer, Sequence(
+        "conversation_share_asset_t_share_asset_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    asset_id = Column(String(64), nullable=False, unique=True,
+                      doc="Opaque public asset token")
+    share_token = Column(String(64), nullable=False,
+                         doc="Parent share token")
+    object_name = Column(String(1000), nullable=False,
+                         doc="Original MinIO object name")
+    filename = Column(String(500), doc="Display/download filename")
+    content_type = Column(String(200), doc="Content type")
+    size = Column(BigInteger, doc="File size in bytes")
+    source_kind = Column(String(50), doc="attachment, source, image, markdown")
+    metadata_json = Column(JSONB, doc="Original reference metadata")
+
+
 class ModelRecord(TableBase):
     """
     Model list defined by the user on the configuration page
@@ -194,6 +250,20 @@ class ModelRecord(TableBase):
         Integer, doc="Request timeout in seconds for this model. Default is 120 seconds.")
     concurrency_limit = Column(
         Integer, doc="Maximum concurrent requests for this model. Default is null (unlimited).")
+    context_window_tokens = Column(
+        Integer, doc="Total combined input/output context window in tokens, when the provider uses a combined window. Nullable.")
+    max_input_tokens = Column(
+        Integer, doc="Provider hard input-token limit when distinct from the combined window. Nullable.")
+    max_output_tokens = Column(
+        Integer, doc="Provider-supported or operator-configured completion-output cap. Replaces the ambiguous LLM meaning of max_tokens. Nullable.")
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved per request before constructing input context. Nullable.")
+    tokenizer_family = Column(
+        String(100), doc="Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.")
+    capacity_source = Column(
+        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.")
+    capability_profile_version = Column(
+        String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -243,6 +313,69 @@ class ModelMonitoringRecord(SimpleTableBase):
     input_tokens = Column(Integer, doc="Number of input tokens")
     output_tokens = Column(Integer, doc="Number of output tokens")
     total_tokens = Column(Integer, doc="Total tokens (input + output)")
+    context_window_tokens = Column(
+        Integer, doc="Resolved total combined model context window for this request"
+    )
+    default_output_reserve_tokens = Column(
+        Integer, doc="Default output allowance reserved before input context construction"
+    )
+    capability_profile_version = Column(
+        String(100), doc="Version of the resolved capacity profile for this request"
+    )
+    capacity_source = Column(
+        String(100), doc="Dominant source of resolved capacity fields for this request"
+    )
+    requested_output_tokens = Column(
+        Integer, doc="Output tokens requested or reserved during capacity resolution"
+    )
+    provider_input_limit_tokens = Column(
+        Integer, doc="Resolved provider input-token limit used by context management"
+    )
+    tokenizer_family = Column(
+        String(100), doc="Tokenizer family used for request token counting"
+    )
+    counting_mode = Column(
+        String(20), doc="Token counting mode for the request: exact or estimated"
+    )
+    unknown_capabilities = Column(
+        JSONB, doc="Structured list of capacity capabilities unknown at resolution time"
+    )
+    capacity_fingerprint = Column(
+        String(64), doc="Fingerprint of the resolved model capacity snapshot"
+    )
+    budget_fingerprint = Column(
+        String(64), doc="Fingerprint of the resolved W2 safe input budget snapshot"
+    )
+    budget_w1_fingerprint = Column(
+        String(64), doc="W1 capacity fingerprint consumed by the W2 budget snapshot"
+    )
+    budget_requested_output_tokens = Column(
+        Integer, doc="W2 trusted requested output tokens used at dispatch"
+    )
+    budget_output_reserve_source = Column(
+        String(32), doc="Source of the W2 requested output token reserve"
+    )
+    budget_provider_input_limit_tokens = Column(
+        Integer, doc="Provider input limit after applying the W2 output reserve"
+    )
+    budget_uncertainty_reserve_tokens = Column(
+        Integer, doc="Additional W2 uncertainty reserve deducted from input budget"
+    )
+    budget_uncertainty_reserve_basis = Column(
+        String(64), doc="Basis used for the W2 uncertainty reserve"
+    )
+    budget_soft_limit_ratio = Column(
+        Float, doc="W2 soft input budget ratio"
+    )
+    budget_soft_input_budget_tokens = Column(
+        Integer, doc="W2 soft input budget where proactive compression begins"
+    )
+    budget_hard_input_budget_tokens = Column(
+        Integer, doc="W2 hard input budget consumed by W3 final fit"
+    )
+    budget_warnings = Column(
+        JSONB, doc="Structured W2 budget warnings active for this request"
+    )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
     is_streaming = Column(
@@ -311,10 +444,8 @@ class AgentInfo(TableBase):
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")
-    model_name = Column(
-        String(100), doc="[DEPRECATED] Name of the model used, use model_id instead")
-    model_id = Column(
-        Integer, doc="Model ID, foreign key reference to model_record_t.model_id")
+    model_ids = Column(
+        ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
     max_steps = Column(Integer, doc="Maximum number of steps")
     duty_prompt = Column(Text, doc="Duty prompt content")
     constraint_prompt = Column(Text, doc="Constraint prompt content")
@@ -338,7 +469,14 @@ class AgentInfo(TableBase):
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
     ingroup_permission = Column(String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
-    enable_context_manager = Column(Boolean, default=False, doc="Whether to enable context management (compression) for this agent")
+    requested_output_tokens = Column(
+        Integer,
+        doc=(
+            "Per-agent override for W2 requested_output_tokens. NULL means "
+            "inherit the resolved model-level default."
+        ),
+    )
+    enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
@@ -724,23 +862,27 @@ class AgentRepository(TableBase):
     publisher_user_id = Column(String(100), nullable=False, doc="Publisher user ID")
     agent_id = Column(Integer, nullable=False,
                       doc="Root agent ID from ag_tenant_agent_t; upsert key")
-    source_version_no = Column(Integer, nullable=False,
-                               doc="Published version number frozen at share time")
+    version_no = Column(Integer, nullable=False,
+                        doc="Published version number frozen at share time")
     name = Column(String(100), nullable=False,
                   doc="Root agent programmatic name for display and search")
     display_name = Column(String(100), doc="Root agent display name")
     description = Column(Text, doc="Root agent description")
     author = Column(String(100), doc="Agent author")
+    submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
     category_id = Column(Integer, doc="Optional marketplace category ID")
     tags = Column(ARRAY(Text), doc="Marketplace tags")
     tool_count = Column(Integer,
                         doc="Total tool count across all agents in the bundle (display only)")
-    version_label = Column(String(100),
-                           doc="Repository entry version label for display (e.g. v1.0)")
+    icon = Column(String(100), doc="Marketplace card icon (emoji or URL)")
+    downloads = Column(Integer, default=0,
+                       doc="Marketplace download/copy count for card display")
+    version_name = Column(String(100),
+                          doc="Repository entry version name for display (from ag_tenant_agent_version_t)")
     agent_info_json = Column(JSONB, nullable=False,
                              doc="Frozen ExportAndImportDataFormat snapshot with optional skills")
-    status = Column(String(30), default="NOT_SHARED",
-                    doc="Listing status: NOT_SHARED (未共享) / PENDING_REVIEW (待审核) / REJECTED (审核驳回) / SHARED (已共享)")
+    status = Column(String(30), default="not_shared",
+                    doc="Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)")
 
 
 class UserTokenInfo(TableBase):

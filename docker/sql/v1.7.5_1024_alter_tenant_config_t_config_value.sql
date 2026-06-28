@@ -1,1 +1,0 @@
-ALTER TABLE nexent.tenant_config_t ALTER COLUMN config_value TYPE TEXT;

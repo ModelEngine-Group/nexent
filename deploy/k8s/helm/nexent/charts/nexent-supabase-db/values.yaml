@@ -1,0 +1,30 @@
+replicaCount: 1
+
+image:
+  repository: supabase/postgres
+  tag: 15.8.1.060
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 500m
+  limits:
+    memory: 2Gi
+    cpu: 1
+
+storage:
+  size: 10Gi
+
+persistence:
+  mode: local
+  storageClassName: nexent-local
+  accessModes:
+    - ReadWriteOnce
+  localPath: "/var/lib/nexent-data/nexent-supabase-db"
+  existingClaim: ""
+
+config:
+  postgresDb: "supabase"
+  postgresPort: "5436"
+  jwtExpiry: "3600"

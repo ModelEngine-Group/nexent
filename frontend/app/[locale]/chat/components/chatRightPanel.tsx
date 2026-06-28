@@ -4,7 +4,11 @@ import { ExternalLink, Database, X, Server } from "lucide-react";
 
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { formatDate, formatUrl } from "@/lib/utils";
-import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
+import {
+  convertImageUrlToApiUrl,
+  extractObjectNameFromUrl,
+  storageService,
+} from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
@@ -36,8 +40,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     result.score_details?.datamate_dataset_id ||
     result.score_details?.dataset_id;
   const datamateFileId =
-    result.score_details?.datamate_file_id ||
-    result.score_details?.file_id;
+    result.score_details?.datamate_file_id || result.score_details?.file_id;
   const datamateBaseUrl =
     result.score_details?.datamate_base_url ||
     result.score_details?.datamate_baseUrl ||
@@ -58,13 +61,18 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
 
   const downloadDatamateFile = async () => {
     if (!appConfig?.modelEngineEnabled) {
-      message.error("DataMate download not available: ModelEngine is not enabled");
+      message.error(
+        "DataMate download not available: ModelEngine is not enabled"
+      );
       return;
     }
     if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
       if (!url || url === "#") {
         message.error(
-          t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information")
+          t(
+            "chatRightPanel.fileDownloadError",
+            "Missing Datamate dataset or file information"
+          )
         );
         return;
       }
@@ -76,20 +84,42 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
       fileId: datamateFileId,
       filename: filename || undefined,
     });
-    message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+    message.success(
+      t("chatRightPanel.fileDownloadSuccess", "File download started")
+    );
   };
 
   const downloadObjectFile = async () => {
+    if (result.download_url) {
+      const link = document.createElement("a");
+      link.href = result.download_url;
+      link.download = filename || "download";
+      link.click();
+      message.success(
+        t("chatRightPanel.fileDownloadSuccess", "File download started")
+      );
+      return;
+    }
+
     let objectName: string | undefined;
-    if (url && url !== "#") {
+    if (result.object_name) {
+      objectName = result.object_name;
+    } else if (url && url !== "#") {
       objectName = extractObjectNameFromUrl(url) || undefined;
     }
     if (!objectName) {
-      message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
+      message.error(
+        t(
+          "chatRightPanel.fileDownloadError",
+          "Cannot determine file object name"
+        )
+      );
       return;
     }
     await storageService.downloadFile(objectName, filename || "download");
-    message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+    message.success(
+      t("chatRightPanel.fileDownloadSuccess", "File download started")
+    );
   };
 
   // Handle file download
@@ -98,7 +128,9 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     e.stopPropagation();
 
     if (!filename && !url) {
-      message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
+      message.error(
+        t("chatRightPanel.fileDownloadError", "File name or URL is missing")
+      );
       return;
     }
 
@@ -111,7 +143,12 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
       await downloadObjectFile();
     } catch (error) {
       log.error("Failed to download file:", error);
-      message.error(t("chatRightPanel.fileDownloadError", "Failed to download file. Please try again."));
+      message.error(
+        t(
+          "chatRightPanel.fileDownloadError",
+          "Failed to download file. Please try again."
+        )
+      );
     } finally {
       setIsDownloading(false);
     }
@@ -162,11 +199,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     );
   } else {
     titleNode = (
-      <div
-        className="font-medium text-base"
-        style={titleStyle}
-        title={title}
-      >
+      <div className="font-medium text-base" style={titleStyle} title={title}>
         {title}
       </div>
     );
@@ -263,7 +296,6 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
   );
 }
 
-
 export function ChatRightPanel({
   messages,
   onImageError,
@@ -311,92 +343,98 @@ export function ChatRightPanel({
 
   // Load image - wrapped in useCallback to ensure fresh state references
   // NOTE: does NOT depend on imageData to avoid stale-closure issues
-  const loadImage = useCallback(async (imageUrl: string) => {
-    // Read current state inside the async function to avoid stale closure
-    const currentState = imageData;
+  const loadImage = useCallback(
+    async (imageUrl: string) => {
+      // Read current state inside the async function to avoid stale closure
+      const currentState = imageData;
 
-    // If it is already loaded with data, return directly
-    if (currentState[imageUrl]?.base64Data && !currentState[imageUrl]?.isLoading) {
-      return Promise.resolve();
-    }
-
-    // If it is loading, prevent duplicate requests
-    if (loadingImages.current.has(imageUrl)) {
-      return Promise.resolve();
-    }
-
-    // Mark as loading
-    loadingImages.current.add(imageUrl);
-
-    // Get the current load attempts (from captured state)
-    const currentAttempts = currentState[imageUrl]?.loadAttempts || 0;
-
-    // If the number of attempts is too high, do not continue to try
-    if (currentAttempts >= 3) {
-      handleImageLoadFail(imageUrl);
-      loadingImages.current.delete(imageUrl);
-      return Promise.resolve();
-    }
-
-    // Mark as loading
-    setImageData((prev) => ({
-      ...prev,
-      [imageUrl]: {
-        base64Data: "",
-        contentType: "image/jpeg",
-        isLoading: true,
-        loadAttempts: currentAttempts + 1,
-      },
-    }));
-
-    try {
-      // Convert image URL to backend API URL
-      const apiUrl = convertImageUrlToApiUrl(imageUrl);
-
-      // Use backend API to get the image
-      const response = await fetch(apiUrl);
-
-      if (!response.ok) {
-        throw new Error(`Failed to load image: ${response.statusText}`);
+      // If it is already loaded with data, return directly
+      if (
+        currentState[imageUrl]?.base64Data &&
+        !currentState[imageUrl]?.isLoading
+      ) {
+        return Promise.resolve();
       }
 
-      // Get image as blob and convert to base64
-      const blob = await response.blob();
-      const reader = new FileReader();
+      // If it is loading, prevent duplicate requests
+      if (loadingImages.current.has(imageUrl)) {
+        return Promise.resolve();
+      }
 
-      reader.onloadend = () => {
-        const base64Data = reader.result as string;
-        // Remove data URL prefix (e.g., "data:image/png;base64,")
-        const base64 = base64Data.split(',')[1] || base64Data;
+      // Mark as loading
+      loadingImages.current.add(imageUrl);
 
-        setImageData((prev) => ({
-          ...prev,
-          [imageUrl]: {
-            base64Data: base64,
-            contentType: blob.type || "image/jpeg",
-            isLoading: false,
-            loadAttempts: (prev[imageUrl]?.loadAttempts || 0) + 1,
-          },
-        }));
-        loadingImages.current.delete(imageUrl);
-      };
+      // Get the current load attempts (from captured state)
+      const currentAttempts = currentState[imageUrl]?.loadAttempts || 0;
 
-      reader.onerror = () => {
-        log.error("Failed to read image blob");
+      // If the number of attempts is too high, do not continue to try
+      if (currentAttempts >= 3) {
         handleImageLoadFail(imageUrl);
         loadingImages.current.delete(imageUrl);
-      };
+        return Promise.resolve();
+      }
 
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      log.error(t("chatRightPanel.imageProxyError"), error);
-      // If loading fails, remove it directly from the list
-      handleImageLoadFail(imageUrl);
-      loadingImages.current.delete(imageUrl);
-    }
+      // Mark as loading
+      setImageData((prev) => ({
+        ...prev,
+        [imageUrl]: {
+          base64Data: "",
+          contentType: "image/jpeg",
+          isLoading: true,
+          loadAttempts: currentAttempts + 1,
+        },
+      }));
 
-    return Promise.resolve();
-  }, [handleImageLoadFail]);
+      try {
+        // Convert image URL to backend API URL
+        const apiUrl = convertImageUrlToApiUrl(imageUrl);
+
+        // Use backend API to get the image
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+          throw new Error(`Failed to load image: ${response.statusText}`);
+        }
+
+        // Get image as blob and convert to base64
+        const blob = await response.blob();
+        const reader = new FileReader();
+
+        reader.onloadend = () => {
+          const base64Data = reader.result as string;
+          // Remove data URL prefix (e.g., "data:image/png;base64,")
+          const base64 = base64Data.split(",")[1] || base64Data;
+
+          setImageData((prev) => ({
+            ...prev,
+            [imageUrl]: {
+              base64Data: base64,
+              contentType: blob.type || "image/jpeg",
+              isLoading: false,
+              loadAttempts: (prev[imageUrl]?.loadAttempts || 0) + 1,
+            },
+          }));
+          loadingImages.current.delete(imageUrl);
+        };
+
+        reader.onerror = () => {
+          log.error("Failed to read image blob");
+          handleImageLoadFail(imageUrl);
+          loadingImages.current.delete(imageUrl);
+        };
+
+        reader.readAsDataURL(blob);
+      } catch (error) {
+        log.error(t("chatRightPanel.imageProxyError"), error);
+        // If loading fails, remove it directly from the list
+        handleImageLoadFail(imageUrl);
+        loadingImages.current.delete(imageUrl);
+      }
+
+      return Promise.resolve();
+    },
+    [handleImageLoadFail]
+  );
 
   // Listen for message changes, update search results and images
   useEffect(() => {
@@ -455,7 +493,9 @@ export function ChatRightPanel({
         // Load if: no state, or has error but not yet reached max attempts
         const shouldLoad =
           !imgState ||
-          (imgState.error && (imgState.loadAttempts || 0) < 3 && !imgState.isLoading);
+          (imgState.error &&
+            (imgState.loadAttempts || 0) < 3 &&
+            !imgState.isLoading);
 
         if (shouldLoad) {
           loadImage(imageUrl);
@@ -579,7 +619,10 @@ export function ChatRightPanel({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col" style={{ maxWidth: "400px", height: "100%" }}>
+      <div
+        className="flex-1 flex flex-col"
+        style={{ maxWidth: "400px", height: "100%" }}
+      >
         {/* Tab Headers */}
         <div className="flex border-b bg-gray-50">
           <Button

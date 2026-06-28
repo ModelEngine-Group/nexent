@@ -27,7 +27,7 @@ kubectl get nodes
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
+cd nexent
 ```
 
 ### 3. 部署
@@ -35,7 +35,7 @@ cd nexent/k8s/helm
 运行部署脚本：
 
 ```bash
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 执行此命令后，系统会通过 Bash TUI 选择配置选项。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
@@ -43,8 +43,8 @@ cd nexent/k8s/helm
 **组件组合:**
 - **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
 - **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
-- **data-process（可选）**: 数据处理服务
-- **supabase（可选）**: 启用用户、租户和认证能力
+- **data-process（默认选中，可选）**: 数据处理服务
+- **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
@@ -57,7 +57,9 @@ cd nexent/k8s/helm
 - **mainland**: 使用中国大陆镜像源
 - **local-latest**: 使用本地 `latest` 镜像，并将 Nexent 应用镜像的拉取策略设为本地优先
 
-部署成功后，非敏感部署选项会保存到 `k8s/helm/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+
+部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 ### ⚠️ 重要提示
 
@@ -80,7 +82,7 @@ kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c
   "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
 
 # Step 3: 重新部署并记录 su 账号密码
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 ### 4. 访问您的安装
@@ -155,44 +157,96 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 | Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
 | MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
 | Supabase DB（选择 supabase 时）| nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
+| 共享工作区 | nexent-workspace-pv | `/var/lib/nexent` |
+| 共享技能目录 | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
-卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `./uninstall.sh --delete-local-data true` 删除 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
+卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `bash uninstall.sh k8s --delete-local-data true` 删除 `/var/lib/nexent`、`/var/lib/nexent-data/skills` 和 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
+
+### 卸载 Kubernetes 部署
+
+请在仓库根目录使用统一卸载入口：
+
+```bash
+# 删除 Helm release；交互模式会询问是否删除 namespace 和本地数据
+bash uninstall.sh k8s
+
+# 仅清理 Helm release 状态，适合修复卡住的发布
+bash uninstall.sh k8s clean
+
+# 删除 Helm release 和 namespace，但保留本地 hostPath 数据
+bash uninstall.sh k8s delete --keep-local-data
+
+# 卸载后删除已知本地 hostPath 数据
+bash uninstall.sh k8s --delete-local-data true
+
+# 完整清理：Helm release、namespace 和本地 hostPath 数据都会删除
+bash uninstall.sh k8s delete-all
+```
+
+`--delete-data` 和 `--delete-volumes` 是兼容 Helm 管理资源的参数；本地盘数据请使用 `--delete-local-data` 或 `--keep-local-data` 控制。`delete-all --keep-local-data` 会删除 namespace，但保留本地卷内容。
+
+### 离线镜像包
+
+可在仓库根目录构建 Kubernetes 离线包：
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target k8s \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package
+```
+
+包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`manifest.yaml` 和 `checksums.txt`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
+
+```bash
+cd offline-package
+bash deploy.sh --load-images k8s
+```
+
+多节点集群需要在每个可能运行 Nexent Pod 的节点上加载镜像，或将镜像推送到集群可访问的内部镜像仓库，再使用匹配的镜像参数部署。
 
 ## 🔧 部署命令
 
 ```bash
 # 交互式部署
-./deploy.sh
+bash deploy.sh k8s
 
 # 非交互式部署默认组件
-./deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-./deploy.sh --components infrastructure,application,supabase,data-process,terminal
+bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
 
 # 使用中国大陆镜像源部署
-./deploy.sh --image-source mainland
+bash deploy.sh k8s --image-source mainland
 
 # 使用本地 latest 镜像
-./deploy.sh --image-source local-latest
+bash deploy.sh k8s --image-source local-latest
+
+# 使用 --sc 简写指定 StorageClass
+bash deploy.sh k8s --sc fast-storage
 
 # 仅清理 Helm 状态（修复卡住的发布）
-./uninstall.sh clean
+bash uninstall.sh k8s clean
 
 # 卸载，默认保留本地数据；交互确认是否删除 namespace 和本地数据
-./uninstall.sh
+bash uninstall.sh k8s
 
 # 卸载并删除 namespace
-./uninstall.sh --delete-namespace true
+bash uninstall.sh k8s --delete-namespace true
 
 # 卸载并删除本地 hostPath 数据
-./uninstall.sh --delete-local-data true
+bash uninstall.sh k8s --delete-local-data true
 
 # 完全卸载，包括 namespace 和本地 hostPath 数据
-./uninstall.sh delete-all
+bash uninstall.sh k8s delete-all
 
 # 完全卸载但保留本地 hostPath 数据
-./uninstall.sh delete-all --keep-local-data
+bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
 ## 🔧 高级配置
@@ -202,11 +256,11 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会生成运行时 Helm values，设置 `global.monitoring.enabled`、`global.monitoring.provider`、`global.monitoring.dashboardUrl`，并启用 `nexent-monitoring` 子 Chart。
 
 ```bash
-cd nexent/k8s/helm
-./deploy.sh
+cd nexent
+bash deploy.sh k8s
 ```
 
-如果本地已有 `k8s/helm/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
+如果本地已有 `deploy/k8s/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
 
 支持的 provider：
 
@@ -219,7 +273,7 @@ cd nexent/k8s/helm
 | `grafana` | 本地 Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | 本地 Zipkin | `http://localhost:30011` |
 
-选择 `langsmith` provider 前，请先在 `k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
+选择 `langsmith` provider 前，请先在 `deploy/deploy/k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
 
 常用 Helm values：
 
@@ -248,7 +302,7 @@ kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
 OAuth 登录依赖 `supabase` 组件。启用第三方登录时，请同时部署 `supabase`，并将 `config.oauth.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址。
 
 ```bash
-./deploy.sh --components infrastructure,application,supabase
+bash deploy.sh k8s --components infrastructure,application,supabase
 ```
 
 Kubernetes 部署通过 `nexent-common` 的 `config.oauth.*` values 写入后端环境变量：

@@ -186,7 +186,7 @@ def mock_agent_draft():
         "version_no": 0,
         "name": "Test Agent",
         "description": "Test Description",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 2,
         "max_steps": 10,
         "duty_prompt": "Test prompt",
@@ -305,6 +305,20 @@ def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_
     assert relation_snapshot["selected_agent_version_no"] == 1
     assert mock_insert_skill.call_count == 1
 
+    # Verify updated_by is set to user_id on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+
+    tool_snapshot_0 = mock_insert_tool.call_args_list[0][0][0]
+    tool_snapshot_1 = mock_insert_tool.call_args_list[1][0][0]
+    assert tool_snapshot_0["updated_by"] == "user1"
+    assert tool_snapshot_1["updated_by"] == "user1"
+
+    assert relation_snapshot["updated_by"] == "user1"
+
+    skill_snapshot = mock_insert_skill.call_args[0][0]
+    assert skill_snapshot["updated_by"] == "user1"
+
 
 def test_publish_version_impl_unpublished_sub_agent(
     monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft
@@ -376,6 +390,14 @@ def test_publish_version_impl_with_rollback_source(monkeypatch, mock_agent_draft
     assert call_args["source_type"] == "ROLLBACK"
     assert call_args["source_version_no"] == 1
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_skills(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing version with skill instances"""
@@ -411,6 +433,11 @@ def test_publish_version_impl_with_skills(monkeypatch, mock_agent_draft, mock_to
 
     assert result["version_no"] == 3
     assert mock_insert_skill.call_count == 3
+
+    # Verify updated_by is set on all skill snapshots
+    for i, call in enumerate(mock_insert_skill.call_args_list):
+        skill_snapshot = call[0][0]
+        assert skill_snapshot["updated_by"] == "user1"
 
 
 def test_publish_version_impl_empty_tools_relations(monkeypatch, mock_agent_draft, mock_skills_draft):
@@ -503,7 +530,7 @@ def test_get_version_detail_impl_success(monkeypatch):
     mock_agent_snapshot = {
         "agent_id": 1,
         "name": "Test Agent",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 2,
         "max_steps": 10,
         "description": "Test",
@@ -585,7 +612,7 @@ def test_get_version_detail_impl_with_skills(monkeypatch):
     mock_agent_snapshot = {
         "agent_id": 1,
         "name": "Test Agent",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
         "description": "Test",
@@ -635,12 +662,12 @@ def test_get_version_detail_impl_no_model(monkeypatch):
     mock_agent_snapshot = {
         "agent_id": 1,
         "name": "Test Agent",
-        "model_id": 0,  # No model configured
+        "model_ids": [],  # No model configured (empty list)
         "business_logic_model_id": 0,
         "max_steps": 10,
         "description": "Test",
         "duty_prompt": "Test prompt",
-        "group_ids": None,  # group_ids is None - triggers line 242
+        "group_ids": None,  # group_ids is None -> empty list
     }
 
     mock_tools_snapshot = []
@@ -657,8 +684,9 @@ def test_get_version_detail_impl_no_model(monkeypatch):
     result = get_version_detail_impl(agent_id=1, tenant_id="tenant1", version_no=1)
 
     assert result["model_name"] is None
+    assert result["model_names"] == []
     assert result["business_logic_model_name"] is None
-    assert result["group_ids"] == []  # Line 242: group_ids is None -> empty list
+    assert result["group_ids"] == []  # group_ids is None -> empty list
 
 
 def test_rollback_version_impl_success(monkeypatch):
@@ -1058,7 +1086,9 @@ def test_compare_versions_impl_success(monkeypatch):
     # Mock _get_version_detail_or_draft
     version_a = {
         "name": "Agent A",
-        "model_name": "Model A",
+        "model_ids": [1, 2],
+        "model_names": ["Model A1", "Model A2"],
+        "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
         "duty_prompt": "Prompt A",
@@ -1068,7 +1098,9 @@ def test_compare_versions_impl_success(monkeypatch):
     }
     version_b = {
         "name": "Agent B",
-        "model_name": "Model B",
+        "model_ids": [3, 4],
+        "model_names": ["Model B1", "Model B2"],
+        "model_name": "Model B1",
         "max_steps": 20,
         "description": "Desc B",
         "duty_prompt": "Prompt B",
@@ -1094,7 +1126,7 @@ def test_compare_versions_impl_success(monkeypatch):
         # Check that differences are detected
         difference_fields = [d["field"] for d in result["differences"]]
         assert "name" in difference_fields
-        assert "model_name" in difference_fields
+        assert "model_ids" in difference_fields
         assert "max_steps" in difference_fields
         assert "tools_count" in difference_fields
 
@@ -1103,7 +1135,9 @@ def test_compare_versions_impl_no_differences(monkeypatch):
     """Test comparing identical versions"""
     version = {
         "name": "Same Agent",
-        "model_name": "Same Model",
+        "model_ids": [1, 2],
+        "model_names": ["Model A", "Model B"],
+        "model_name": "Model A",
         "max_steps": 10,
         "description": "Same Desc",
         "duty_prompt": "Same Prompt",
@@ -1129,6 +1163,8 @@ def test_compare_versions_impl_skills_count_difference(monkeypatch):
     """Test comparing versions with different skills count"""
     version_a = {
         "name": "Agent A",
+        "model_ids": [1],
+        "model_names": ["Model A"],
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
@@ -1139,6 +1175,8 @@ def test_compare_versions_impl_skills_count_difference(monkeypatch):
     }
     version_b = {
         "name": "Agent A",
+        "model_ids": [1],
+        "model_names": ["Model A"],
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
@@ -1166,6 +1204,8 @@ def test_compare_versions_impl_sub_agents_count_difference(monkeypatch):
     """Test comparing versions with different sub_agents count"""
     version_a = {
         "name": "Agent A",
+        "model_ids": [1],
+        "model_names": ["Model A"],
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
@@ -1176,6 +1216,8 @@ def test_compare_versions_impl_sub_agents_count_difference(monkeypatch):
     }
     version_b = {
         "name": "Agent A",
+        "model_ids": [1],
+        "model_names": ["Model A"],
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
@@ -1202,7 +1244,7 @@ def test_compare_versions_impl_sub_agents_count_difference(monkeypatch):
 def test_check_version_snapshot_availability_success():
     """Test checking availability when agent is available"""
     agent_info = {
-        "model_id": 1,
+        "model_ids": [1],
     }
     tool_instances = [
         {"tool_id": 1, "enabled": True},
@@ -1235,7 +1277,7 @@ def test_check_version_snapshot_availability_no_agent():
 def test_check_version_snapshot_availability_no_model():
     """Test checking availability when model is not configured"""
     agent_info = {
-        "model_id": None,
+        "model_ids": [],
     }
     tool_instances = [{"tool_id": 1, "enabled": True}]
 
@@ -1250,10 +1292,28 @@ def test_check_version_snapshot_availability_no_model():
     assert "model_not_configured" in reasons
 
 
-def test_check_version_snapshot_availability_model_id_zero():
-    """Test checking availability when model_id is 0"""
+def test_check_version_snapshot_availability_empty_model_ids():
+    """Test checking availability when model_ids is empty list"""
     agent_info = {
-        "model_id": 0,
+        "model_ids": [],
+    }
+    tool_instances = [{"tool_id": 1, "enabled": True}]
+
+    is_available, reasons = _check_version_snapshot_availability(
+        agent_id=1,
+        tenant_id="tenant1",
+        agent_info=agent_info,
+        tool_instances=tool_instances,
+    )
+
+    assert is_available is False
+    assert "model_not_configured" in reasons
+
+
+def test_check_version_snapshot_availability_no_model_ids_key():
+    """Test checking availability when model_ids key is missing"""
+    agent_info = {
+        "name": "Test Agent",  # Other fields present, but model_ids is not
     }
     tool_instances = [{"tool_id": 1, "enabled": True}]
 
@@ -1270,7 +1330,7 @@ def test_check_version_snapshot_availability_model_id_zero():
 
 def test_check_version_snapshot_availability_no_tools():
     """Test checking availability when no tools exist (should be available)"""
-    agent_info = {"model_id": 1}
+    agent_info = {"model_ids": [1]}
 
     is_available, reasons = _check_version_snapshot_availability(
         agent_id=1,
@@ -1286,7 +1346,7 @@ def test_check_version_snapshot_availability_no_tools():
 
 def test_check_version_snapshot_availability_all_tools_disabled():
     """Test checking availability when all tools are disabled"""
-    agent_info = {"model_id": 1}
+    agent_info = {"model_ids": [1]}
     tool_instances = [
         {"tool_id": 1, "enabled": False},
         {"tool_id": 2, "enabled": False},
@@ -1308,7 +1368,7 @@ def test_get_version_detail_or_draft_draft_version(monkeypatch):
     mock_agent_draft = {
         "agent_id": 1,
         "name": "Draft Agent",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 2,
         "group_ids": "1,2",
     }
@@ -1340,7 +1400,7 @@ def test_get_version_detail_or_draft_draft_version_no_skills(monkeypatch):
     mock_agent_draft = {
         "agent_id": 1,
         "name": "Draft Agent",
-        "model_id": 1,  # model_id is not None
+        "model_ids": [1],
         "business_logic_model_id": 0,
         "group_ids": "",
     }
@@ -1351,7 +1411,7 @@ def test_get_version_detail_or_draft_draft_version_no_skills(monkeypatch):
         return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
     )
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
-    # model_info is None - triggers line 656 (model_info.get with None)
+    # model_info is None
     mock_get_model = MagicMock(return_value=None)
     monkeypatch.setattr(agent_version_service_module, "get_model_by_model_id", mock_get_model)
     monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
@@ -1359,23 +1419,40 @@ def test_get_version_detail_or_draft_draft_version_no_skills(monkeypatch):
     result = _get_version_detail_or_draft(agent_id=1, tenant_id="tenant1", version_no=0)
 
     assert result["name"] == "Draft Agent"
-    assert result["model_name"] is None  # Line 656: model_info is None -> None
+    assert result["model_name"] is None
+    assert result["model_names"] == []
     assert result["business_logic_model_name"] is None
     assert result["group_ids"] == []
     assert len(result["skills"]) == 0
 
 
-def test_get_version_detail_or_draft_model_id_none(monkeypatch):
-    """Test _get_version_detail_or_draft when model_id is None - triggers line 658"""
+def test_get_version_detail_or_draft_model_ids_empty(monkeypatch):
+    """Test _get_version_detail_or_draft when model_ids is empty list"""
     mock_agent_draft = {
         "agent_id": 1,
         "name": "Draft Agent",
-        "model_id": None,  # model_id is None - triggers line 658 else branch
-        "business_logic_model_id": None,  # Also None - triggers line 665 else branch
-        "group_ids": None,  # group_ids is None - triggers line 676
+        "model_ids": [],
+        "business_logic_model_id": None,
+        "group_ids": None,
     }
     mock_tools_draft = []
     mock_relations_draft = []
+
+    mock_query_draft = MagicMock(
+        return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+    mock_get_model = MagicMock(return_value=None)
+    monkeypatch.setattr(agent_version_service_module, "get_model_by_model_id", mock_get_model)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
+
+    result = _get_version_detail_or_draft(agent_id=1, tenant_id="tenant1", version_no=0)
+
+    assert result["name"] == "Draft Agent"
+    assert result["model_name"] is None
+    assert result["model_names"] == []
+    assert result["business_logic_model_name"] is None
+    assert result["group_ids"] == []
 
     mock_query_draft = MagicMock(
         return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
@@ -1409,7 +1486,7 @@ def test_get_version_detail_or_draft_published_version(monkeypatch):
     mock_version_detail = {
         "name": "Published Agent",
         "version": {"version_name": "v1.0"},
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 2,
         "group_ids": "1,2",
         "tools": [],
@@ -1427,6 +1504,7 @@ def test_get_version_detail_or_draft_published_version(monkeypatch):
 
     assert result["name"] == "Published Agent"
     assert result["version"]["version_name"] == "v1.0"
+    assert result["model_names"] == ["Test Model"]
 
 
 def test_get_version_detail_or_draft_group_ids_as_list(monkeypatch):
@@ -1434,7 +1512,7 @@ def test_get_version_detail_or_draft_group_ids_as_list(monkeypatch):
     mock_agent_draft = {
         "agent_id": 1,
         "name": "Draft Agent",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 0,
         "group_ids": [1, 2, 3],  # Already a list
     }
@@ -1473,8 +1551,10 @@ def test_remove_audit_fields_for_insert():
     assert "other_field" in data
     assert "create_time" not in data
     assert "update_time" not in data
-    assert "created_by" not in data
-    assert "updated_by" not in data
+    assert "created_by" in data
+    assert data["created_by"] == "user1"
+    assert "updated_by" in data
+    assert data["updated_by"] == "user2"
     assert "delete_flag" not in data
 
 
@@ -1523,7 +1603,7 @@ def test_list_published_agents_impl_success(monkeypatch):
             {
                 "agent_id": 1,
                 "name": "Test Agent",
-                "model_id": 1,
+                "model_ids": [1],
                 "description": "Test",
             },
             [{"tool_id": 1, "enabled": True}],
@@ -1544,6 +1624,8 @@ def test_list_published_agents_impl_success(monkeypatch):
     assert len(result) == 1
     assert result[0]["agent_id"] == 1
     assert result[0]["name"] == "Test Agent"
+    assert result[0]["model_ids"] == [1]
+    assert result[0]["model_names"] == ["Test Model"]
 
 
 def test_list_published_agents_impl_no_published_version(monkeypatch):
@@ -1676,7 +1758,7 @@ def test_list_published_agents_impl_user_with_groups(monkeypatch):
             {
                 "agent_id": 1,
                 "name": "Test Agent",
-                "model_id": 1,
+                "model_ids": [1],
                 "description": "Test",
             },
             [{"tool_id": 1, "enabled": True}],
@@ -1726,11 +1808,11 @@ def test_list_published_agents_impl_model_cache(monkeypatch):
         return_value={"user_role": "ADMIN"}
     )
 
-    # Both agents use the same model_id
+    # Both agents use the same model_ids
     agent_version_db_mock.query_agent_snapshot = MagicMock(
         side_effect=[
-            ({"agent_id": 1, "name": "Agent 1", "model_id": 1, "description": "Test"}, [], []),
-            ({"agent_id": 2, "name": "Agent 2", "model_id": 1, "description": "Test"}, [], []),
+            ({"agent_id": 1, "name": "Agent 1", "model_ids": [1], "description": "Test"}, [], []),
+            ({"agent_id": 2, "name": "Agent 2", "model_ids": [1], "description": "Test"}, [], []),
         ]
     )
 
@@ -1746,8 +1828,10 @@ def test_list_published_agents_impl_model_cache(monkeypatch):
 
     assert len(result) == 2
     # Verify model info is used in results
-    assert result[0]["model_id"] == 1
-    assert result[1]["model_id"] == 1
+    assert result[0]["model_ids"] == [1]
+    assert result[1]["model_ids"] == [1]
+    assert result[0]["model_names"] == ["Test Model"]
+    assert result[1]["model_names"] == ["Test Model"]
 
 
 def test_list_published_agents_impl_group_ids_query_exception(monkeypatch):
@@ -1808,7 +1892,7 @@ def test_list_published_agents_impl_is_available_false(monkeypatch):
 
     agent_version_db_mock.query_agent_snapshot = MagicMock(
         return_value=(
-            {"agent_id": 1, "name": "Test Agent", "model_id": 0, "description": "Test"},
+            {"agent_id": 1, "name": "Test Agent", "model_ids": [], "description": "Test"},
             [],
             [],
         )
@@ -1908,6 +1992,14 @@ def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, 
         version="1",
     )
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_existing_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing version with publish_as_a2a=True for an existing A2A agent"""
@@ -1975,7 +2067,7 @@ def test_publish_version_impl_with_a2a_no_name_uses_default(monkeypatch, mock_to
         "version_no": 0,
         "name": None,
         "description": "Test Description",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
         "duty_prompt": "Test prompt",
@@ -2068,6 +2160,14 @@ def test_publish_version_impl_without_a2a(monkeypatch, mock_agent_draft, mock_to
     a2a_agent_db_mock.get_server_agent_by_agent_id.assert_not_called()
     a2a_agent_db_mock.create_server_agent.assert_not_called()
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing A2A agent that supports streaming"""
@@ -2109,6 +2209,14 @@ def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_d
     assert result["a2a_agent"]["streaming"] is True
     assert result["a2a_agent_card"]["streaming"] is True
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing version with publish_as_a2a=True for an existing A2A agent that has no name - uses default name"""
@@ -2118,7 +2226,7 @@ def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_
         "version_no": 0,
         "name": None,
         "description": "Test Description",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
         "duty_prompt": "Test prompt",
@@ -2187,6 +2295,14 @@ def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_
         version="1",
     )
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing with A2A when agent name is empty string - uses default name"""
@@ -2196,7 +2312,7 @@ def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools
         "version_no": 0,
         "name": "",  # Empty string - falsy
         "description": "Test Description",
-        "model_id": 1,
+        "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
         "duty_prompt": "Test prompt",
@@ -2241,6 +2357,14 @@ def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools
     # Verify empty string falls back to default name
     call_kwargs = a2a_agent_db_mock.create_server_agent.call_args[1]
     assert call_kwargs["name"] == "Agent-55"
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_missing_endpoint_id_in_response(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2343,6 +2467,14 @@ def test_publish_version_impl_with_a2a_existing_agent_keeps_endpoint_id(monkeypa
     assert result["a2a_agent_card"]["agent_card_url"] == "/nb/a2a/a2a_1_persistent/.well-known/agent-card.json"
     assert result["a2a_agent_card"]["rest_endpoints"]["message_send"] == "/nb/a2a/a2a_1_persistent/message:send"
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_result_contains_both_keys(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test that publish_version_impl returns both a2a_agent and a2a_agent_card keys when publish_as_a2a=True"""
@@ -2392,6 +2524,14 @@ def test_publish_version_impl_with_a2a_result_contains_both_keys(monkeypatch, mo
     assert isinstance(result["a2a_agent"], dict)
     assert isinstance(result["a2a_agent_card"], dict)
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test A2A agent creation when agent draft has no description"""
@@ -2438,6 +2578,14 @@ def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_
     assert call_kwargs["description"] is None
     # Agent card should reflect None description
     assert result["a2a_agent_card"]["description"] is None
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2492,6 +2640,14 @@ def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeyp
     # Agent card should reflect updated values
     assert result["a2a_agent_card"]["name"] == "Test Agent"
     assert result["a2a_agent_card"]["description"] == "Test Description"
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_with_a2a_agent_card_all_fields(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
@@ -2554,6 +2710,14 @@ def test_publish_version_impl_with_a2a_agent_card_all_fields(monkeypatch, mock_a
     assert card["jsonrpc_url"] == f"{expected_base_path}/v1"
     assert card["jsonrpc_methods"] == ["SendMessage", "SendStreamingMessage", "GetTask"]
 
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
 
 def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft, caplog):
     """Test that appropriate log messages are emitted for A2A agent creation"""
@@ -2598,6 +2762,14 @@ def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draf
     # Should contain log about creating A2A agent
     assert any("Creating/updating A2A Server agent" in msg for msg in log_messages)
     assert any("A2A Server agent created/updated with endpoint_id=a2a_1_log" in msg for msg in log_messages)
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
 
 
 def test_publish_version_impl_a2a_logging_on_update(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft, caplog):
@@ -2651,3 +2823,370 @@ def test_publish_version_impl_a2a_logging_on_update(monkeypatch, mock_agent_draf
     assert any("A2A Server agent already exists" in msg for msg in log_messages)
     assert any("Creating/updating A2A Server agent" in msg for msg in log_messages)
     assert any("A2A Server agent created/updated with endpoint_id=a2a_1_existing" in msg for msg in log_messages)
+
+    # Verify updated_by is set on all snapshot types
+    agent_snapshot = mock_insert_agent.call_args[0][0]
+    assert agent_snapshot["updated_by"] == "user1"
+    for call in mock_insert_tool.call_args_list:
+        assert call[0][0]["updated_by"] == "user1"
+    assert mock_insert_relation.call_args[0][0]["updated_by"] == "user1"
+    assert mock_insert_skill.call_args[0][0]["updated_by"] == "user1"
+
+
+# =============================================================================
+# Additional tests for model_ids handling (new code paths)
+# =============================================================================
+
+def test_get_version_detail_impl_multiple_models(monkeypatch):
+    """Test getting version detail with multiple models in model_ids array"""
+    mock_version = {
+        "version_no": 1,
+        "version_name": "v1.0",
+        "status": "RELEASED",
+        "release_note": "Test note",
+        "source_type": "NORMAL",
+        "source_version_no": None,
+    }
+
+    mock_agent_snapshot = {
+        "agent_id": 1,
+        "name": "Test Agent",
+        "model_ids": [1, 2, 3],
+        "business_logic_model_id": 4,
+        "max_steps": 10,
+        "description": "Test",
+        "duty_prompt": "Test prompt",
+        "group_ids": "1,2",
+    }
+
+    mock_tools_snapshot = [
+        {"tool_id": 1, "enabled": True},
+    ]
+
+    mock_relations_snapshot = []
+
+    mock_search = MagicMock(return_value=mock_version)
+    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+    mock_query_snapshot = MagicMock(
+        return_value=(mock_agent_snapshot, mock_tools_snapshot, mock_relations_snapshot)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+
+    def mock_get_model(model_id):
+        return {"display_name": f"Model-{model_id}"}
+
+    monkeypatch.setattr(agent_version_service_module, "get_model_by_model_id", mock_get_model)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
+
+    result = get_version_detail_impl(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert result["name"] == "Test Agent"
+    assert result["model_ids"] == [1, 2, 3]
+    assert result["model_names"] == ["Model-1", "Model-2", "Model-3"]
+    assert result["model_name"] == "Model-1"
+    assert result["business_logic_model_name"] == "Model-4"
+
+
+def test_get_version_detail_impl_model_ids_none(monkeypatch):
+    """Test getting version detail when model_ids is None"""
+    mock_version = {
+        "version_no": 1,
+        "version_name": "v1.0",
+        "status": "RELEASED",
+        "release_note": "Test note",
+        "source_type": "NORMAL",
+        "source_version_no": None,
+    }
+
+    mock_agent_snapshot = {
+        "agent_id": 1,
+        "name": "Test Agent",
+        "model_ids": None,
+        "business_logic_model_id": None,
+        "max_steps": 10,
+        "description": "Test",
+        "duty_prompt": "Test prompt",
+        "group_ids": "1,2",
+    }
+
+    mock_tools_snapshot = []
+    mock_relations_snapshot = []
+
+    mock_search = MagicMock(return_value=mock_version)
+    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+    mock_query_snapshot = MagicMock(
+        return_value=(mock_agent_snapshot, mock_tools_snapshot, mock_relations_snapshot)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=[]))
+
+    result = get_version_detail_impl(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert result["model_ids"] is None
+    assert result["model_names"] == []
+    assert result["model_name"] is None
+    assert result["business_logic_model_name"] is None
+
+
+def test_compare_versions_impl_model_ids_difference(monkeypatch):
+    """Test comparing versions with different model_ids arrays"""
+    version_a = {
+        "name": "Agent A",
+        "model_ids": [1, 2],
+        "model_names": ["Model A1", "Model A2"],
+        "model_name": "Model A1",
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+    version_b = {
+        "name": "Agent A",
+        "model_ids": [1, 3],
+        "model_names": ["Model A1", "Model B3"],
+        "model_name": "Model A1",
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+
+    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+        mock_get_detail.side_effect = [version_a, version_b]
+
+        result = compare_versions_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            version_no_a=1,
+            version_no_b=2,
+        )
+
+        difference_fields = [d["field"] for d in result["differences"]]
+        assert "model_ids" in difference_fields
+
+
+def test_compare_versions_impl_model_ids_same(monkeypatch):
+    """Test comparing versions with identical model_ids"""
+    version_a = {
+        "name": "Agent A",
+        "model_ids": [1, 2],
+        "model_names": ["Model A1", "Model A2"],
+        "model_name": "Model A1",
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+    version_b = {
+        "name": "Agent B",
+        "model_ids": [1, 2],
+        "model_names": ["Model A1", "Model A2"],
+        "model_name": "Model A1",
+        "max_steps": 10,
+        "description": "Desc B",
+        "duty_prompt": "Prompt B",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+
+    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+        mock_get_detail.side_effect = [version_a, version_b]
+
+        result = compare_versions_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            version_no_a=1,
+            version_no_b=2,
+        )
+
+        difference_fields = [d["field"] for d in result["differences"]]
+        assert "model_ids" not in difference_fields
+        assert "name" in difference_fields
+
+
+def test_compare_versions_impl_model_ids_order_difference(monkeypatch):
+    """Test comparing versions with same models but different order"""
+    version_a = {
+        "name": "Agent A",
+        "model_ids": [1, 2],
+        "model_names": ["Model A1", "Model A2"],
+        "model_name": "Model A1",
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+    version_b = {
+        "name": "Agent A",
+        "model_ids": [2, 1],
+        "model_names": ["Model A2", "Model A1"],
+        "model_name": "Model A2",
+        "max_steps": 10,
+        "description": "Desc A",
+        "duty_prompt": "Prompt A",
+        "tools": [],
+        "sub_agent_id_list": [],
+        "skills": [],
+    }
+
+    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+        mock_get_detail.side_effect = [version_a, version_b]
+
+        result = compare_versions_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            version_no_a=1,
+            version_no_b=2,
+        )
+
+        difference_fields = [d["field"] for d in result["differences"]]
+        assert "model_ids" in difference_fields
+
+
+def test_get_version_detail_or_draft_with_multiple_models(monkeypatch):
+    """Test _get_version_detail_or_draft with multiple models"""
+    mock_agent_draft = {
+        "agent_id": 1,
+        "name": "Draft Agent",
+        "model_ids": [1, 2],
+        "business_logic_model_id": 3,
+        "group_ids": "1,2",
+    }
+    mock_tools_draft = []
+    mock_relations_draft = []
+    mock_skills_draft = []
+
+    mock_query_draft = MagicMock(
+        return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft)
+    )
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+
+    def mock_get_model(model_id):
+        return {"display_name": f"Model-{model_id}"}
+
+    monkeypatch.setattr(agent_version_service_module, "get_model_by_model_id", mock_get_model)
+    monkeypatch.setattr(skill_db_mock, "query_skill_instances_by_agent_id", MagicMock(return_value=mock_skills_draft))
+
+    result = _get_version_detail_or_draft(agent_id=1, tenant_id="tenant1", version_no=0)
+
+    assert result["model_ids"] == [1, 2]
+    assert result["model_names"] == ["Model-1", "Model-2"]
+    assert result["model_name"] == "Model-1"
+    assert result["business_logic_model_name"] == "Model-3"
+
+
+def test_list_published_agents_impl_multiple_models(monkeypatch):
+    """Test listing published agents with multiple models"""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+                "author": "Author",
+                "is_new": False,
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+    agent_service_mock.query_group_ids_by_user = MagicMock(return_value=[1, 2])
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [1, 2],
+                "description": "Test",
+            },
+            [{"tool_id": 1, "enabled": True}],
+            [],
+        )
+    )
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(True, [])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+
+    def mock_get_model(model_id, tenant_id=None):
+        return {"display_name": f"Model-{model_id}"}
+
+    agent_service_mock.get_model_by_model_id = MagicMock(side_effect=mock_get_model)
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    assert len(result) == 1
+    assert result[0]["agent_id"] == 1
+    assert result[0]["model_ids"] == [1, 2]
+    assert result[0]["model_names"] == ["Model-1", "Model-2"]
+    assert result[0]["model_name"] == "Model-1"
+
+
+def test_list_published_agents_impl_model_ids_empty(monkeypatch):
+    """Test listing published agents with empty model_ids"""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+                "description": "Test",
+                "author": "Author",
+                "is_new": False,
+            }
+        ]
+    )
+
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+    agent_service_mock.query_group_ids_by_user = MagicMock(return_value=[1, 2])
+
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=(
+            {
+                "agent_id": 1,
+                "name": "Test Agent",
+                "model_ids": [],
+                "description": "Test",
+            },
+            [{"tool_id": 1, "enabled": True}],
+            [],
+        )
+    )
+
+    agent_service_mock.check_agent_availability = MagicMock(
+        return_value=(False, ["model_not_configured"])
+    )
+    agent_service_mock._apply_duplicate_name_availability_rules = MagicMock()
+    agent_service_mock.get_model_by_model_id = MagicMock(return_value=None)
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    assert len(result) == 1
+    assert result[0]["model_ids"] == []
+    assert result[0]["model_names"] == []
+    assert result[0]["model_name"] is None
+    assert result[0]["is_available"] is False

@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
-import type { FileAttachment, FilePreview } from "@/types/chat";
+import type { FileAttachment, FilePreview, MinioFileItem } from "@/types/chat";
 import log from "@/lib/logger";
 
 /**
@@ -119,7 +119,107 @@ export const createMessageAttachments = (
 };
 
 /**
- * Revoke all object URLs created for attachments to free browser memory
+ * Build the complete attachment payload for an agent run request.
+ *
+ * Orchestrates the full attachment pipeline used by chat/debug/compare send paths:
+ * upload → validate → build message attachments → (optionally) preprocess for
+ * descriptions → assemble the `minio_files` array. Centralizing this here removes
+ * duplicated upload/mapping logic across debug and compare send handlers and
+ * guarantees both paths apply the same "missing upload" validation.
+ *
+ * @param attachments     - Selected file previews (images and/or documents) to send.
+ * @param fileUrls        - Local object URLs keyed by attachment id (non-image files).
+ * @param question        - The user's question text; passed to preprocessing.
+ * @param signal          - AbortSignal for cancellation; required when `withDescription` is true.
+ * @param withDescription - If true, run `preprocessAttachments` to fetch per-file
+ *                          descriptions and fill `minio_files[].description`. Debug mode
+ *                          sets this true; compare mode sets it false (descriptions stay "").
+ * @param t               - i18n translation function (passed through to upload/preprocess).
+ * @returns `{ messageAttachments, minioFiles }` on success (both empty arrays when there
+ *          are no attachments). On failure returns `{ messageAttachments: [], minioFiles: [], error }`
+ *          where `error` is a localized/concatenated reason string; the caller is responsible
+ *          for surfacing it to the user.
+ */
+export const buildMinioFilePayload = async (
+  attachments: FilePreview[],
+  fileUrls: Record<string, string>,
+  question: string,
+  signal: AbortSignal | undefined,
+  withDescription: boolean,
+  t: any
+): Promise<{
+  messageAttachments: FileAttachment[];
+  minioFiles: MinioFileItem[];
+  error?: string;
+}> => {
+  // No attachments: return empty payload, caller decides whether to omit the field.
+  if (attachments.length === 0) {
+    return { messageAttachments: [], minioFiles: [] };
+  }
+
+  // 1. Upload all attachments to storage (MinIO).
+  const uploadResult = await uploadAttachments(attachments, t);
+  if (uploadResult.error) {
+    return { messageAttachments: [], minioFiles: [], error: uploadResult.error };
+  }
+  const { uploadedFileUrls, objectNames, presignedUrls } = uploadResult;
+
+  // 2. Guard: every attachment must have both a public URL and an object name.
+  const missing = attachments.filter(
+    (attachment) =>
+      !uploadedFileUrls[attachment.file.name] ||
+      !objectNames[attachment.file.name]
+  );
+  if (missing.length > 0) {
+    return {
+      messageAttachments: [],
+      minioFiles: [],
+      error: missing.map((attachment) => attachment.file.name).join(", "),
+    };
+  }
+
+  // 3. Build the message-side attachment metadata (for local UI rendering).
+  const messageAttachments = createMessageAttachments(
+    attachments,
+    uploadedFileUrls,
+    fileUrls,
+    objectNames,
+    presignedUrls
+  );
+
+  // 4. Optionally fetch per-file descriptions (currently a no-op in preprocessAttachments).
+  let descriptions: Record<string, string> = {};
+  if (withDescription && signal) {
+    const preprocessResult = await preprocessAttachments(
+      question,
+      attachments,
+      signal,
+      () => {},
+      t,
+      -1
+    );
+    descriptions = preprocessResult.fileDescriptions || {};
+  }
+
+  // 5. Assemble the `minio_files` payload sent to the backend agent run.
+  const minioFiles: MinioFileItem[] = messageAttachments.map((attachment) => ({
+    object_name: objectNames[attachment.name] || "",
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    url: uploadedFileUrls[attachment.name] || attachment.url,
+    presigned_url: presignedUrls[attachment.name] || "",
+    description: descriptions[attachment.name] || "",
+  }));
+
+  return { messageAttachments, minioFiles };
+};
+
+/**
+ * Revoke all object URLs created for attachments to free browser memory.
+ *
+ * @param attachments - Attachments whose `previewUrl` (image) object URLs should be revoked.
+ * @param fileUrls    - Map of attachment id → local object URL (non-image files) to revoke.
  */
 export const cleanupAttachmentUrls = (
   attachments: FilePreview[],

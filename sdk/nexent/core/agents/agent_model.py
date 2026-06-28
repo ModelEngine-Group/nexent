@@ -12,15 +12,14 @@ PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..utils.observer import MessageObserver
 
 # TYPE_CHECKING to avoid circular import
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .agent_context import ContextManagerConfig
-    from .summary_config import ContextManagerConfig as SummaryConfig
+    from .summary_config import ContextManagerConfig
 
 
 class ModelConfig(BaseModel):
@@ -44,14 +43,47 @@ class ModelConfig(BaseModel):
         ),
         default=None,
     )
-    max_tokens: Optional[int] = Field(
+    max_output_tokens: Optional[int] = Field(
         description=(
             "Per-call completion output cap forwarded to chat.completions.create. "
-            "Defaults to None so production keeps the provider's own default "
-            "(typically the model's max output). Benchmarks set this explicitly "
-            "(e.g. 4096) to bound pathological generation loops where a model "
-            "regurgitates context."
+            "Preferred name over the deprecated max_tokens. Defaults to None so "
+            "production keeps the provider's own default (typically the model's "
+            "max output). Benchmarks set this explicitly (e.g. 4096) to bound "
+            "pathological generation loops where a model regurgitates context."
         ),
+        default=None,
+    )
+    max_tokens: Optional[int] = Field(
+        description=(
+            "DEPRECATED W1 alias for max_output_tokens. Retained so existing "
+            "callers and persisted ModelRecord rows keep working during the "
+            "migration window. If only max_tokens is set, the validator copies "
+            "it into max_output_tokens; if both are set, max_output_tokens wins."
+        ),
+        default=None,
+    )
+    context_window_tokens: Optional[int] = Field(
+        description="Total combined input/output context window in tokens, when the provider uses a combined window. Resolved by ModelCapacityResolver per W1 ADR.",
+        default=None,
+    )
+    max_input_tokens: Optional[int] = Field(
+        description="Provider hard input-token limit when distinct from the combined window. Resolved by ModelCapacityResolver per W1 ADR.",
+        default=None,
+    )
+    default_output_reserve_tokens: Optional[int] = Field(
+        description="Default output allowance reserved per request before constructing input context. Resolved by ModelCapacityResolver per W1 ADR.",
+        default=None,
+    )
+    tokenizer_family: Optional[str] = Field(
+        description="Tokenizer-family identifier resolved via tokenizer_registry. None forces estimated counting mode.",
+        default=None,
+    )
+    capacity_source: Optional[str] = Field(
+        description="Source of the persisted capacity value: operator | profile | provider_candidate | legacy | unknown.",
+        default=None,
+    )
+    capability_profile_version: Optional[str] = Field(
+        description="Version of the approved provider/model capability profile selected by the resolver, e.g. 'openai/gpt-4o@1'.",
         default=None,
     )
     timeout_seconds: Optional[float] = Field(
@@ -62,6 +94,23 @@ class ModelConfig(BaseModel):
         description="Maximum concurrent requests for this model. If None, no limit.",
         default=None,
     )
+    prompt_cache: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Selected prompt-cache capability profile. Unknown or absent "
+            "capability disables provider cache directives while still allowing "
+            "deterministic prefix proxy metrics."
+        ),
+        default=None,
+    )
+
+    @model_validator(mode="after")
+    def _backfill_max_output_from_legacy_max_tokens(self) -> "ModelConfig":
+        if self.max_output_tokens is None and self.max_tokens is not None:
+            self.max_output_tokens = self.max_tokens
+        elif self.max_output_tokens is not None and self.max_tokens is None:
+            # Keep legacy attribute populated so callers reading it keep working.
+            self.max_tokens = self.max_output_tokens
+        return self
 
 
 class ToolConfig(BaseModel):
@@ -142,6 +191,14 @@ class AgentConfig(BaseModel):
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
     max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1, le=30)
+    requested_output_tokens: Optional[int] = Field(
+        description=(
+            "Per-agent W2 output reserve override. None means inherit the "
+            "resolved model-level default."
+        ),
+        default=None,
+        ge=1,
+    )
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
@@ -160,6 +217,14 @@ class AgentConfig(BaseModel):
     context_components: Optional[List[Any]] = Field(
         description="Pre-built context components for system prompt assembly",
         default=None
+    )
+    capacity_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
+    )
+    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved W2 safe input budget snapshot for request execution",
+        default=None,
     )
     verification_config: AgentVerificationConfig = Field(
         description="Layered ReAct self-verification configuration",
@@ -191,6 +256,14 @@ class AgentRunInfo(BaseModel):
         description="Conversation-level reusable ContextManager instance. "
                     "If provided, it will be attached to the CoreAgent instead of creating a new one.",
         default=None
+    )
+    capacity_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved model capacity snapshot fields for request monitoring",
+        default=None,
+    )
+    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Resolved W2 safe input budget snapshot for request execution",
+        default=None,
     )
 
     class Config:
@@ -254,28 +327,28 @@ class ExternalA2AAgentConfig(BaseModel):
         """Build detailed skills description from raw_card."""
         if not self.raw_card:
             return ""
-        
+
         skills = self.raw_card.get("skills", [])
         if not skills:
             return ""
-        
+
         # Build examples section
         examples_lines = []
         for skill in skills:
             examples = skill.get("examples", [])
             if examples:
                 examples_lines.extend(examples[:3])
-        
+
         examples_section = ""
         if examples_lines:
             # Shuffle and pick some examples
             examples_str = ', '.join(f'"{ex}"' for ex in examples_lines[:8])
             examples_section = f"\n  调用示例: {examples_str}"
-        
+
         # Build capability description (without explicit skill IDs)
         capability_names = [skill.get("name", "") for skill in skills if skill.get("name")]
         capability_str = "、".join(capability_names) if capability_names else ""
-        
+
         return f"[此助手可处理: {capability_str}]{examples_section}"
 
     def to_a2a_agent_info(self) -> "A2AAgentInfo":
@@ -303,7 +376,7 @@ ComponentType = Literal["system_prompt", "tools", "skills", "memory", "knowledge
 
 class ContextComponent(BaseModel, ABC):
     """Abstract base for all context components.
-    
+
     Each component knows how to convert itself to LLM message format via to_messages().
     Follows smolagents MemoryStep.to_messages() pattern.
     """
@@ -315,7 +388,7 @@ class ContextComponent(BaseModel, ABC):
     @abstractmethod
     def to_messages(self) -> List[Dict[str, str]]:
         """Convert component content to message format for LLM.
-        
+
         Returns:
             List of message dicts with 'role' and 'content' keys.
         """
@@ -323,10 +396,10 @@ class ContextComponent(BaseModel, ABC):
 
     def estimate_tokens(self, chars_per_token: float = 1.5) -> int:
         """Estimate token count from content length.
-        
+
         Args:
             chars_per_token: Average characters per token ratio.
-            
+
         Returns:
             Estimated token count.
         """
@@ -393,7 +466,10 @@ class MemoryComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, str]]:
         if self.formatted_content:
-            return [{"role": "system", "content": self.formatted_content}]
+            # Memory is user/session-specific dynamic context.  Keeping it out
+            # of the authoritative system prefix preserves cross-turn cache
+            # reuse without changing its content or selection semantics.
+            return [{"role": "user", "content": self.formatted_content}]
         return []
 
     def add_memory(self, content: str, memory_type: str = "user", metadata: Dict[str, Any] = None) -> None:
@@ -413,7 +489,10 @@ class KnowledgeBaseComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, str]]:
         if self.summary:
-            return [{"role": "system", "content": self.summary}]
+            # Retrieved knowledge is request-dependent evidence, not
+            # authoritative instruction.  Keeping it dynamic protects the
+            # stable cache prefix when retrieval results change between turns.
+            return [{"role": "user", "content": self.summary}]
         return []
 
 
@@ -464,7 +543,7 @@ class ExternalAgentsComponent(ContextComponent):
 
 class ContextStrategy(ABC):
     """Abstract base for context component selection strategies."""
-    
+
     @abstractmethod
     def select_components(
         self,
@@ -473,12 +552,12 @@ class ContextStrategy(ABC):
         component_budgets: Dict[str, int]
     ) -> List[ContextComponent]:
         """Select components to include within constraints.
-        
+
         Args:
             components: All available context components.
             token_budget: Maximum total tokens allowed.
             component_budgets: Per-type token limits.
-            
+
         Returns:
             Selected components in priority order.
         """
@@ -492,7 +571,7 @@ class ContextStrategy(ABC):
 
 class FullStrategy(ContextStrategy):
     """Keep all components - for unlimited context models."""
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
@@ -507,7 +586,7 @@ class FullStrategy(ContextStrategy):
 
 class TokenBudgetStrategy(ContextStrategy):
     """Select components within total token budget by priority."""
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
@@ -518,7 +597,7 @@ class TokenBudgetStrategy(ContextStrategy):
         selected: List[ContextComponent] = []
         total_tokens = 0
         type_totals: Dict[str, int] = {}
-        
+
         for comp in sorted_components:
             comp_tokens = comp.token_estimate or comp.estimate_tokens()
             comp_budget = component_budgets.get(comp.component_type, token_budget)
@@ -556,10 +635,10 @@ class TokenBudgetStrategy(ContextStrategy):
 
 class BufferedStrategy(ContextStrategy):
     """Keep last N components per type."""
-    
+
     def __init__(self, buffer_size: int = 10):
         self.buffer_size = buffer_size
-    
+
     def select_components(
         self,
         components: List[ContextComponent],
@@ -567,10 +646,10 @@ class BufferedStrategy(ContextStrategy):
         component_budgets: Dict[str, int]
     ) -> List[ContextComponent]:
         type_buckets: Dict[str, List[ContextComponent]] = {}
-        
+
         for comp in components:
             type_buckets.setdefault(comp.component_type, []).append(comp)
-        
+
         selected: List[ContextComponent] = []
         for comp_type, bucket in type_buckets.items():
             recent = bucket[-self.buffer_size:]
@@ -591,10 +670,10 @@ class BufferedStrategy(ContextStrategy):
 
 class PriorityWeightedStrategy(ContextStrategy):
     """Select by weighted importance + relevance scores."""
-    
+
     def __init__(self, relevance_threshold: float = 0.5):
         self.relevance_threshold = relevance_threshold
-    
+
     def select_components(
         self,
         components: List[ContextComponent],

@@ -1,7 +1,9 @@
 import pytest
 import json
 import sys
+import types
 from unittest.mock import patch
+from pydantic import BaseModel, Field
 
 # Setup common mocks
 from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
@@ -9,9 +11,25 @@ from test.common.test_mocks import setup_common_mocks, patch_minio_client_initia
 # Initialize common mocks
 mocks = setup_common_mocks()
 
+
+class InvalidReservePolicy(Exception):
+    pass
+
+
+class CapacityReservePolicy(BaseModel):
+    soft_limit_ratio: float = Field(default=0.8, gt=0, le=1)
+    soft_limit_ratio_source: str = "code_default"
+
+
+capacity_budget_mock = types.ModuleType("nexent.core.models.capacity_budget")
+capacity_budget_mock.CapacityReservePolicy = CapacityReservePolicy
+capacity_budget_mock.InvalidReservePolicy = InvalidReservePolicy
+sys.modules["nexent.core.models.capacity_budget"] = capacity_budget_mock
+
 # Patch storage factory before importing
 with patch_minio_client_initialization():
     from backend.utils.config_utils import (
+        CONTEXT_SOFT_LIMIT_RATIO_KEY,
         safe_value,
         safe_list,
         get_env_key,
@@ -214,6 +232,38 @@ class TestTenantConfigManager:
         """Test without tenant ID"""
         result = config_manager.get_app_config("key")
         assert result == ""
+
+    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    def test_get_capacity_reserve_policy_default(self, mock_get_configs, config_manager):
+        """Missing W2 soft-limit config should use policy default."""
+        mock_get_configs.return_value = []
+
+        policy = config_manager.get_capacity_reserve_policy("tenant1")
+
+        assert policy.soft_limit_ratio == 0.8
+        assert policy.soft_limit_ratio_source == "code_default"
+
+    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    def test_get_capacity_reserve_policy_tenant_override(self, mock_get_configs, config_manager):
+        """Valid tenant W2 soft-limit config should be parsed and sourced."""
+        mock_get_configs.return_value = [
+            {"config_key": CONTEXT_SOFT_LIMIT_RATIO_KEY, "config_value": "0.75"}
+        ]
+
+        policy = config_manager.get_capacity_reserve_policy("tenant1")
+
+        assert policy.soft_limit_ratio == 0.75
+        assert policy.soft_limit_ratio_source == "tenant_config"
+
+    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    def test_get_capacity_reserve_policy_invalid_override(self, mock_get_configs, config_manager):
+        """Invalid W2 soft-limit config should fail closed."""
+        mock_get_configs.return_value = [
+            {"config_key": CONTEXT_SOFT_LIMIT_RATIO_KEY, "config_value": "1.5"}
+        ]
+
+        with pytest.raises(Exception, match=CONTEXT_SOFT_LIMIT_RATIO_KEY):
+            config_manager.get_capacity_reserve_policy("tenant1")
 
     @patch('backend.utils.config_utils.insert_config')
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
