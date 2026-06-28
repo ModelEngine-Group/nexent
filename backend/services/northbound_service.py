@@ -1,31 +1,40 @@
 import asyncio
 import hashlib
+import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from os.path import basename
+from typing import Any, Dict, List, Optional
 
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
+
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import (
     LimitExceededError,
     UnauthorizedError,
+    ConversationNotFoundError,
 )
-from consts.model import AgentRequest
-from database.conversation_db import get_conversation_messages
+from consts.model import AgentRequest, ToolParamsRequest
+from database.conversation_db import get_conversation_messages, get_source_searches_by_message
 from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
     run_agent_stream,
     stop_agent_tasks,
-    list_all_agent_info_impl,
     get_agent_id_by_name
 )
+from services.agent_version_service import list_published_agents_impl
 from services.conversation_management_service import (
     save_conversation_user,
     get_conversation_list_service,
     create_new_conversation,
     update_conversation_title as update_conversation_title_service,
 )
+from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from database.attachment_db import get_file_url, get_file_size_from_minio
+from nexent.multi_modal.utils import parse_s3_url
 
 logger = logging.getLogger("northbound_service")
 
@@ -37,6 +46,188 @@ class NorthboundContext:
     user_id: str
     authorization: str
     token_id: int = 0
+
+
+def _build_northbound_file_descriptor(
+    upload_result: Dict[str, Any],
+    original_file_name: str = "",
+    file_type: Optional[str] = None,
+    file_size: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Normalize upload metadata for northbound API consumers."""
+    object_name = str(upload_result.get("object_name") or "").strip()
+    # Use original filename if provided, otherwise fall back to upload result or object name
+    if original_file_name:
+        file_name = original_file_name
+    else:
+        file_name = str(upload_result.get("file_name") or basename(object_name) or "")
+    # Frontend-compatible field order
+    descriptor = {
+        "object_name": object_name,
+        "name": file_name,
+        "type": file_type or "file",
+        # Use provided file_size, or from upload_result, or 0 as fallback
+        "size": file_size if file_size is not None else upload_result.get("file_size", 0),
+        # Use relative URL format matching frontend: /nexent/{object_name}
+        "url": f"/nexent/{object_name}",
+        "description": "",
+    }
+    presigned_url = upload_result.get("presigned_url")
+    if presigned_url:
+        descriptor["presigned_url"] = presigned_url
+    return descriptor
+
+
+async def upload_files_for_northbound(
+    ctx: NorthboundContext,
+    files: List[UploadFile],
+    folder: str = "attachments",
+) -> Dict[str, Any]:
+    """Upload files for northbound callers and return reusable storage references."""
+    if not files:
+        raise ValueError("No files in the request")
+
+    actual_folder = resolve_minio_upload_folder(folder, ctx.user_id, ctx.tenant_id)
+    results = await upload_to_minio(files=files, folder=actual_folder)
+    normalized_files = []
+    for result, upload_file in zip(results, files):
+        if result.get("success") and result.get("object_name"):
+            content_type = result.get("content_type", "")
+            file_type = "image" if content_type.startswith("image/") else "file"
+            # Extract original filename - use upload result first, then fallback to UploadFile
+            # The upload result contains the original filename passed to upload_fileobj
+            original_file_name = result.get("original_file_name") or upload_file.filename or ""
+            file_size = result.get("file_size", 0)
+            # If file_size is 0 but we have the UploadFile, try to get size from headers
+            if file_size == 0 and hasattr(upload_file, 'size') and upload_file.size:
+                file_size = upload_file.size
+            descriptor = _build_northbound_file_descriptor(
+                result,
+                original_file_name=original_file_name,
+                file_type=file_type,
+                file_size=file_size,
+            )
+            normalized_files.append(descriptor)
+
+    if not normalized_files:
+        raise ValueError("No valid files uploaded")
+
+    success_count = sum(1 for result in results if result.get("success", False))
+    failed_count = sum(1 for result in results if not result.get("success", False))
+
+    return {
+        "message": f"Processed {len(results)} files",
+        "requestId": ctx.request_id,
+        "summary": {
+            "total": len(results),
+            "uploaded": success_count,
+            "failed": failed_count,
+        },
+        "files": normalized_files,
+    }
+
+
+def _normalize_northbound_attachments(
+    attachments: Optional[List[Any]],
+    user_id: str,
+    tenant_id: str,
+) -> Optional[List[Dict[str, Any]]]:
+    """Convert northbound attachment references into internal minio_files objects.
+
+    Supports two formats:
+    1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
+    2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]
+    """
+    from database.attachment_db import _build_mcp_presigned_url
+
+    if attachments is None:
+        return None
+    if not isinstance(attachments, list):
+        raise ValueError("attachments must be an array")
+
+    normalized_files: List[Dict[str, Any]] = []
+    for attachment in attachments:
+        # Handle dict format (full attachment object)
+        if isinstance(attachment, dict):
+            # Use the attachment dict directly, just ensure required fields
+            normalized_file = {
+                "object_name": attachment.get("object_name", ""),
+                "name": attachment.get("name", basename(attachment.get("object_name", ""))),
+                "type": attachment.get("type", "file"),
+                "size": attachment.get("size", 0),
+                "url": attachment.get("url", ""),
+                "description": attachment.get("description", ""),
+            }
+            # Add presigned_url if available, or generate one if we have object_name
+            if "presigned_url" in attachment:
+                normalized_file["presigned_url"] = attachment["presigned_url"]
+            elif normalized_file.get("object_name"):
+                try:
+                    presigned_result = get_file_url(object_name=normalized_file["object_name"], expires=86400)
+                    if presigned_result.get("success") and presigned_result.get("url"):
+                        normalized_file["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
+                except Exception:
+                    pass
+            normalized_files.append(normalized_file)
+            continue
+
+        # Handle string format (S3 URL)
+        if not isinstance(attachment, str) or not attachment.strip():
+            raise ValueError("attachments must contain non-empty S3 URLs or object paths")
+
+        attachment_url = attachment.strip()
+
+        # Support multiple URL formats:
+        # 1. s3://nexent/attachments/xxx.md
+        # 2. /nexent/attachments/xxx.md
+        # 3. attachments/xxx.md (relative path)
+        if attachment_url.startswith("s3://"):
+            try:
+                _, object_name = parse_s3_url(attachment_url)
+            except ValueError as exc:
+                raise ValueError(f"Invalid S3 URL format: {attachment_url}") from exc
+            validate_url = attachment_url
+        elif attachment_url.startswith("/nexent/"):
+            object_name = attachment_url[len("/nexent/"):]
+            validate_url = f"s3://nexent/{object_name}"
+        elif attachment_url.startswith("attachments/") or attachment_url.startswith("nexent/"):
+            object_name = attachment_url if attachment_url.startswith("nexent/") else attachment_url
+            validate_url = f"s3://nexent/{object_name}"
+        else:
+            raise ValueError(f"Invalid attachment format: {attachment_url}. Expected s3:// URL, /nexent/ path, or attachments/ path")
+
+        try:
+            validate_urls_access([validate_url], user_id, tenant_id)
+            presigned_result = get_file_url(object_name=object_name, expires=86400)
+        except PermissionError as exc:
+            detail = str(exc)
+            if "Invalid S3 URL format" in detail:
+                raise ValueError(detail) from exc
+            raise PermissionError(detail) from exc
+
+        # Get file size from MinIO
+        try:
+            file_size = get_file_size_from_minio(object_name)
+        except Exception:
+            file_size = 0
+
+        # Build frontend-compatible minio_files format
+        file_name = basename(object_name.rstrip("/"))
+        normalized_file = {
+            "object_name": object_name,
+            "name": file_name,
+            "type": "file",
+            "size": file_size,
+            # Use relative URL format matching frontend: /nexent/{object_name}
+            "url": f"/nexent/{object_name}",
+            "description": "",
+        }
+        # Use MCP proxy URL for presigned_url (same as frontend format)
+        if presigned_result.get("success") and presigned_result.get("url"):
+            normalized_file["presigned_url"] = _build_mcp_presigned_url(presigned_result["url"])
+        normalized_files.append(normalized_file)
+
+    return normalized_files
 
 
 # -----------------------------
@@ -111,6 +302,12 @@ def _build_idempotency_key(*parts: Any) -> str:
     return ":".join(processed)
 
 
+def _build_title_update_idempotency_key(tenant_id: str, conversation_id: int, title: str) -> str:
+    """Build an ASCII-safe idempotency key for title updates."""
+    title_hash = hashlib.sha256(title.encode("utf-8")).hexdigest()
+    return _build_idempotency_key(tenant_id, str(conversation_id), title_hash)
+
+
 # -----------------------------
 # Agent resolver
 # -----------------------------
@@ -126,7 +323,10 @@ async def start_streaming_chat(
     conversation_id: Optional[int],
     agent_name: str,
     query: str,
+    attachments: Optional[List[Any]] = None,
     meta_data: Optional[Dict[str, Any]] = None,
+    tool_params: Optional[ToolParamsRequest] = None,
+    model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
@@ -145,6 +345,11 @@ async def start_streaming_chat(
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
         agent_id = await get_agent_id_by_name(agent_name=agent_name, tenant_id=ctx.tenant_id)
+        normalized_attachments = _normalize_northbound_attachments(
+            attachments=attachments,
+            user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+        )
         # Idempotency: only prevent concurrent duplicate starts
         composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), agent_id, query)
         await idempotency_start(composed_key)
@@ -153,8 +358,10 @@ async def start_streaming_chat(
             agent_id=agent_id,
             query=query,
             history=(history_resp.get("data", {})).get("history", []),
-            minio_files=None,
+            minio_files=normalized_attachments,
             is_debug=False,
+            tool_params=tool_params,
+            model_id=model_id,
         )
 
         # Synchronously persist the user message before starting the stream to avoid race conditions
@@ -257,15 +464,58 @@ async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
+def _format_search_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Format a search source record for API response."""
+    search_item = {
+        "title": record.get("source_title", ""),
+        "text": record.get("source_content", ""),
+        "source_type": record.get("source_type", ""),
+        "url": record.get("source_location", ""),
+        "filename": record.get("source_title", "") if record.get("source_type") == "file" else None,
+        "published_date": None,
+        "score": float(record["score_overall"]) if record.get("score_overall") is not None else None,
+        "tool_sign": record.get("tool_sign", ""),
+        "cite_index": record.get("cite_index")
+    }
+
+    if record.get("published_date"):
+        if hasattr(record["published_date"], "strftime"):
+            search_item["published_date"] = record["published_date"].strftime("%Y-%m-%d")
+        else:
+            search_item["published_date"] = str(record["published_date"])[:10]
+
+    return search_item
+
+
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
     history = get_conversation_messages(conversation_id)
-    # Remove unnecessary fields
     result = []
     for message in history:
+        # Parse minio_files from database (stored as JSON string)
+        minio_files = []
+        raw_minio_files = message.get("minio_files")
+        if raw_minio_files:
+            try:
+                minio_files = json.loads(raw_minio_files) if isinstance(raw_minio_files, str) else raw_minio_files
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"Failed to parse minio_files for message {message.get('message_id')}")
+
+        # Fetch search results for this message
+        message_id = message.get("message_id")
+        search_results = []
+        if message_id:
+            try:
+                search_records = get_source_searches_by_message(message_id, user_id=ctx.user_id)
+                search_results = [_format_search_record(r) for r in search_records]
+            except Exception as e:
+                logger.warning(f"Failed to get search records for message {message_id}: {str(e)}")
+
         result.append({
             "role": message["message_role"],
-            "content": message["message_content"]
+            "content": message["message_content"],
+            "minio_files": minio_files,
+            "search": search_results
         })
 
     response = {
@@ -284,7 +534,18 @@ async def get_conversation_history(ctx: NorthboundContext, conversation_id: int)
 
 async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
     try:
-        agent_info_list = await list_all_agent_info_impl(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
+        agent_info_list = await list_published_agents_impl(
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+        )
+        # Match the same scope as /agent/published_list: non-asset-owner tenants
+        # also get the asset owner's published agents merged in.
+        if ctx.tenant_id != ASSET_OWNER_TENANT_ID:
+            asset_agent_list = await list_published_agents_impl(
+                tenant_id=ASSET_OWNER_TENANT_ID,
+                user_id=ctx.user_id,
+            )
+            agent_info_list.extend(asset_agent_list)
         # Remove internal information that partner don't need
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
@@ -298,7 +559,11 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     composed_key: Optional[str] = None
     try:
         # Idempotency: avoid concurrent duplicate title update for same conversation
-        composed_key = idempotency_key or _build_idempotency_key(ctx.tenant_id, str(conversation_id), title)
+        composed_key = idempotency_key or _build_title_update_idempotency_key(
+            ctx.tenant_id,
+            conversation_id,
+            title,
+        )
         await idempotency_start(composed_key)
 
         update_conversation_title_service(conversation_id, title, ctx.user_id)
@@ -324,6 +589,8 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
         }
     except LimitExceededError as _:
         raise LimitExceededError("Duplicate request is still running, please wait.")
+    except ConversationNotFoundError:
+        raise
     except Exception as e:
         raise Exception(f"Failed to update conversation title for conversation_id {conversation_id}: {str(e)}")
     finally:

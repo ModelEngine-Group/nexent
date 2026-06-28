@@ -164,6 +164,7 @@ class HttpClientManager:
                     verify_ssl=verify_ssl
                 )
                 self._clients[key] = httpx.Client(
+                    base_url=base_url,
                     timeout=timeout,
                     verify=verify_ssl,
                     limits=Limits(
@@ -204,6 +205,7 @@ class HttpClientManager:
                     verify_ssl=verify_ssl
                 )
                 self._async_clients[key] = httpx.AsyncClient(
+                    base_url=base_url,
                     timeout=timeout,
                     verify=verify_ssl,
                     limits=Limits(

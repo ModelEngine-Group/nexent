@@ -117,6 +117,7 @@ messageTypes: {
   STEP_COUNT: "step_count" as const,
   TOKEN_COUNT: "token_count" as const,
   MAX_STEPS_REACHED: "max_steps_reached" as const,
+  VERIFICATION: "verification" as const,
   SEARCH_CONTENT_PLACEHOLDER: "search_content_placeholder" as const,
   VIRTUAL: "virtual" as const,
   PREPROCESS: "preprocess" as const,
@@ -134,6 +135,7 @@ contentTypes: {
   SEARCH_CONTENT: "search_content" as const,
   CARD: "card" as const,
   MEMORY_SEARCH: "memory_search" as const,
+  VERIFICATION: "verification" as const,
   PREPROCESS: "preprocess" as const,
 },
 

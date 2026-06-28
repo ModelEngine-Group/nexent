@@ -19,6 +19,8 @@ class ContextManagerConfig:
     # === Compression Settings (existing) ===
     enabled: bool = False
     token_threshold: int = 10000
+    soft_input_budget_tokens: int = 0
+    hard_input_budget_tokens: int = 0
     keep_recent_steps: int = 4
     keep_recent_pairs: int = 2
     max_chunk_count: int = 0
@@ -103,7 +105,7 @@ class ContextManagerConfig:
     component_budgets: Dict[str, int] = field(default_factory=lambda: {
         "system_prompt": 4000,
         "tools": 3000,
-        "skills": 1000,
+        "skills": 4000,
         "memory": 2000,
         "knowledge_base": 1500,
         "managed_agents": 500,

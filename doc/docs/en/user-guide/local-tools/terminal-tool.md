@@ -33,7 +33,7 @@ Working directory: /opt/terminal
 ##### Method B: Local Image Build
 ```bash
 # Build Ubuntu Terminal image locally
-docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 ```
 
 > 📚 **Detailed Build Instructions**: Refer to [Docker Build Guide](/en/deployment/docker-build) for complete image build and push processes.
@@ -43,15 +43,12 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/
 When running the deployment script, choose to enable the Terminal tool container:
 
 ```bash
-# Run deployment script
-cd docker
-bash deploy.sh
+# Run deployment script from the repository root
+bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
 
 # During script execution, select:
-# 1. Deployment mode: Choose development/production/infrastructure mode
-# 2. Terminal tool: Choose "Y" to enable Terminal tool container
-# 3. Configure SSH credentials: Enter username and password
-# 4. Configure mount directory: Specify host directory mapping
+# During script execution, select or keep the terminal component enabled.
+# Then configure SSH credentials and the host mount directory when prompted.
 ```
 
 #### 3. Container Features

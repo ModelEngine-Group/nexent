@@ -393,7 +393,6 @@ export default function AgentImportWizard({
         items: agentsWithConflicts.map(([agentKey, conflict]) => {
           const agentInfo = initialData.agent_info[agentKey] as any;
           return {
-            agent_id: agentInfo?.agent_id,
             name: conflict.renamedName || agentInfo?.name || "",
             display_name: conflict.renamedDisplayName || agentInfo?.display_name || "",
             task_description: agentInfo?.business_description || agentInfo?.description || "",
@@ -922,16 +921,16 @@ export default function AgentImportWizard({
     if (modelSelectionMode === "unified") {
       // Unified mode: apply selected model to all agents
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
-        agentInfo.model_id = selectedModelId;
-        agentInfo.model_name = selectedModelName;
+        if (selectedModelId !== null) {
+          agentInfo.model_ids = [selectedModelId];
+        }
       });
     } else {
       // Individual mode: apply models to all agents
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
         const modelSelection = selectedModelsByAgent[agentKey];
-        if (modelSelection && modelSelection.modelId && modelSelection.modelName) {
-          agentInfo.model_id = modelSelection.modelId;
-          agentInfo.model_name = modelSelection.modelName;
+        if (modelSelection && modelSelection.modelId) {
+          agentInfo.model_ids = [modelSelection.modelId];
         }
       });
     }

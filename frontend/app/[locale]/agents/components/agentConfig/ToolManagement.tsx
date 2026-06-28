@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import { Settings, AlertTriangle } from "lucide-react";
+import log from "@/lib/logger";
 
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
@@ -27,6 +28,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "datamate_search",
   "idata_search",
   "haotian_search",
+  "aidp_search",
 ];
 
 // Tool types that require Embedding model
@@ -47,12 +49,13 @@ const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = [
 
 function getToolKbType(
   toolName: string
-): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | null {
+): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "aidp_search" | null {
   if (!TOOLS_REQUIRING_KB_SELECTION.includes(toolName)) return null;
   if (toolName === "dify_search") return "dify_search";
   if (toolName === "datamate_search") return "datamate_search";
   if (toolName === "idata_search") return "idata_search";
   if (toolName === "haotian_search") return "haotian_search";
+  if (toolName === "aidp_search") return "aidp_search";
   return "knowledge_base_search";
 }
 
@@ -140,13 +143,15 @@ export default function ToolManagement({
 
         if (tooInstance.success && tooInstance.data) {
           // Merge instance params with default params
+          // Only use instance value if it exists and is not null/undefined
           const mergedParams =
             defaultTool.initParams?.map((param: ToolParam) => {
               const instanceValue = tooInstance.data?.params?.[param.name];
+              // Use instance value only if it's not null or undefined
+              const hasValidInstanceValue = instanceValue !== null && instanceValue !== undefined;
               return {
                 ...param,
-                value:
-                  instanceValue !== undefined ? instanceValue : param.value,
+                value: hasValidInstanceValue ? instanceValue : param.value,
               };
             }) ||
             defaultTool.initParams ||
@@ -156,7 +161,7 @@ export default function ToolManagement({
           return defaultTool.initParams || [];
         }
       } catch (error) {
-        console.error("Failed to fetch tool instance params:", error);
+        log.error("Failed to fetch tool instance params:", error);
         return defaultTool.initParams || [];
       }
     } else {

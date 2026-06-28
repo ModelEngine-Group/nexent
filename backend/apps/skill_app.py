@@ -592,6 +592,7 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
     """Build ModelConfig from tenant's quick-config LLM model."""
     from utils.config_utils import tenant_config_manager, get_model_name_from_config
     from consts.const import MODEL_CONFIG_MAPPING
+    from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 
     quick_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"],
@@ -600,6 +601,7 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
     if not quick_config:
         raise ValueError("No LLM model configured for tenant")
 
+    model_factory = quick_config.get("model_factory")
     return ModelConfig(
         cite_name=quick_config.get("display_name", "default"),
         api_key=quick_config.get("api_key", ""),
@@ -608,7 +610,8 @@ def _build_model_config_from_tenant(tenant_id: str) -> ModelConfig:
         temperature=0.1,
         top_p=0.95,
         ssl_verify=True,
-        model_factory=quick_config.get("model_factory")
+        model_factory=model_factory,
+        prompt_cache=resolve_prompt_cache_profile(model_factory),
     )
 
 

@@ -198,6 +198,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     """
     info_with_metadata = dict(agent_info)
     info_with_metadata.setdefault("max_steps", 15)
+    info_with_metadata.setdefault("verification_config", None)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -219,8 +220,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "display_name": new_agent.display_name,
             "description": new_agent.description,
             "author": new_agent.author,
-            "model_id": new_agent.model_id,
-            "model_name": new_agent.model_name,
             "max_steps": new_agent.max_steps,
             "duty_prompt": new_agent.duty_prompt,
             "constraint_prompt": new_agent.constraint_prompt,
@@ -236,6 +235,8 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
+            "requested_output_tokens": new_agent.requested_output_tokens,
+            "verification_config": new_agent.verification_config,
             "greeting_message": new_agent.greeting_message,
             "example_questions": new_agent.example_questions,
             "current_version_no": new_agent.current_version_no,
@@ -271,8 +272,13 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         if not agent:
             raise ValueError("ag_tenant_agent_t Agent not found")
 
-        for key, value in filter_property(agent_info.__dict__, AgentInfo).items():
-            if value is None:
+        agent_data = dict(agent_info.__dict__)
+        fields_set = getattr(agent_info, "model_fields_set", None)
+        if fields_set is not None and "requested_output_tokens" not in fields_set:
+            agent_data.pop("requested_output_tokens", None)
+
+        for key, value in filter_property(agent_data, AgentInfo).items():
+            if value is None and key != "requested_output_tokens":
                 continue
             if key == "group_ids":
                 value = convert_list_to_string(value)

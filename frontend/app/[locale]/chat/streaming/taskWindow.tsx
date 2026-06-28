@@ -9,11 +9,18 @@ import {
   FileText,
   ChevronRight,
   Wrench,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  ShieldCheck,
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button, message as antdMessage } from "antd";
-import { MarkdownRenderer, CodeBlock } from "@/components/common/markdownRenderer";
+import {
+  MarkdownRenderer,
+  CodeBlock,
+} from "@/components/common/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
   ChatMessageType,
@@ -331,6 +338,7 @@ type KnowledgeSiteInfo = {
   datamateFileId?: string;
   datamateBaseUrl?: string;
   objectName?: string;
+  downloadUrl?: string;
   canOpenWeb: boolean;
 };
 
@@ -457,9 +465,12 @@ const messageHandlers: MessageHandler[] = [
           let baseUrl = "";
           let faviconUrl = "";
           let useDefaultIcon = false;
+          const searchType = result.search_type || "";
           let isKnowledgeBase =
             sourceType === "file" ||
             sourceType === "datamate" ||
+            sourceType === "aidp" ||
+            searchType === "aidp_search" ||
             (!sourceType && !!filename);
           let canOpenWeb = false;
 
@@ -520,6 +531,7 @@ const messageHandlers: MessageHandler[] = [
             datamateFileId,
             datamateBaseUrl,
             objectName,
+            downloadUrl: result.download_url,
             canOpenWeb,
           };
         }
@@ -558,6 +570,22 @@ const messageHandlers: MessageHandler[] = [
               filename: site.filename || undefined,
             });
           } else {
+            if (site.downloadUrl) {
+              const link = document.createElement("a");
+              link.href = site.downloadUrl;
+              link.download = site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
+              antdMessage.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            }
+
             // Check if URL is a direct http/https URL that can be accessed directly
             // Exclude backend API endpoints (containing /api/file/download/)
             if (
@@ -965,7 +993,8 @@ const messageHandlers: MessageHandler[] = [
           useDefaultIcon,
           isKnowledgeBase,
           filename,
-          canClick,
+          downloadUrl: result.download_url,
+          canClick: canClick || Boolean(result.download_url),
         };
       });
 
@@ -1026,7 +1055,12 @@ const messageHandlers: MessageHandler[] = [
                       : "none",
                   }}
                   onClick={() => {
-                    if (site.canClick && site.url) {
+                    if (site.downloadUrl) {
+                      const link = document.createElement("a");
+                      link.href = site.downloadUrl;
+                      link.download = site.filename || "download";
+                      link.click();
+                    } else if (site.canClick && site.url) {
                       window.open(site.url, "_blank", "noopener,noreferrer");
                     }
                   }}
@@ -1148,6 +1182,114 @@ const messageHandlers: MessageHandler[] = [
   {
     canHandle: (message) => message.type === "execution",
     render: (_message, _t) => null, // Return null, do not render this type of message
+  },
+
+  // verification type processor - layered ReAct self-check status
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.VERIFICATION,
+    render: (message, t) => {
+      let data: any = {};
+      try {
+        data =
+          typeof message.content === "string"
+            ? JSON.parse(message.content)
+            : message.content || {};
+      } catch (_) {
+        data = { message: message.content };
+      }
+
+      const phase = data.phase || "start";
+      const severity = data.severity || "info";
+      const labelMap: Record<string, string> = {
+        start: t("taskWindow.verification.start"),
+        pass: t("taskWindow.verification.pass"),
+        warning: t("taskWindow.verification.warning"),
+        blocked: t("taskWindow.verification.blocked"),
+        repair: t("taskWindow.verification.repair"),
+        final_pass: t("taskWindow.verification.finalPass"),
+        final_fail: t("taskWindow.verification.finalFail"),
+      };
+      const label =
+        labelMap[phase] || data.message || t("taskWindow.verification.start");
+      const rawMessage =
+        typeof data.message === "string" ? data.message.trim() : "";
+      const genericPassMessages = new Set([
+        "自检通过",
+        "最终自检通过",
+        "Self-check passed",
+        "Final self-check passed",
+      ]);
+      const fallbackReason = (() => {
+        if (data.event === "tool_precheck") {
+          return "动作非空、参数和语法已检查";
+        }
+        if (data.event === "retrieval") {
+          return "检索结果和错误信号已检查";
+        }
+        if (data.event === "handoff") {
+          return "子任务返回内容已检查";
+        }
+        if (data.event === "tool_result" || data.event === "code_execution") {
+          return "执行结果非空，未发现未处理错误";
+        }
+        if (data.event === "final_answer") {
+          return phase === "final_pass"
+            ? "答案完整、格式正常，未发现未处理错误"
+            : "答案非空、无内部标记、无占位符";
+        }
+        return "未发现阻断问题";
+      })();
+      const displayMessage =
+        (phase === "pass" || phase === "final_pass") &&
+        (!rawMessage || genericPassMessages.has(rawMessage))
+          ? `${rawMessage || label}：${fallbackReason}`
+          : rawMessage || label;
+      const tone =
+        phase === "final_pass" || phase === "pass"
+          ? "#047857"
+          : phase === "blocked" ||
+              phase === "final_fail" ||
+              severity === "blocking"
+            ? "#dc2626"
+            : phase === "repair" || phase === "warning"
+              ? "#d97706"
+              : "#2563eb";
+      const Icon =
+        phase === "final_pass" || phase === "pass"
+          ? CheckCircle2
+          : phase === "repair"
+            ? RotateCcw
+            : phase === "blocked" || phase === "final_fail"
+              ? AlertTriangle
+              : ShieldCheck;
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: tone,
+            fontWeight: 500,
+            borderRadius: "0.25rem",
+            paddingTop: "0.5rem",
+          }}
+        >
+          <Icon size={16} />
+          <span>{displayMessage}</span>
+          {typeof data.score === "number" && (
+            <span style={{ opacity: 0.72 }}>
+              {Math.round(data.score * 100)}%
+            </span>
+          )}
+        </div>
+      );
+    },
   },
 
   // error type processor - error information

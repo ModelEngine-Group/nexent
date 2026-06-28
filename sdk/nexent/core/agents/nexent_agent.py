@@ -19,7 +19,6 @@ from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .agent_context import ContextManager
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -182,9 +181,10 @@ class NexentAgent:
             ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True,
             model_factory=model_config.model_factory,
             display_name=model_config.cite_name,
-extra_body=model_config.extra_body,
-            max_tokens=model_config.max_tokens,
+            extra_body=model_config.extra_body,
+            max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
+            prompt_cache=model_config.prompt_cache,
         )
         model.stop_event = self.stop_event
         return model
@@ -198,11 +198,16 @@ extra_body=model_config.extra_body,
             raise ValueError(f"{class_name} not found in local")
         else:
             if class_name == "KnowledgeBaseSearchTool":
-                # Filter out conflicting parameters from params to avoid conflicts
-                # These parameters have exclude=True and cannot be passed to __init__
-                # due to smolagents.tools.Tool wrapper restrictions
+                # Filter out conflicting parameters from params to avoid conflicts.
+                # Parameters declared with exclude=True cannot be passed to __init__
+                # due to smolagents.tools.Tool wrapper restrictions; they are set as
+                # attributes on the instance after construction, sourced from metadata.
+                # `document_paths` is intentionally hidden from the LLM and only
+                # populated via tool_params from the northbound interface.
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["vdb_core", "embedding_model", "observer", "rerank_model", "display_name_to_index_map"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer",
+                                                 "rerank_model", "display_name_to_index_map",
+                                                 "document_paths"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
@@ -216,6 +221,13 @@ extra_body=model_config.extra_body,
                     "rerank_model", None) if tool_config.metadata else None
                 tools_obj.display_name_to_index_map = tool_config.metadata.get(
                     "display_name_to_index_map", {}) if tool_config.metadata else {}
+                # Internal access control: restrict results to documents whose
+                # path_or_url is in the allow list. Only the northbound interface
+                # may populate this; never the LLM.
+                tools_obj.set_document_paths(
+                    tool_config.metadata.get(
+                        "document_paths") if tool_config.metadata else None
+                )
             elif class_name in ["DifySearchTool", "DataMateSearchTool"]:
                 # These parameters have exclude=True and cannot be passed to __init__
                 filtered_params = {k: v for k, v in params.items()
@@ -375,6 +387,16 @@ extra_body=model_config.extra_body,
 
         try:
             model = self.create_model(agent_config.model_name)
+            model.safe_input_budget_snapshot = getattr(
+                agent_config,
+                "safe_input_budget_snapshot",
+                None,
+            )
+            model.capacity_snapshot = getattr(
+                agent_config,
+                "capacity_snapshot",
+                None,
+            )
             prompt_templates = agent_config.prompt_templates
 
             try:
@@ -413,6 +435,26 @@ extra_body=model_config.extra_body,
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
+            # Choose one context runtime at construction time.  The managed and
+            # legacy implementations do not call one another after this point.
+            ctx_config = getattr(agent_config, 'context_manager_config', None)
+            if ctx_config and ctx_config.enabled:
+                from .agent_context import ContextManager
+                from ..context_runtime.managed.runtime import ManagedContextRuntime
+
+                context_manager = ContextManager(
+                    config=ctx_config,
+                    max_steps=agent_config.max_steps,
+                )
+                context_runtime = ManagedContextRuntime(
+                    context_manager,
+                    components=getattr(agent_config, 'context_components', None) or [],
+                )
+            else:
+                from ..context_runtime.legacy.runtime import LegacyContextRuntime
+
+                context_runtime = LegacyContextRuntime()
+
             # Create the agent
             agent = CoreAgent(
                 observer=self.observer,
@@ -422,24 +464,14 @@ extra_body=model_config.extra_body,
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
+                verification_config=agent_config.verification_config,
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
+                context_runtime=context_runtime,
             )
             agent.stop_event = self.stop_event
-
-            # Mount context manager if config provided
-            ctx_config = getattr(agent_config, 'context_manager_config', None)
-            if ctx_config:
-                agent.context_manager = ContextManager(
-                    config=ctx_config,
-                    max_steps=agent_config.max_steps
-                )
-                context_components = getattr(agent_config, 'context_components', None)
-                if context_components:
-                    for component in context_components:
-                        agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:

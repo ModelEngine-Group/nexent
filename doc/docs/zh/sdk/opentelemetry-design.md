@@ -376,7 +376,7 @@ Zipkin 当前本地形态只转发 traces；metrics 进入 Collector debug pipel
 启动命令：
 
 ```bash
-cd docker
+cd deploy/docker
 ./start-monitoring.sh --stack otlp
 ./start-monitoring.sh --stack phoenix
 ./start-monitoring.sh --stack langfuse

@@ -23,8 +23,9 @@ export interface Agent {
   display_name?: string;
   description: string;
   author?: string;
+  model_ids?: number[];
+  model_names?: string[];
   model_name?: string;
-  model_id?: number;
   max_steps: number;
   duty_prompt?: string;
   constraint_prompt?: string;
@@ -33,6 +34,7 @@ export interface Agent {
   tenant_id: string;
   enabled: boolean;
   provide_run_summary: boolean;
+  verification_config?: Record<string, any>;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;

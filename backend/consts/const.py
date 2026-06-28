@@ -109,7 +109,7 @@ CAS_SESSION_MAX_AGE_SECONDS = int(os.getenv("CAS_SESSION_MAX_AGE_SECONDS", "3600
 LOCAL_SESSION_MAX_AGE_SECONDS = int(os.getenv("LOCAL_SESSION_MAX_AGE_SECONDS", "3600") or 3600)
 CAS_RENEW_BEFORE_SECONDS = int(os.getenv("CAS_RENEW_BEFORE_SECONDS", "300") or 300)
 CAS_RENEW_TIMEOUT_SECONDS = int(os.getenv("CAS_RENEW_TIMEOUT_SECONDS", "10") or 10)
-CAS_SYNTHETIC_EMAIL_DOMAIN = os.getenv("CAS_SYNTHETIC_EMAIL_DOMAIN", "cas.local")
+CAS_SYNTHETIC_EMAIL_DOMAIN = os.getenv("CAS_SYNTHETIC_EMAIL_DOMAIN", "")
 CAS_LOGOUT_URL = os.getenv("CAS_LOGOUT_URL", "")
 CAS_SSL_VERIFY = os.getenv("CAS_SSL_VERIFY", "true").lower() == "true"
 CAS_CA_BUNDLE = os.getenv("CAS_CA_BUNDLE", "")
@@ -167,6 +167,12 @@ PERMISSION_PRIVATE = "PRIVATE"
 
 # Response flag when system prompts are withheld from non-ASSET_OWNER callers.
 AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
+
+# W11 capacity suggestion rollout flags.
+CAPACITY_SUGGESTION_ENABLED = os.getenv(
+    "CAPACITY_SUGGESTION_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+CAPACITY_VISIBILITY_ENABLED = os.getenv(
+    "CAPACITY_VISIBILITY_ENABLED", "true").lower() in ("true", "1", "yes", "on")
 
 
 # Deployment Version Configuration
@@ -487,7 +493,7 @@ NORTHBOUND_EXTERNAL_URL = os.getenv(
 
 
 # APP Version
-APP_VERSION = "v2.2.0"
+APP_VERSION = "v2.2.1"
 
 
 # Skill Creation Streaming Configuration

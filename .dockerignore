@@ -28,6 +28,9 @@ yarn-error.log*
 
 # Node
 frontend/node_modules/
+frontend/.next/
+frontend/package-lock.json
+frontend/tsconfig.tsbuildinfo
 node_modules/
 .pnpm-store/
 .pnpm-lock.yaml
@@ -38,6 +41,7 @@ build/
 
 # Backend
 backend/flower_db.sqlite
+model-assets.tmp.*/
 uploads/
 test/
 assets/

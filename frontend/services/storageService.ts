@@ -105,13 +105,23 @@ export function extractObjectNameFromUrl(url: string): string | null {
  * @returns Backend API URL for the image
  */
 export function convertImageUrlToApiUrl(url: string): string {
-  // If URL is an external http/https URL (not backend API), use proxy to avoid CORS and 403 errors
+  const isHttpUrl = url.startsWith("http://") || url.startsWith("https://");
+
+  if (url.startsWith("/api/share/")) {
+    return url;
+  }
+
+  // For localhost URLs in development, return original URL directly to avoid proxy issues
+  if (isHttpUrl && /localhost|127\.0\.0\.1/i.test(url)) {
+    return url;
+  }
+
+  // For external http/https URLs, use proxy to avoid CORS issues
   if (
-    (url.startsWith("http://") || url.startsWith("https://")) &&
+    isHttpUrl &&
     !url.includes("/api/file/download/") &&
     !url.includes("/api/image")
   ) {
-    // Use backend proxy to fetch external images (avoids CORS and hotlink protection)
     return API_ENDPOINTS.proxy.image(url);
   }
 

@@ -12,8 +12,9 @@ export type AgentConfigUpdate = Partial<Pick<
   | "display_name"
   | "author"
   | "model"
-  | "model_id"
+  | "model_ids"
   | "max_step"
+  | "requested_output_tokens"
   | "provide_run_summary"
   | "description"
   | "duty_prompt"
@@ -24,11 +25,50 @@ export type AgentConfigUpdate = Partial<Pick<
   | "business_logic_model_name"
   | "prompt_template_id"
   | "prompt_template_name"
+  | "verification_config"
   | "group_ids"
   | "ingroup_permission"
   | "greeting_message"
   | "example_questions"
 >>;
+
+export interface AgentVerificationConfig {
+  enabled: boolean;
+  step_verification_enabled: boolean;
+  final_verification_enabled: boolean;
+  llm_verification_enabled?: boolean;
+  max_final_rounds: number;
+  strictness: "lenient" | "balanced" | "strict";
+  fail_policy: "repair_then_controlled_summary" | "warn";
+  pass_score?: number;
+  critical_events: Array<
+    | "tool_precheck"
+    | "tool_result"
+    | "retrieval"
+    | "code_execution"
+    | "handoff"
+    | "final_answer"
+  >;
+}
+
+export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
+  enabled: false,
+  step_verification_enabled: true,
+  final_verification_enabled: true,
+  llm_verification_enabled: true,
+  max_final_rounds: 2,
+  strictness: "balanced",
+  fail_policy: "repair_then_controlled_summary",
+  pass_score: 0.75,
+  critical_events: [
+    "tool_precheck",
+    "tool_result",
+    "retrieval",
+    "code_execution",
+    "handoff",
+    "final_answer",
+  ],
+};
 
 // ========== Core Interfaces ==========
 
@@ -40,10 +80,13 @@ export interface Agent {
   author?: string;
   unavailable_reasons?: string[];
   model: string;
-  model_id?: number;
+  model_ids?: number[];
+  model_names?: string[];  // Model display names resolved from model_ids for list/detail responses
   max_step: number;
+  requested_output_tokens?: number | null;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
+  verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[];  // Skills configured for this agent
   duty_prompt?: string;
@@ -103,6 +146,20 @@ export interface ToolParam {
   description_zh?: string;
   default?: string;
   depends_on?: string;
+}
+
+export interface AidpKnowledgeBaseItem {
+  kds_id: string;
+  kds_name: string;
+  description?: string;
+  document_count?: number;
+  chunk_count?: number;
+}
+
+export interface AidpKnowledgeBaseListResponse {
+  value: AidpKnowledgeBaseItem[];
+  total_count?: number;
+  next_link?: string | null;
 }
 
 export interface SkillParam {
