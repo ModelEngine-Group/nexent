@@ -26,6 +26,7 @@ RUN apt-get update && \
     coreutils \
     fontconfig \
     fonts-noto-cjk \
+    pandoc \
     && fc-cache -fv \
     && apt-get autoremove -y \
     && apt-get clean \
