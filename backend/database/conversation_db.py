@@ -701,7 +701,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
                 func.json_build_object(
                     'unit_id', ConversationMessageUnit.unit_id,
                     'unit_type', ConversationMessageUnit.unit_type,
-                    'unit_content', ConversationMessageUnit.unit_content
+                    'unit_content', ConversationMessageUnit.unit_content,
+                    'unit_status', ConversationMessageUnit.unit_status,
+                    'unit_index', ConversationMessageUnit.unit_index
                 )
             )
         ).select_from(
@@ -717,6 +719,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.message_index,
             ConversationMessage.message_role.label('role'),
             ConversationMessage.message_content,
+            ConversationMessage.status,
             ConversationMessage.minio_files,
             ConversationMessage.opinion_flag,
             subquery.label('units')
@@ -1209,6 +1212,85 @@ def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str]
 
         result = session.execute(stmt).scalar()
         return result
+
+
+def get_latest_assistant_message(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get the latest assistant message for a conversation, including its status field.
+    Used for streaming recovery to check if a stream is still in progress.
+
+    Args:
+        conversation_id: Conversation ID
+        user_id: Optional user ID for ownership check
+
+    Returns:
+        Optional[Dict]: Contains message_id, status, message_content, or None if not found
+    """
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+
+        stmt = select(
+            ConversationMessage.message_id,
+            ConversationMessage.status,
+            ConversationMessage.message_content,
+        ).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.message_role == 'assistant'
+        ).order_by(desc(ConversationMessage.message_index)).limit(1)
+
+        if user_id:
+            stmt = stmt.join(
+                ConversationRecord,
+                ConversationMessage.conversation_id == ConversationRecord.conversation_id
+            ).where(ConversationRecord.created_by == user_id)
+
+        result = session.execute(stmt).first()
+        if result:
+            return {
+                'message_id': result.message_id,
+                'status': result.status,
+                'message_content': result.message_content,
+            }
+        return None
+
+
+def get_last_unit_for_message(message_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Get the last unit (highest unit_index) for a message.
+    Used for streaming recovery to determine the resume position.
+
+    Args:
+        message_id: Message ID
+
+    Returns:
+        Optional[Dict]: Contains unit_id, unit_index, unit_type, unit_content, unit_status,
+                        or None if no units exist
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = select(
+            ConversationMessageUnit.unit_id,
+            ConversationMessageUnit.unit_index,
+            ConversationMessageUnit.unit_type,
+            ConversationMessageUnit.unit_content,
+            ConversationMessageUnit.unit_status,
+        ).where(
+            ConversationMessageUnit.message_id == message_id,
+            ConversationMessageUnit.delete_flag == 'N'
+        ).order_by(desc(ConversationMessageUnit.unit_index)).limit(1)
+
+        result = session.execute(stmt).first()
+        if result:
+            return {
+                'unit_id': result.unit_id,
+                'unit_index': result.unit_index,
+                'unit_type': result.unit_type,
+                'unit_content': result.unit_content,
+                'unit_status': result.unit_status,
+            }
+        return None
 
 
 def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[str, Any]]) -> bool:

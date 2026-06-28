@@ -757,6 +757,7 @@ export const conversationService = {
     model_id?: number; // Optional model override
     version_no?: number; // Optional version override
     is_debug?: boolean; // Add debug mode parameter
+    is_resume?: boolean; // Add resume mode parameter for streaming recovery
   }, signal?: AbortSignal) {
     try {
       // Construct request parameters
@@ -779,7 +780,17 @@ export const conversationService = {
         requestParams.version_no = params.version_no;
       }
 
-      const response = await fetch(API_ENDPOINTS.agent.run, {
+      // Build URL with query parameters for resume mode
+      let url = API_ENDPOINTS.agent.run;
+      const queryParams = new URLSearchParams();
+      if (params.is_resume) {
+        queryParams.append('resume', 'true');
+      }
+      if (queryParams.toString()) {
+        url = `${url}?${queryParams.toString()}`;
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(requestParams),
@@ -788,6 +799,14 @@ export const conversationService = {
 
       if (!response.body) {
         throw new Error("Response body is null");
+      }
+
+      // Check content-type to distinguish JSON response from SSE stream
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        // JSON response (e.g., from resume mode when agent finished)
+        const data = await response.json();
+        return { type: 'json', data };
       }
 
       return response.body.getReader();

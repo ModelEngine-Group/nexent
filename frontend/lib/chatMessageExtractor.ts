@@ -118,8 +118,26 @@ export function extractAssistantMsgFromResponse(
               .substring(2, 7)}`;
             currentStep.contents.push({
               id: contentId,
-              type: "model_output",
+              type: chatConfig.messageTypes.MODEL_OUTPUT_THINKING,
               subType: "thinking",
+              content: msg.content,
+              expanded: true,
+              timestamp: Date.now(),
+            });
+          }
+          break;
+        }
+
+        case chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING: {
+          const currentStep = steps[steps.length - 1];
+          if (currentStep) {
+            const contentId = `model-${Date.now()}-${Math.random()
+              .toString(36)
+              .substring(2, 7)}`;
+            currentStep.contents.push({
+              id: contentId,
+              type: chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+              subType: "deep_thinking",
               content: msg.content,
               expanded: true,
               timestamp: Date.now(),

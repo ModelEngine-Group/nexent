@@ -197,8 +197,11 @@ from unittest.mock import patch, MagicMock
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
     from backend.services.conversation_management_service import (
         save_message,
+        save_message_unit,
         save_conversation_user,
         save_conversation_assistant,
+        save_source_image,
+        save_source_search,
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
@@ -225,8 +228,7 @@ class TestConversationManagementService(unittest.TestCase):
         minio_client_mock.reset_mock()
 
     @patch('backend.services.conversation_management_service.create_conversation_message')
-    @patch('backend.services.conversation_management_service.create_source_image')
-    def test_save_message_picture_web_invalid_json(self, mock_create_image, mock_create_msg):
+    def test_save_message_picture_web_invalid_json(self, mock_create_msg):
         mock_create_msg.return_value = 1
         message_request = MessageRequest(
             conversation_id=456,
@@ -237,8 +239,9 @@ class TestConversationManagementService(unittest.TestCase):
         )
         result = save_message(
             message_request, user_id=self.user_id, tenant_id=self.tenant_id)
-        self.assertEqual(result.code, 0)
-        mock_create_image.assert_not_called()
+        # save_message now returns the message_id (int) directly.
+        self.assertEqual(result, 1)
+        mock_create_msg.assert_called_once()
 
     def test_get_sources_service_no_id(self):
         """Should return error when both conversation_id and message_id are None."""
@@ -247,11 +250,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result['message'], "Must provide conversation_id or message_id parameter")
 
     @patch('backend.services.conversation_management_service.create_conversation_message')
-    @patch('backend.services.conversation_management_service.create_source_search')
-    @patch('backend.services.conversation_management_service.create_source_image')
-    @patch('backend.services.conversation_management_service.create_message_units')
-    def test_save_message_with_string_content(self, mock_create_message_units, mock_create_source_image,
-                                              mock_create_source_search, mock_create_conversation_message):
+    def test_save_message_with_string_content(self, mock_create_conversation_message):
         # Setup
         mock_create_conversation_message.return_value = 123  # message_id
 
@@ -269,10 +268,8 @@ class TestConversationManagementService(unittest.TestCase):
         result = save_message(
             message_request, user_id=self.user_id, tenant_id=self.tenant_id)
 
-        # Assert
-        self.assertEqual(result.code, 0)
-        self.assertEqual(result.message, "success")
-        self.assertTrue(result.data)
+        # Assert: save_message now returns the message_id (int) directly.
+        self.assertEqual(result, 123)
 
         # Check if create_conversation_message was called with correct params
         mock_create_conversation_message.assert_called_once()
@@ -282,165 +279,75 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(call_args['role'], "user")
         self.assertEqual(call_args['content'], "Hello, this is a test message")
 
-        # Check that other methods were not called
-        mock_create_message_units.assert_not_called()
-        mock_create_source_image.assert_not_called()
-        mock_create_source_search.assert_not_called()
-
     @patch('backend.services.conversation_management_service.create_conversation_message')
-    @patch('backend.services.conversation_management_service.create_source_search')
-    @patch('backend.services.conversation_management_service.create_message_units')
-    def test_save_message_with_search_content(self, mock_create_message_units, mock_create_source_search,
-                                              mock_create_conversation_message):
-        # Setup
-        mock_create_conversation_message.return_value = 123  # message_id
-
-        # Create message with search content
-        search_content = json.dumps([{
-            "source_type": "web",
-            "title": "Test Result",
-            "url": "https://example.com",
-            "text": "Example search result",
-            "score": "0.95",
-            "score_details": {"accuracy": "0.9", "semantic": "0.8"},
-            "published_date": "2023-01-15",
-            "cite_index": 1,
-            "search_type": "web_search",
-            "tool_sign": "web_search"
-        }])
-
+    def test_save_message_with_string_content_returns_message_id(self, mock_create_conversation_message):
+        """After the refactor, save_message only creates the message row and returns message_id."""
+        mock_create_conversation_message.return_value = 123
         message_request = MessageRequest(
             conversation_id=456,
-            message_idx=2,
-            role="assistant",
-            message=[
-                MessageUnit(type="string",
-                            content="Here are the search results"),
-                MessageUnit(type="search_content", content=search_content)
-            ],
+            message_idx=1,
+            role="user",
+            message=[MessageUnit(
+                type="string", content="Hello, this is a test message")],
             minio_files=[]
         )
-
-        # Execute
-        result = save_message(
+        message_id = save_message(
             message_request, user_id=self.user_id, tenant_id=self.tenant_id)
-
-        # Assert
-        self.assertEqual(result.code, 0)
-        self.assertTrue(result.data)
-
-        # Check correct message was created
+        self.assertEqual(message_id, 123)
         mock_create_conversation_message.assert_called_once()
         call_args = mock_create_conversation_message.call_args[0][0]
-        self.assertEqual(call_args['content'], "Here are the search results")
+        self.assertEqual(call_args['content'], "Hello, this is a test message")
+        # The new save_message forwards the status kwarg (default "completed")
+        self.assertEqual(mock_create_conversation_message.call_args.kwargs.get('status'), 'completed')
 
-        # Check search content was saved
-        mock_create_source_search.assert_called_once()
-        search_data = mock_create_source_search.call_args[0][0]
-        self.assertEqual(search_data['message_id'], 123)
-        self.assertEqual(search_data['conversation_id'], 456)
-        self.assertEqual(search_data['source_type'], "web")
-        self.assertEqual(search_data['score_overall'], 0.95)
-
-        # Check message units were created with placeholder
-        mock_create_message_units.assert_called_once()
-        units = mock_create_message_units.call_args[0][0]
-        self.assertEqual(len(units), 1)
-        self.assertEqual(units[0]['type'], 'search_content_placeholder')
-
-    @patch('backend.services.conversation_management_service.create_conversation_message')
-    @patch('backend.services.conversation_management_service.create_source_image')
-    @patch('backend.services.conversation_management_service.create_message_units')
-    def test_save_message_with_picture_web(self, mock_create_message_units, mock_create_source_image, mock_create_conversation_message):
-        """Ensure picture_web units trigger create_source_image and not message_units creation."""
-        # Setup
-        mock_create_conversation_message.return_value = 789  # message_id
-
-        images_payload = json.dumps({
-            "images_url": [
-                "https://example.com/img1.jpg",
-                "https://example.com/img2.jpg"
-            ]
-        })
-
-        message_request = MessageRequest(
+    @patch('backend.services.conversation_management_service.create_message_unit')
+    def test_save_message_unit_inserts_single_row(self, mock_create_message_unit):
+        """save_message_unit wraps create_message_unit and returns the new unit_id."""
+        mock_create_message_unit.return_value = 555
+        unit_id = save_message_unit(
+            message_id=1,
             conversation_id=456,
-            message_idx=3,
-            role="assistant",
-            message=[
-                MessageUnit(type="string", content="Here are some images"),
-                MessageUnit(type="picture_web", content=images_payload)
-            ],
-            minio_files=[]
+            unit_index=2,
+            unit_type="model_output_code",
+            unit_content="print('hi')",
+            user_id=self.user_id,
+            unit_status="streaming",
+        )
+        self.assertEqual(unit_id, 555)
+        mock_create_message_unit.assert_called_once_with(
+            message_id=1,
+            conversation_id=456,
+            unit_index=2,
+            unit_type="model_output_code",
+            unit_content="print('hi')",
+            user_id=self.user_id,
+            unit_status="streaming",
         )
 
-        # Execute
-        result = save_message(
-            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
-
-        # Assert base result
-        self.assertEqual(result.code, 0)
-        self.assertTrue(result.data)
-
-        # create_conversation_message called once
-        mock_create_conversation_message.assert_called_once()
-        # create_source_image called twice for two images
-        self.assertEqual(mock_create_source_image.call_count, 2)
-        calls = mock_create_source_image.call_args_list
-        called_urls = [call.args[0]['image_url'] for call in calls]
-        self.assertIn("https://example.com/img1.jpg", called_urls)
-        self.assertIn("https://example.com/img2.jpg", called_urls)
-        # ensure conversation_id and message_id in payload
-        for call in calls:
-            payload = call.args[0]
-            self.assertEqual(payload['conversation_id'], 456)
-            self.assertEqual(payload['message_id'], 789)
-
-        # create_message_units should not be called for picture_web
-        mock_create_message_units.assert_not_called()
-
-    @patch('backend.services.conversation_management_service.create_conversation_message')
     @patch('backend.services.conversation_management_service.create_source_image')
-    @patch('backend.services.conversation_management_service.create_message_units')
-    def test_save_message_with_picture_web_deduplicates_duplicate_urls(
-        self, mock_create_message_units, mock_create_source_image, mock_create_conversation_message
-    ):
-        """Ensure duplicate image URLs in a single PICTURE_WEB unit are deduplicated before saving."""
-        mock_create_conversation_message.return_value = 789
+    def test_save_source_image_passes_through(self, mock_create_source_image):
+        """save_source_image is a thin pass-through to create_source_image."""
+        mock_create_source_image.return_value = 42
+        image_data = {
+            "message_id": 1,
+            "conversation_id": 456,
+            "image_url": "https://example.com/img.jpg",
+        }
+        self.assertEqual(save_source_image(image_data), 42)
+        mock_create_source_image.assert_called_once_with(image_data)
 
-        images_payload = json.dumps({
-            "images_url": [
-                "https://example.com/liver.jpg",
-                "https://example.com/liver.jpg",  # duplicate
-                "https://example.com/other.jpg",
-            ]
-        })
-
-        message_request = MessageRequest(
-            conversation_id=456,
-            message_idx=3,
-            role="assistant",
-            message=[
-                MessageUnit(type="string", content="Here are some images"),
-                MessageUnit(type="picture_web", content=images_payload)
-            ],
-            minio_files=[]
-        )
-
-        result = save_message(
-            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
-
-        self.assertEqual(result.code, 0)
-        # Only 2 calls (liver.jpg and other.jpg), not 3
-        self.assertEqual(mock_create_source_image.call_count, 2)
-        called_urls = [call.args[0]['image_url'] for call in mock_create_source_image.call_args_list]
-        self.assertEqual(called_urls.count("https://example.com/liver.jpg"), 1)
-        self.assertIn("https://example.com/liver.jpg", called_urls)
-        self.assertIn("https://example.com/other.jpg", called_urls)
+    @patch('backend.services.conversation_management_service.create_source_search')
+    def test_save_source_search_passes_through(self, mock_create_source_search):
+        """save_source_search is a thin pass-through to create_source_search."""
+        mock_create_source_search.return_value = 7
+        search_data = {"message_id": 1, "source_type": "web"}
+        self.assertEqual(save_source_search(search_data, user_id="u"), 7)
+        mock_create_source_search.assert_called_once_with(search_data, user_id="u")
 
     @patch('backend.services.conversation_management_service.save_message')
     def test_save_conversation_user(self, mock_save_message):
-        # Setup
+        """User messages only create a message row, no unit records are created."""
+        mock_save_message.return_value = 999
         agent_request = AgentRequest(
             conversation_id=123,
             query="What is machine learning?",
@@ -454,7 +361,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Execute
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
-        # Assert
+        # Assert: save_message is called exactly once (no unit records for user messages)
         mock_save_message.assert_called_once()
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.conversation_id, 123)
@@ -465,45 +372,18 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(
             request_arg.message[0].content, "What is machine learning?")
 
-    @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_assistant(self, mock_save_message):
-        # Setup
+    def test_save_conversation_assistant_is_removed(self):
+        """save_conversation_assistant has been replaced by the incremental
+        save_message / save_message_unit flow used by _stream_agent_chunks."""
         agent_request = AgentRequest(
             conversation_id=123,
-            query="What is machine learning?",
+            query="hi",
             minio_files=[],
-            history=[
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"}
-            ]
+            history=[{"role": "user", "content": "x"}],
         )
-
-        messages = [
-            json.dumps({"type": "model_output_thinking",
-                       "content": "Machine learning is "}),
-            json.dumps({"type": "model_output_thinking",
-                       "content": "a field of AI"})
-        ]
-
-        # Execute
-        save_conversation_assistant(
-            agent_request, messages, self.user_id, self.tenant_id)
-
-        # Assert
-        mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.conversation_id, 123)
-        # Based on 1 user message in history + current
-        self.assertEqual(request_arg.message_idx, 3)
-        self.assertEqual(request_arg.role, "assistant")
-        # Check that consecutive model_output_thinking messages were merged
-        self.assertEqual(len(request_arg.message), 1)
-        first_unit = request_arg.message[0]
-        unit_type = getattr(first_unit, "type", None) or (first_unit.get("type") if isinstance(first_unit, dict) else None)
-        self.assertEqual(unit_type, "model_output_thinking")
-        first_unit = request_arg.message[0]
-        unit_content = getattr(first_unit, "content", None) or (first_unit.get("content") if isinstance(first_unit, dict) else None)
-        self.assertEqual(unit_content, "Machine learning is a field of AI")
+        with self.assertRaises(NotImplementedError):
+            save_conversation_assistant(
+                agent_request, [], self.user_id, self.tenant_id)
 
     @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
@@ -655,6 +535,40 @@ class TestConversationManagementService(unittest.TestCase):
             assistant_message["message"][0]["type"], "final_answer")
         self.assertEqual(
             assistant_message["message"][0]["content"], "AI stands for Artificial Intelligence.")
+
+    @patch('backend.services.conversation_management_service.get_conversation_history')
+    def test_get_conversation_history_service_no_duplicate_final_answer(self, mock_get_conversation_history):
+        """When final_answer unit already exists in DB, it should not be duplicated."""
+        # Setup: assistant message already has a final_answer unit in DB
+        mock_history = {
+            "conversation_id": 123,
+            "create_time": "2023-04-01",
+            "message_records": [
+                {
+                    "message_id": 2,
+                    "role": "assistant",
+                    "message_content": "The capital of France is Paris.",
+                    "units": [
+                        {"unit_id": 100, "unit_type": "step_count", "unit_content": "Step 1", "unit_index": 0},
+                        {"unit_id": 101, "unit_type": "final_answer", "unit_content": "The capital of France is Paris.", "unit_index": 1},
+                    ],
+                    "opinion_flag": None
+                }
+            ],
+            "search_records": [],
+            "image_records": []
+        }
+        mock_get_conversation_history.return_value = mock_history
+
+        # Execute
+        result = get_conversation_history_service(123, self.user_id)
+
+        # Assert: should only have one final_answer, not duplicated
+        assistant_message = result[0]["message"][0]
+        final_answer_units = [u for u in assistant_message["message"] if u["type"] == "final_answer"]
+        self.assertEqual(len(final_answer_units), 1)
+        self.assertEqual(
+            final_answer_units[0]["content"], "The capital of France is Paris.")
 
     @patch('backend.services.conversation_management_service.get_conversation')
     @patch('backend.services.conversation_management_service.get_source_searches_by_message')

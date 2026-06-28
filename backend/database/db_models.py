@@ -66,7 +66,7 @@ class ConversationMessage(TableBase):
     opinion_flag = Column(String(
         1), doc="User evaluation of the conversation. Enumeration value \"Y\" represents a positive review, \"N\" represents a negative review")
     status = Column(
-        String(20), default='completed',
+        String(30), default='completed',
         doc="Lifecycle status: pending / streaming / completed / failed / stopped")
 
 
@@ -89,7 +89,7 @@ class ConversationMessageUnit(TableBase):
     unit_content = Column(
         String, doc="Complete content of the smallest reply unit")
     unit_status = Column(
-        String(20), default='completed',
+        String(30), default='completed',
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
 
 

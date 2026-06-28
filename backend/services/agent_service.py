@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from http import HTTPStatus
 import io
 import json
 import logging
@@ -87,6 +88,8 @@ from services.prompt_template_service import (
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
+    get_latest_assistant_message,
+    get_last_unit_for_message,
     save_conversation_user,
     save_message,
     save_message_unit,
@@ -99,6 +102,7 @@ from services.conversation_management_service import (
     update_unit_status,
 )
 from services.memory_config_service import build_memory_context
+from services.streaming_channel import streaming_channel_manager
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.memory_utils import build_memory_config
@@ -114,6 +118,15 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+
+
+async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
+    """
+    Remove the streaming channel after a delay to allow subscribers to finish.
+    This gives reconnected clients time to receive the final chunks before cleanup.
+    """
+    await asyncio.sleep(delay)
+    await streaming_channel_manager.remove_channel(conversation_id, user_id)
 
 
 def _extract_json_objects_from_text(text: str) -> list[dict]:
@@ -795,8 +808,20 @@ async def _stream_agent_chunks(
     tenant_id: str,
     agent_run_info,
     memory_ctx,
+    resume_from_unit_index: int = 0,
+    resume_message_id: Optional[int] = None,
+    channel: Optional[Any] = None,
 ):
-    """Yield SSE chunks from agent_run while persisting messages incrementally."""
+    """
+    Yield SSE chunks from agent_run while persisting messages incrementally.
+
+    Args:
+        resume_from_unit_index: If > 0, we're in resume mode and should start
+                                the unit index counter from this position.
+        resume_message_id: The existing message_id to use in resume mode
+                          (instead of creating a new one).
+        channel: Optional StreamingChannel for multi-subscriber support.
+    """
 
     # Types whose chunks should be merged into the previous unit boundary,
     # matching the legacy batch merge logic.
@@ -810,10 +835,13 @@ async def _stream_agent_chunks(
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
 
+    # Determine if we're in resume mode
+    is_resume_mode = resume_from_unit_index > 0
+
     # Persist the parent ConversationMessage row up front with status='streaming'
     # so that units saved incrementally have a valid message_id to reference.
-    streaming_message_id: Optional[int] = None
-    if not agent_request.is_debug:
+    streaming_message_id: Optional[int] = resume_message_id
+    if not is_resume_mode and not agent_request.is_debug:
         user_role_count = sum(
             1 for item in getattr(agent_request, "history", [])
             if item.role == MESSAGE_ROLE["USER"]
@@ -840,9 +868,29 @@ async def _stream_agent_chunks(
     # a dict with keys: type, content, unit_id, unit_index, mergeable.
     current_unit: Optional[Dict[str, Any]] = None
     # The next unit_index to assign to a brand-new (non-merge) unit.
-    next_unit_index: int = 0
+    # In resume mode, start from the position after the last persisted unit.
+    next_unit_index: int = resume_from_unit_index
     # Set when the agent run loop finishes successfully.
     stream_completed_normally: bool = False
+
+    # Get or create streaming channel for multi-subscriber support
+    if channel is None:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id
+        )
+
+    async def _emit_and_publish(chunk: str):
+        """Yield a chunk to SSE and publish to channel for reconnection."""
+        await channel.publish(chunk)
+        yield chunk
+
+    # In resume mode, emit a status event first
+    if is_resume_mode:
+        await channel.publish('event: stream_status\n')
+        await channel.publish(f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n')
+        yield 'event: stream_status\n'
+        yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
     try:
         async for chunk in agent_run(agent_run_info):
@@ -852,8 +900,25 @@ async def _stream_agent_chunks(
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
+
+                # Add unit_index to the chunk data for frontend resume skip logic.
+                # This allows frontend to accurately skip chunks that were already persisted.
+                # For mergeable types (continuing chunks), use the current unit's index.
+                # For new units, use the next_unit_index that will be assigned.
+                if streaming_message_id is not None and chunk_type:
+                    mergeable = chunk_type in _MERGEABLE_TYPES
+                    if current_unit is not None and mergeable and current_unit.get("type") == chunk_type:
+                        # Continuing chunk - use current unit's index
+                        data["unit_index"] = current_unit["unit_index"]
+                    elif chunk_type not in ("search_content_placeholder",):
+                        # New unit - this will be the next index after assignment
+                        data["unit_index"] = next_unit_index
+                    # Re-serialize the chunk with unit_index for accurate frontend skip
+                    chunk = json.dumps(data)
+                    logger.debug(f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}")
             except Exception:
                 # Malformed chunk: emit as-is and skip persistence bookkeeping.
+                await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
 
@@ -910,9 +975,38 @@ async def _stream_agent_chunks(
                 if is_continuation:
                     # Same mergeable unit: append to the in-memory buffer and
                     # update the DB row to keep content in sync.
+                    # Use synchronous write to prevent race condition: the async submit()
+                    # approach has a critical bug where concurrent submits can read stale
+                    # content and overwrite the DB with incomplete data. Since the main
+                    # loop is async but the DB operations are I/O-bound with network
+                    # latency, synchronous writes here are acceptably fast and guarantee
+                    # that each chunk is fully persisted before the next chunk arrives.
+                    old_len = len(current_unit["content"])
                     current_unit["content"] += chunk_content
-                    submit(
-                        update_unit_content,
+                    new_len = len(current_unit["content"])
+                    # #region debug log
+                    try:
+                        with open("debug-31c94c.log", "a", encoding="utf-8") as f:
+                            f.write(json.dumps({
+                                "sessionId": "31c94c",
+                                "id": f"log_{int(__import__('time').time() * 1000)}",
+                                "timestamp": int(__import__('time').time() * 1000),
+                                "location": "agent_service.py:continuation",
+                                "message": "Mergeable continuation chunk",
+                                "data": {
+                                    "unit_type": chunk_type,
+                                    "unit_id": current_unit.get("unit_id"),
+                                    "old_len": old_len,
+                                    "chunk_len": len(chunk_content),
+                                    "new_len": new_len,
+                                },
+                                "runId": "post-fix-verification",
+                                "hypothesisId": "A"
+                            }, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
+                    update_unit_content(
                         current_unit["unit_id"],
                         current_unit["content"],
                         user_id,
@@ -920,6 +1014,27 @@ async def _stream_agent_chunks(
                 else:
                     # Boundary detected: close the previous unit (if any) and
                     # open a new one for this chunk.
+                    # #region debug log
+                    try:
+                        with open("debug-31c94c.log", "a", encoding="utf-8") as f:
+                            f.write(json.dumps({
+                                "sessionId": "31c94c",
+                                "id": f"log_{int(__import__('time').time() * 1000)}",
+                                "timestamp": int(__import__('time').time() * 1000),
+                                "location": "agent_service.py:unit_boundary",
+                                "message": "Unit boundary detected - closing previous unit",
+                                "data": {
+                                    "prev_type": current_unit.get("type") if current_unit else None,
+                                    "prev_id": current_unit.get("unit_id") if current_unit else None,
+                                    "prev_content_len": len(current_unit["content"]) if current_unit else 0,
+                                    "new_type": chunk_type,
+                                },
+                                "runId": "debug-run",
+                                "hypothesisId": "A"
+                            }, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
                     if current_unit is not None:
                         submit(
                             update_unit_status,
@@ -1016,6 +1131,7 @@ async def _stream_agent_chunks(
                             )
                         current_unit = None
                         next_unit_index += 1
+                        await channel.publish(f"data: {chunk}\n\n")
                         yield f"data: {chunk}\n\n"
                         continue
 
@@ -1023,6 +1139,27 @@ async def _stream_agent_chunks(
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
+                        # #region debug log
+                        try:
+                            with open("debug-31c94c.log", "a", encoding="utf-8") as f:
+                                f.write(json.dumps({
+                                    "sessionId": "31c94c",
+                                    "id": f"log_{int(__import__('time').time() * 1000)}",
+                                    "timestamp": int(__import__('time').time() * 1000),
+                                    "location": "agent_service.py:new_unit_insert",
+                                    "message": "Creating new unit",
+                                    "data": {
+                                        "chunk_type": chunk_type,
+                                        "unit_index": next_unit_index,
+                                        "chunk_content_len": len(chunk_content),
+                                        "chunk_content_repr": repr(chunk_content[:100]) if chunk_content else "",
+                                    },
+                                    "runId": "debug-run",
+                                    "hypothesisId": "A"
+                                }, ensure_ascii=False) + "\n")
+                        except Exception:
+                            pass
+                        # #endregion
                         new_unit_id = submit(
                             save_message_unit,
                             message_id=streaming_message_id,
@@ -1042,10 +1179,12 @@ async def _stream_agent_chunks(
                         }
                         next_unit_index += 1
 
+            await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
+        await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
         # Finalize any in-flight unit and transition the parent message to its
@@ -1053,8 +1192,42 @@ async def _stream_agent_chunks(
         if streaming_message_id is not None:
             if current_unit is not None:
                 try:
-                    submit(
-                        update_unit_status,
+                    # First update the content to ensure the last chunk is persisted
+                    # This must be done synchronously before updating status
+                    final_content = current_unit["content"]
+                    final_len = len(final_content)
+                    # #region debug log
+                    try:
+                        with open("debug-31c94c.log", "a", encoding="utf-8") as f:
+                            f.write(json.dumps({
+                                "sessionId": "31c94c",
+                                "id": f"log_{int(__import__('time').time() * 1000)}",
+                                "timestamp": int(__import__('time').time() * 1000),
+                                "location": "agent_service.py:finally_finalize",
+                                "message": "Finalizing current_unit in finally block",
+                                "data": {
+                                    "unit_type": current_unit.get("type"),
+                                    "unit_id": current_unit.get("unit_id"),
+                                    "unit_index": current_unit.get("unit_index"),
+                                    "final_content_len": final_len,
+                                    "stream_completed_normally": stream_completed_normally,
+                                    "final_content_repr": repr(final_content[-200:]) if final_len > 0 else "",
+                                },
+                                "runId": "debug-run",
+                                "hypothesisId": "A"
+                            }, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
+                    update_unit_content(
+                        current_unit["unit_id"],
+                        final_content,
+                        user_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to update last unit content")
+                try:
+                    update_unit_status(
                         current_unit["unit_id"],
                         "completed",
                         user_id,
@@ -1064,8 +1237,7 @@ async def _stream_agent_chunks(
 
             terminal_status = "completed" if stream_completed_normally else "failed"
             try:
-                submit(
-                    update_message_status,
+                update_message_status(
                     streaming_message_id,
                     terminal_status,
                     user_id,
@@ -1075,6 +1247,22 @@ async def _stream_agent_chunks(
 
         agent_run_manager.unregister_agent_run(
             agent_request.conversation_id, user_id)
+
+        # Mark channel as completed and schedule cleanup
+        if channel is not None:
+            terminal_status = 'completed' if stream_completed_normally else 'failed'
+            await streaming_channel_manager.complete_channel(
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+                status=terminal_status
+            )
+            # Schedule channel removal (give subscribers time to receive final chunks)
+            asyncio.create_task(
+                _cleanup_channel_later(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=user_id
+                )
+            )
 
         try:
             skill_file_content_local = "\n".join(
@@ -2498,6 +2686,12 @@ async def generate_stream_with_memory(
     # Note: the actual streaming happens via `_stream_agent_chunks` helper
     # ------------------------------------------------------------------
 
+    # Create channel for multi-subscriber support
+    channel = await streaming_channel_manager.get_or_create_channel(
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id
+    )
+
     memory_enabled = False
     try:
         memory_context_preview = build_memory_context(
@@ -2507,6 +2701,7 @@ async def generate_stream_with_memory(
 
         if memory_enabled:
             # Emit start token before memory retrieval
+            await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
             yield f"data: {_memory_token(msg_start)}\n\n"
 
         # Prepare run (will execute memory retrieval inside create_agent_run_info)
@@ -2524,6 +2719,7 @@ async def generate_stream_with_memory(
 
         if memory_enabled:
             # Emit completion token once memory is ready
+            await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
             yield f"data: {_memory_token(msg_done)}\n\n"
 
         async for data_chunk in _stream_agent_chunks(
@@ -2532,12 +2728,14 @@ async def generate_stream_with_memory(
             tenant_id=tenant_id,
             agent_run_info=agent_run_info,
             memory_ctx=memory_context,
+            channel=channel,
         ):
             yield data_chunk
 
     except MemoryPreparationException:
         # Memory retrieval failure: emit failure token when memory is enabled, and continue without blocking
         if memory_enabled:
+            await channel.publish(f"data: {_memory_token(msg_fail)}\n\n")
             yield f"data: {_memory_token(msg_fail)}\n\n"
 
         try:
@@ -2546,6 +2744,7 @@ async def generate_stream_with_memory(
                 agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                channel=channel,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -2554,6 +2753,7 @@ async def generate_stream_with_memory(
                 run_exc,
                 exc_info=True,
             )
+            await channel.publish(_safe_agent_stream_error_chunk())
             yield _safe_agent_stream_error_chunk()
             return
     except Exception as stream_exc:
@@ -2562,6 +2762,7 @@ async def generate_stream_with_memory(
             stream_exc,
             exc_info=True,
         )
+        await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
         return
     finally:
@@ -2575,6 +2776,7 @@ async def generate_stream_no_memory(
     user_id: str,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    channel: Optional[Any] = None,
 ):
     """Stream agent responses without any memory preprocessing tokens or fallback logic."""
 
@@ -2593,8 +2795,83 @@ async def generate_stream_no_memory(
         tenant_id=tenant_id,
         agent_run_info=agent_run_info,
         memory_ctx=memory_context,
+        channel=channel,
     ):
         yield data_chunk
+
+
+def _detect_resume_position(
+    conversation_id: int,
+    user_id: str,
+) -> Dict[str, Any]:
+    """
+    Determine the position to resume streaming from.
+
+    This function queries the database to check if there's an in-progress
+    streaming message for the given conversation. Used when frontend reconnects
+    after tab switch.
+
+    Returns:
+        Dict containing:
+            - should_resume: bool - whether we should resume streaming
+            - message_id: int - the assistant message ID
+            - message_status: str - current status (streaming/completed/failed/stopped)
+            - resume_from_unit_index: int - the unit index to resume from
+            - reason: str - explanation of the decision
+    """
+    latest_msg = get_latest_assistant_message(conversation_id, user_id)
+
+    if latest_msg is None:
+        return {
+            'should_resume': False,
+            'message_id': None,
+            'message_status': None,
+            'resume_from_unit_index': None,
+            'reason': 'no_assistant_message'
+        }
+
+    message_status = latest_msg.get('status')
+    message_id = latest_msg['message_id']
+
+    # Check if channel exists and is still active
+    channel = streaming_channel_manager.get_channel(conversation_id, user_id)
+    channel_active = channel is not None and not channel.is_completed
+
+    if message_status == 'streaming':
+        # Backend still running - get last unit position
+        last_unit = get_last_unit_for_message(message_id)
+        resume_from = last_unit['unit_index'] + 1 if last_unit else 0
+        return {
+            'should_resume': True,
+            'message_id': message_id,
+            'message_status': message_status,
+            'resume_from_unit_index': resume_from,
+            'resume_message_id': message_id,
+            'reason': 'backend_streaming'
+        }
+    elif channel_active:
+        # Message shows completed but channel is still active - resume to get remaining chunks
+        # This handles edge case where message status was updated but channel not yet cleaned up
+        last_unit = get_last_unit_for_message(message_id)
+        resume_from = last_unit['unit_index'] + 1 if last_unit else 0
+        return {
+            'should_resume': True,
+            'message_id': message_id,
+            'message_status': message_status,
+            'resume_from_unit_index': resume_from,
+            'resume_message_id': message_id,
+            'reason': 'channel_active'
+        }
+    else:
+        # Backend finished - no more chunks to stream
+        return {
+            'should_resume': False,
+            'message_id': message_id,
+            'message_status': message_status,
+            'resume_from_unit_index': None,
+            'resume_message_id': None,
+            'reason': f'backend_{message_status}'
+        }
 
 
 async def run_agent_stream(
@@ -2604,10 +2881,14 @@ async def run_agent_stream(
     user_id: str = None,
     tenant_id: str = None,
     skip_user_save: bool = False,
+    resume: bool = False,
 ):
     """
     Start an agent run and stream responses.
     If user_id or tenant_id is provided, authorization will be overridden. (Useful in northbound apis)
+
+    Args:
+        resume: If True, check for existing streaming message and continue from where it left off
     """
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
         authorization=authorization,
@@ -2616,6 +2897,95 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
+    # Resume mode: check for existing streaming message
+    if resume:
+        resume_info = _detect_resume_position(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+        )
+
+        if not resume_info['should_resume']:
+            # Backend already finished
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    'status': resume_info['message_status'],
+                    'message': f"Stream already {resume_info['message_status']}: {resume_info['reason']}",
+                }
+            )
+
+        # Check if the agent is still running by querying the agent_run_manager
+        existing_run_info = agent_run_manager.get_agent_run_info(
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id
+        )
+
+        if existing_run_info is None:
+            # Agent has finished while frontend was disconnected
+            # Update message status to completed if it's still streaming
+            try:
+                update_message_status(
+                    message_id=resume_info['message_id'],
+                    status='completed'
+                )
+            except Exception:
+                pass
+
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    'status': 'completed',
+                    'message': 'Agent finished during disconnection',
+                }
+            )
+
+        # Agent is still running - subscribe to the channel to receive new chunks
+        channel = streaming_channel_manager.get_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id
+        )
+
+        if channel is None:
+            # No channel exists, agent might be in a different state
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    'status': 'streaming',
+                    'message': 'Stream channel not found',
+                }
+            )
+
+        # Subscribe to the channel and stream chunks to the frontend
+        async def channel_stream():
+            # Include the current buffer size so frontend knows how many chunks to skip
+            replay_chunk_count = channel.history_size if channel else 0
+
+            # Emit status event first with chunk count for skip tracking
+            yield 'event: stream_status\n'
+            yield f'data: {{"status": "resumed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}, "replay_chunk_count": {replay_chunk_count}}}\n\n'
+
+            # Use subscribe_with_history(0) to replay ALL chunks from the buffer
+            # This ensures no chunks are lost even if frontend disconnected during streaming
+            # The frontend skips all chunks until replay_chunk_count is reached
+            async for chunk in channel.subscribe_with_history(0):
+                yield chunk
+
+            # Mark as complete when channel ends
+            yield 'event: stream_status\n'
+            yield f'data: {{"status": "completed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}}}\n\n'
+
+        return StreamingResponse(
+            channel_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Stream-Status": "resumed",
+                "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+            },
+        )
+
+    # Normal mode: start new stream
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
             agent_request,

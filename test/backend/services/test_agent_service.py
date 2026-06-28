@@ -20,7 +20,7 @@ class MockToolConfig:
     def __init__(self, *args, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
-    
+
     def model_dump(self, **kwargs):
         """Return a dict representation of the ToolConfig."""
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
@@ -3778,25 +3778,26 @@ def test_save_messages(mock_submit, mock_agent_request):
     save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
     mock_submit.assert_called_once()
 
-    # Test assistant message saving
-    save_messages(
-        mock_agent_request,
-        "assistant",
-        user_id="u",
-        tenant_id="t",
-        messages=["test message"],
-    )
-    assert mock_submit.call_count == 2
+    # Test assistant message saving now raises because incremental
+    # persistence has replaced the old batch path.
+    with pytest.raises(ValueError, match="incremental"):
+        save_messages(
+            mock_agent_request,
+            "assistant",
+            user_id="u",
+            tenant_id="t",
+            messages=["test message"],
+        )
 
-    # Test invalid target should not raise according to current implementation; ensure no submit called
-    save_messages(
-        mock_agent_request,
-        "invalid",
-        user_id="u",
-        tenant_id="t",
-        messages=["test message"],
-    )
-    assert mock_submit.call_count == 2
+    # Test invalid target now raises explicitly.
+    with pytest.raises(ValueError, match="Unsupported target"):
+        save_messages(
+            mock_agent_request,
+            "invalid",
+            user_id="u",
+            tenant_id="t",
+            messages=["test message"],
+        )
 
 
 @pytest.mark.asyncio
@@ -4282,7 +4283,7 @@ def test_get_agent_call_relationship_impl_tool_name_fallback(mock_query_sub_agen
 
 @pytest.mark.asyncio
 async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
-    """Ensure _stream_agent_chunks yields chunks, saves assistant messages (when not debug) and always unregisters the run regardless of errors."""
+    """Ensure _stream_agent_chunks yields chunks, creates the streaming message row (when not debug), persists units incrementally, and always unregisters the run regardless of errors."""
     # Prepare fake AgentRequest
     agent_request = AgentRequest(
         agent_id=1,
@@ -4293,10 +4294,12 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         is_debug=False,
     )
 
-    # Mock agent_run to yield two chunks
+    # Mock agent_run to yield two JSON-typed chunks that form a single
+    # mergeable (MODEL_OUTPUT_CODE) unit plus a distinct (final_answer) unit.
     async def fake_agent_run(*_, **__):
-        yield "chunk1"
-        yield "chunk2"
+        yield json.dumps({"type": "model_output_code", "content": "def f(): "})
+        yield json.dumps({"type": "model_output_code", "content": "pass"})
+        yield json.dumps({"type": "final_answer", "content": "All done."})
 
     monkeypatch.setitem(
         sys.modules, "nexent.core.agents.run_agent", MagicMock())
@@ -4304,15 +4307,67 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         "backend.services.agent_service.agent_run", fake_agent_run, raising=False
     )
 
-    # Track calls
-    save_calls = []
+    # Track calls into the new incremental persistence path.
+    save_message_calls = []
+    save_message_unit_calls = []
+    update_unit_status_calls = []
+    update_message_status_calls = []
+    submit_jobs = []
 
-    def fake_save_messages(*args, **kwargs):
-        save_calls.append((args, kwargs))
+    def fake_save_message(req, user_id, tenant_id, status="completed"):
+        save_message_calls.append((req, user_id, tenant_id, status))
+        return 4242
+
+    def fake_save_message_unit(**kwargs):
+        save_message_unit_calls.append(kwargs)
+        return kwargs.get("unit_index", 0) + 100
+
+    def fake_update_unit_status(unit_id, status, user_id):
+        update_unit_status_calls.append((unit_id, status, user_id))
+
+    def fake_update_message_status(message_id, status, user_id):
+        update_message_status_calls.append((message_id, status, user_id))
+
+    class _FakeFuture:
+        def __init__(self, value):
+            self._value = value
+
+        def result(self):
+            return self._value
+
+    def fake_submit(fn, *args, **kwargs):
+        submit_jobs.append((fn, args, kwargs))
+        if fn is save_message_unit:
+            return _FakeFuture(save_message_unit_calls[-1] and len(save_message_unit_calls) + 99)
+        if fn is update_unit_status:
+            return _FakeFuture(None)
+        if fn is update_message_status:
+            return _FakeFuture(None)
+        return _FakeFuture(None)
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_messages",
-        fake_save_messages,
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        fake_save_message_unit,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        fake_update_unit_status,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        fake_update_message_status,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        fake_submit,
         raising=False,
     )
 
@@ -4335,11 +4390,33 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     ):
         collected.append(out)
 
+    # Three chunks should each be emitted as SSE data lines.
     assert collected == [
-        "data: chunk1\n\n",
-        "data: chunk2\n\n",
-    ]  # Prefix added in helper
-    assert save_calls, "save_messages should have been called for assistant messages"
+        'data: {"type": "model_output_code", "content": "def f(): "}\n\n',
+        'data: {"type": "model_output_code", "content": "pass"}\n\n',
+        'data: {"type": "final_answer", "content": "All done."}\n\n',
+    ]
+
+    # The parent streaming message row must have been created up front with
+    # status="streaming".
+    assert save_message_calls, "save_message must be called to create the streaming message row"
+    assert save_message_calls[0][3] == "streaming"
+    assert save_message_calls[0][2] == "t"
+
+    # Two boundary-creating chunks (model_output_code chunk #1, final_answer)
+    # should each have produced a save_message_unit call. The second
+    # model_output_code chunk is a continuation, so it must NOT create a new
+    # unit row.
+    assert len(save_message_unit_calls) == 2
+    assert save_message_unit_calls[0]["unit_type"] == "model_output_code"
+    assert save_message_unit_calls[0]["unit_status"] == "streaming"
+    assert save_message_unit_calls[1]["unit_type"] == "final_answer"
+
+    # The model_output_code unit must be completed (boundary to final_answer)
+    # and the final_answer unit must be completed in the finally block, after
+    # which the parent message must transition to "completed".
+    assert update_unit_status_calls, "previous unit must be marked completed at boundary"
+    assert update_message_status_calls[-1] == (4242, "completed", "u")
     assert unregister_called.get("conv_id") == 999
     assert unregister_called.get("user_id") == "u"
 
@@ -4411,6 +4488,44 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run", yield_final_answer, raising=False
+    )
+
+    # Mock the new incremental persistence path so this test can focus on
+    # memory and final_answer capture without touching the DB.
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=9001),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        MagicMock(return_value=42),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(),
+        raising=False,
+    )
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *a, **kw: _FakeFuture(),
+        raising=False,
     )
 
     add_calls = {"args": None, "called": False}
@@ -4490,6 +4605,43 @@ async def test__stream_agent_chunks_skips_memory_when_switch_off(monkeypatch):
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run", yield_one, raising=False
+    )
+
+    # Mock the new incremental persistence path.
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        MagicMock(return_value=9001),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        MagicMock(return_value=42),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_content",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        MagicMock(),
+        raising=False,
+    )
+
+    class _FakeFuture:
+        def result(self):
+            return 42
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *a, **kw: _FakeFuture(),
+        raising=False,
     )
 
     called = {"count": 0}
@@ -10087,7 +10239,7 @@ def test_save_messages_assistant_without_messages_error():
 
     agent_request = MagicMock()
 
-    with pytest.raises(ValueError, match="Messages cannot be None"):
+    with pytest.raises(ValueError, match="incremental"):
         save_messages(agent_request, MESSAGE_ROLE["ASSISTANT"], "user_1", "tenant_1")
 
 
@@ -10250,3 +10402,101 @@ async def test_export_agent_dict_for_repository_impl(mock_export_core):
         user_id="user_a",
         version_no=1,
     )
+
+
+# Tests for _detect_resume_position with channel check
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.get_latest_assistant_message')
+@patch('backend.services.agent_service.get_last_unit_for_message')
+@patch('backend.services.agent_service.streaming_channel_manager')
+async def test__detect_resume_position_streaming_status(
+    mock_channel_manager, mock_get_last_unit, mock_get_latest_msg
+):
+    """When message status is 'streaming', should_resume should be True."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_latest_msg.return_value = {
+        'message_id': 123,
+        'status': 'streaming'
+    }
+    mock_get_last_unit.return_value = {'unit_index': 5}
+    mock_channel_manager.get_channel.return_value = None  # Channel cleaned up
+
+    result = _detect_resume_position(conversation_id=1, user_id="user1")
+
+    assert result['should_resume'] is True
+    assert result['message_id'] == 123
+    assert result['resume_from_unit_index'] == 6  # last_unit_index + 1
+    assert result['reason'] == 'backend_streaming'
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.get_latest_assistant_message')
+@patch('backend.services.agent_service.get_last_unit_for_message')
+@patch('backend.services.agent_service.streaming_channel_manager')
+async def test__detect_resume_position_channel_still_active(
+    mock_channel_manager, mock_get_last_unit, mock_get_latest_msg
+):
+    """When message is completed but channel is still active, should resume."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_latest_msg.return_value = {
+        'message_id': 456,
+        'status': 'completed'  # Message shows completed
+    }
+    mock_get_last_unit.return_value = {'unit_index': 10}
+    # Channel still active
+    mock_active_channel = MagicMock()
+    mock_active_channel.is_completed = False
+    mock_channel_manager.get_channel.return_value = mock_active_channel
+
+    result = _detect_resume_position(conversation_id=2, user_id="user2")
+
+    assert result['should_resume'] is True
+    assert result['message_id'] == 456
+    assert result['resume_from_unit_index'] == 11
+    assert result['reason'] == 'channel_active'
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.get_latest_assistant_message')
+@patch('backend.services.agent_service.streaming_channel_manager')
+async def test__detect_resume_position_no_channel_no_resume(
+    mock_channel_manager, mock_get_latest_msg
+):
+    """When message is completed and no active channel, should not resume."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_latest_msg.return_value = {
+        'message_id': 789,
+        'status': 'completed'
+    }
+    mock_channel_manager.get_channel.return_value = None
+
+    result = _detect_resume_position(conversation_id=3, user_id="user3")
+
+    assert result['should_resume'] is False
+    assert result['message_id'] == 789
+    assert result['reason'] == 'backend_completed'
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.get_latest_assistant_message')
+@patch('backend.services.agent_service.streaming_channel_manager')
+async def test__detect_resume_position_no_assistant_message(
+    mock_channel_manager, mock_get_latest_msg
+):
+    """When no assistant message exists, should not resume."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_latest_msg.return_value = None
+    mock_channel_manager.get_channel.return_value = None
+
+    result = _detect_resume_position(conversation_id=4, user_id="user4")
+
+    assert result['should_resume'] is False
+    assert result['message_id'] is None
+    assert result['reason'] == 'no_assistant_message'

@@ -19,7 +19,9 @@ from database.conversation_db import (
     get_conversation,
     get_conversation_history,
     get_conversation_list,
+    get_latest_assistant_message,
     get_latest_assistant_message_id,
+    get_last_unit_for_message,
     get_message_id_by_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
@@ -177,7 +179,11 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist the user-side message (one message row + one string unit)."""
+    """Persist the user-side message (one message row only).
+
+    Note: conversation_message_unit_t only stores assistant message content.
+    User messages do not need unit records.
+    """
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
@@ -188,16 +194,8 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         message=[MessageUnit(type="string", content=request.query)],
         minio_files=request.minio_files,
     )
-    message_id = save_message(
+    save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id)
-    save_message_unit(
-        message_id=message_id,
-        conversation_id=request.conversation_id,
-        unit_index=0,
-        unit_type="string",
-        unit_content=request.query,
-        user_id=user_id,
-    )
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -374,6 +372,33 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         raise Exception(str(e))
 
 
+def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Build streaming state from the latest assistant message with status='streaming'.
+    This is used by the frontend to recover streaming state when the user returns to
+    a conversation tab after switching away.
+
+    Args:
+        message_records: Raw message records from get_conversation_history
+
+    Returns:
+        Optional[Dict]: Contains streaming message info for recovery, or None if no streaming message
+    """
+    for msg in reversed(message_records):
+        if msg.get('status') == 'streaming' and msg.get('role') == MESSAGE_ROLE["ASSISTANT"]:
+            units = msg.get('units') or []
+            last_unit = units[-1] if units else None
+            return {
+                'message_id': msg['message_id'],
+                'message_index': msg['message_index'],
+                'status': msg['status'],
+                'message_content': msg.get('message_content', ''),
+                'last_unit': last_unit,
+                'units': units,
+            }
+    return None
+
+
 def get_conversation_history_service(conversation_id: int, user_id: str) -> List[Dict[str, Any]]:
     """
     Get complete history of specified conversation
@@ -490,11 +515,13 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                             'content': unit_content
                         })
 
-                # Add final_answer type message unit
-                processed_units.append({
-                    'type': 'final_answer',
-                    'content': message_content
-                })
+                # Add final_answer type message unit only if not already present
+                has_final_answer = any(u.get('type') == 'final_answer' for u in processed_units)
+                if not has_final_answer:
+                    processed_units.append({
+                        'type': 'final_answer',
+                        'content': message_content
+                    })
 
                 message_item = {
                     'role': role,
@@ -536,6 +563,12 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'create_time': history_data['create_time'],
             'message': messages
         }
+
+        # Add streaming_message if there's an in-progress assistant message
+        streaming_message = _build_streaming_message(history_data['message_records'])
+        if streaming_message:
+            formatted_history['streaming_message'] = streaming_message
+
         return [formatted_history]
 
     except Exception as e:

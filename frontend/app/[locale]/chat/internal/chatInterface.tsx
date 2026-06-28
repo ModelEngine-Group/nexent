@@ -32,7 +32,7 @@ import {
 } from "@/lib/chat/chatAttachmentUtils";
 import { ConversationListItem, ApiConversationDetail, HistoryItem } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
-import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
+import { handleStreamResponse, ResumeConfig, StreamingMessage } from "@/app/chat/streaming/chatStreamHandler";
 import {
   extractUserMsgFromResponse,
   extractAssistantMsgFromResponse,
@@ -755,6 +755,156 @@ export function ChatInterface() {
   };
 
 
+  // Helper to handle resume completion when agent finished during disconnect
+  const handleResumeCompletion = (conversationId: number, status: string) => {
+    // Clean up streaming state
+    setStreamingConversations((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(conversationId);
+      return newSet;
+    });
+    setIsStreaming(false);
+
+    // Mark the message as complete in the UI
+    setSessionMessages((prev) => {
+      const messages = prev[conversationId];
+      if (!messages || messages.length === 0) return prev;
+      const newMessages = [...messages];
+      const lastMsg = newMessages[newMessages.length - 1];
+      if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+        newMessages[newMessages.length - 1] = {
+          ...lastMsg,
+          isComplete: true,
+        };
+      }
+      return {
+        ...prev,
+        [conversationId]: newMessages,
+      };
+    });
+  };
+
+
+  // Helper function to resume streaming after tab switch
+  const resumeStreamingConversation = async (
+    conversationId: number,
+    streamingMessage: StreamingMessage
+  ) => {
+    const lastUnit = streamingMessage.last_unit;
+    const resumeConfig: ResumeConfig = {
+      streamingMessage,
+      lastUnitIndex: lastUnit?.unit_index ?? -1,
+    };
+
+    // Create new AbortController for the resume request
+    const controller = new AbortController();
+    conversationControllersRef.current.set(conversationId, controller);
+
+    try {
+      // Call resume API
+      const response = await conversationService.runAgent(
+        {
+          query: "", // Empty query for resume
+          conversation_id: conversationId,
+          history: [],
+          is_resume: true, // Flag to indicate resume mode
+        },
+        controller.signal
+      );
+
+      // Check if this is a JSON response (agent finished during disconnect)
+      if (response && typeof response === 'object' && 'type' in response && response.type === 'json') {
+        const jsonData = response.data as { status: string; message?: string };
+        // Agent finished while disconnected - mark message as complete
+        handleResumeCompletion(conversationId, jsonData.status);
+        return;
+      }
+
+      const reader = response as ReadableStreamDefaultReader<Uint8Array>;
+      if (!reader) {
+        throw new Error("Response body is null");
+      }
+
+      // Set streaming state
+      setStreamingConversations((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(conversationId);
+        return newSet;
+      });
+      setIsStreaming(true);
+
+      // Create setCurrentSessionMessages factory
+      const setCurrentSessionMessagesFactory =
+        (targetConversationId: number) =>
+        (valueOrUpdater: React.SetStateAction<ChatMessageType[]>) => {
+          setSessionMessages((prev) => {
+            const prevArr = prev[targetConversationId] || [];
+            let nextArr: ChatMessageType[];
+            if (typeof valueOrUpdater === "function") {
+              nextArr = (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(prevArr);
+            } else {
+              nextArr = valueOrUpdater;
+            }
+            return {
+              ...prev,
+              [targetConversationId]: [...nextArr],
+            };
+          });
+        };
+
+      // Create resetTimeout function
+      const resetTimeout = () => {
+        const existingTimeout = conversationTimeoutsRef.current.get(conversationId);
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+        const newTimeout = setTimeout(async () => {
+          const ctrl = conversationControllersRef.current.get(conversationId);
+          if (ctrl && !ctrl.signal.aborted) {
+            try {
+              ctrl.abort(t("chatInterface.requestTimeout"));
+              await conversationService.stop(conversationId);
+            } catch (e) {
+              log.error(t("chatInterface.stopTimeoutRequestFailed"), e);
+            }
+          }
+          conversationTimeoutsRef.current.delete(conversationId);
+        }, 120000);
+        conversationTimeoutsRef.current.set(conversationId, newTimeout);
+      };
+
+      resetTimeout();
+
+      // Call handleStreamResponse with resume config
+      await handleStreamResponse(
+        reader as ReadableStreamDefaultReader<Uint8Array>,
+        setCurrentSessionMessagesFactory(conversationId),
+        resetTimeout,
+        stepIdCounter,
+        setIsSwitchedConversation,
+        false, // isNewConversation
+        conversationManagement.setConversationTitle,
+        conversationManagement.fetchConversationList,
+        conversationId,
+        conversationService,
+        false, // isDebug
+        t,
+        resumeConfig
+      );
+    } catch (error) {
+      log.error(t("chatInterface.resumeStreamFailed"), error);
+    } finally {
+      // Clean up
+      conversationControllersRef.current.delete(conversationId);
+      setStreamingConversations((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(conversationId);
+        return newSet;
+      });
+      setIsStreaming(false);
+    }
+  };
+
   // When switching conversation, automatically load messages
   const handleDialogClick = async (dialog: ConversationListItem) => {
     // When switching conversation, keep all SSE connections active
@@ -858,6 +1008,15 @@ export function ChatInterface() {
 
             // Clear any previous error for this conversation
             conversationManagement.clearConversationLoadError(dialog.conversation_id);
+
+            // Check if this conversation has an in-progress streaming message
+            const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
+            if (streamingMessage && streamingMessage.status === 'streaming') {
+              // Resume streaming - wait for state to update first
+              setTimeout(() => {
+                resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+              }, 100);
+            }
 
             // Asynchronously load all attachment URLs
             loadAttachmentUrls(formattedMessages, dialog.conversation_id);
@@ -985,6 +1144,15 @@ export function ChatInterface() {
 
           // Clear any previous error for this conversation
           conversationManagement.clearConversationLoadError(dialog.conversation_id);
+
+          // Check if this conversation has an in-progress streaming message
+          const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
+          if (streamingMessage && streamingMessage.status === 'streaming') {
+            // Resume streaming - wait for state to update first
+            setTimeout(() => {
+              resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+            }, 100);
+          }
 
           // Asynchronously load all attachment URLs
           loadAttachmentUrls(formattedMessages, dialog.conversation_id);
