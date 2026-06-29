@@ -20,6 +20,7 @@ interface ToolRow {
   name: string;
   source: string;
   labels: string[];
+  updatedBy: string;
 }
 
 export default function LabelManagementModal({
@@ -51,6 +52,7 @@ export default function LabelManagementModal({
           name: tool.name,
           source: tool.source || "",
           labels: Array.isArray(tool.labels) ? [...tool.labels] : [],
+          updatedBy: tool.updated_by || "",
         }));
         setDataSource(rows);
         builtRef.current = true;
@@ -104,6 +106,15 @@ export default function LabelManagementModal({
       dataIndex: "source",
       key: "source",
       width: 100,
+    },
+    {
+      title: t("toolConfig.column.updatedBy"),
+      dataIndex: "updatedBy",
+      key: "updatedBy",
+      width: 140,
+      render: (val: string) => (
+        <span className="text-xs text-gray-400">{val || "—"}</span>
+      ),
     },
     {
       title: t("toolConfig.column.labels"),

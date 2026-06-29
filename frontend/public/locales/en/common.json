@@ -502,6 +502,7 @@
   "toolConfig.column.toolName": "Tool Name",
   "toolConfig.column.source": "Source",
   "toolConfig.column.labels": "Labels",
+  "toolConfig.column.updatedBy": "Updated By",
   "toolConfig.labelPlaceholder": "Add labels...",
   "toolConfig.message.labelsSaveFailed": "Failed to save labels",
   "toolConfig.message.loadError": "Failed to load tool configuration",

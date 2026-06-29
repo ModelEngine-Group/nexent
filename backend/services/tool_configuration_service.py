@@ -562,7 +562,8 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "params": tool.get("params", []),
             "inputs": inputs_str,
             "category": tool.get("category"),
-            "labels": tool.get("labels", [])
+            "labels": tool.get("labels", []),
+            "updated_by": tool.get("updated_by", "")
         }
         formatted_tools.append(formatted_tool)
     return formatted_tools

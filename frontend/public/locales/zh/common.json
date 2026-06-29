@@ -475,6 +475,7 @@
   "toolConfig.column.toolName": "工具名称",
   "toolConfig.column.source": "来源",
   "toolConfig.column.labels": "标签",
+  "toolConfig.column.updatedBy": "最后修改",
   "toolConfig.labelPlaceholder": "添加标签...",
   "toolConfig.message.labelsSaveFailed": "保存标签失败",
   "toolConfig.message.loadError": "加载工具配置失败",

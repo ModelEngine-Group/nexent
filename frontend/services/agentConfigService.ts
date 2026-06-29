@@ -92,6 +92,7 @@ export const fetchTools = async () => {
         : typeof tool.labels === 'string'
           ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
           : [],
+      updated_by: tool.updated_by || "",
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
