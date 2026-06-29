@@ -271,8 +271,7 @@ def generate_error_report(results: list[dict]) -> None:
 
 def _combine_coverage(current_dir: Path, project_root: Path) -> bool:
     coverage_data_file = current_dir / ".coverage"
-    coverage_xml_file = current_dir / "coverage.xml"
-    for path in (coverage_data_file, coverage_xml_file):
+    for path in (coverage_data_file,):
         if path.exists():
             path.unlink()
 
@@ -282,23 +281,12 @@ def _combine_coverage(current_dir: Path, project_root: Path) -> bool:
         str(coverage_data_file),
         str(current_dir),
     )
-    xml_cmd = _coverage_command(
-        "xml",
-        "-o",
-        str(coverage_xml_file),
-        "--data-file",
-        str(coverage_data_file),
-    )
     coverage_env = _coverage_env(project_root)
     combine = subprocess.run(combine_cmd, cwd=project_root, env=coverage_env, text=True, capture_output=True)
     if combine.returncode != 0:
         logger.error("Coverage combine failed:\n%s\n%s", combine.stdout, combine.stderr)
         return False
-    xml = subprocess.run(xml_cmd, cwd=project_root, env=coverage_env, text=True, capture_output=True)
-    if xml.returncode != 0:
-        logger.error("Coverage XML generation failed:\n%s\n%s", xml.stdout, xml.stderr)
-        return False
-    logger.info("Coverage XML file generated: %s", coverage_xml_file)
+    logger.info("Coverage data combined: %s", coverage_data_file)
     return True
 
 
@@ -318,6 +306,9 @@ def _report_coverage(current_dir: Path) -> bool:
         html_dir = current_dir / "coverage_html"
         cov.html_report(directory=str(html_dir))
         logger.info("\nHTML coverage report generated in: %s", html_dir)
+        xml_file = current_dir / "coverage.xml"
+        cov.xml_report(outfile=str(xml_file))
+        logger.info("XML coverage report generated: %s", xml_file)
     except Exception as exc:
         logger.error("Coverage report failed: %s", exc)
         return False
