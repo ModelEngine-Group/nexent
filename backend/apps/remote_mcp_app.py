@@ -15,6 +15,7 @@ from consts.exceptions import (
     McpValidationError,
     McpNameConflictError,
     McpPortConflictError,
+    UnauthorizedError,
 )
 from consts.model import (
     MCPConfigRequest,
@@ -392,6 +393,11 @@ async def get_mcp_list(
                 "enable_upload_image": ENABLE_UPLOAD_IMAGE,
                 "status": "success"
             }
+        )
+    except UnauthorizedError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(e)
         )
     except Exception as e:
         logger.error(f"Failed to get MCP list: {e}")

@@ -31,6 +31,7 @@ from services.mcp_management_service import (
     update_community_mcp_service,
     delete_community_mcp_service,
 )
+from database.market_mcp_db import increment_mcp_market_download_count
 from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/mcp-tools")
@@ -453,4 +454,28 @@ async def list_my_community_mcp_services_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to list my MCP community services"
+        )
+
+
+@router.post("/community/{market_id}/download")
+async def increment_community_mcp_download_count_api(
+    market_id: int,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    """Increment the download counter when a user installs a community MCP."""
+    try:
+        get_current_user_info(authorization, http_request)
+        increment_mcp_market_download_count(market_id)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"status": "success", "data": None},
+        )
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Failed to increment download count: {exc}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to increment download count",
         )

@@ -654,6 +654,7 @@ class McpMarketRecord(TableBase):
     config_json = Column(JSON, doc="Public-shareable MCP configuration JSON")
     tags = Column(ARRAY(Text), doc="Tags")
     description = Column(Text, doc="Description")
+    download_count = Column(Integer, default=0, doc="Cumulative download/install count")
 
 
 class McpMarketReview(TableBase):

@@ -8,6 +8,7 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
+  incrementCommunityMcpDownloadCount,
   parseContainerMcpConfigJson,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
@@ -127,6 +128,7 @@ export function useMcpCommunityQuickAdd({
           tags: draft.tags,
           version: draft.version,
           registry_json: draft.registryJson,
+          enabled: true,
         });
       }
 
@@ -139,13 +141,29 @@ export function useMcpCommunityQuickAdd({
         t,
         toastKey: "mcp-tools-refresh-tools-add-community",
       });
+
+      // Increment download count (fire-and-forget, non-blocking)
+      if (source.marketId) {
+        incrementCommunityMcpDownloadCount(source.marketId).catch((err) =>
+          log.warn(
+            "[useMcpCommunityQuickAdd] Failed to increment download count",
+            err
+          )
+        );
+      }
+
       onSuccess();
       close();
     } catch (error) {
       log.error("[useMcpCommunityQuickAdd] Failed to add community service", {
         error,
       });
-      message.error(t("mcpTools.add.failed"));
+      const msg = error instanceof Error ? error.message : "";
+      if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
+        message.error(t("mcpTools.add.error.connectionFailed"));
+      } else {
+        message.error(t("mcpTools.add.failed"));
+      }
     } finally {
       setSubmitting(false);
     }

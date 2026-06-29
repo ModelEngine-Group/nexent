@@ -23,7 +23,15 @@
       "WebSearch",
       "WebFetch(domain:smithery.ai)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:2000]\\)\")",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:3000]\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d,indent=2\\)[:3000]\\)\")",
+      "Bash(ls -d /c/Users/HAN/PycharmProjects/nexent/frontend/app/\\\\\\\\[locale\\\\\\\\]/mcp-tools/)",
+      "Bash(python3 -c ' *)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(docker inspect *)",
+      "Bash(/c/Users/HAN/PycharmProjects/nexent/backend/.venv/Scripts/python.exe -c ' *)",
+      "Bash(docker start *)",
+      "Bash(docker stop *)"
     ]
   }
 }

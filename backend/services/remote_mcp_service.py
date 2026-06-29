@@ -4,7 +4,6 @@ import tempfile
 import asyncio
 import socket
 import random
-import httpx
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
@@ -46,8 +45,12 @@ logger = logging.getLogger("remote_mcp_service")
 # Health Check
 # ---------------------------------------------------------------------------
 
-async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
-    """Check if an MCP server is healthy and reachable."""
+async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> list[str]:
+    """Check if an MCP server is healthy and reachable via MCP protocol.
+
+    Returns the list of tool names on success.
+    Raises MCPConnectionError if the server is unreachable or does not support MCP.
+    """
     url_stripped = remote_mcp_server.strip()
     headers = {}
     if authorization_token:
@@ -55,32 +58,17 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
     if custom_headers:
         headers.update(custom_headers)
 
-    # Try full MCP protocol health check first
-    mcp_ok = await _mcp_protocol_health_check(url_stripped, headers)
-    if mcp_ok:
-        return True
-
-    # Fallback: simple HTTP GET to verify server reachability (may require auth)
-    try:
-        timeout = httpx.Timeout(10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url_stripped, headers=headers, follow_redirects=True)
-            # Any HTTP response means the server is alive (even 401/403)
-            logger.info(f"MCP server HTTP health check returned {response.status_code} for {url_stripped}")
-            return True
-    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-        logger.error(f"MCP server unreachable via HTTP: {e}")
-        raise MCPConnectionError("MCP server is unreachable")
-    except httpx.TimeoutException as e:
-        logger.error(f"MCP server HTTP health check timed out: {e}")
-        raise MCPConnectionError("MCP_HEALTH_TIMEOUT")
-    except Exception as e:
-        logger.error(f"MCP server HTTP health check failed: {e}")
-        raise MCPConnectionError(f"MCP connection failed: {e}")
+    tool_names = await _mcp_protocol_health_check(url_stripped, headers)
+    if not tool_names:
+        raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
+    return tool_names
 
 
-async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> bool:
-    """Try to establish an MCP protocol-level connection to the server."""
+async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[str]:
+    """Try to establish an MCP protocol-level connection and return tool names.
+
+    Returns a list of tool names on success, or an empty list on failure.
+    """
     try:
         if url_stripped.endswith("/sse"):
             transport = SSETransport(
@@ -103,11 +91,14 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> bool:
 
         client = Client(transport=transport)
         async with client:
-            connected = client.is_connected()
-            return connected
+            # Verify the server can actually serve tools.
+            # This exercises API key validation and end-to-end connectivity,
+            # unlike is_connected() which only checks the initialize handshake.
+            tools_result = await asyncio.wait_for(client.list_tools(), timeout=10)
+            return [t.name for t in tools_result] if tools_result else []
     except BaseException as e:
-        logger.debug(f"MCP protocol health check failed (will try HTTP fallback): {e}")
-        return False
+        logger.debug(f"MCP protocol health check failed: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -289,14 +280,20 @@ async def add_mcp_service(
     is_container = container_id is not None or container_config is not None
     resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
 
+    if enabled and check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
+        logger.error(f"MCP name already exists: {name}")
+        raise MCPNameIllegal("MCP name already exists")
+
+    # Always validate connectivity for URL-based MCP services before saving.
+    # Container-based services are started separately and do not require a
+    # reachable URL here.
+    resolved_registry_json = registry_json or {}
+    if not is_container and server_url:
+        tool_names = await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token, custom_headers=custom_headers)
+        # Store tool names in registry_json for tool count display
+        resolved_registry_json["_toolNames"] = tool_names
+
     if enabled:
-        if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
-            logger.error(f"MCP name already exists: {name}")
-            raise MCPNameIllegal("MCP name already exists")
-
-        if not await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token, custom_headers=custom_headers):
-            raise MCPConnectionError("MCP connection failed")
-
         status = True
 
     create_mcp_record(
@@ -309,7 +306,7 @@ async def add_mcp_service(
             "authorization_token": authorization_token,
             "custom_headers": custom_headers,
             "source": source,
-            "registry_json": registry_json,
+            "registry_json": resolved_registry_json,
             "version": version,
             "market_id": market_id,
             "enabled": enabled,

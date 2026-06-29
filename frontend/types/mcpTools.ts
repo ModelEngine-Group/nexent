@@ -199,6 +199,7 @@ export interface AddMcpServicePayload {
   config_json?: Record<string, unknown>;
   version?: string;
   registry_json?: Record<string, unknown>;
+  enabled?: boolean;
 }
 
 export interface UpdateMcpServicePayload {

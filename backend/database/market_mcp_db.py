@@ -156,6 +156,18 @@ def list_mcp_market_records_by_tenant_and_user(tenant_id: str, user_id: str) -> 
         return [as_dict(row) for row in rows]
 
 
+def increment_mcp_market_download_count(market_id: int) -> None:
+    """Atomically increment the download counter on a market record."""
+    with get_db_session() as session:
+        session.query(McpMarketRecord).filter(
+            McpMarketRecord.market_id == market_id,
+            McpMarketRecord.delete_flag != "Y",
+        ).update(
+            {McpMarketRecord.download_count: McpMarketRecord.download_count + 1},
+            synchronize_session=False,
+        )
+
+
 def get_mcp_market_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
     """Tag stats scoped to a specific tenant."""
     with get_db_session() as session:

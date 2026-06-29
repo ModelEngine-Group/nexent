@@ -81,6 +81,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "reviewType": row.get("review_type") or MCP_REVIEW_TYPE_INITIAL_LISTING,
         "previousVersion": row.get("previous_version"),
         "pendingVersion": row.get("version") if row.get("review_status") == MCP_REVIEW_PENDING else None,
+        "installCount": row.get("download_count") or 0,
     }
 
 

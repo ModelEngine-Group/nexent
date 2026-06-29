@@ -369,6 +369,8 @@ export const API_ENDPOINTS = {
     communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
     communityReviewReject: `${API_BASE_URL}/mcp-tools/community/review/reject`,
     communityTagsStats: `${API_BASE_URL}/mcp-tools/community/tags/stats`,
+    communityDownload: (marketId: number) =>
+      `${API_BASE_URL}/mcp-tools/community/${marketId}/download`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

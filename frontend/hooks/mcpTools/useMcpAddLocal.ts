@@ -141,7 +141,12 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
       return true;
     } catch (error) {
       log.error("[useMcpAddLocal] Failed to add service", { error });
-      message.error(t("mcpTools.add.failed"));
+      const msg = error instanceof Error ? error.message : "";
+      if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
+        message.error(t("mcpTools.add.error.connectionFailed"));
+      } else {
+        message.error(t("mcpTools.add.failed"));
+      }
       return false;
     } finally {
       setSubmitting(false);

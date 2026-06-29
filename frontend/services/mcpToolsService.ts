@@ -265,6 +265,10 @@ export const addContainerMcpToolService = async (
       method: "POST",
       body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      const errorBody = await parseJson<{ detail?: string }>(response);
+      throw new Error(errorBody.detail || `Request failed (${response.status})`);
+    }
     const data = await parseJson<ApiEnvelope>(response);
     if (data.status !== "success") {
       throw new Error("Failed to add container MCP service");
@@ -301,7 +305,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       version: s.version ?? undefined,
       registryJson: s.registry_json ?? undefined,
       configJson: s.config_json ?? undefined,
-      tools: [],
+      tools: s.registry_json?._toolNames ?? [],
       healthStatus: s.status
         ? McpHealthStatus.HEALTHY
         : McpHealthStatus.UNCHECKED,
@@ -398,6 +402,22 @@ export const listCommunityMcpTools = async (payload: CommunityMcpListPayload) =>
     }>;
   } catch (error) {
     log.error("listCommunityMcpTools failed", error);
+    throw error;
+  }
+};
+
+export const incrementCommunityMcpDownloadCount = async (marketId: number) => {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.mcpTools.communityDownload(marketId),
+      { method: "POST" }
+    );
+    const data = await parseJson<ApiEnvelope>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to increment download count");
+    }
+  } catch (error) {
+    log.error("incrementCommunityMcpDownloadCount failed", error);
     throw error;
   }
 };
@@ -594,6 +614,10 @@ export const addMcpToolService = async (payload: AddMcpServicePayload) => {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      const errorBody = await parseJson<{ detail?: string; message?: string }>(response);
+      throw new Error(errorBody.detail || errorBody.message || `Request failed (${response.status})`);
+    }
     const data = await parseJson<ApiEnvelope>(response);
     if (data.status !== "success") {
       throw new Error("Failed to add MCP service");

@@ -2207,6 +2207,7 @@
   "mcpTools.add.error.containerJsonInvalid": "容器配置 JSON 格式不正确",
   "mcpTools.add.error.containerJsonMissingServers": "容器配置必须包含 mcpServers 对象",
   "mcpTools.add.error.containerAddFailed": "容器配置添加失败",
+  "mcpTools.add.error.connectionFailed": "MCP 服务器连接失败，请检查服务器地址后重试",
   "mcpTools.addModal.title": "添加 MCP 服务",
   "mcpTools.addModal.tabLocal": "自定义",
   "mcpTools.addModal.tabRegistry": "外部市场",
@@ -2921,6 +2922,7 @@
   "mcpTools.mine.empty": "暂无匹配的 MCP 服务。",
   "mcpTools.mine.edit": "编辑",
   "mcpTools.mine.enable": "启用",
+  "mcpTools.mine.enabled": "已启用",
   "mcpTools.mine.disable": "停用",
   "mcpTools.mine.localService": "我的服务",
   "mcpTools.mine.publishedService": "已上架仓库",
@@ -2986,5 +2988,6 @@
   "mcpTools.repository.version": "版本号",
   "mcpTools.repository.rating": "评分",
   "mcpTools.repository.downloads": "下载量",
+  "mcpTools.repository.downloadCount": "下载次数",
   "mcpTools.repository.installed": "已安装"
 }
