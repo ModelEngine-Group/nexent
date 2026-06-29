@@ -1000,7 +1000,7 @@ export default function AgentGenerateDetail({}) {
                       </Row>
 
                       <Row gutter={16}>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="mainAgentMaxStep"
                             label={t("businessLogic.config.maxSteps")}
@@ -1028,7 +1028,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="provideRunSummary"
                             label={t("agent.provideRunSummary")}
@@ -1046,33 +1046,6 @@ export default function AgentGenerateDetail({}) {
                               ]}
                               onChange={(value) => {
                                 updateAgentConfig({ provide_run_summary: value });
-                              }}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                          <Form.Item
-                            name="verificationEnabled"
-                            label={t("agent.verification")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("agent.verification.error"),
-                              },
-                            ]}
-                          >
-                            <Select
-                              options={[
-                                { value: true, label: t("common.yes") },
-                                { value: false, label: t("common.no") },
-                              ]}
-                              onChange={(value) => {
-                                updateAgentConfig({
-                                  verification_config: {
-                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
-                                    enabled: value,
-                                  },
-                                });
                               }}
                             />
                           </Form.Item>
@@ -1119,6 +1092,33 @@ export default function AgentGenerateDetail({}) {
                                 updateAgentConfig({
                                   requested_output_tokens:
                                     typeof value === "number" ? value : null,
+                                });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            name="verificationEnabled"
+                            label={t("agent.verification")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.verification.error"),
+                              },
+                            ]}
+                          >
+                            <Select
+                              options={[
+                                { value: true, label: t("common.yes") },
+                                { value: false, label: t("common.no") },
+                              ]}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  verification_config: {
+                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+                                    enabled: value,
+                                  },
                                 });
                               }}
                             />
