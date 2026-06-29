@@ -88,7 +88,7 @@ export default function SelectToolsDialog({
       const labels = getToolLabels(tool);
       labels.forEach((l: string) => labelSet.add(l));
     });
-    return Array.from(labelSet).sort();
+    return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
   }, [availableTools]);
 
   const [activeLabels, setActiveLabels] = useState<string[]>([]);

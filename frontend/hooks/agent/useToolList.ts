@@ -35,7 +35,7 @@ export function useToolList(options?: { enabled?: boolean; staleTime?: number })
 			const labels = Array.isArray(tool.labels) ? tool.labels : [];
 			labels.forEach((l: string) => labelSet.add(l));
 		});
-		return Array.from(labelSet).sort();
+		return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
 	}, [availableTools]);
 
 	// Grouped tools by source and usage

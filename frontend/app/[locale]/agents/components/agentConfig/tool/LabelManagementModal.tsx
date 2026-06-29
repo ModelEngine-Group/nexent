@@ -39,7 +39,7 @@ export default function LabelManagementModal({
   const allExistingLabels = useMemo(() => {
     const labelSet = new Set<string>();
     dataSource.forEach((row) => row.labels.forEach((l: string) => labelSet.add(l)));
-    return Array.from(labelSet).sort();
+    return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
   }, [dataSource]);
 
   // Build dataSource once per open cycle. Using builtRef lets us
