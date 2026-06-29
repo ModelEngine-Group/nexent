@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 ARG DATA_PROCESS_DEPENDENCY_VARIANT=cpu
 
 FROM python:3.11-slim AS data-process-base
