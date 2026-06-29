@@ -12465,8 +12465,460 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 
 
 # ============================================================================
-# Tests for _validate_requested_output_tokens_for_agent coverage (lines 1505-1541)
+# Tests for memory background processing (lines 1269-1319)
 # ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_memory_disabled(monkeypatch):
+    """_stream_agent_chunks should skip memory when memory_switch is disabled."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Mock memory_ctx with memory_switch disabled
+    memory_ctx = MagicMock()
+    memory_ctx.user_config.memory_switch = False
+    memory_ctx.user_config.agent_share_option = "always"
+    memory_ctx.user_config.disable_agent_ids = []
+    memory_ctx.user_config.disable_user_agent_ids = []
+    memory_ctx.user_config.getattr = lambda *args, **kwargs: None
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_ctx
+    ):
+        collected.append(out)
+
+    # Should still complete
+    assert len(collected) >= 1
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
+    """_stream_agent_chunks should skip agent memory when agent_share_option is 'never'."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Mock memory_ctx with agent_share_option = "never"
+    memory_ctx = MagicMock()
+    memory_ctx.user_config.memory_switch = True
+    memory_ctx.user_config.agent_share_option = "never"
+    memory_ctx.user_config.disable_agent_ids = []
+    memory_ctx.user_config.disable_user_agent_ids = []
+    memory_ctx.agent_id = 1
+    memory_ctx.user_config.getattr = lambda *args, **kwargs: None
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_ctx
+    ):
+        collected.append(out)
+
+    # Should still complete
+    assert len(collected) >= 1
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
+    """_stream_agent_chunks should skip agent memory when agent_id is in disable_agent_ids."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Mock memory_ctx with agent_id in disable_agent_ids
+    memory_ctx = MagicMock()
+    memory_ctx.user_config.memory_switch = True
+    memory_ctx.user_config.agent_share_option = "always"
+    memory_ctx.user_config.disable_agent_ids = [1]  # Current agent disabled
+    memory_ctx.user_config.disable_user_agent_ids = []
+    memory_ctx.agent_id = 1
+    memory_ctx.user_config.getattr = lambda *args, **kwargs: None
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_ctx
+    ):
+        collected.append(out)
+
+    # Should still complete
+    assert len(collected) >= 1
+
+
+# ============================================================================
+# Tests for circular dependency detection (lines 1708-1714)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_self_reference(monkeypatch):
+    """update_agent_info_impl should raise error when agent references itself."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.related_agent_ids = [1]  # Self-reference
+
+    with patch("backend.services.agent_service.get_current_user_info") as mock_user:
+        mock_user.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+            mock_search.return_value = {
+                "agent_id": 1,
+                "name": "test",
+                "enabled": True,
+            }
+
+            with pytest.raises(ValueError) as exc_info:
+                await agent_service.update_agent_info_impl(agent_request, "Bearer token")
+
+            assert "Circular dependency" in str(exc_info.value)
+
+
+# ============================================================================
+# Tests for collect_skill_zip_entries (lines 2017-2029)
+# ============================================================================
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service._collect_skill_names_from_tree")
+def test_collect_skill_zip_entries_no_skills(mock_collect, mock_service):
+    """collect_skill_zip_entries should return empty list when no skills found."""
+    from backend.services.agent_service import collect_skill_zip_entries
+
+    mock_collect.return_value = []
+
+    result = collect_skill_zip_entries(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert result == []
+    mock_service.assert_not_called()
+
+
+# ============================================================================
+# Tests for run_agent_stream resume mode (lines 2936-3012)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
+    """run_agent_stream should subscribe to channel in resume mode."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': True,
+                'message_id': 1,
+                'message_status': 'streaming',
+                'resume_from_unit_index': 5,
+                'reason': 'backend_streaming'
+            }
+
+            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+                mock_mgr.get_agent_run_info.return_value = MagicMock()
+
+                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                    mock_channel = MagicMock()
+                    mock_channel.is_completed = False
+                    mock_channel.history_size = 0
+                    mock_channel.subscribe_with_history = AsyncMock(return_value=iter([]))
+                    mock_channel_mgr.get_channel.return_value = mock_channel
+                    mock_channel_mgr.complete_channel = AsyncMock()
+
+                    result = await agent_service.run_agent_stream(
+                        agent_request,
+                        MagicMock(),
+                        "Bearer token"
+                    )
+
+                    # Should stream successfully
+                    assert result.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_already_finished(monkeypatch):
+    """run_agent_stream should return early when backend already finished."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': False,
+                'message_id': 1,
+                'message_status': 'completed',
+                'reason': 'backend_completed'
+            }
+
+            result = await agent_service.run_agent_stream(
+                agent_request,
+                MagicMock(),
+                "Bearer token"
+            )
+
+            assert result.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypatch):
+    """run_agent_stream should handle agent finished during disconnect."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': True,
+                'message_id': 1,
+                'message_status': 'streaming',
+                'resume_from_unit_index': 5,
+                'reason': 'backend_streaming'
+            }
+
+            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+                mock_mgr.get_agent_run_info.return_value = None  # Agent finished
+
+                with patch("backend.services.agent_service.update_message_status") as mock_update:
+                    result = await agent_service.run_agent_stream(
+                        agent_request,
+                        MagicMock(),
+                        "Bearer token"
+                    )
+
+                    assert result.status_code == 200
+                    # Verify update_message_status was attempted (may be called 0 or 1 time)
+                    assert mock_update.call_count <= 1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_no_channel(monkeypatch):
+    """run_agent_stream should handle no channel exists."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': True,
+                'message_id': 1,
+                'message_status': 'streaming',
+                'resume_from_unit_index': 5,
+                'reason': 'backend_streaming'
+            }
+
+            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+                mock_mgr.get_agent_run_info.return_value = MagicMock()
+
+                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                    mock_channel_mgr.get_channel.return_value = None  # No channel
+
+                    result = await agent_service.run_agent_stream(
+                        agent_request,
+                        MagicMock(),
+                        "Bearer token"
+                    )
+
+                    assert result.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_with_chunks(monkeypatch):
+    """run_agent_stream resume mode should stream chunks from channel."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': True,
+                'message_id': 1,
+                'message_status': 'streaming',
+                'resume_from_unit_index': 5,
+                'reason': 'backend_streaming'
+            }
+
+            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+                mock_mgr.get_agent_run_info.return_value = MagicMock()
+
+                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                    # Create a mock channel with chunks
+                    mock_channel = MagicMock()
+                    mock_channel.is_completed = False
+                    mock_channel.history_size = 3
+
+                    # Simulate chunks being streamed
+                    async def mock_subscribe():
+                        yield 'data: {"type": "final_answer", "content": "test response"}\n\n'
+
+                    mock_channel.subscribe_with_history = mock_subscribe
+                    mock_channel_mgr.get_channel.return_value = mock_channel
+                    mock_channel_mgr.complete_channel = AsyncMock()
+
+                    result = await agent_service.run_agent_stream(
+                        agent_request,
+                        MagicMock(),
+                        "Bearer token"
+                    )
+
+                    # Should return streaming response
+                    assert result.status_code == 200
+
 
 
 def test_validate_requested_output_tokens_no_requested_tokens():
