@@ -324,7 +324,7 @@ class TestSystemPromptComponent:
         messages = comp.to_messages()
         assert len(messages) == 1
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "Test prompt content"
+        assert messages[0]["content"] == [{"type": "text", "text": "Test prompt content"}]
 
     def test_with_template_name(self):
         comp = agent_model_module.SystemPromptComponent(
