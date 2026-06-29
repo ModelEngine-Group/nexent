@@ -10,26 +10,17 @@ import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import ToolConfigModal from "./tool/ToolConfigModal";
+import {
+  TOOLS_REQUIRING_KB_SELECTION,
+  TOOLS_REQUIRING_EMBEDDING,
+  TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
+  TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
+  getToolKbType,
+  getToolLabels,
+} from "./tool/utils";
 import log from "@/lib/logger";
 
-// --- Tool helpers (shared with SelectToolsDialog) ---
-const TOOLS_REQUIRING_KB_SELECTION = [
-  "knowledge_base_search", "dify_search", "datamate_search",
-  "idata_search", "haotian_search", "aidp_search",
-];
-const TOOLS_REQUIRING_EMBEDDING = ["knowledge_base_search"];
-const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = ["analyze_image"];
-const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = ["analyze_audio", "analyze_video"];
-
-function getToolKbType(name: string) {
-  if (!TOOLS_REQUIRING_KB_SELECTION.includes(name)) return null;
-  if (name === "dify_search") return "dify_search" as const;
-  if (name === "datamate_search") return "datamate_search" as const;
-  if (name === "idata_search") return "idata_search" as const;
-  if (name === "haotian_search") return "haotian_search" as const;
-  if (name === "aidp_search") return "aidp_search" as const;
-  return "knowledge_base_search" as const;
-}
+// --- Local tool helpers (not in utils) ---
 
 function isToolDisabledDueToVlm(name: string, img: boolean, vid: boolean): boolean {
   if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name)) return !img;
@@ -40,10 +31,6 @@ function isToolDisabledDueToVlm(name: string, img: boolean, vid: boolean): boole
 function isToolDisabledDueToEmbedding(name: string, emb: boolean): boolean {
   if (!TOOLS_REQUIRING_EMBEDDING.includes(name)) return false;
   return !emb;
-}
-
-function getToolLabels(tool: any): string[] {
-  return Array.isArray(tool.labels) ? tool.labels : [];
 }
 
 type SourceKey = "local" | "mcp" | "langchain";

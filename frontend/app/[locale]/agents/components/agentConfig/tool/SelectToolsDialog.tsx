@@ -14,36 +14,21 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import ToolConfigModal from "./ToolConfigModal";
+import {
+  TOOLS_REQUIRING_KB_SELECTION,
+  TOOLS_REQUIRING_EMBEDDING,
+  TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
+  TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
+  getToolKbType,
+  getToolLabels,
+} from "./utils";
 import log from "@/lib/logger";
-
-// --- Tool helpers (shared with ToolManagement) ---
-const TOOLS_REQUIRING_KB_SELECTION = [
-  "knowledge_base_search", "dify_search", "datamate_search",
-  "idata_search", "haotian_search", "aidp_search",
-];
-const TOOLS_REQUIRING_EMBEDDING = ["knowledge_base_search"];
-const TOOLS_REQUIRING_IMAGE_UNDERSTANDING = ["analyze_image"];
-const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = ["analyze_audio", "analyze_video"];
-
-function getToolKbType(name: string) {
-  if (!TOOLS_REQUIRING_KB_SELECTION.includes(name)) return null;
-  if (name === "dify_search") return "dify_search" as const;
-  if (name === "datamate_search") return "datamate_search" as const;
-  if (name === "idata_search") return "idata_search" as const;
-  if (name === "haotian_search") return "haotian_search" as const;
-  if (name === "aidp_search") return "aidp_search" as const;
-  return "knowledge_base_search" as const;
-}
 
 function isToolDisabled(name: string, img: boolean, vid: boolean, emb: boolean): boolean {
   if (TOOLS_REQUIRING_IMAGE_UNDERSTANDING.includes(name) && !img) return true;
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name) && !vid) return true;
   if (TOOLS_REQUIRING_EMBEDDING.includes(name) && !emb) return true;
   return false;
-}
-
-function getToolLabels(tool: any): string[] {
-  return Array.isArray(tool.labels) ? tool.labels : [];
 }
 
 const SOURCE_TABS: { key: string; labelKey: string; sourceValue: string }[] = [
