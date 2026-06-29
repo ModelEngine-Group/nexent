@@ -679,6 +679,32 @@ class AgentRepositorySnapshot(ExportAndImportDataFormat):
     skills: Optional[List["SkillZipEntry"]] = None
 
 
+RepositoryImportRequirementType = Literal[
+    "model", "knowledge_base", "mcp", "skill", "tool"
+]
+
+
+class RepositoryImportRequirementItem(BaseModel):
+    """Single dependency item for repository import precheck."""
+    type: RepositoryImportRequirementType
+    key: str
+    name: str
+    description: Optional[str] = None
+    available: bool
+    reason_code: Optional[str] = None
+
+
+class RepositoryImportPrecheckResponse(BaseModel):
+    """Response payload for repository import precheck."""
+    agent_repository_id: int
+    display_name: str
+    total_count: int
+    available_count: int
+    percent: int
+    has_abnormal: bool
+    items: List[RepositoryImportRequirementItem]
+
+
 class AgentRepositoryListingCreateRequest(BaseModel):
     """Request body for creating a marketplace listing from an agent version."""
     icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")

@@ -1,7 +1,8 @@
 "use client";
 
-import { Button, Card } from "antd";
-import { Bot, Copy, Download, Eye } from "lucide-react";
+import type { MenuProps } from "antd";
+import { Button, Card, Dropdown } from "antd";
+import { Bot, Copy, Download, Eye, MoreHorizontal, PackageX } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
@@ -9,13 +10,21 @@ import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 interface AgentRepositoryCardProps {
   listing: AgentRepositoryListingItem;
   categoryName?: string | null;
+  showAdminMenu?: boolean;
+  isTakingDown?: boolean;
+  onCopyClick?: (listing: AgentRepositoryListingItem) => void;
   onDetailClick?: (listing: AgentRepositoryListingItem) => void;
+  onTakeDown?: (listing: AgentRepositoryListingItem) => void;
 }
 
 export function AgentRepositoryCard({
   listing,
   categoryName,
+  showAdminMenu = false,
+  isTakingDown = false,
+  onCopyClick,
   onDetailClick,
+  onTakeDown,
 }: AgentRepositoryCardProps) {
   const { t } = useTranslation("common");
 
@@ -30,6 +39,20 @@ export function AgentRepositoryCard({
   const versionText = listing.version_label;
   const downloads = listing.downloads ?? 0;
   const showTagsRow = tags.length > 0 || toolCount > 0;
+  const showMenu = showAdminMenu && onTakeDown != null;
+
+  const menuItems: MenuProps["items"] = showMenu
+    ? [
+        {
+          key: "takeDown",
+          label: t("agentRepository.mine.reviewModal.takeDown"),
+          icon: <PackageX className="size-3.5" aria-hidden />,
+          danger: true,
+          disabled: isTakingDown,
+          onClick: () => onTakeDown(listing),
+        },
+      ]
+    : [];
 
   return (
     <Card
@@ -43,22 +66,36 @@ export function AgentRepositoryCard({
         },
       }}
     >
-      <div className="flex min-w-0 items-start gap-3">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
-          {listing.icon?.trim() ? (
-            <span aria-hidden>{listing.icon.trim()}</span>
-          ) : (
-            <Bot className="size-5" aria-hidden />
-          )}
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
+            {listing.icon?.trim() ? (
+              <span aria-hidden>{listing.icon.trim()}</span>
+            ) : (
+              <Bot className="size-5" aria-hidden />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
+              {title}
+            </h3>
+            <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+              {subtitle}
+            </p>
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-            {title}
-          </h3>
-          <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-            {subtitle}
-          </p>
-        </div>
+        {showMenu ? (
+          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+            <Button
+              type="text"
+              size="small"
+              className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+              icon={<MoreHorizontal className="size-4" aria-hidden />}
+              loading={isTakingDown}
+              aria-label={t("agentRepository.mine.menu.more")}
+            />
+          </Dropdown>
+        ) : null}
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
@@ -86,27 +123,32 @@ export function AgentRepositoryCard({
       <div className="mt-auto flex flex-col gap-3 pt-4">
         <div className="flex min-h-[1.75rem] items-center justify-between gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
           {versionText ? (
-            <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
               <span className="size-1.5 rounded-full bg-primary" aria-hidden />
               {versionText}
             </span>
           ) : (
             <span />
           )}
-          {downloads > 0 ? (
-            <span className="inline-flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
+            <span
+              className="inline-flex items-center gap-1"
+              aria-label={t("agentRepository.detail.downloads", {
+                count: downloads.toLocaleString(),
+              })}
+            >
               <Download className="size-3.5" aria-hidden />
               {downloads.toLocaleString()}
             </span>
-          ) : null}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Button
             size="small"
             className="flex-1"
-            disabled
             icon={<Copy className="size-3.5" />}
+            onClick={() => onCopyClick?.(listing)}
           >
             {t("agentRepository.card.copy")}
           </Button>
