@@ -20,7 +20,7 @@ for _path in (str(PROJECT_ROOT), str(TEST_ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from loader import ContextManager, ContextManagerConfig
+from loader import ContextManager, ContextManagerConfig, ChatMessage, MessageRole
 from stubs import _SystemPromptStep
 
 
@@ -318,6 +318,38 @@ class TestComponentManagementWithConfig:
         cm.register_component(comp)
         registered = cm.get_registered_components()
         assert registered[0].token_estimate > 0
+
+
+class TestExtractMessageText:
+    """Tests for ContextManager._extract_message_text static method."""
+
+    def test_dict_with_list_content(self):
+        msg = {"role": "system", "content": [{"type": "text", "text": "hello"}]}
+        assert ContextManager._extract_message_text(msg) == "hello"
+
+    def test_dict_with_string_content(self):
+        msg = {"role": "system", "content": "plain text"}
+        assert ContextManager._extract_message_text(msg) == "plain text"
+
+    def test_dict_with_none_content(self):
+        msg = {"role": "system", "content": None}
+        assert ContextManager._extract_message_text(msg) == ""
+
+    def test_chatmessage_object_with_list_content(self):
+        msg = ChatMessage(role=MessageRole.SYSTEM, content=[{"type": "text", "text": "from object"}])
+        assert ContextManager._extract_message_text(msg) == "from object"
+
+    def test_chatmessage_object_with_string_content(self):
+        msg = ChatMessage(role=MessageRole.SYSTEM, content="string from object")
+        assert ContextManager._extract_message_text(msg) == "string from object"
+
+    def test_dict_missing_content_key(self):
+        msg = {"role": "system"}
+        assert ContextManager._extract_message_text(msg) == ""
+
+    def test_list_content_with_non_dict_parts(self):
+        msg = {"role": "system", "content": [{"type": "text", "text": "a"}, "raw_string"]}
+        assert ContextManager._extract_message_text(msg) == "a"
 
 
 if __name__ == "__main__":
