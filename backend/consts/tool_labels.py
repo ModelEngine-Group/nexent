@@ -13,7 +13,7 @@ Why not in SQL?
   - This module is the only hook that fires at the exact moment tools are
     inserted — the earliest lifecycle point where the data exists.
 
-Keep in sync with: docker/sql/v2.3.0_0624_add_labels_to_ag_tool_info.sql
+Keep in sync with: deploy/sql/migrations/v2.3.0_0624_add_labels_to_ag_tool_info.sql
 """
 
 # tool_name → [label, ...]
