@@ -308,7 +308,7 @@ async def update_tool_labels_api(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update tool labels: {e}")
+        logger.exception(f"Failed to update tool labels: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to update tool labels: {str(e)}"
