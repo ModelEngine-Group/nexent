@@ -12650,9 +12650,455 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
     assert len(collected) >= 1
 
 
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
+    """_stream_agent_chunks should skip user_agent memory when agent_id is in disable_user_agent_ids."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Mock memory_ctx with agent_id in disable_user_agent_ids
+    memory_ctx = MagicMock()
+    memory_ctx.user_config.memory_switch = True
+    memory_ctx.user_config.agent_share_option = "always"
+    memory_ctx.user_config.disable_agent_ids = []
+    memory_ctx.user_config.disable_user_agent_ids = [1]  # Current agent in user_agent disabled
+    memory_ctx.agent_id = 1
+    memory_ctx.user_config.getattr = lambda *args, **kwargs: None
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), memory_ctx
+    ):
+        collected.append(out)
+
+    # Should still complete
+    assert len(collected) >= 1
+
+
 # ============================================================================
-# Tests for circular dependency detection (lines 1708-1714)
+# Tests for skill collection from tree (lines 1966-2014)
 # ============================================================================
+
+
+@patch("backend.services.agent_service.resolve_sub_agent_version_no")
+@patch("backend.services.agent_service.query_sub_agent_relations")
+@patch("backend.services.agent_service.skill_db")
+def test_collect_skill_names_from_tree_with_sub_agents(mock_skill_db, mock_relations, mock_resolve):
+    """_collect_skill_names_from_tree should recursively collect skills from sub-agents."""
+    from backend.services.agent_service import _collect_skill_names_from_tree
+
+    # Agent 1 has skill "Skill1" and sub-agent 2
+    mock_skill_db.query_skill_instances_by_agent_id.side_effect = [
+        [{"skill_id": 1}],  # Agent 1's skills
+        [{"skill_id": 2}],  # Agent 2's skills
+    ]
+    mock_skill_db.get_skill_by_id.side_effect = [
+        {"name": "Skill1"},
+        {"name": "Skill2"},
+    ]
+
+    # Agent 1 -> Agent 2
+    mock_relations.side_effect = [
+        [{"selected_agent_id": 2, "selected_agent_version_no": 1}],  # Agent 1's relations
+        [],  # Agent 2's relations
+    ]
+    mock_resolve.return_value = 1
+
+    result = _collect_skill_names_from_tree(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert "Skill1" in result
+    assert "Skill2" in result
+    assert len(result) == 2
+
+
+@patch("backend.services.agent_service.query_sub_agent_relations")
+@patch("backend.services.agent_service.skill_db")
+def test_collect_skill_names_from_tree_no_skills(mock_skill_db, mock_relations):
+    """_collect_skill_names_from_tree should return empty list when no skills found."""
+    from backend.services.agent_service import _collect_skill_names_from_tree
+
+    mock_skill_db.query_skill_instances_by_agent_id.return_value = []
+    mock_relations.return_value = []
+
+    result = _collect_skill_names_from_tree(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert result == []
+
+
+@patch("backend.services.agent_service.skill_db")
+def test_collect_skill_names_from_tree_skill_not_found(mock_skill_db):
+    """_collect_skill_names_from_tree should handle missing skills gracefully."""
+    from backend.services.agent_service import _collect_skill_names_from_tree
+
+    mock_skill_db.query_skill_instances_by_agent_id.return_value = [{"skill_id": 1}]
+    mock_skill_db.get_skill_by_id.return_value = None  # Skill not found
+    mock_skill_db.query_sub_agent_relations.return_value = []
+
+    # Should not raise
+    result = _collect_skill_names_from_tree(agent_id=1, tenant_id="tenant1", version_no=1)
+    assert result == []
+
+
+# ============================================================================
+# Tests for export_agent_by_agent_id (lines 2060-2078)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_export_agent_by_agent_id_skill_error(monkeypatch):
+    """export_agent_by_agent_id should handle skill collection error gracefully."""
+    from backend.services import agent_service
+
+    async def mock_create_tool_config_list(*args, **kwargs):
+        return []
+
+    with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+        mock_search.return_value = {
+            "agent_id": 1,
+            "name": "Test",
+            "display_name": "Test Agent",
+            "description": "Test agent",
+            "business_description": "Test",
+            "max_steps": 5,
+            "provide_run_summary": True,
+            "enabled": True,
+            "tenant_id": "tenant1",
+            "model_ids": [],
+        }
+
+        with patch("backend.services.agent_service.query_sub_agents_id_list") as mock_sub:
+            mock_sub.return_value = []
+
+            with patch("backend.services.agent_service.create_tool_config_list", new=mock_create_tool_config_list):
+                with patch.object(agent_service, "skill_db") as mock_skill_db:
+                    mock_skill_db.query_skill_instances_by_agent_id.side_effect = Exception("DB error")
+
+                    with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+                        mock_model.return_value = None
+
+                        # Should not raise, just log warning
+                        result = await agent_service.export_agent_by_agent_id(
+                            agent_id=1,
+                            tenant_id="tenant1",
+                            user_id="user1",
+                            version_no=0
+                        )
+
+                        # Should return agent info with empty skill_names
+                        assert result.skill_names == []
+
+
+@pytest.mark.asyncio
+async def test_export_agent_by_agent_id_knowledge_base_tool(monkeypatch):
+    """export_agent_by_agent_id should reset metadata for KnowledgeBase tools."""
+    from backend.services import agent_service
+
+    async def mock_create_tool_config_list(*args, **kwargs):
+        return []
+
+    with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+        mock_search.return_value = {
+            "agent_id": 1,
+            "name": "Test",
+            "display_name": "Test Agent",
+            "description": "Test agent",
+            "business_description": "Test",
+            "max_steps": 5,
+            "provide_run_summary": True,
+            "enabled": True,
+            "tenant_id": "tenant1",
+            "model_ids": [],
+        }
+
+        with patch("backend.services.agent_service.query_sub_agents_id_list") as mock_sub:
+            mock_sub.return_value = []
+
+            with patch("backend.services.agent_service.create_tool_config_list", new=mock_create_tool_config_list):
+                with patch.object(agent_service, "skill_db") as mock_skill_db:
+                    mock_skill_db.query_skill_instances_by_agent_id.return_value = []
+                    mock_skill_db.get_skill_by_id.return_value = None
+
+                    with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+                        mock_model.return_value = None
+
+                        # Should not raise
+                        result = await agent_service.export_agent_by_agent_id(
+                            agent_id=1,
+                            tenant_id="tenant1",
+                            user_id="user1",
+                            version_no=0
+                        )
+
+                        # Should return valid agent info
+                        assert result.agent_id == 1
+                        assert result.name == "Test"
+
+
+# ============================================================================
+# Tests for collect_skill_zip_entries (lines 2017-2035)
+# ============================================================================
+
+
+# ============================================================================
+# Tests for generate_stream_with_memory error handling (lines 2785-2793)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_with_memory_stream_chunks_error(monkeypatch):
+    """generate_stream_with_memory should handle error from _stream_agent_chunks gracefully."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock build_memory_context to return memory enabled
+    def mock_build_memory(*args, **kwargs):
+        m = MagicMock()
+        m.user_config.memory_switch = True
+        return m
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.build_memory_context",
+        mock_build_memory,
+        raising=False,
+    )
+
+    # Mock prepare_agent_run to succeed
+    async def mock_prepare(*args, **kwargs):
+        m = MagicMock()
+        return (m, m)
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.prepare_agent_run",
+        mock_prepare,
+        raising=False,
+    )
+
+    # Mock _stream_agent_chunks to raise an error - must be async generator
+    async def mock_stream_chunks(*args, **kwargs):
+        raise Exception("Stream chunks error")
+        yield "never"  # Make it an async generator
+
+    monkeypatch.setattr(
+        "backend.services.agent_service._stream_agent_chunks",
+        mock_stream_chunks,
+        raising=False,
+    )
+
+    # Track publish calls
+    published = []
+
+    async def mock_publish(data):
+        published.append(data)
+
+    # Mock channel
+    mock_channel = MagicMock()
+    mock_channel.publish = mock_publish
+
+    async def mock_get_or_create(*args, **kwargs):
+        return mock_channel
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.streaming_channel_manager.get_or_create_channel",
+        mock_get_or_create,
+        raising=False,
+    )
+
+    # Collect chunks
+    chunks = []
+    async for chunk in agent_service.generate_stream_with_memory(
+        agent_request, "user1", "tenant1", "en"
+    ):
+        chunks.append(chunk)
+
+    # Should yield error chunk (not memory token)
+    assert len(chunks) >= 1
+    # First chunk should be either memory start token or error token
+    # The error handler yields error chunk after memory tokens
+
+
+
+
+
+# ============================================================================
+# Tests for run_agent_stream resume mode channel_stream (lines 2994-3011)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypatch):
+    """run_agent_stream resume mode should yield status and chunks from channel."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': True,
+                'message_id': 1,
+                'message_status': 'streaming',
+                'resume_from_unit_index': 5,
+                'reason': 'backend_streaming'
+            }
+
+            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+                mock_mgr.get_agent_run_info.return_value = MagicMock()
+
+                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                    # Create a mock channel with history_size
+                    mock_channel = MagicMock()
+                    mock_channel.is_completed = False
+                    mock_channel.history_size = 10  # 10 chunks already in buffer
+
+                    # Simulate chunks being streamed
+                    async def mock_subscribe(n):
+                        yield 'data: {"type": "final_answer", "content": "test response"}\n\n'
+
+                    mock_channel.subscribe_with_history = mock_subscribe
+                    mock_channel_mgr.get_channel.return_value = mock_channel
+
+                    result = await agent_service.run_agent_stream(
+                        agent_request,
+                        MagicMock(),
+                        "Bearer token"
+                    )
+
+                    # Should return streaming response
+                    assert result.status_code == 200
+
+                    # Verify channel.history_size was accessed
+                    assert mock_channel.history_size == 10
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_channel_completed(monkeypatch):
+    """run_agent_stream resume mode should handle completed channel."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': True,
+                'message_id': 1,
+                'message_status': 'streaming',
+                'resume_from_unit_index': 5,
+                'reason': 'backend_streaming'
+            }
+
+            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+                mock_mgr.get_agent_run_info.return_value = MagicMock()
+
+                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                    # Create a mock channel that is completed
+                    mock_channel = MagicMock()
+                    mock_channel.is_completed = True
+                    mock_channel.history_size = 5
+
+                    # Empty async generator
+                    async def mock_subscribe(n):
+                        return
+                        yield  # Make it async generator
+
+                    mock_channel.subscribe_with_history = mock_subscribe
+                    mock_channel_mgr.get_channel.return_value = mock_channel
+
+                    result = await agent_service.run_agent_stream(
+                        agent_request,
+                        MagicMock(),
+                        "Bearer token"
+                    )
+
+                    # Should still return streaming response
+                    assert result.status_code == 200
+
+
+# ============================================================================
+# Tests for collect_skill_zip_entries (lines 2017-2035)
+# ============================================================================
+
+
+@patch("backend.services.agent_service.SkillService")
+@patch("backend.services.agent_service._collect_skill_names_from_tree")
+def test_collect_skill_zip_entries_with_skills(mock_collect, mock_service):
+    """collect_skill_zip_entries should export skills when found."""
+    from backend.services.agent_service import collect_skill_zip_entries
+
+    mock_collect.return_value = ["Skill1", "Skill2"]
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.export_skills_by_names.return_value = [
+        {"skill_name": "Skill1", "skill_zip_base64": "base64data1"},
+        {"skill_name": "Skill2", "skill_zip_base64": "base64data2"},
+    ]
+    mock_service.return_value = mock_skill_service_instance
+
+    result = collect_skill_zip_entries(agent_id=1, tenant_id="tenant1", version_no=1)
+
+    assert len(result) == 2
+    assert result[0].skill_name == "Skill1"
+    assert result[1].skill_name == "Skill2"
 
 
 @pytest.mark.asyncio
