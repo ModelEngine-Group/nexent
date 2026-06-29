@@ -24,6 +24,7 @@ import {
   deleteCommunityMcpTool,
   deleteMcpToolService,
   publishCommunityMcpTool,
+  refreshMcpToolCount,
   rejectCommunityMcpTool,
   updateCommunityMcpTool,
 } from "@/services/mcpToolsService";
@@ -549,6 +550,7 @@ function MineView({
   const [page, setPage] = useState(1);
   const [publishingKey, setPublishingKey] = useState<string | null>(null);
   const [unpublishingKey, setUnpublishingKey] = useState<string | null>(null);
+  const [refreshingMineKey, setRefreshingMineKey] = useState<string | null>(null);
   const [reviewProgressItem, setReviewProgressItem] = useState<{
     item: MineMcpCardItem;
     onlineService?: CommunityMcpCard;
@@ -740,6 +742,21 @@ function MineView({
     });
   };
 
+  const handleRefreshToolCount = async (item: MineMcpCardItem) => {
+    if (item.kind !== "local") return;
+    const key = getMineItemKey(item);
+    setRefreshingMineKey(key);
+    try {
+      await refreshMcpToolCount(item.service.mcpId);
+      message.success(t("mcpTools.add.success"));
+      await refreshMineData();
+    } catch {
+      message.error(t("mcpTools.add.failed"));
+    } finally {
+      setRefreshingMineKey(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <McpToolsSearchFilterBar
@@ -783,6 +800,7 @@ function MineView({
                 }
                 publishing={publishingKey === key}
                 unpublishing={unpublishingKey === key}
+                refreshingToolCount={refreshingMineKey === key}
                 onEditLocal={onEditLocal}
                 onEditCommunity={onEditCommunity}
                 onToggle={handleToggle}
@@ -792,6 +810,7 @@ function MineView({
                 onViewReviewProgress={(item, os) =>
                   setReviewProgressItem({ item, onlineService: os })
                 }
+                onRefreshToolCount={handleRefreshToolCount}
               />
             );
           })}

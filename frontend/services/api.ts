@@ -291,6 +291,7 @@ export const API_ENDPOINTS = {
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
     record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
+    refreshTools: `${API_BASE_URL}/mcp/refresh-tools`,
     portCheck: `${API_BASE_URL}/mcp/port/check`,
     portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
     enable: `${API_BASE_URL}/mcp/enable`,

@@ -2955,6 +2955,7 @@
   "mcpTools.mine.reviewProgressStepReviewing": "等待管理员审核",
   "mcpTools.mine.reviewProgressStepApproved": "审核通过",
   "mcpTools.mine.reviewProgressStepRejected": "审核未通过",
+  "mcpTools.mine.refreshToolCount": "刷新工具数量",
   "mcpTools.review.emptyTitle": "暂无待审核 MCP 工具",
   "mcpTools.review.approve": "通过",
   "mcpTools.review.reject": "驳回",

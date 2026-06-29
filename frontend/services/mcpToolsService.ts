@@ -749,4 +749,23 @@ export const listMcpRuntimeTools = async (mcpId: number) => {
   }
 };
 
+export const refreshMcpToolCount = async (mcpId: number) => {
+  try {
+    const query = new URLSearchParams();
+    query.set("mcp_id", mcpId.toString());
+    const response = await fetchWithAuth(
+      `${API_ENDPOINTS.mcp.refreshTools}?${query.toString()}`,
+      { method: "POST" }
+    );
+    const data = await parseJson<ApiEnvelope>(response);
+    if (data.status !== "success") {
+      throw new Error("Failed to refresh tool count");
+    }
+    return { success: true, data: null } as McpToolsApiResult<null>;
+  } catch (error) {
+    log.error("refreshMcpToolCount failed", error);
+    throw error;
+  }
+};
+
 // Intentionally keep AddFromConfigApiResult type for backward compatibility in other modules.

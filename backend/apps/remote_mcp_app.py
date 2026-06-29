@@ -36,6 +36,7 @@ from services.remote_mcp_service import (
     attach_mcp_container_permissions,
     get_mcp_record_by_id,
     list_mcp_service_tools_by_id,
+    refresh_mcp_service_tool_count,
     add_mcp_service,
     add_container_mcp_service,
     update_mcp_service,
@@ -94,6 +95,46 @@ async def get_tools_from_mcp(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to get tools from MCP server."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tool Count Refresh Endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/refresh-tools")
+async def refresh_mcp_tools_endpoint(
+    mcp_id: int = Query(..., description="MCP service ID"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
+    """Connect to the MCP server, fetch tool names, and persist them to the record."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        await refresh_mcp_service_tool_count(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            mcp_id=mcp_id,
+        )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"message": "Tool count refreshed", "status": "success"}
+        )
+    except McpNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except McpValidationError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except MCPConnectionError as e:
+        logger.error(f"Failed to refresh tool count for mcp_id={mcp_id}: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="MCP connection failed"
+        )
+    except Exception as e:
+        logger.error(f"Failed to refresh MCP tool count: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to refresh MCP tool count"
         )
 
 

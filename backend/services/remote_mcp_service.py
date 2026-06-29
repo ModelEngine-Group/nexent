@@ -29,6 +29,7 @@ from database.remote_mcp_db import (
     update_mcp_record_enabled_by_id,
     update_mcp_record_container_fields_by_id,
     update_mcp_record_status_by_id,
+    update_mcp_record_registry_json_by_id,
     delete_mcp_record_by_id,
     get_mcp_authorization_token_by_name_and_url,
     get_mcp_record_by_id_and_tenant,
@@ -1090,6 +1091,56 @@ async def list_mcp_service_tools_by_id(*, tenant_id: str, mcp_id: int) -> list[d
         custom_headers=custom_headers,
     )
     return [tool.__dict__ for tool in tools_info]
+
+
+async def refresh_mcp_service_tool_count(
+    *,
+    tenant_id: str,
+    user_id: str,
+    mcp_id: int,
+) -> list[str]:
+    """Connect to the MCP server, fetch tool names, and persist them to the record.
+
+    Args:
+        tenant_id: Tenant ID
+        user_id: User ID
+        mcp_id: MCP record ID
+
+    Returns:
+        List of tool names
+
+    Raises:
+        McpNotFoundError: If MCP record is not found
+        McpValidationError: If MCP record has no server URL
+        MCPConnectionError: If MCP connection fails
+    """
+    record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not record:
+        raise McpNotFoundError("MCP record not found")
+
+    server_url = record.get("mcp_server")
+    if not server_url:
+        raise McpValidationError("MCP record has no server URL to connect to")
+
+    authorization_token = record.get("authorization_token")
+    custom_headers = record.get("custom_headers")
+
+    tool_names = await mcp_server_health(
+        remote_mcp_server=server_url,
+        authorization_token=authorization_token,
+        custom_headers=custom_headers,
+    )
+
+    registry_json = record.get("registry_json") or {}
+    registry_json["_toolNames"] = tool_names
+
+    update_mcp_record_registry_json_by_id(
+        mcp_id=mcp_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        registry_json=registry_json,
+    )
+    return tool_names
 
 
 # ---------------------------------------------------------------------------

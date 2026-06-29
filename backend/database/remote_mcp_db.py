@@ -413,3 +413,22 @@ def get_mcp_record_by_id_and_tenant(mcp_id: int, tenant_id: str) -> Dict[str, An
         ).first()
 
         return as_dict(mcp_record) if mcp_record else None
+
+
+def update_mcp_record_registry_json_by_id(
+    *,
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str,
+    registry_json: dict,
+) -> None:
+    """Update the registry_json field on an MCP record (e.g. to persist refreshed tool names)."""
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({
+            "registry_json": registry_json,
+            "updated_by": user_id,
+        })
