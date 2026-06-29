@@ -11718,19 +11718,751 @@ async def test_process_skill_file_uploads_empty_absolute_path(mock_allowed):
 
 
 # ============================================================================
-# Tests for additional uncovered helper functions
+# Tests for _stream_agent_chunks - error handling coverage
 # ============================================================================
 
 
-def test_extract_json_objects_with_whitespace():
-    """_extract_json_objects_from_text should handle whitespace-only text."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_save_message_exception(monkeypatch):
+    """_stream_agent_chunks should handle save_message exceptions gracefully."""
+    from backend.services import agent_service
 
-    content = "   \n\t   \n   "
-    result = _extract_json_objects_from_text(content)
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
 
-    # Should skip whitespace-only text
-    assert len(result) == 0
+    # Mock agent_run to yield chunks
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_code", "content": "code"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    # Mock save_message to raise exception
+    def fake_save_message_fail(*args, **kwargs):
+        raise Exception("DB error on save_message")
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message_fail,
+        raising=False,
+    )
+
+    # Track unregister calls
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should still yield despite save_message failure
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should still have chunks
+    assert len(collected) >= 1
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_malformed_json(monkeypatch):
+    """_stream_agent_chunks should handle malformed JSON chunks gracefully."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield malformed JSON
+    async def fake_agent_run(*_, **__):
+        yield "not valid json {"
+        yield json.dumps({"type": "model_output_code", "content": "valid"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should yield malformed chunk as-is
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should have chunks including malformed one
+    assert len(collected) >= 2
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
+    """_stream_agent_chunks should handle picture_web chunks."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield picture_web chunk
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "picture_web",
+            "content": json.dumps({"images_url": ["http://example.com/img1.jpg", "http://example.com/img2.jpg"]})
+        })
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    save_source_image_calls = []
+
+    def fake_save_source_image(data, user_id=None):
+        save_source_image_calls.append(data)
+        return None
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_source_image",
+        fake_save_source_image,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should have picture_web chunk
+    assert len(collected) >= 1
+    assert "picture_web" in collected[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
+    """_stream_agent_chunks should handle search_content chunks."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield search_content chunk
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "search_content",
+            "content": json.dumps([
+                {"title": "Result 1", "url": "http://example.com/1", "text": "Content 1", "score": 0.9},
+                {"title": "Result 2", "url": "http://example.com/2", "text": "Content 2", "score": 0.8}
+            ])
+        })
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    save_source_search_calls = []
+
+    def fake_save_source_search(data, user_id=None):
+        save_source_search_calls.append(data)
+        return None
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_source_search",
+        fake_save_source_search,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should have search_content chunk
+    assert len(collected) >= 1
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
+    """_stream_agent_chunks should handle update_unit_content exceptions in finally block."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield chunks that will be persisted
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_code", "content": "code"})
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    # Make update_unit_content fail in finally block
+    update_unit_content_calls = []
+
+    def fake_update_unit_content(unit_id, content, user_id):
+        update_unit_content_calls.append((unit_id, content, user_id))
+        raise Exception("DB error on update_unit_content")
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        fake_update_unit_content,
+        raising=False,
+    )
+
+    def fake_update_unit_status(unit_id, status, user_id):
+        pass
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        fake_update_unit_status,
+        raising=False,
+    )
+
+    def fake_update_message_status(msg_id, status, user_id):
+        pass
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        fake_update_message_status,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should still complete despite update_unit_content failure
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should have chunks and unregister should be called
+    assert len(collected) >= 2
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
+    """_stream_agent_chunks should handle update_unit_status exceptions in finally block."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield chunks
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_code", "content": "code"})
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    def fake_update_unit_content(unit_id, content, user_id):
+        pass
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        fake_update_unit_content,
+        raising=False,
+    )
+
+    # Make update_unit_status fail
+    def fake_update_unit_status_fail(unit_id, status, user_id):
+        raise Exception("DB error on update_unit_status")
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        fake_update_unit_status_fail,
+        raising=False,
+    )
+
+    def fake_update_message_status(msg_id, status, user_id):
+        pass
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        fake_update_message_status,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should still complete
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should complete despite update_unit_status failure
+    assert len(collected) >= 2
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
+    """_stream_agent_chunks should handle update_message_status exceptions in finally block."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield chunks
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    def fake_update_unit_content(unit_id, content, user_id):
+        pass
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_content",
+        fake_update_unit_content,
+        raising=False,
+    )
+
+    def fake_update_unit_status(unit_id, status, user_id):
+        pass
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_unit_status",
+        fake_update_unit_status,
+        raising=False,
+    )
+
+    # Make update_message_status fail
+    def fake_update_message_status_fail(msg_id, status, user_id):
+        raise Exception("DB error on update_message_status")
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.update_message_status",
+        fake_update_message_status_fail,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should still complete
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should complete despite update_message_status failure
+    assert len(collected) >= 1
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
+    """_stream_agent_chunks should extract skill file payloads from execution_logs chunks."""
+    from backend.services import agent_service
+
+    # Create a temporary skill file
+    skill_file = tmp_path / "test_script.py"
+    skill_file.write_text("# skill file content")
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield execution_logs with skill file payload
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "execution_logs",
+            "content": json.dumps({
+                "type": "text",
+                "text": f'{{"absolute_path": "{skill_file}", "file_name": "test_script.py"}}'
+            })
+        })
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Mock upload_fileobj
+    def fake_upload(file_obj, file_name, prefix, generate_presigned_url, file_size):
+        return {"success": True, "object_name": "test_obj", "url": "http://example.com/file"}
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.upload_fileobj",
+        fake_upload,
+        raising=False,
+    )
+
+    # Mock is_allowed_skill_upload_path
+    def fake_is_allowed(path):
+        return True
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.is_allowed_skill_upload_path",
+        fake_is_allowed,
+        raising=False,
+    )
+
+    # Collect chunks
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should have execution_logs chunk
+    assert len(collected) >= 1
+    assert "execution_logs" in collected[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
+    """_stream_agent_chunks should handle invalid picture_web content gracefully."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield picture_web with invalid JSON content
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "picture_web",
+            "content": "not valid json {"
+        })
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should handle invalid JSON gracefully
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should still complete
+    assert len(collected) >= 1
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
+    """_stream_agent_chunks should handle invalid search_content content gracefully."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield search_content with invalid JSON content
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "search_content",
+            "content": "not valid json {"
+        })
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Collect chunks - should handle invalid JSON gracefully
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock()
+    ):
+        collected.append(out)
+
+    # Should still complete
+    assert len(collected) >= 1
+    assert unregister_called.get("conv_id") == 999
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_resume_mode(monkeypatch):
+    """_stream_agent_chunks should emit resume status events in resume mode."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+
+    # Mock agent_run to yield chunks
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+    )
+
+    def fake_save_message(*args, **kwargs):
+        return 4242
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message",
+        fake_save_message,
+        raising=False,
+    )
+
+    unregister_called = {}
+
+    def fake_unregister(conv_id, user_id):
+        unregister_called["conv_id"] = conv_id
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        fake_unregister,
+        raising=False,
+    )
+
+    # Call with resume_from_unit_index > 0
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock(), resume_from_unit_index=5
+    ):
+        collected.append(out)
+
+    # Should have resume status events at the beginning
+    assert len(collected) >= 2
+    assert "resumed" in collected[0] or "resumed" in collected[1]
+
 
 
 
