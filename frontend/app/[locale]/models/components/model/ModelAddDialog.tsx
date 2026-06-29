@@ -1171,7 +1171,6 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...acceptSignalKwargs,
         };
@@ -1214,7 +1213,6 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...acceptSignalKwargs,
         };
