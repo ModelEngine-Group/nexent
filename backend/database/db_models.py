@@ -879,6 +879,32 @@ class AgentRepository(TableBase):
                     doc="Listing status: not_shared (未共享) / pending_review (待审核) / rejected (审核驳回) / shared (已共享)")
 
 
+class SkillRepository(TableBase):
+    """
+    Skill repository (marketplace) table. Frozen snapshot of a shared skill for installation.
+    """
+    __tablename__ = "ag_skill_repository_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    skill_repository_id = Column(BigInteger, Sequence("ag_skill_repository_t_skill_repository_id_seq", schema=SCHEMA),
+                                 primary_key=True, nullable=False, doc="Skill repository listing ID, unique primary key")
+    publisher_tenant_id = Column(String(100), nullable=False, doc="Publisher tenant ID")
+    publisher_user_id = Column(String(100), nullable=False, doc="Publisher user ID")
+    skill_id = Column(Integer, nullable=False, doc="Source skill ID from ag_skill_info_t")
+    name = Column(String(100), nullable=False, doc="Skill name for display and search")
+    description = Column(Text, doc="Skill description")
+    source = Column(String(30), doc="Skill source")
+    submitted_by = Column(String(100), doc="Submitter email when listing enters pending_review")
+    category_id = Column(Integer, doc="Optional marketplace category ID")
+    tags = Column(ARRAY(Text), doc="Marketplace tags")
+    icon = Column(String(100), doc="Marketplace card icon (emoji or URL)")
+    downloads = Column(Integer, default=0, doc="Marketplace install count for card display")
+    skill_info_json = Column(JSONB, nullable=False, doc="Frozen skill metadata snapshot")
+    skill_zip_base64 = Column(Text, nullable=False, doc="Frozen skill ZIP payload encoded as base64")
+    status = Column(String(30), default="not_shared",
+                    doc="Listing status: not_shared / pending_review / rejected / shared")
+
+
 class UserTokenInfo(TableBase):
     """
     User token (AK/SK) information table
