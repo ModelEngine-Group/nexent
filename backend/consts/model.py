@@ -146,6 +146,12 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
+    # the frontend when the operator clicks "Use suggestion" and saves; the
+    # app layer pops them before the dict reaches the service/DB layer and
+    # forwards them to model_capacity_suggestion_accept_total.
+    accepted_suggestion_match_kind: Optional[str] = None
+    accepted_capability_profile_version: Optional[str] = None
 
 
 class CapacitySuggestionFields(BaseModel):
@@ -1076,6 +1082,15 @@ class ManageTenantModelCreateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W11 accept-signal fields. Same audit-only contract as ModelRequest:
+    # the app layer pops them off model_data before the dict reaches the
+    # service/DB layer and forwards them to
+    # model_capacity_suggestion_accept_total. Declared here so Pydantic's
+    # default extra="ignore" does not silently drop the wire signal --
+    # without these declarations the SLO numerator misses every accept
+    # that lands via the SU/asset-owner surface.
+    accepted_suggestion_match_kind: Optional[str] = Field(None, description="Audit-only: catalog match_kind the operator accepted")
+    accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -1098,6 +1113,11 @@ class ManageTenantModelUpdateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
+    # contract. The app layer pops them before calling the service so
+    # update_model_record never sees them.
+    accepted_suggestion_match_kind: Optional[str] = Field(None, description="Audit-only: catalog match_kind the operator accepted")
+    accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):

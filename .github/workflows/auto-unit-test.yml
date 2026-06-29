@@ -19,6 +19,10 @@ on:
         description: 'per-file timeout in seconds (0=disabled)'
         required: false
         default: '300'
+      codecov_os:
+        description: 'Codecov uploader OS override (e.g. linux-arm64, linux, macos, windows)'
+        required: false
+        default: 'linux-arm64'
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
@@ -95,11 +99,13 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        # codecov/codecov-action@v7
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           files: test/coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unittests
           name: codecov-umbrella
-          fail_ci_if_error: false
+          fail_ci_if_error: true
+          os: ${{ github.event.inputs.codecov_os || 'linux-arm64' }}
           verbose: true

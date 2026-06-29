@@ -5837,3 +5837,74 @@ class TestMergeToolParams:
         tool_record = {"params": [{"name": "param1", "default": "default1"}]}
         result = _merge_tool_params(tool_record, {})
         assert result == {"param1": "default1"}
+
+
+# ---------------------------------------------------------------------------
+# W11 V1.5 - dispatch_profile_hit_total metric wiring
+# ---------------------------------------------------------------------------
+
+
+class TestDispatchProfileHitMetric:
+    """Spec L710: every successful capacity resolve where the resolved snapshot
+    carries a non-null capability_profile_version increments the dispatch
+    profile-hit counter. Combined with accept_total at save time, this gives
+    the 95% SLO 'accepted catalog suggestions produce expected runtime
+    profile' (W11 spec L1162-1163).
+    """
+
+    def test_profile_hit_recorded_when_snapshot_carries_profile_version(self):
+        counter = MagicMock()
+        snapshot = MockModelCapacitySnapshot(
+            model_name="gpt-4o",
+            capability_profile_version="openai/gpt-4o@1",
+        )
+        with patch.object(
+            create_agent_info_module,
+            "_capacity_dispatch_profile_hit_total",
+            counter,
+        ), patch.object(
+            create_agent_info_module,
+            "resolve_capacity",
+            return_value=snapshot,
+        ):
+            create_agent_info_module._resolve_input_budget(
+                {"model_factory": "openai", "model_name": "gpt-4o"}
+            )
+
+        counter.add.assert_called_once_with(1, {"provider": "openai"})
+
+    def test_profile_hit_not_recorded_without_profile_version(self):
+        """An operator-configured row (no catalog match) resolves successfully
+        but `capability_profile_version` stays None. Counter must not fire --
+        otherwise the SLO ratio is inflated by non-catalog dispatches.
+        """
+        counter = MagicMock()
+        snapshot = MockModelCapacitySnapshot(
+            model_name="custom-local",
+            capability_profile_version=None,
+        )
+        with patch.object(
+            create_agent_info_module,
+            "_capacity_dispatch_profile_hit_total",
+            counter,
+        ), patch.object(
+            create_agent_info_module,
+            "resolve_capacity",
+            return_value=snapshot,
+        ):
+            create_agent_info_module._resolve_input_budget(
+                {"model_factory": "custom", "model_name": "custom-local"}
+            )
+
+        counter.add.assert_not_called()
+
+    def test_recorder_no_op_when_counter_disabled(self):
+        """OTel-optional guard: the helper must not raise when the counter
+        is None so agent dispatch works in deployments without OpenTelemetry.
+        """
+        with patch.object(
+            create_agent_info_module,
+            "_capacity_dispatch_profile_hit_total",
+            None,
+        ):
+            create_agent_info_module._record_dispatch_profile_hit("openai")
