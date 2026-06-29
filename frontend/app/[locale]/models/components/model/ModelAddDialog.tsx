@@ -294,8 +294,6 @@ export const ModelAddDialog = ({
   const [form, setForm] = useState(DEFAULT_FORM_STATE);
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
-  const [checkingCapacitySuggestion, setCheckingCapacitySuggestion] =
-    useState(false);
   const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
     useState(true);
   const [capacitySuggestion, setCapacitySuggestion] =
@@ -504,12 +502,6 @@ export const ModelAddDialog = ({
     }
   };
 
-  const canSuggestCapacity = () =>
-    supportsCapacityFields &&
-    !form.isBatchImport &&
-    form.name.trim() !== "" &&
-    (form.url.trim() !== "" || form.provider.trim() !== "");
-
   const applyCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
     const next = capacityFormFromSuggestion(suggestion);
     if (!next || Object.keys(next).length === 0) return;
@@ -525,37 +517,6 @@ export const ModelAddDialog = ({
       // the active list and the edit dropdown.
     }));
     setAcceptedCapacitySuggestion(suggestion);
-  };
-
-  const handleSuggestCapacity = async () => {
-    if (!canSuggestCapacity()) {
-      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
-      return;
-    }
-    setCheckingCapacitySuggestion(true);
-    try {
-      const suggestion = await modelService.suggestCapacity({
-        modelName: form.name.trim(),
-        baseUrl: form.url.trim(),
-        // Only send providerHint when the user actually picked it (batch mode
-        // exposes the dropdown). In single-add mode the form keeps a hidden
-        // default ("modelengine") that the user never sees, so forwarding it
-        // would falsely pin catalog lookup to that provider.
-        ...(form.isBatchImport ? { providerHint: form.provider } : {}),
-        apiKey: form.apiKey.trim() || undefined,
-        modelType: resolveConnectivityModelType(form.type),
-      });
-      setCapacitySuggestion(suggestion);
-      if (!suggestion.suggestions) {
-        setAcceptedCapacitySuggestion(null);
-      }
-    } catch (error) {
-      setCapacitySuggestion(null);
-      setAcceptedCapacitySuggestion(null);
-      message.error(t("model.dialog.capacity.suggestion.failed"));
-    } finally {
-      setCheckingCapacitySuggestion(false);
-    }
   };
 
   // Verify if the vector dimension is valid
@@ -1184,6 +1145,22 @@ export const ModelAddDialog = ({
         maxTokensValue = 0;
       }
 
+      // W11 accept-signal: pop the audit fields from acceptedCapacitySuggestion
+      // so the app layer can label model_capacity_suggestion_accept_total.
+      // Emitting once per save keeps the counter aligned with the
+      // dispatch_profile_hit_total denominator (spec L709-710).
+      const acceptSignalKwargs = acceptedCapacitySuggestion
+        ? {
+            acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
+            ...(acceptedCapacitySuggestion.capabilityProfileVersion
+              ? {
+                  acceptedCapabilityProfileVersion:
+                    acceptedCapacitySuggestion.capabilityProfileVersion,
+                }
+              : {}),
+          }
+        : {};
+
       // Add to the backend service - use manage interface if tenantId is provided
       if (tenantId) {
         const modelParams: any = {
@@ -1196,6 +1173,7 @@ export const ModelAddDialog = ({
           displayName: form.displayName || form.name,
           modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...acceptSignalKwargs,
         };
 
         // Add STT specific fields
@@ -1238,6 +1216,7 @@ export const ModelAddDialog = ({
           displayName: form.displayName || form.name,
           modelFactory: form.provider,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...acceptSignalKwargs,
         };
 
         // Add STT specific fields
@@ -1869,27 +1848,17 @@ export const ModelAddDialog = ({
                   <div className="text-sm font-medium text-gray-700">
                     {t("model.dialog.capacity.suggestion.title")}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {t("model.dialog.capacity.suggestion.hint")}
-                  </div>
+                  {capacitySuggestionEnabled && (
+                    <div className="text-xs text-gray-500">
+                      {t("model.dialog.capacity.suggestion.hintAdd")}
+                    </div>
+                  )}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Switch
-                    size="small"
-                    checked={capacitySuggestionEnabled}
-                    onChange={setCapacitySuggestionEnabled}
-                  />
-                  <Button
-                    size="small"
-                    onClick={handleSuggestCapacity}
-                    loading={checkingCapacitySuggestion}
-                    disabled={
-                      !capacitySuggestionEnabled || !canSuggestCapacity()
-                    }
-                  >
-                    {t("model.dialog.capacity.suggestion.check")}
-                  </Button>
-                </div>
+                <Switch
+                  size="small"
+                  checked={capacitySuggestionEnabled}
+                  onChange={setCapacitySuggestionEnabled}
+                />
               </div>
             )}
             <ModelCapacityFields
@@ -1905,10 +1874,10 @@ export const ModelAddDialog = ({
                   ? capacitySuggestion
                   : null
               }
-              suggestionLoading={checkingCapacitySuggestion}
               onUseSuggestion={() =>
                 applyCapacitySuggestion(capacitySuggestion)
               }
+              acceptedSuggestion={acceptedCapacitySuggestion}
             />
           </div>
         )}

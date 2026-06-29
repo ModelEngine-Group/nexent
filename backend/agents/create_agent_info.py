@@ -86,6 +86,43 @@ _CAPACITY_WARNING_EMITTED: set = set()
 _CAPACITY_WARNING_LOCK = threading.Lock()
 
 
+# W11 spec line 710: emitted every time _resolve_input_budget resolves a row
+# whose dispatch-time capability_profile_version is non-null (i.e. the W1
+# exact catalog lookup succeeded). Combined with
+# model_capacity_suggestion_accept_total at save time gives the SLO ratio
+# "95% of accepted catalog suggestions produce the expected runtime profile".
+# Guarded so a missing OpenTelemetry runtime never breaks agent startup.
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _capacity_dispatch_meter = _otel_metrics.get_meter(__name__)
+    _capacity_dispatch_profile_hit_total = _capacity_dispatch_meter.create_counter(
+        name="model_capacity_suggestion_dispatch_profile_hit_total",
+        description=(
+            "Count of agent dispatches where the resolved W1 capacity "
+            "snapshot reports a non-null capability_profile_version "
+            "(i.e. the runtime profile match succeeded). Labelled by "
+            "provider."
+        ),
+        unit="dispatches",
+    )
+except Exception:  # pragma: no cover - OTel is optional at runtime
+    _capacity_dispatch_profile_hit_total = None
+
+
+def _record_dispatch_profile_hit(provider: Optional[str]) -> None:
+    """Emit dispatch_profile_hit_total for one successful runtime profile match."""
+    if _capacity_dispatch_profile_hit_total is None:
+        return
+    try:
+        _capacity_dispatch_profile_hit_total.add(
+            1,
+            {"provider": (provider or "unknown").lower()},
+        )
+    except Exception:  # pragma: no cover - never break agent run for telemetry
+        pass
+
+
 def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     """Extract the W1 operator-override fields from a model_record_t row."""
     if not isinstance(model_info, dict):
@@ -102,7 +139,7 @@ def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
         return None
-    for preferred in ("operator", "profile", "provider_candidate", "legacy", "unknown"):
+    for preferred in ("operator", "profile", "provider_candidate", "legacy", "default", "unknown"):
         if preferred in values:
             return preferred
     return values[0]
@@ -224,6 +261,8 @@ def _resolve_input_budget(
             snapshot.capability_profile_version,
             snapshot.fingerprint,
         )
+        if snapshot.capability_profile_version:
+            _record_dispatch_profile_hit(provider)
         return (
             snapshot.provider_input_limit_tokens,
             _capacity_snapshot_for_monitoring(snapshot),

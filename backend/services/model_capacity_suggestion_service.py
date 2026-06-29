@@ -1,9 +1,78 @@
+import logging
 import re
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Optional
 
 from consts.const import CAPACITY_SUGGESTION_ENABLED
+
+logger = logging.getLogger(__name__)
+
+# OpenTelemetry instruments for W11 catalog match observability.
+# Spec lines 706-708. Guarded the same way as the SDK monitor module: if
+# OpenTelemetry is not installed (some deployments run without it), the
+# instruments are None and the recording becomes a no-op.
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _suggestion_meter = _otel_metrics.get_meter(__name__)
+    _capacity_suggestion_requests_total = _suggestion_meter.create_counter(
+        name="model_capacity_suggestion_requests_total",
+        description=(
+            "Count of capacity-suggestion service invocations, labelled by "
+            "match_kind, model_type, and inferred provider. Drives the SLO "
+            "'at least 70% of new manual-add LLM rows produce match_kind "
+            "!= none' (W11 spec)."
+        ),
+        unit="requests",
+    )
+    _capacity_suggestion_latency_ms = _suggestion_meter.create_histogram(
+        name="model_capacity_suggestion_latency_ms",
+        description=(
+            "End-to-end latency of suggest_capacity, labelled by match_kind "
+            "and provider. Used to verify provider-discovery p95 stays under "
+            "the model-add latency budget (W11 spec)."
+        ),
+        unit="ms",
+    )
+except Exception:  # pragma: no cover - OTel is optional at runtime
+    _capacity_suggestion_requests_total = None
+    _capacity_suggestion_latency_ms = None
+
+
+def _record_suggestion_request(
+    match_kind: str,
+    provider: Optional[str],
+    model_type: Optional[str],
+    duration_ms: float,
+) -> None:
+    """Emit the requests_total counter and latency_ms histogram for one call.
+
+    Recording never raises -- a broken telemetry stack must not break the
+    suggestion path.
+    """
+    safe_provider = (provider or "unknown").lower()
+    if _capacity_suggestion_requests_total is not None:
+        try:
+            _capacity_suggestion_requests_total.add(
+                1,
+                {
+                    "match_kind": match_kind,
+                    "model_type": (model_type or "unknown").lower(),
+                    "provider": safe_provider,
+                },
+            )
+        except Exception:  # pragma: no cover
+            pass
+    if _capacity_suggestion_latency_ms is not None:
+        try:
+            _capacity_suggestion_latency_ms.record(
+                duration_ms,
+                {"match_kind": match_kind, "provider": safe_provider},
+            )
+        except Exception:  # pragma: no cover
+            pass
 
 
 ProfileKey = tuple[str, str]
@@ -233,6 +302,35 @@ def suggest_capacity(
     api_key: Optional[str] = None,
     catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]] = None,
     enabled: bool = CAPACITY_SUGGESTION_ENABLED,
+) -> CapacitySuggestionResult:
+    start_perf = time.perf_counter()
+    result = _suggest_capacity_inner(
+        model_name=model_name,
+        base_url=base_url,
+        provider_hint=provider_hint,
+        model_type=model_type,
+        api_key=api_key,
+        catalog=catalog,
+        enabled=enabled,
+    )
+    duration_ms = (time.perf_counter() - start_perf) * 1000.0
+    _record_suggestion_request(
+        match_kind=result.match_kind.value,
+        provider=result.suggested_provider,
+        model_type=model_type,
+        duration_ms=duration_ms,
+    )
+    return result
+
+
+def _suggest_capacity_inner(
+    model_name: str,
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+    model_type: Optional[str],
+    api_key: Optional[str],
+    catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]],
+    enabled: bool,
 ) -> CapacitySuggestionResult:
     del api_key
 
