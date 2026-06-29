@@ -12,15 +12,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type {
-  AgentRepositoryListingDetail,
-  AgentRepositoryListingStatus,
-} from "@/types/agentRepository";
+import type { AgentDetailModalData } from "@/lib/agentRepositoryDetail";
+import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
 
 interface AgentRepositoryDetailModalProps {
   open: boolean;
   onClose: () => void;
-  detail: AgentRepositoryListingDetail | null | undefined;
+  detail: AgentDetailModalData | null | undefined;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -36,6 +34,13 @@ function formatCreatedAt(value?: string | null): string | null {
     return value;
   }
   return date.toLocaleDateString();
+}
+
+function resolveDetailTitle(
+  detail: AgentDetailModalData,
+  untitledLabel: string
+): string {
+  return detail.display_name?.trim() || detail.name?.trim() || untitledLabel;
 }
 
 function StatusBadge({ status }: { status: AgentRepositoryListingStatus }) {
@@ -79,6 +84,205 @@ function StatusBadge({ status }: { status: AgentRepositoryListingStatus }) {
   );
 }
 
+function AgentRepositoryDetailLoading() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <Spin size="large" />
+    </div>
+  );
+}
+
+function AgentRepositoryDetailError({
+  onRetry,
+  isFetching,
+}: {
+  onRetry: () => void;
+  isFetching: boolean;
+}) {
+  const { t } = useTranslation("common");
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 px-6 py-20 text-center">
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        {t("agentRepository.detail.loadError")}
+      </p>
+      <Button type="primary" onClick={onRetry} loading={isFetching}>
+        {t("agentRepository.detail.retry")}
+      </Button>
+    </div>
+  );
+}
+
+function AgentRepositoryDetailIcon({ icon }: { icon?: string | null }) {
+  const trimmedIcon = icon?.trim();
+  if (trimmedIcon) {
+    return <span aria-hidden>{trimmedIcon}</span>;
+  }
+  return <Bot className="size-8 text-primary" aria-hidden />;
+}
+
+function AgentRepositoryDetailMeta({
+  detail,
+  downloads,
+  createdAtText,
+}: {
+  detail: AgentDetailModalData;
+  downloads: number;
+  createdAtText: string | null;
+}) {
+  const { t } = useTranslation("common");
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+      {detail.model_name ? (
+        <span className="inline-flex items-center gap-1">
+          <Cpu className="size-3.5" aria-hidden />
+          {detail.model_name}
+        </span>
+      ) : null}
+      {detail.version_label ? <span>{detail.version_label}</span> : null}
+      <span className="inline-flex items-center gap-1">
+        <Download className="size-3.5" aria-hidden />
+        {t("agentRepository.detail.downloads", {
+          count: downloads.toLocaleString(),
+        })}
+      </span>
+      {createdAtText ? (
+        <span className="inline-flex items-center gap-1">
+          <Calendar className="size-3.5" aria-hidden />
+          {createdAtText}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentRepositoryDetailHeader({ detail }: { detail: AgentDetailModalData }) {
+  const { t } = useTranslation("common");
+  const title = resolveDetailTitle(detail, t("agentRepository.card.untitled"));
+  const downloads = detail.downloads ?? 0;
+  const createdAtText = formatCreatedAt(detail.created_at);
+
+  return (
+    <div className="border-b border-slate-200 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/40">
+      <div className="flex items-start gap-4">
+        <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-white text-3xl shadow-sm dark:bg-slate-800">
+          <AgentRepositoryDetailIcon icon={detail.icon} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              {title}
+            </h2>
+            {detail.status ? <StatusBadge status={detail.status} /> : null}
+          </div>
+          <AgentRepositoryDetailMeta
+            detail={detail}
+            downloads={downloads}
+            createdAtText={createdAtText}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentRepositoryDetailTools({ tools }: { tools: string[] }) {
+  const { t } = useTranslation("common");
+
+  if (tools.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-2">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <Wrench className="size-4 text-primary" aria-hidden />
+        {t("agentRepository.detail.tools")}
+      </h3>
+      <div className="flex flex-wrap gap-1.5">
+        {tools.map((tool) => (
+          <Tag key={tool} className="m-0 font-mono text-xs">
+            {tool}
+          </Tag>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentRepositoryDetailDutyPrompt({
+  dutyPrompt,
+}: {
+  dutyPrompt?: string | null;
+}) {
+  const { t } = useTranslation("common");
+  const trimmedPrompt = dutyPrompt?.trim();
+
+  if (!trimmedPrompt) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        {t("agentRepository.detail.role")}
+      </h3>
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+        {trimmedPrompt}
+      </pre>
+    </section>
+  );
+}
+
+function AgentRepositoryDetailContent({ detail }: { detail: AgentDetailModalData }) {
+  const { t } = useTranslation("common");
+  const tools = detail.tools?.filter((tool) => tool.trim()) ?? [];
+
+  return (
+    <div className="max-h-[80vh] overflow-y-auto">
+      <AgentRepositoryDetailHeader detail={detail} />
+      <div className="space-y-6 p-6">
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {t("agentRepository.detail.intro")}
+          </h3>
+          <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+            {detail.description?.trim() ||
+              t("agentRepository.card.noDescription")}
+          </p>
+        </section>
+        <AgentRepositoryDetailTools tools={tools} />
+        <AgentRepositoryDetailDutyPrompt dutyPrompt={detail.duty_prompt} />
+      </div>
+    </div>
+  );
+}
+
+function resolveDetailModalBody({
+  isLoading,
+  isError,
+  isFetching,
+  detail,
+  onRetry,
+}: Pick<
+  AgentRepositoryDetailModalProps,
+  "isLoading" | "isError" | "isFetching" | "detail" | "onRetry"
+>) {
+  if (isLoading) {
+    return <AgentRepositoryDetailLoading />;
+  }
+  if (isError) {
+    return (
+      <AgentRepositoryDetailError onRetry={onRetry} isFetching={isFetching} />
+    );
+  }
+  if (!detail) {
+    return null;
+  }
+  return <AgentRepositoryDetailContent detail={detail} />;
+}
+
 export function AgentRepositoryDetailModal({
   open,
   onClose,
@@ -88,16 +292,6 @@ export function AgentRepositoryDetailModal({
   isFetching,
   onRetry,
 }: AgentRepositoryDetailModalProps) {
-  const { t } = useTranslation("common");
-
-  const title =
-    detail?.display_name?.trim() ||
-    detail?.name?.trim() ||
-    t("agentRepository.card.untitled");
-  const createdAtText = formatCreatedAt(detail?.created_at);
-  const downloads = detail?.downloads ?? 0;
-  const tools = detail?.tools?.filter((tool) => tool.trim()) ?? [];
-
   return (
     <Modal
       open={open}
@@ -110,106 +304,13 @@ export function AgentRepositoryDetailModal({
       className="agent-repository-detail-modal"
       styles={{ body: { padding: 0 } }}
     >
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Spin size="large" />
-        </div>
-      ) : isError ? (
-        <div className="flex flex-col items-center justify-center gap-3 px-6 py-20 text-center">
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("agentRepository.detail.loadError")}
-          </p>
-          <Button type="primary" onClick={onRetry} loading={isFetching}>
-            {t("agentRepository.detail.retry")}
-          </Button>
-        </div>
-      ) : detail ? (
-        <div className="max-h-[80vh] overflow-y-auto">
-          <div className="border-b border-slate-200 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/40">
-            <div className="flex items-start gap-4">
-              <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-white text-3xl shadow-sm dark:bg-slate-800">
-                {detail.icon?.trim() ? (
-                  <span aria-hidden>{detail.icon.trim()}</span>
-                ) : (
-                  <Bot className="size-8 text-primary" aria-hidden />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-                    {title}
-                  </h2>
-                  <StatusBadge status={detail.status} />
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                  {detail.model_name ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Cpu className="size-3.5" aria-hidden />
-                      {detail.model_name}
-                    </span>
-                  ) : null}
-                  {detail.version_label ? (
-                    <span>{detail.version_label}</span>
-                  ) : null}
-                  {downloads > 0 ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Download className="size-3.5" aria-hidden />
-                      {t("agentRepository.detail.downloads", {
-                        count: downloads.toLocaleString(),
-                      })}
-                    </span>
-                  ) : null}
-                  {createdAtText ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Calendar className="size-3.5" aria-hidden />
-                      {createdAtText}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6 p-6">
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {t("agentRepository.detail.intro")}
-              </h3>
-              <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                {detail.description?.trim() ||
-                  t("agentRepository.card.noDescription")}
-              </p>
-            </section>
-
-            {tools.length > 0 ? (
-              <section className="space-y-2">
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  <Wrench className="size-4 text-primary" aria-hidden />
-                  {t("agentRepository.detail.tools")}
-                </h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {tools.map((tool) => (
-                    <Tag key={tool} className="m-0 font-mono text-xs">
-                      {tool}
-                    </Tag>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {detail.duty_prompt?.trim() ? (
-              <section className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  {t("agentRepository.detail.role")}
-                </h3>
-                <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                  {detail.duty_prompt}
-                </pre>
-              </section>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      {resolveDetailModalBody({
+        isLoading,
+        isError,
+        isFetching,
+        detail,
+        onRetry,
+      })}
     </Modal>
   );
 }

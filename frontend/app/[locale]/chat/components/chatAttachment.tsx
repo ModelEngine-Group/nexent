@@ -17,6 +17,8 @@ interface SelectedFileState {
   fileName: string;
   fileType?: string;
   fileSize?: number;
+  previewUrl?: string;
+  downloadUrl?: string;
 }
 
 // Format file size
@@ -31,7 +33,9 @@ export function ChatAttachment({
   onImageClick,
   className = "",
 }: ChatAttachmentProps) {
-  const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(null);
+  const [selectedFile, setSelectedFile] = useState<SelectedFileState | null>(
+    null
+  );
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
@@ -40,21 +44,23 @@ export function ChatAttachment({
   //Handle file click
   const handleFileClick = (attachment: AttachmentItem) => {
     let objectName = attachment.object_name;
-    
+
     if (!objectName && attachment.url) {
       objectName = extractObjectNameFromUrl(attachment.url) || undefined;
     }
-    
-    if (!objectName) {
+
+    if (!objectName && !attachment.preview_url) {
       message.warning(t("filePreview.previewFailed"));
       return;
     }
 
     setSelectedFile({
-      objectName,
+      objectName: objectName || "",
       fileName: attachment.name,
       fileType: attachment.contentType,
       fileSize: attachment.size,
+      previewUrl: attachment.preview_url,
+      downloadUrl: attachment.download_url,
     });
 
     // Also call external callback if provided (for compatibility with images)
@@ -65,7 +71,7 @@ export function ChatAttachment({
         (attachment.contentType &&
           attachment.contentType.startsWith("image/")) ||
         chatConfig.imageExtensions.includes(extension);
-      
+
       if (isImage) {
         onImageClick(attachment.url);
       }
@@ -98,7 +104,10 @@ export function ChatAttachment({
                   <div className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md">
                     {attachment.url && (
                       <img
-                        src={convertImageUrlToApiUrl(attachment.url)}
+                        src={
+                          attachment.preview_url ||
+                          convertImageUrlToApiUrl(attachment.url)
+                        }
                         alt={attachment.name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -148,6 +157,8 @@ export function ChatAttachment({
           fileName={selectedFile.fileName}
           fileType={selectedFile.fileType}
           fileSize={selectedFile.fileSize}
+          previewUrl={selectedFile.previewUrl}
+          downloadUrl={selectedFile.downloadUrl}
           onClose={() => setSelectedFile(null)}
         />
       )}

@@ -69,7 +69,7 @@ bash uninstall.sh k8s delete-all
 bash uninstall.sh k8s delete-all --keep-local-data
 ```
 
-K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Existing `deploy/env/.env` is kept as-is. If it is missing, the deploy script first reuses an existing legacy root `.env` or `docker/.env`, then falls back to `deploy/env/.env.example` or legacy templates. Do not edit generated Helm values by hand; they are recreated from `deploy/env/.env` and deployment options.
+K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Existing `deploy/env/.env` is kept as-is. If it is missing, the deploy script first reuses `docker/.env`, then falls back to `deploy/env/.env.example`. Do not edit generated Helm values by hand; they are recreated from `deploy/env/.env` and deployment options.
 
 When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
@@ -160,7 +160,7 @@ The deployment script uses Bash TUI menus when running interactively. It first s
 | Policy | Kubernetes behavior |
 |--------|---------------------|
 | `development` | Uses NodePort for Web and selected debug/internal services |
-| `production` | Keeps internal services as ClusterIP and exposes the Web entrypoint |
+| `production` | Keeps internal services as ClusterIP and exposes the Web and northbound entrypoints |
 
 ## Deployment Workflow
 

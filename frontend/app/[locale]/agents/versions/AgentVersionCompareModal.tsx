@@ -181,11 +181,15 @@ export default function AgentVersionCompareModal({
   const resolveVersionModel = (versionNo: number | null | undefined) => {
     if ((versionNo === null || versionNo === undefined) || !compareData?.data) return "-";
     const { version_a, version_b } = compareData.data;
+    const formatModelNames = (modelNames: any, modelName: any) => {
+      if (Array.isArray(modelNames) && modelNames.length > 0) return modelNames.join(", ");
+      return modelName || "-";
+    };
     if (version_a?.version?.version_no === versionNo) {
-      return version_a.model_name || "-";
+      return formatModelNames(version_a.model_names, version_a.model_name);
     }
     if (version_b?.version?.version_no === versionNo) {
-      return version_b.model_name || "-";
+      return formatModelNames(version_b.model_names, version_b.model_name);
     }
     return "-";
   };
@@ -273,41 +277,49 @@ export default function AgentVersionCompareModal({
               ];
 
               const data = [
-                {
-                  key: "name_model",
-                  field: (
-                    <Flex align="center" gap={6}>
-                      <PencilLine size={14} className="text-gray-400" />
-                      <span>
-                        {t("agent.version.field.name")}/{t("agent.version.field.modelName")}
-                      </span>
-                    </Flex>
-                  ),
-                  current: (
-                    <span
-                      className={
-                        version_a.name !== version_b.name ||
-                        version_a.model_name !== version_b.model_name
-                          ? "text-orange-500 font-medium"
-                          : "text-gray-600"
-                      }
-                    >
-                      {version_a.name || "-"} / {version_a.model_name || "-"}
-                    </span>
-                  ),
-                  version: (
-                    <span
-                      className={
-                        version_a.name !== version_b.name ||
-                        version_a.model_name !== version_b.model_name
-                          ? "text-green-500 font-medium"
-                          : "text-gray-600"
-                      }
-                    >
-                      {version_b.name || "-"} / {version_b.model_name || "-"}
-                    </span>
-                  ),
-                },
+{
+              key: "name_model",
+              field: (
+                <Flex align="center" gap={6}>
+                  <PencilLine size={14} className="text-gray-400" />
+                  <span>
+                    {t("agent.version.field.name")}/{t("agent.version.field.modelName")}
+                  </span>
+                </Flex>
+              ),
+              current: (
+                <span
+                  className={
+                    version_a.name !== version_b.name ||
+                    JSON.stringify(version_a.model_ids || []) !==
+                      JSON.stringify(version_b.model_ids || [])
+                      ? "text-orange-500 font-medium"
+                      : "text-gray-600"
+                  }
+                >
+                  {version_a.name || "-"} /{" "}
+                  {Array.isArray(version_a.model_names) && version_a.model_names.length > 0
+                    ? version_a.model_names.join(", ")
+                    : version_a.model_name || "-"}
+                </span>
+              ),
+              version: (
+                <span
+                  className={
+                    version_a.name !== version_b.name ||
+                    JSON.stringify(version_a.model_ids || []) !==
+                      JSON.stringify(version_b.model_ids || [])
+                      ? "text-green-500 font-medium"
+                      : "text-gray-600"
+                  }
+                >
+                  {version_b.name || "-"} /{" "}
+                  {Array.isArray(version_b.model_names) && version_b.model_names.length > 0
+                    ? version_b.model_names.join(", ")
+                    : version_b.model_name || "-"}
+                </span>
+              ),
+            },
                 {
                   key: "description",
                   field: (

@@ -53,6 +53,23 @@ export const API_ENDPOINTS = {
     opinion: `${API_BASE_URL}/conversation/message/update_opinion`,
     messageId: `${API_BASE_URL}/conversation/message/id`,
   },
+  share: {
+    createConversation: (conversationId: number) =>
+      `${API_BASE_URL}/share/conversation/${conversationId}`,
+    detail: (shareId: string) => `${API_BASE_URL}/share/${shareId}`,
+    assetPreview: (shareId: string, assetId: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+      return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/preview${suffix}`;
+    },
+    assetDownload: (shareId: string, assetId: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+      return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/download${suffix}`;
+    },
+  },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     update: `${API_BASE_URL}/agent/update`,
@@ -396,14 +413,17 @@ export const API_ENDPOINTS = {
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
       }
-      if (params?.deduplicate_by_agent_id != null) {
-        queryParams.append(
-          "deduplicate_by_agent_id",
-          String(params.deduplicate_by_agent_id)
-        );
-      }
       if (params?.category_id != null) {
         queryParams.append("category_id", String(params.category_id));
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
@@ -413,11 +433,25 @@ export const API_ENDPOINTS = {
       if (params?.ownership) {
         queryParams.append("ownership", params.ownership);
       }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.new_agent_padding) {
+        queryParams.append("new_agent_padding", "true");
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    importPrecheck: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import`,
     updateStatus: (agentRepositoryId: number) =>

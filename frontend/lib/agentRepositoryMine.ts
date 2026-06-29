@@ -1,4 +1,5 @@
 import type {
+  AgentRepositoryListingItem,
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
@@ -96,8 +97,9 @@ export function getMineCardMenuActions(
   const repositoryInfo = agent.repository_info ?? [];
   const actions: MineCardMenuAction[] = [];
   const currentVersionNo = agent.current_version_no ?? 0;
+  const canEdit = agent.permission !== "READ_ONLY";
 
-  if (currentVersionNo > 0 && !isCurrentVersionListed(agent)) {
+  if (canEdit && currentVersionNo > 0 && !isCurrentVersionListed(agent)) {
     actions.push("apply");
   }
 
@@ -128,4 +130,128 @@ export function formatRepositoryVersionLabel(
     return `v${item.version_no}`;
   }
   return "";
+}
+
+export type MineCardRepositoryStatusVariant = "pending" | "shared" | "rejected";
+
+export interface MineCardRepositoryStatusBadge {
+  labelKey: string;
+  versionLabel: string;
+  variant: MineCardRepositoryStatusVariant;
+}
+
+const MINE_STATUS_LABEL_KEYS = {
+  reviewing: "agentRepository.mine.status.reviewing",
+  updateReviewing: "agentRepository.mine.status.updateReviewing",
+  listed: "agentRepository.mine.status.listed",
+  rejected: "agentRepository.mine.status.rejected",
+} as const;
+
+export function getMineCardRepositoryStatusBadge(
+  items: MyAgentRepositoryInfoItem[]
+): MineCardRepositoryStatusBadge | null {
+  const displayItem = pickReviewDisplayRepositoryInfo(items);
+  if (!displayItem) {
+    return null;
+  }
+
+  const versionLabel = formatRepositoryVersionLabel(displayItem);
+  const hasShared = items.some((item) => item.status === "shared");
+
+  switch (displayItem.status) {
+    case "pending_review":
+      return {
+        labelKey: hasShared
+          ? MINE_STATUS_LABEL_KEYS.updateReviewing
+          : MINE_STATUS_LABEL_KEYS.reviewing,
+        versionLabel,
+        variant: "pending",
+      };
+    case "rejected":
+      return {
+        labelKey: MINE_STATUS_LABEL_KEYS.rejected,
+        versionLabel,
+        variant: "rejected",
+      };
+    case "shared":
+      return {
+        labelKey: MINE_STATUS_LABEL_KEYS.listed,
+        versionLabel,
+        variant: "shared",
+      };
+    default:
+      return null;
+  }
+}
+
+export function pickApplyListingPrefillSource(
+  items: AgentRepositoryListingItem[],
+  currentVersionLabel?: string | null
+): AgentRepositoryListingItem | null {
+  const normalizedVersion = currentVersionLabel?.trim();
+  if (normalizedVersion) {
+    const byVersion = items.find(
+      (item) => item.version_label?.trim() === normalizedVersion
+    );
+    if (byVersion) {
+      return byVersion;
+    }
+  }
+
+  const shared = items.find((item) => item.status === "shared");
+  return shared ?? null;
+}
+
+export interface ApplyListingFormPrefill {
+  icon: string | null;
+  categoryId: number | null;
+  tags: string[];
+}
+
+function normalizeApplyListingTags(tags: string[], maxTags: number): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+    if (!tag || seen.has(tag)) {
+      continue;
+    }
+    seen.add(tag);
+    normalized.push(tag);
+    if (normalized.length >= maxTags) {
+      break;
+    }
+  }
+  return normalized;
+}
+
+export function buildApplyListingFormPrefill(
+  item: AgentRepositoryListingItem | null,
+  options: {
+    allowedIcons: readonly string[];
+    allowedCategoryIds: readonly number[];
+    maxTags?: number;
+  }
+): ApplyListingFormPrefill | null {
+  if (!item) {
+    return null;
+  }
+
+  const maxTags = options.maxTags ?? 5;
+  const allowedIconSet = new Set(options.allowedIcons);
+  const allowedCategorySet = new Set(options.allowedCategoryIds);
+
+  const icon =
+    item.icon?.trim() && allowedIconSet.has(item.icon.trim())
+      ? item.icon.trim()
+      : null;
+
+  const categoryId =
+    item.category_id != null && allowedCategorySet.has(item.category_id)
+      ? item.category_id
+      : null;
+
+  const tags = normalizeApplyListingTags(item.tags ?? [], maxTags);
+
+  return { icon, categoryId, tags };
 }
