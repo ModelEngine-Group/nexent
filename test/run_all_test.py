@@ -1,390 +1,497 @@
-import importlib.util
-import logging
 import os
-import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
+import logging
 
-
+# Configure logger
 logger = logging.getLogger("run_all_test")
 logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter("%(message)s"))
+formatter = logging.Formatter('%(message)s')
+console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
-def _has_module(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
+def check_required_packages():
+    """Check if required packages are available"""
+    missing_packages = []
 
+    # Check for pytest-cov
+    try:
+        import pytest_cov
+    except ImportError:
+        missing_packages.append("pytest-cov")
 
-def check_required_packages() -> None:
-    required = {
-        "pytest_cov": "pytest-cov",
-        "coverage": "coverage",
-        "pytest_asyncio": "pytest-asyncio",
-    }
-    missing_packages = [package for module, package in required.items() if not _has_module(module)]
+    # Check for coverage
+    try:
+        import coverage
+    except ImportError:
+        missing_packages.append("coverage")
+
+    # Check for pytest-asyncio
+    try:
+        import pytest_asyncio
+    except ImportError:
+        missing_packages.append("pytest-asyncio")
+
     if missing_packages:
-        logger.error("Missing required packages: %s", ", ".join(missing_packages))
-        logger.error("Please install them using: pip install %s", " ".join(missing_packages))
+        logger.error(
+            f"Missing required packages: {', '.join(missing_packages)}")
+        logger.error("Please install them using: pip install " +
+                     " ".join(missing_packages))
         sys.exit(1)
+
     logger.info("All required packages are available")
+    return True
 
 
-def _worker_count(total_files: int) -> int:
-    raw_workers = os.environ.get("NEXENT_PYTEST_WORKERS", "auto").strip().lower()
-    if raw_workers in {"", "0", "false", "none", "off"}:
-        return 1
-    if raw_workers == "auto":
-        return max(1, min(os.cpu_count() or 1, total_files))
-    try:
-        return max(1, min(int(raw_workers), total_files))
-    except ValueError:
-        logger.warning("Invalid NEXENT_PYTEST_WORKERS=%s; falling back to serial", raw_workers)
-        return 1
+def run_tests():
+    """Find and run all test files in the app directory using pytest with coverage"""
+    # Get the script directory path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
 
+    # Get project root directory (Nexent)
+    project_root = os.path.abspath(os.path.join(current_dir, "../"))
 
-def _file_timeout_seconds() -> int:
-    raw_timeout = os.environ.get("NEXENT_PYTEST_FILE_TIMEOUT", "600").strip()
-    if raw_timeout in {"", "0", "false", "none", "off"}:
-        return 0
-    try:
-        return max(1, int(raw_timeout))
-    except ValueError:
-        logger.warning("Invalid NEXENT_PYTEST_FILE_TIMEOUT=%s; falling back to 600 seconds", raw_timeout)
-        return 600
+    # Get the test directories path using relative path
+    backend_test_dir = os.path.join(project_root, "test", "backend")
+    sdk_test_dir = os.path.join(project_root, "test", "sdk")
 
+    test_files = []
 
-def _target_paths(project_root: Path) -> list[Path]:
-    raw_targets = os.environ.get("NEXENT_PYTEST_TARGETS")
-    if raw_targets:
-        return [(project_root / target).resolve() for target in raw_targets.split()]
-    return [
-        project_root / "test" / "backend",
-        project_root / "test" / "sdk",
-    ]
+    # Check and collect test files from backend directory recursively
+    if os.path.exists(backend_test_dir):
+        # Search recursively in all subdirectories
+        for root, dirs, files in os.walk(backend_test_dir):
+            for file in files:
+                if file.startswith('test_') and file.endswith('.py'):
+                    test_files.append(os.path.join(root, file))
+    else:
+        logger.warning(f"Directory not found: {backend_test_dir}")
 
+    # Check and collect test files from sdk directory recursively
+    if os.path.exists(sdk_test_dir):
+        # Search recursively in all subdirectories
+        for root, dirs, files in os.walk(sdk_test_dir):
+            for file in files:
+                if file.startswith('test_') and file.endswith('.py'):
+                    test_files.append(os.path.join(root, file))
+    else:
+        logger.warning(f"Directory not found: {sdk_test_dir}")
 
-def _collect_test_files(project_root: Path) -> list[Path]:
-    test_files: list[Path] = []
-    for target in _target_paths(project_root):
-        if target.is_file():
-            test_files.append(target)
-            continue
-        if target.is_dir():
-            test_files.extend(sorted(target.rglob("test_*.py")))
-        else:
-            logger.warning("Test target not found: %s", target)
-    return sorted({path.resolve() for path in test_files})
+    # Print the paths being searched to help with debugging
+    logger.info(f"Searching for tests in: {backend_test_dir}")
+    logger.info(f"Searching for tests in: {sdk_test_dir}")
 
+    logger.info(f"Found {len(test_files)} test files to run")
+    logger.info(f"Running tests from project root: {project_root}")
 
-def _coverage_command(*args: str) -> list[str]:
-    cmd = [sys.executable, "-m", "coverage"]
-    cmd.extend(args)
-    return cmd
+    # Change to project root directory
+    os.chdir(project_root)
 
+    # Check required packages
+    check_required_packages()
 
-def _coverage_env(project_root: Path) -> dict[str, str]:
-    env = os.environ.copy()
-    cov_config = project_root / "test" / ".coveragerc"
-    if cov_config.exists():
-        env["COVERAGE_RCFILE"] = str(cov_config)
-    return env
+    # Coverage data file path
+    coverage_data_file = os.path.join(current_dir, '.coverage')
+    config_file = os.path.join(current_dir, '.coveragerc')
 
+    # Delete old coverage data if it exists
+    if os.path.exists(coverage_data_file):
+        try:
+            os.remove(coverage_data_file)
+            logger.info("Removed old coverage data.")
+        except Exception as e:
+            logger.warning(f"Could not remove old coverage data: {e}")
 
-def _run_test_file(
-    *,
-    index: int,
-    test_file: Path,
-    project_root: Path,
-    backend_source: Path,
-    sdk_source: Path,
-    coverage_dir: Path,
-    timeout_seconds: int,
-) -> dict:
-    rel_path = test_file.relative_to(project_root).as_posix()
-    coverage_file = coverage_dir / f".coverage.{index}"
-    cov_config = project_root / "test" / ".coveragerc"
-    cmd = [
-        sys.executable,
-        "-m",
-        "pytest",
-        rel_path,
-        "-q",
-        f"--cov={backend_source}",
-        f"--cov={sdk_source}",
-        "--cov-report=",
-        "--cov-branch",
-        "--disable-warnings",
-    ]
-    if cov_config.exists():
-        cmd.append("--cov-config=test/.coveragerc")
-
-    env = os.environ.copy()
-    path_separator = ";" if sys.platform == "win32" else ":"
-    env["PYTHONPATH"] = f"{project_root}{path_separator}{env.get('PYTHONPATH', '')}"
-    env["COVERAGE_FILE"] = str(coverage_file)
-    if cov_config.exists():
-        env["COVERAGE_PROCESS_START"] = str(cov_config)
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=timeout_seconds or None,
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode(errors="replace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode(errors="replace")
-        return {
-            "file": rel_path,
-            "returncode": 124,
-            "stdout": stdout,
-            "stderr": stderr + f"\nTimed out after {timeout_seconds} seconds\n",
-        }
-    return {
-        "file": rel_path,
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
-
-
-def _parse_test_counts(result: dict) -> dict[str, int]:
-    counts = {"total": 0, "passed": 0, "failed": 0}
-    summary_lines = [
-        line.strip()
-        for line in result["stdout"].splitlines()
-        if " in " in line and any(word in line for word in (" passed", " failed", " error", " errors"))
-    ]
-    if summary_lines:
-        summary = summary_lines[-1]
-        for key in ("passed", "failed"):
-            match = re.search(rf"(\d+)\s+{key}\b", summary)
-            if match:
-                counts[key] = int(match.group(1))
-        error_match = re.search(r"(\d+)\s+errors?\b", summary)
-        if error_match:
-            counts["failed"] += int(error_match.group(1))
-        counts["total"] = counts["passed"] + counts["failed"]
-
-    if result["returncode"] != 0 and counts["failed"] == 0:
-        counts["failed"] = 1
-        counts["total"] = max(counts["total"], 1)
-    return counts
-
-
-def _print_file_result(result: dict) -> None:
-    summary = "execution failed"
-    for line in reversed(result["stdout"].splitlines()):
-        if " passed" in line and " in " in line:
-            summary = line.strip()
-            break
-        if (" failed" in line or " error" in line or " errors" in line) and " in " in line:
-            summary = line.strip()
-            break
-    status = "PASS" if result["returncode"] == 0 else "FAIL"
-    logger.info("%-60s %s | %s", result["file"], status, summary)
-
-
-def _print_test_summary(results: list[dict]) -> None:
+    # Results tracking
     total_tests = 0
     passed_tests = 0
     failed_tests = 0
+    test_results = []
 
-    logger.info("\n%s", "=" * 60)
+    # Define source directories for coverage
+    backend_source = os.path.join(project_root, 'backend')
+    sdk_source = os.path.join(project_root, 'sdk')
+
+    # Run each test file with pytest-cov
+    for test_file in test_files:
+        # Get test file path relative to project root
+        rel_path = os.path.relpath(test_file, project_root)
+        # Replace backslashes with forward slashes for pytest
+        rel_path = rel_path.replace("\\", "/")
+
+        # Display running message without newline using print, then flush
+        print(f"{rel_path:60}\t\t", end='', flush=True)
+
+        # Run the test using pytest with coverage from project root
+        # Use --cov to specify both backend and sdk directories
+        cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            rel_path,
+            "-q",  # Quiet mode for cleaner output
+            f"--cov={backend_source}",
+            f"--cov={sdk_source}",
+            f"--cov-report=",
+            "--cov-append",
+            "--cov-branch",  # Enable branch coverage
+            "--cov-config=test/.coveragerc",  # Use the config file
+            "--disable-warnings"  # Disable warnings
+        ]
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{project_root}:{env.get('PYTHONPATH', '')}"
+        # For Windows systems, adjust path separator
+        if sys.platform == 'win32':
+            env["PYTHONPATH"] = f"{project_root};{env.get('PYTHONPATH', '')}"
+        env["COVERAGE_FILE"] = coverage_data_file
+        env["COVERAGE_PROCESS_START"] = config_file
+
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+        # First, capture warnings and errors to display separately
+        capture_warnings = False
+        capture_errors = False
+        warning_lines = []
+        error_lines = []
+
+        for line in result.stdout.split('\n'):
+            if "warnings summary" in line.lower():
+                capture_warnings = True
+                capture_errors = False
+                warning_lines.append(line)
+            elif line.strip().startswith("=") and ("ERROR" in line or "FAIL" in line):
+                capture_errors = True
+                capture_warnings = False
+                error_lines.append(line)
+            elif capture_warnings and not line.strip().startswith("=== "):
+                warning_lines.append(line)
+            elif capture_errors:
+                error_lines.append(line)
+            elif line.strip().startswith("=== ") and ("short test summary" in line or "warnings summary" not in line):
+                capture_warnings = False
+                capture_errors = False
+
+        # Check if any tests actually failed (not just warnings)
+        test_failed = False
+        if result.returncode != 0:
+            # Check output for failed tests vs just warnings
+            test_failed = (" failed " in result.stdout or
+                           " FAILED " in result.stdout or
+                           "ERROR " in result.stdout or
+                           "ImportError" in result.stdout or
+                           "ModuleNotFoundError" in result.stdout)
+
+        # Parse pytest output to get test counts
+        file_total = file_passed = file_failed = 0
+
+        # First, get the collected count
+        for line in result.stdout.split('\n'):
+            if line.strip().startswith('collecting ... collected '):
+                try:
+                    file_total = int(line.strip().split(
+                        'collecting ... collected ')[1].split()[0])
+                except (IndexError, ValueError):
+                    pass
+
+        # Look for the summary line at the end of the test run
+        for line in result.stdout.split('\n'):
+            # Match patterns like "10 passed in 0.05s" or "17 passed, 13 warnings in 2.49s"
+            if " passed" in line and " in " in line:
+                parts = line.strip().split()
+                try:
+                    # Find the position of "passed" word
+                    for i, part in enumerate(parts):
+                        if "passed" in part:
+                            file_passed = int(parts[i-1])
+                            break
+                    # Find the position of "failed" word if it exists
+                    for i, part in enumerate(parts):
+                        if "failed" in part:
+                            file_failed = int(parts[i-1])
+                            break
+                except (IndexError, ValueError):
+                    pass
+
+        # If we couldn't determine the number of collected tests from the output,
+        # use the sum of passed and failed as the total
+        if file_total == 0 and (file_passed > 0 or file_failed > 0):
+            file_total = file_passed + file_failed
+
+        # Special case: If we have an import error or collection error,
+        # count it as at least one failed test
+        if test_failed and "ImportError" in result.stdout or "ERROR collecting" in result.stdout:
+            if file_total == 0:
+                # If no tests were collected, count the file as having one test that failed
+                file_total = 1
+                file_failed = 1
+
+                # Try to count the actual number of test methods in the file
+                try:
+                    with open(os.path.join(project_root, rel_path), 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # Count test methods in unittest style tests
+                        test_methods = [line for line in content.split(
+                            '\n') if line.strip().startswith('def test_')]
+                        if test_methods:
+                            file_total = len(test_methods)
+                            file_failed = file_total  # All tests in the file are considered failed
+                except Exception:
+                    # If counting fails, stick with the default of 1
+                    pass
+
+        # Generate the summary line for this test file
+        execution_time = ""
+        for line in result.stdout.split('\n'):
+            if " passed" in line and " in " in line:
+                parts = line.strip().split()
+                for i, part in enumerate(parts):
+                    if part == "in" and i < len(parts) - 1:
+                        execution_time = parts[i+1]
+                        break
+                break
+
+        # Format and print the summary line
+        if file_passed > 0 or file_failed > 0:
+            if file_failed > 0:
+                temp_result = f" {file_passed} passed, {file_failed} failed"
+                summary = f"{execution_time:6} | {temp_result:20}"
+            else:
+                temp_result = f" {file_passed} passed"
+                summary = f"{execution_time:6} | {temp_result:20}"
+        else:
+            summary = "No tests collected or execution failed"
+
+        # Complete the line started earlier
+        print(summary)
+
+        # Log warnings if any
+        if warning_lines:
+            logger.warning("Warnings detected:")
+            for line in warning_lines:
+                if line.strip():  # Only log non-empty lines
+                    logger.warning(line)
+
+        # Log errors if any
+        if error_lines:
+            logger.error("Errors detected:")
+            for line in error_lines:
+                if line.strip():  # Only log non-empty lines
+                    logger.error(line)
+
+        # Log stderr if present
+        if result.stderr:
+            logger.error("Standard error output:")
+            logger.error(result.stderr)
+
+        # Count tests and results
+        test_info = {
+            'file': rel_path,
+            'success': result.returncode == 0,  # Success only if returncode is 0
+            'output': result.stdout
+        }
+        test_results.append(test_info)
+
+        total_tests += file_total
+        passed_tests += file_passed
+        failed_tests += file_failed
+
+    # Generate test summary report
+    logger.info("\n" + "=" * 60)
     logger.info("Test Summary")
     logger.info("=" * 60)
-    for result in sorted(results, key=lambda item: item["file"]):
-        status = "PASSED" if result["returncode"] == 0 else "FAILED"
-        logger.info("%s - %s", status, result["file"])
-        counts = _parse_test_counts(result)
-        total_tests += counts["total"]
-        passed_tests += counts["passed"]
-        failed_tests += counts["failed"]
 
-    pass_rate = (passed_tests / total_tests * 100) if total_tests else 0
+    # Print per-file results
+    for test_result in test_results:
+        status = "✅ PASSED" if test_result['success'] else "❌ FAILED"
+        logger.info(f"{status} - {test_result['file']}")
+
+    # Calculate pass rate
+    pass_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
     logger.info("\nTest Results:")
-    logger.info("  Total Tests: %s", total_tests)
-    logger.info("  Passed: %s", passed_tests)
-    logger.info("  Failed: %s", failed_tests)
-    logger.info("  Pass Rate: %.1f%%", pass_rate)
+    logger.info(f"  Total Tests: {total_tests}")
+    logger.info(f"  Passed: {passed_tests}")
+    logger.info(f"  Failed: {failed_tests}")
+    logger.info(f"  Pass Rate: {pass_rate:.1f}%")
+
+    # Generate error report if there are failures
+    if failed_tests > 0:
+        generate_error_report(test_results)
+
+    # Generate coverage reports
+    logger.info("\n" + "=" * 60)
+    logger.info("Code Coverage Report")
+    logger.info("=" * 60)
+
+    try:
+        # Use coverage API to generate reports from the collected data
+        import coverage
+        cov = coverage.Coverage(
+            data_file=coverage_data_file,
+            config_file=config_file
+        )
+        cov.load()
+
+        # Get measured files and check if they exist
+        measured_files = cov.get_data().measured_files()
+        missing_files = []
+        for file_path in measured_files:
+            if not os.path.exists(file_path):
+                missing_files.append(file_path)
+                logger.warning(f"Source file not found: {file_path}")
+
+        if missing_files:
+            logger.warning(
+                f"\nFound {len(missing_files)} missing source files")
+            logger.warning("Coverage report may be incomplete")
+
+            # Remove missing files from coverage data
+            logger.info(
+                "Attempting to exclude missing files from coverage reports...")
+            # Create a temporary copy of the config
+            temp_config = os.path.join(current_dir, '.coveragerc.tmp')
+            with open(config_file, 'r') as src, open(temp_config, 'w') as dst:
+                for line in src:
+                    dst.write(line)
+                # Add explicit omit rules for missing files
+                dst.write("\n# Additional files to omit (added automatically)\n")
+                for file_path in missing_files:
+                    dst.write(f"    {file_path}\n")
+
+            # Reload coverage with the updated config
+            try:
+                logger.info("Reloading coverage with updated configuration...")
+                cov = coverage.Coverage(
+                    data_file=coverage_data_file,
+                    config_file=temp_config
+                )
+                cov.load()
+                logger.info(
+                    "Successfully reloaded coverage data with updated config")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to reload coverage with updated config: {e}")
+                # Continue with the original coverage object
+
+        # Console report
+        try:
+            total_coverage = cov.report(show_missing=True)
+            logger.info(f"\nTotal Coverage: {total_coverage:.1f}%")
+
+            # Generate HTML report
+            html_dir = os.path.join(current_dir, 'coverage_html')
+            cov.html_report(directory=html_dir)
+            logger.info(f"\nHTML coverage report generated in: {html_dir}")
+
+            # Generate XML report
+            xml_file = os.path.join(current_dir, 'coverage.xml')
+            cov.xml_report(outfile=xml_file)
+            logger.info(f"XML coverage report generated: {xml_file}")
+        except Exception as e:
+            logger.error(
+                f"Error generating coverage reports after data cleanup: {e}")
+    except Exception as e:
+        if "No data to report" in str(e) or "No data was collected" in str(e):
+            logger.info("No coverage data collected. This might be because:")
+            logger.info("1. No backend modules were imported during tests")
+            logger.info("2. All tested modules are mocked")
+            logger.info("3. Tests are not actually calling the backend code")
+        else:
+            logger.error(f"Error generating coverage report: {e}")
+
+            # Additional debugging for missing source files
+            if "No source for code" in str(e):
+                file_path = str(e).split(
+                    "'")[1] if "'" in str(e) else "unknown"
+                logger.error(f"The file exists: {os.path.exists(file_path)}")
+                logger.error("Possible solutions:")
+                logger.error(
+                    "1. Make sure the file exists at the path shown in the error")
+                logger.error(
+                    "2. Check if the PYTHONPATH includes the directory containing this file")
+                logger.error(
+                    "3. Try running tests with absolute imports instead of relative imports")
+                logger.error(
+                    "4. Add a .coveragerc file with [paths] section to map source paths")
+
+    # Return appropriate exit code based on test results
+    if failed_tests > 0:
+        logger.error(
+            f"\n❌ Test run failed: {failed_tests} tests failed out of {total_tests}")
+        return False
+    else:
+        logger.info(f"\n✅ Test run successful: {passed_tests} tests passed")
+        return True
 
 
-def generate_error_report(results: list[dict]) -> None:
-    failed_results = [result for result in results if result["returncode"] != 0]
-    if not failed_results:
+def generate_error_report(test_results):
+    """Generate a detailed report for failed tests"""
+    failed_tests = [test for test in test_results if not test['success']]
+
+    if not failed_tests:
         return
 
-    logger.info("\n%s", "=" * 60)
+    logger.info("\n" + "=" * 60)
     logger.info("Test Error Report")
     logger.info("=" * 60)
-    for index, result in enumerate(failed_results, start=1):
-        output = "\n".join(part for part in (result["stdout"], result["stderr"]) if part)
-        logger.info("\n%s. File: %s", index, result["file"])
+
+    for index, test in enumerate(failed_tests):
+        file_path = test['file']
+        output = test['output']
+
+        logger.info(f"\n{index + 1}. File: {file_path}")
         logger.info("-" * 40)
 
-        error_lines: list[str] = []
+        # Extract error information from output
+        error_lines = []
         capture_error = False
-        for line in output.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("=") and ("ERROR" in line or "FAIL" in line):
+
+        for line in output.split('\n'):
+            # Start capturing at ERROR or FAIL sections
+            if line.strip().startswith("=") and ("ERROR" in line or "FAIL" in line):
                 capture_error = True
                 error_lines.append(line)
-            elif stripped.startswith("=== short test summary"):
+            # Stop at the short test summary
+            elif line.strip().startswith("=== short test summary"):
                 error_lines.append(line)
                 break
+            # Add lines while capturing
             elif capture_error:
                 error_lines.append(line)
 
+        # If we didn't capture specific errors, look for traceback
         if not error_lines:
-            capture_traceback = False
-            for line in output.splitlines():
+            capture_error = False
+            for line in output.split('\n'):
                 if "Traceback" in line:
-                    capture_traceback = True
-                if capture_traceback:
+                    capture_error = True
+                if capture_error:
                     error_lines.append(line)
-                    if len(error_lines) > 15:
+                    if len(error_lines) > 15:  # Limit traceback to 15 lines
                         error_lines.append("... (truncated) ...")
                         break
 
+        # If still no error lines found, just show the last few lines of output
         if not error_lines:
-            output_lines = output.splitlines()
-            error_lines = output_lines[-10:] if len(output_lines) > 10 else output_lines
+            output_lines = output.split('\n')
+            if len(output_lines) > 10:
+                error_lines = ["... (output truncated) ..."] + \
+                    output_lines[-10:]
+            else:
+                error_lines = output_lines
 
+        # Print the error details
         for line in error_lines:
             logger.info(line)
 
-    logger.info("\n%s", "=" * 60)
-    logger.info("Total failed test files: %s", len(failed_results))
+    logger.info("\n" + "=" * 60)
+    logger.info(f"Total failed test files: {len(failed_tests)}")
     logger.info("=" * 60)
 
 
-def _combine_coverage(current_dir: Path, project_root: Path) -> bool:
-    coverage_data_file = current_dir / ".coverage"
-    coverage_xml_file = current_dir / "coverage.xml"
-    for path in (coverage_data_file, coverage_xml_file):
-        if path.exists():
-            path.unlink()
-
-    combine_cmd = _coverage_command(
-        "combine",
-        "--data-file",
-        str(coverage_data_file),
-        str(current_dir),
-    )
-    xml_cmd = _coverage_command(
-        "xml",
-        "-o",
-        str(coverage_xml_file),
-        "--data-file",
-        str(coverage_data_file),
-    )
-    coverage_env = _coverage_env(project_root)
-    combine = subprocess.run(combine_cmd, cwd=project_root, env=coverage_env, text=True, capture_output=True)
-    if combine.returncode != 0:
-        logger.error("Coverage combine failed:\n%s\n%s", combine.stdout, combine.stderr)
-        return False
-    xml = subprocess.run(xml_cmd, cwd=project_root, env=coverage_env, text=True, capture_output=True)
-    if xml.returncode != 0:
-        logger.error("Coverage XML generation failed:\n%s\n%s", xml.stdout, xml.stderr)
-        return False
-    logger.info("Coverage XML file generated: %s", coverage_xml_file)
-    return True
-
-
-def _report_coverage(current_dir: Path) -> bool:
-    coverage_data_file = current_dir / ".coverage"
-    cov_config = current_dir / ".coveragerc"
-    try:
-        import coverage
-
-        cov = coverage.Coverage(
-            data_file=str(coverage_data_file),
-            config_file=str(cov_config) if cov_config.exists() else True,
-        )
-        cov.load()
-        total_coverage = cov.report(show_missing=True)
-        logger.info("\nTotal Coverage: %.1f%%", total_coverage)
-        html_dir = current_dir / "coverage_html"
-        cov.html_report(directory=str(html_dir))
-        logger.info("\nHTML coverage report generated in: %s", html_dir)
-    except Exception as exc:
-        logger.error("Coverage report failed: %s", exc)
-        return False
-    return True
-
-
-def run_tests() -> bool:
-    current_dir = Path(__file__).resolve().parent
-    project_root = current_dir.parent
-    backend_source = project_root / "backend"
-    sdk_source = project_root / "sdk"
-
-    os.chdir(project_root)
-    check_required_packages()
-
-    test_files = _collect_test_files(project_root)
-    if not test_files:
-        logger.error("No test files found")
-        return False
-
-    for coverage_artifact in [current_dir / ".coverage", *current_dir.glob(".coverage.*")]:
-        if coverage_artifact.exists():
-            coverage_artifact.unlink()
-    coverage_xml = current_dir / "coverage.xml"
-    if coverage_xml.exists():
-        coverage_xml.unlink()
-
-    workers = _worker_count(len(test_files))
-    timeout_seconds = _file_timeout_seconds()
-    logger.info("Found %s test files", len(test_files))
-    logger.info("Running with %s file worker(s)", workers)
-    if timeout_seconds:
-        logger.info("Per-file timeout: %s seconds", timeout_seconds)
-
-    results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(
-                _run_test_file,
-                index=index,
-                test_file=test_file,
-                project_root=project_root,
-                backend_source=backend_source,
-                sdk_source=sdk_source,
-                coverage_dir=current_dir,
-                timeout_seconds=timeout_seconds,
-            )
-            for index, test_file in enumerate(test_files)
-        ]
-        for future in as_completed(futures):
-            result = future.result()
-            results.append(result)
-            _print_file_result(result)
-
-    _print_test_summary(results)
-    failed = [result for result in results if result["returncode"] != 0]
-    if failed:
-        logger.error("\nFailed test files: %s", len(failed))
-        for result in failed[:10]:
-            logger.error("\n%s\n%s\n%s", result["file"], result["stdout"][-4000:], result["stderr"][-2000:])
-        generate_error_report(results)
-
-    coverage_ok = _combine_coverage(current_dir, project_root)
-    if coverage_ok:
-        coverage_ok = _report_coverage(current_dir)
-    return not failed and coverage_ok
-
-
 if __name__ == "__main__":
-    sys.exit(0 if run_tests() else 1)
+    success = run_tests()
+    sys.exit(0 if success else 1)

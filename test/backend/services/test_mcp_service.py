@@ -158,23 +158,10 @@ mcp_service.MCPTool = MockMCPTool
 mcp_service.ToolResult = RealToolResult
 
 
-# Proxy env vars that can leak into httpx.AsyncClient and cause failures
-# (e.g. socks:// proxies that httpx does not support natively)
-_PROXY_ENV_KEYS = [
-    "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
-    "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
-]
-
-
 # Reset global state before each test
 @pytest.fixture(autouse=True)
 def reset_global_state():
     """Reset global state before each test"""
-    saved_proxy = {}
-    for key in _PROXY_ENV_KEYS:
-        if key in os.environ:
-            saved_proxy[key] = os.environ.pop(key)
-
     # Reset before test
     mcp_service._openapi_mcp_services = {}
     mcp_service._mcp_management_app = None
@@ -194,8 +181,6 @@ def reset_global_state():
             pass
 
     yield
-
-    os.environ.update(saved_proxy)
 
     # Reset after test
     mcp_service._openapi_mcp_services = {}

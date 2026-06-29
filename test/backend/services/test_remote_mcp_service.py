@@ -526,7 +526,6 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             custom_headers=None,
         )
 
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available', return_value=True)
     @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
     @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
@@ -534,7 +533,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     async def test_container_enable_with_custom_headers(
-        self, mock_records, mock_get, mock_mgr_cls, mock_health, mock_cont_fields, mock_enabled, mock_port_check
+        self, mock_records, mock_get, mock_mgr_cls, mock_health, mock_cont_fields, mock_enabled
     ):
         """Test container enable with custom_headers passed to health check."""
         mock_get.return_value = self._make_record(
