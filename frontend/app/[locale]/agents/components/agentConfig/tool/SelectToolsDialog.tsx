@@ -395,12 +395,20 @@ export default function SelectToolsDialog({
                       return (
                         <li key={tool.id}>
                           <div
+                            role="button"
+                            tabIndex={disabled ? -1 : 0}
                             className={`group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
                               disabled
                                 ? "cursor-not-allowed opacity-50"
                                 : "cursor-pointer hover:bg-gray-50"
                             }`}
                             onClick={disabled ? undefined : () => handleToolToggle(tool)}
+                            onKeyDown={(e) => {
+                              if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+                                e.preventDefault();
+                                handleToolToggle(tool);
+                              }
+                            }}
                           >
                             <Checkbox checked={isSelected} disabled={disabled} />
                             <div className="min-w-0 flex-1">

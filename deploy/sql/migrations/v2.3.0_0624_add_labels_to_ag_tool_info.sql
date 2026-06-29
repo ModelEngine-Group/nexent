@@ -8,14 +8,22 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.labels IS 'JSON array of label strings f
 -- These labels serve as suggested defaults and can be modified by users.
 -- Keep in sync with: backend/consts/tool_labels.py
 
-UPDATE nexent.ag_tool_info_t SET labels = CASE
-    WHEN name IN ('mysql_database', 'postgres_database', 'mssql_database') THEN '["database"]'::jsonb
-    WHEN name IN ('read_file', 'create_file', 'delete_file', 'create_directory', 'delete_directory', 'list_directory', 'move_item') THEN '["file"]'::jsonb
-    WHEN name IN ('tavily_search', 'exa_search', 'linkup_search', 'search_memory', 'knowledge_base_search') THEN '["search"]'::jsonb
-    WHEN name IN ('dify_search', 'datamate_search', 'idata_search', 'haotian_search', 'aidp_search') THEN '["knowledge-base"]'::jsonb
-    WHEN name IN ('analyze_image', 'analyze_audio', 'analyze_video', 'analyze_text_file') THEN '["multimodal"]'::jsonb
-    WHEN name IN ('get_email', 'send_email') THEN '["email"]'::jsonb
-    WHEN name IN ('store_memory') THEN '["memory"]'::jsonb
-    WHEN name IN ('terminal') THEN '["terminal"]'::jsonb
-END
-WHERE labels = '[]'::jsonb;
+WITH label_map (tool_name, label) AS (
+    VALUES
+        ('mysql_database','database'),('postgres_database','database'),('mssql_database','database'),
+        ('read_file','file'),('create_file','file'),('delete_file','file'),('create_directory','file'),
+        ('delete_directory','file'),('list_directory','file'),('move_item','file'),
+        ('tavily_search','search'),('exa_search','search'),('linkup_search','search'),
+        ('search_memory','search'),('knowledge_base_search','search'),
+        ('dify_search','knowledge-base'),('datamate_search','knowledge-base'),('idata_search','knowledge-base'),
+        ('haotian_search','knowledge-base'),('aidp_search','knowledge-base'),
+        ('analyze_image','multimodal'),('analyze_audio','multimodal'),('analyze_video','multimodal'),
+        ('analyze_text_file','multimodal'),
+        ('get_email','email'),('send_email','email'),
+        ('store_memory','memory'),
+        ('terminal','terminal')
+)
+UPDATE nexent.ag_tool_info_t t
+SET labels = to_jsonb(ARRAY[m.label])
+FROM label_map m
+WHERE t.name = m.tool_name AND t.labels = '[]'::jsonb;
