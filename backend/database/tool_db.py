@@ -5,6 +5,7 @@ from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
 from consts.model import ToolSourceEnum
+from consts.tool_labels import BUILTIN_LABEL_MAP
 from utils.tool_utils import get_local_tools_description_zh
 
 
@@ -298,7 +299,10 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 existing_tool.updated_by = user_id
                 existing_tool.is_available = is_available
             else:
-                # create new tool
+                # create new tool — apply built-in labels for fresh installs
+                builtin_labels = BUILTIN_LABEL_MAP.get(tool.name, [])
+                if builtin_labels:
+                    filtered_tool_data["labels"] = builtin_labels
                 filtered_tool_data.update(
                     {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                 new_tool = ToolInfo(**filtered_tool_data)
