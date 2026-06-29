@@ -40,6 +40,10 @@ class MockModelModule:
 
 consts_mock.model = MockModelModule()
 
+# Mock consts.tool_labels with BUILTIN_LABEL_MAP
+consts_mock.tool_labels = MagicMock()
+consts_mock.tool_labels.BUILTIN_LABEL_MAP = {}
+
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const

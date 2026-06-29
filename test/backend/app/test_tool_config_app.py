@@ -63,7 +63,7 @@ class TestListToolsAPI:
         assert data[1]["name"] == "Tool2"
 
         mock_get_user_id.assert_called_once_with(None)
-        mock_list_all_tools.assert_called_once_with(tenant_id="tenant456")
+        mock_list_all_tools.assert_called_once_with(tenant_id="tenant456", labels=None)
 
     @patch('apps.tool_config_app.get_current_user_id')
     def test_list_tools_auth_error(self, mock_get_user_id):
