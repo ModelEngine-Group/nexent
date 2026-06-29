@@ -432,20 +432,12 @@ export const handleStreamResponse = async (
                 (jsonData.status === 'resumed' && typeof jsonData.last_unit_index === 'number')) {
               // Extract last_unit_index from the status message
               skipUntilUnitIndex = jsonData.last_unit_index as number;
-              // #region debug log
-              fetch('http://127.0.0.1:7625/ingest/03f1b9ea-6c98-4281-a23e-2f966454e600',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9a5588'},body:JSON.stringify({sessionId:'9a5588',location:'chatStreamHandler.tsx:440',message:'stream_status_resumed',data:{skipUntilUnitIndex,jsonData},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
               isInStreamStatusBlock = false;
               continue;
             }
 
             // Reset stream_status block flag for other data
             isInStreamStatusBlock = false;
-
-            // Debug log for all chunks received
-            // #region debug log
-            fetch('http://127.0.0.1:7625/ingest/03f1b9ea-6c98-4281-a23e-2f966454e600',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9a5588'},body:JSON.stringify({sessionId:'9a5588',location:'chatStreamHandler.tsx:447',message:'chunk_received',data:{type:jsonData.type,unitIndex:(jsonData as any).unit_index,skipUntilUnitIndex,resumeConfig:!!resumeConfig},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
 
             // In resume mode, skip chunks that we've already processed before disconnect.
             // The backend sends buffered chunks during resume, and we need to skip those
@@ -456,9 +448,6 @@ export const handleStreamResponse = async (
               const chunkUnitIndex = (jsonData as any).unit_index;
               if (typeof chunkUnitIndex === 'number' && chunkUnitIndex <= skipUntilUnitIndex) {
                 // This chunk was already processed before disconnect (unit_index <= last processed index)
-                // #region debug log
-                fetch('http://127.0.0.1:7625/ingest/03f1b9ea-6c98-4281-a23e-2f966454e600',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9a5588'},body:JSON.stringify({sessionId:'9a5588',location:'chatStreamHandler.tsx:476',message:'skip_by_unit_index',data:{chunkUnitIndex,skipUntilUnitIndex,type:jsonData.type},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
                 continue;
               }
             }

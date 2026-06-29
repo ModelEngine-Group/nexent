@@ -1034,28 +1034,6 @@ async def _stream_agent_chunks(
                     old_len = len(current_unit["content"])
                     current_unit["content"] += chunk_content
                     new_len = len(current_unit["content"])
-                    # #region debug log
-                    try:
-                        with open("debug-31c94c.log", "a", encoding="utf-8") as f:
-                            f.write(json.dumps({
-                                "sessionId": "31c94c",
-                                "id": f"log_{int(__import__('time').time() * 1000)}",
-                                "timestamp": int(__import__('time').time() * 1000),
-                                "location": "agent_service.py:continuation",
-                                "message": "Mergeable continuation chunk",
-                                "data": {
-                                    "unit_type": chunk_type,
-                                    "unit_id": current_unit.get("unit_id"),
-                                    "old_len": old_len,
-                                    "chunk_len": len(chunk_content),
-                                    "new_len": new_len,
-                                },
-                                "runId": "post-fix-verification",
-                                "hypothesisId": "A"
-                            }, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
                     update_unit_content(
                         current_unit["unit_id"],
                         current_unit["content"],
@@ -1064,27 +1042,6 @@ async def _stream_agent_chunks(
                 else:
                     # Boundary detected: close the previous unit (if any) and
                     # open a new one for this chunk.
-                    # #region debug log
-                    try:
-                        with open("debug-31c94c.log", "a", encoding="utf-8") as f:
-                            f.write(json.dumps({
-                                "sessionId": "31c94c",
-                                "id": f"log_{int(__import__('time').time() * 1000)}",
-                                "timestamp": int(__import__('time').time() * 1000),
-                                "location": "agent_service.py:unit_boundary",
-                                "message": "Unit boundary detected - closing previous unit",
-                                "data": {
-                                    "prev_type": current_unit.get("type") if current_unit else None,
-                                    "prev_id": current_unit.get("unit_id") if current_unit else None,
-                                    "prev_content_len": len(current_unit["content"]) if current_unit else 0,
-                                    "new_type": chunk_type,
-                                },
-                                "runId": "debug-run",
-                                "hypothesisId": "A"
-                            }, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
                     if current_unit is not None:
                         submit(
                             update_unit_status,
@@ -1189,27 +1146,6 @@ async def _stream_agent_chunks(
                     if streaming_message_id is not None and chunk_type not in (
                         "search_content_placeholder",
                     ):
-                        # #region debug log
-                        try:
-                            with open("debug-31c94c.log", "a", encoding="utf-8") as f:
-                                f.write(json.dumps({
-                                    "sessionId": "31c94c",
-                                    "id": f"log_{int(__import__('time').time() * 1000)}",
-                                    "timestamp": int(__import__('time').time() * 1000),
-                                    "location": "agent_service.py:new_unit_insert",
-                                    "message": "Creating new unit",
-                                    "data": {
-                                        "chunk_type": chunk_type,
-                                        "unit_index": next_unit_index,
-                                        "chunk_content_len": len(chunk_content),
-                                        "chunk_content_repr": repr(chunk_content[:100]) if chunk_content else "",
-                                    },
-                                    "runId": "debug-run",
-                                    "hypothesisId": "A"
-                                }, ensure_ascii=False) + "\n")
-                        except Exception:
-                            pass
-                        # #endregion
                         new_unit_id = submit(
                             save_message_unit,
                             message_id=streaming_message_id,
@@ -1246,29 +1182,6 @@ async def _stream_agent_chunks(
                     # This must be done synchronously before updating status
                     final_content = current_unit["content"]
                     final_len = len(final_content)
-                    # #region debug log
-                    try:
-                        with open("debug-31c94c.log", "a", encoding="utf-8") as f:
-                            f.write(json.dumps({
-                                "sessionId": "31c94c",
-                                "id": f"log_{int(__import__('time').time() * 1000)}",
-                                "timestamp": int(__import__('time').time() * 1000),
-                                "location": "agent_service.py:finally_finalize",
-                                "message": "Finalizing current_unit in finally block",
-                                "data": {
-                                    "unit_type": current_unit.get("type"),
-                                    "unit_id": current_unit.get("unit_id"),
-                                    "unit_index": current_unit.get("unit_index"),
-                                    "final_content_len": final_len,
-                                    "stream_completed_normally": stream_completed_normally,
-                                    "final_content_repr": repr(final_content[-200:]) if final_len > 0 else "",
-                                },
-                                "runId": "debug-run",
-                                "hypothesisId": "A"
-                            }, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
                     update_unit_content(
                         current_unit["unit_id"],
                         final_content,
