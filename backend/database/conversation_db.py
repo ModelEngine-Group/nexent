@@ -132,8 +132,6 @@ def create_conversation_message(
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_data['role'],
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N'}
-        if tenant_id:
-            data["tenant_id"] = tenant_id
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -181,9 +179,6 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "unit_content": unit['content'],
                 "delete_flag": 'N'
             }
-            if tenant_id:
-                row_data["tenant_id"] = tenant_id
-
             if user_id:
                 row_data["created_by"] = user_id
                 row_data["updated_by"] = user_id
@@ -256,8 +251,6 @@ def get_conversation_messages(conversation_id: int, tenant_id: Optional[str] = N
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.delete_flag == 'N'
         ).order_by(asc(ConversationMessage.message_index))
-        if tenant_id:
-            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
 
         # Execute the query
         records = session.scalars(stmt).all()
@@ -430,10 +423,6 @@ def delete_conversation(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.delete_flag == 'N'
         ).values(update_data)
-        if user_id:
-            message_stmt = message_stmt.where(ConversationMessage.created_by == user_id)
-        if tenant_id:
-            message_stmt = message_stmt.where(ConversationMessage.tenant_id == tenant_id)
         session.execute(message_stmt)
 
         # 3. Mark message units as deleted
@@ -441,10 +430,6 @@ def delete_conversation(
             ConversationMessageUnit.conversation_id == conversation_id,
             ConversationMessageUnit.delete_flag == 'N'
         ).values(update_data)
-        if user_id:
-            unit_stmt = unit_stmt.where(ConversationMessageUnit.created_by == user_id)
-        if tenant_id:
-            unit_stmt = unit_stmt.where(ConversationMessageUnit.tenant_id == tenant_id)
         session.execute(unit_stmt)
 
         # 4. Mark search sources as deleted
@@ -452,10 +437,6 @@ def delete_conversation(
             ConversationSourceSearch.conversation_id == conversation_id,
             ConversationSourceSearch.delete_flag == 'N'
         ).values(update_data)
-        if user_id:
-            search_stmt = search_stmt.where(ConversationSourceSearch.created_by == user_id)
-        if tenant_id:
-            search_stmt = search_stmt.where(ConversationSourceSearch.tenant_id == tenant_id)
         session.execute(search_stmt)
 
         # 5. Mark image sources as deleted
@@ -463,10 +444,6 @@ def delete_conversation(
             ConversationSourceImage.conversation_id == conversation_id,
             ConversationSourceImage.delete_flag == 'N'
         ).values(update_data)
-        if user_id:
-            image_stmt = image_stmt.where(ConversationSourceImage.created_by == user_id)
-        if tenant_id:
-            image_stmt = image_stmt.where(ConversationSourceImage.tenant_id == tenant_id)
         session.execute(image_stmt)
 
         return True
@@ -509,40 +486,28 @@ def soft_delete_all_conversations_by_user(user_id: str, tenant_id: Optional[str]
         message_update = update(ConversationMessage).where(
             ConversationMessage.conversation_id.in_(conv_ids),
             ConversationMessage.delete_flag == 'N',
-            ConversationMessage.created_by == user_id,
         )
-        if tenant_id:
-            message_update = message_update.where(ConversationMessage.tenant_id == tenant_id)
         session.execute(message_update.values(update_data))
 
         # 4) Mark message units as deleted
         unit_update = update(ConversationMessageUnit).where(
             ConversationMessageUnit.conversation_id.in_(conv_ids),
             ConversationMessageUnit.delete_flag == 'N',
-            ConversationMessageUnit.created_by == user_id,
         )
-        if tenant_id:
-            unit_update = unit_update.where(ConversationMessageUnit.tenant_id == tenant_id)
         session.execute(unit_update.values(update_data))
 
         # 5) Mark search sources as deleted
         search_update = update(ConversationSourceSearch).where(
             ConversationSourceSearch.conversation_id.in_(conv_ids),
             ConversationSourceSearch.delete_flag == 'N',
-            ConversationSourceSearch.created_by == user_id,
         )
-        if tenant_id:
-            search_update = search_update.where(ConversationSourceSearch.tenant_id == tenant_id)
         session.execute(search_update.values(update_data))
 
         # 6) Mark image sources as deleted
         image_update = update(ConversationSourceImage).where(
             ConversationSourceImage.conversation_id.in_(conv_ids),
             ConversationSourceImage.delete_flag == 'N',
-            ConversationSourceImage.created_by == user_id,
         )
-        if tenant_id:
-            image_update = image_update.where(ConversationSourceImage.tenant_id == tenant_id)
         session.execute(image_update.values(update_data))
 
         return len(conv_ids)
@@ -583,14 +548,12 @@ def update_message_opinion(
             ConversationMessage.message_id == message_id,
             ConversationMessage.delete_flag == 'N'
         ).values(update_data)
-        if tenant_id:
-            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
-        if user_id:
+        if user_id or tenant_id:
             stmt = stmt.where(
                 ConversationMessage.conversation_id.in_(
                     select(ConversationRecord.conversation_id).where(
-                        ConversationRecord.created_by == user_id,
                         ConversationRecord.delete_flag == 'N',
+                        *([ConversationRecord.created_by == user_id] if user_id else []),
                         *([ConversationRecord.tenant_id == tenant_id] if tenant_id else []),
                     )
                 )
@@ -674,8 +637,6 @@ def get_conversation_history(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.delete_flag == 'N'
         ).order_by(ConversationMessage.message_index)
-        if tenant_id:
-            query = query.where(ConversationMessage.tenant_id == tenant_id)
 
         message_records = session.execute(query).all()
 
@@ -684,8 +645,6 @@ def get_conversation_history(
             ConversationSourceSearch.conversation_id == conversation_id,
             ConversationSourceSearch.delete_flag == 'N'
         ).order_by(ConversationSourceSearch.search_id)
-        if tenant_id:
-            search_stmt = search_stmt.where(ConversationSourceSearch.tenant_id == tenant_id)
         search_records = session.scalars(search_stmt).all()
 
         # Get image data
@@ -693,8 +652,6 @@ def get_conversation_history(
             ConversationSourceImage.conversation_id == conversation_id,
             ConversationSourceImage.delete_flag == 'N'
         )
-        if tenant_id:
-            image_stmt = image_stmt.where(ConversationSourceImage.tenant_id == tenant_id)
         image_records = session.scalars(image_stmt).all()
 
         # Integrate message and unit data
@@ -771,8 +728,6 @@ def create_source_image(
             # Use the database's CURRENT_TIMESTAMP function
             "create_time": func.current_timestamp()
         }
-        if tenant_id:
-            data["tenant_id"] = tenant_id
 
         if user_id:
             data = add_creation_tracking(data, user_id)
@@ -958,8 +913,6 @@ def create_source_search(
             # Use the database's CURRENT_TIMESTAMP function
             "create_time": func.current_timestamp()
         }
-        if tenant_id:
-            data["tenant_id"] = tenant_id
 
         # Add unit_id if provided
         if 'unit_id' in search_data and search_data['unit_id'] is not None:
@@ -1176,14 +1129,12 @@ def get_message_id_by_index(
             ConversationMessage.message_index == message_index,
             ConversationMessage.delete_flag == 'N'
         )
-        if tenant_id:
-            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
-        if user_id:
+        if user_id or tenant_id:
             stmt = stmt.where(
                 ConversationMessage.conversation_id.in_(
                     select(ConversationRecord.conversation_id).where(
-                        ConversationRecord.created_by == user_id,
                         ConversationRecord.delete_flag == 'N',
+                        *([ConversationRecord.created_by == user_id] if user_id else []),
                         *([ConversationRecord.tenant_id == tenant_id] if tenant_id else []),
                     )
                 )
@@ -1219,14 +1170,14 @@ def get_latest_assistant_message_id(
             ConversationMessage.message_role == 'assistant'
         ).order_by(desc(ConversationMessage.message_index)).limit(1)
 
-        if user_id:
+        if user_id or tenant_id:
             stmt = stmt.join(
                 ConversationRecord,
                 ConversationMessage.conversation_id == ConversationRecord.conversation_id
-            ).where(ConversationRecord.created_by == user_id)
-        if tenant_id:
-            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
+            )
             if user_id:
+                stmt = stmt.where(ConversationRecord.created_by == user_id)
+            if tenant_id:
                 stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         result = session.execute(stmt).scalar()
@@ -1236,6 +1187,7 @@ def get_latest_assistant_message_id(
 def update_message_minio_files(
     message_id: int,
     skill_file_uploads: List[Dict[str, Any]],
+    user_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
 ) -> bool:
     """
@@ -1255,8 +1207,15 @@ def update_message_minio_files(
             ConversationMessage.message_id == message_id,
             ConversationMessage.delete_flag == 'N'
         )
-        if tenant_id:
-            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
+        if user_id or tenant_id:
+            stmt = stmt.join(
+                ConversationRecord,
+                ConversationMessage.conversation_id == ConversationRecord.conversation_id,
+            )
+            if user_id:
+                stmt = stmt.where(ConversationRecord.created_by == user_id)
+            if tenant_id:
+                stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
         record = session.scalars(stmt).first()
         if not record:
             return False

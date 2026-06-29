@@ -846,7 +846,12 @@ def save_skill_files_to_conversation(
             )
             return False
 
-        success = update_message_minio_files(message_id, skill_file_uploads, tenant_id=tenant_id)
+        success = update_message_minio_files(
+            message_id,
+            skill_file_uploads,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
         if success:
             logging.info(
                 "[skill-file] persisted %d file(s) to message_id=%s conversation=%s",

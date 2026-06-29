@@ -63,6 +63,7 @@ COMMENT ON TABLE "conversation_message_unit_t" IS 'Carries agent output content 
 CREATE TABLE IF NOT EXISTS "conversation_record_t" (
   "conversation_id" SERIAL,
   "conversation_title" varchar(100) COLLATE "pg_catalog"."default",
+  "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
@@ -72,12 +73,15 @@ CREATE TABLE IF NOT EXISTS "conversation_record_t" (
 );
 ALTER TABLE "conversation_record_t" OWNER TO "root";
 COMMENT ON COLUMN "conversation_record_t"."conversation_title" IS 'Conversation title';
+COMMENT ON COLUMN "conversation_record_t"."tenant_id" IS 'Tenant ID for conversation ownership isolation';
 COMMENT ON COLUMN "conversation_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
 COMMENT ON COLUMN "conversation_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "conversation_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "conversation_record_t"."updated_by" IS 'Last updater ID, audit field';
-COMMENT ON COLUMN "conversation_record_t"."created_by" IS 'Creator ID, audit field';
+COMMENT ON COLUMN "conversation_record_t"."created_by" IS 'Creator ID, audit field; W4 immutable owner user for the conversation';
 COMMENT ON TABLE "conversation_record_t" IS 'Overall information of Q&A conversations';
+CREATE INDEX IF NOT EXISTS idx_conversation_record_t_tenant_user_conversation_delete
+  ON "conversation_record_t" ("tenant_id", "created_by", "conversation_id", "delete_flag");
 
 CREATE TABLE IF NOT EXISTS "conversation_source_image_t" (
   "image_id" SERIAL,
