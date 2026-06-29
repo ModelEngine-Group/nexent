@@ -503,3 +503,6 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "tool",
     "execution_logs",
 ])
+
+# SSE streaming event type for status messages
+STREAM_STATUS_EVENT = "event: stream_status\n"

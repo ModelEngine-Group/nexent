@@ -22,7 +22,7 @@ from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
-    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
+    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -930,16 +930,11 @@ async def _stream_agent_chunks(
             user_id=user_id
         )
 
-    async def _emit_and_publish(chunk: str):
-        """Yield a chunk to SSE and publish to channel for reconnection."""
-        await channel.publish(chunk)
-        yield chunk
-
     # In resume mode, emit a status event first
     if is_resume_mode:
-        await channel.publish('event: stream_status\n')
+        await channel.publish(STREAM_STATUS_EVENT)
         await channel.publish(f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n')
-        yield 'event: stream_status\n'
+        yield STREAM_STATUS_EVENT
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
     try:
@@ -1181,7 +1176,6 @@ async def _stream_agent_chunks(
                     # First update the content to ensure the last chunk is persisted
                     # This must be done synchronously before updating status
                     final_content = current_unit["content"]
-                    final_len = len(final_content)
                     update_unit_content(
                         current_unit["unit_id"],
                         final_content,
@@ -1220,7 +1214,7 @@ async def _stream_agent_chunks(
                 status=terminal_status
             )
             # Schedule channel removal (give subscribers time to receive final chunks)
-            asyncio.create_task(
+            cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
                     conversation_id=agent_request.conversation_id,
                     user_id=user_id
@@ -3002,7 +2996,7 @@ async def run_agent_stream(
             replay_chunk_count = channel.history_size if channel else 0
 
             # Emit status event first with chunk count for skip tracking
-            yield 'event: stream_status\n'
+            yield STREAM_STATUS_EVENT
             yield f'data: {{"status": "resumed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}, "replay_chunk_count": {replay_chunk_count}}}\n\n'
 
             # Use subscribe_with_history(0) to replay ALL chunks from the buffer
@@ -3012,7 +3006,7 @@ async def run_agent_stream(
                 yield chunk
 
             # Mark as complete when channel ends
-            yield 'event: stream_status\n'
+            yield STREAM_STATUS_EVENT
             yield f'data: {{"status": "completed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}}}\n\n'
 
         return StreamingResponse(

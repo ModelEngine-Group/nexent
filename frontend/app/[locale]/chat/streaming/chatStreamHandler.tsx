@@ -86,6 +86,140 @@ interface JsonData {
 
 // Reconstruct streaming state from persisted units (for tab-switch recovery)
 // maxUnitIndex: only process units up to this index (for resume mode)
+
+// Types for unit processing
+type ReconstructionState = {
+  currentStep: AgentStep | null;
+  lastContentType: string | null;
+  lastModelOutputIndex: number;
+  lastCodeOutputIndex: number;
+  finalAnswer: string;
+  steps: AgentStep[];
+  stepCounter: number;
+};
+
+// Helper to create a new step
+const createNewStep = (
+  stepCounter: number,
+  existingStepsLength: number,
+  id: string,
+  title: string,
+  content: string,
+  unitType: string
+): AgentStep => ({
+  id,
+  title,
+  content,
+  expanded: true,
+  contents: [{
+    id,
+    type: unitType as any,
+    content,
+    expanded: true,
+    timestamp: Date.now(),
+  }],
+  metrics: null,
+  thinking: { content: '', expanded: true },
+  code: { content: '', expanded: true },
+  output: { content: '', expanded: true },
+});
+
+// Helper to finalize current step and prepare for next
+const finalizeCurrentStep = (state: ReconstructionState): void => {
+  if (state.currentStep && state.currentStep.contents.length > 0) {
+    state.steps.push(state.currentStep);
+  }
+  state.currentStep = null;
+  state.lastContentType = null;
+  state.lastModelOutputIndex = -1;
+  state.lastCodeOutputIndex = -1;
+};
+
+// Helper to get step number
+const getStepNumber = (state: ReconstructionState): number =>
+  state.stepCounter > 0 ? state.stepCounter : state.steps.length + 1;
+
+// Helper to process model output type units
+const processModelOutputUnit = (unit: StreamingUnit, state: ReconstructionState): void => {
+  const stepNum = getStepNumber(state);
+  state.currentStep = createNewStep(
+    stepNum,
+    state.steps.length,
+    `step-${stepNum}`,
+    '',
+    unit.unit_content,
+    chatConfig.messageTypes.MODEL_OUTPUT
+  );
+  state.currentStep.contents[0].id = `model-${unit.unit_index}`;
+  state.currentStep.contents[0].type = chatConfig.messageTypes.MODEL_OUTPUT;
+  state.lastContentType = chatConfig.messageTypes.MODEL_OUTPUT;
+  state.lastModelOutputIndex = 0;
+};
+
+// Helper to get output subtype
+const getOutputSubType = (unitType: string): "thinking" | "deep_thinking" | undefined => {
+  switch (unitType) {
+    case 'model_output_thinking': return 'thinking';
+    case 'model_output_deep_thinking': return 'deep_thinking';
+    default: return undefined;
+  }
+};
+
+// Helper to append or create content block for thinking/code units
+const processThinkingCodeUnit = (unit: StreamingUnit, state: ReconstructionState): void => {
+  const outputSubType = getOutputSubType(unit.unit_type);
+  const lastContentBlock = state.currentStep?.contents[state.currentStep.contents.length - 1];
+  const lastContentBlockType = lastContentBlock?.type;
+  const shouldAppend = lastContentBlock && lastContentBlockType === unit.unit_type;
+  const unitType = unit.unit_type as typeof chatConfig.messageTypes.MODEL_OUTPUT_THINKING | typeof chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING | typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+
+  if (!state.currentStep) {
+    const stepNumNew = getStepNumber(state);
+    state.currentStep = createNewStep(
+      stepNumNew,
+      state.steps.length,
+      `step-${stepNumNew}`,
+      '',
+      '',
+      unit.unit_type
+    );
+    state.currentStep.contents[0].id = `model-${unit.unit_index}`;
+    state.currentStep.contents[0].subType = outputSubType;
+    state.currentStep.contents[0].content = unit.unit_content;
+    state.lastModelOutputIndex = 0;
+  } else if (shouldAppend) {
+    lastContentBlock.content += unit.unit_content;
+  } else {
+    state.currentStep.contents.push({
+      id: `model-${unit.unit_index}`,
+      type: unitType,
+      subType: outputSubType,
+      content: unit.unit_content,
+      expanded: true,
+      timestamp: Date.now(),
+    });
+    state.lastModelOutputIndex = state.currentStep.contents.length - 1;
+  }
+  state.lastContentType = unit.unit_type;
+};
+
+// Check if unit type should be skipped during reconstruction
+const isSkippedUnitType = (unitType: string): boolean => {
+  const skippedTypes = [
+    'search_content_placeholder',
+    'token_count',
+    'parse',
+    'execution_logs',
+    'agent_new_run',
+    'tool',
+    'verification',
+    'memory_search',
+    'max_steps_reached',
+    'card',
+  ];
+  return skippedTypes.includes(unitType);
+};
+
 export function reconstructFromStreamingMessage(streamingMessage: StreamingMessage, maxUnitIndex?: number): {
   currentStep: AgentStep | null;
   lastContentType: string | null;
@@ -94,14 +228,13 @@ export function reconstructFromStreamingMessage(streamingMessage: StreamingMessa
   finalAnswer: string;
   steps: AgentStep[];
 } {
-  const state = {
-    currentStep: null as AgentStep | null,
-    lastContentType: null as string | null,
+  const state: ReconstructionState = {
+    currentStep: null,
+    lastContentType: null,
     lastModelOutputIndex: -1,
     lastCodeOutputIndex: -1,
     finalAnswer: streamingMessage.message_content || '',
-    steps: [] as AgentStep[],
-    // Track step number for consistent IDs with history extraction
+    steps: [],
     stepCounter: 0,
   };
 
@@ -116,169 +249,59 @@ export function reconstructFromStreamingMessage(streamingMessage: StreamingMessa
       continue;
     }
 
+    // Handle unit types
     switch (unit.unit_type) {
       case 'step_count':
-        // Increment step counter for each step
         state.stepCounter++;
-        // Finalize previous step
-        if (state.currentStep && state.currentStep.contents.length > 0) {
-          state.steps.push(state.currentStep);
-        }
-        // Reset state for the new step
-        state.currentStep = null;
-        state.lastContentType = null;
-        state.lastModelOutputIndex = -1;
-        state.lastCodeOutputIndex = -1;
+        finalizeCurrentStep(state);
         break;
 
       case 'model_output':
-        // Create a new step with main content block
-        const stepNum = state.stepCounter > 0 ? state.stepCounter : state.steps.length + 1;
-        state.currentStep = {
-          id: `step-${stepNum}`,
-          title: '',
-          content: unit.unit_content,
-          expanded: true,
-          contents: [{
-            id: `model-${unit.unit_index}`,
-            type: chatConfig.messageTypes.MODEL_OUTPUT,
-            content: unit.unit_content,
-            expanded: true,
-            timestamp: Date.now(),
-          }],
-          metrics: null,
-          thinking: { content: '', expanded: true },
-          code: { content: '', expanded: true },
-          output: { content: '', expanded: true },
-        };
-        state.lastContentType = 'MODEL_OUTPUT';
-        state.lastModelOutputIndex = 0;
+        processModelOutputUnit(unit, state);
         break;
 
       case 'model_output_thinking':
       case 'model_output_deep_thinking':
       case 'model_output_code':
-        // Different model output types should create separate content blocks
-        // to ensure proper visual separation of thinking, deep_thinking, and code
-        const outputSubType = unit.unit_type === 'model_output_thinking' ? 'thinking' :
-                             unit.unit_type === 'model_output_deep_thinking' ? 'deep_thinking' : undefined;
-        const lastContentBlock = state.currentStep?.contents[state.currentStep.contents.length - 1];
-        const lastContentBlockType = lastContentBlock?.type;
-        const shouldAppend = lastContentBlock && lastContentBlockType === unit.unit_type;
-
-        if (!state.currentStep) {
-          const stepNumNew = state.stepCounter > 0 ? state.stepCounter : state.steps.length + 1;
-          state.currentStep = {
-            id: `step-${stepNumNew}`,
-            title: '',
-            content: '',
-            expanded: true,
-            contents: [{
-              id: `model-${unit.unit_index}`,
-              type: unit.unit_type as any,
-              subType: outputSubType,
-              content: unit.unit_content,
-              expanded: true,
-              timestamp: Date.now(),
-            }],
-            metrics: null,
-            thinking: { content: '', expanded: true },
-            code: { content: '', expanded: true },
-            output: { content: '', expanded: true },
-          };
-          state.lastModelOutputIndex = 0;
-        } else if (shouldAppend) {
-          // Only append if the last content block has the SAME type
-          lastContentBlock.content += unit.unit_content;
-        } else {
-          // Different type - create a new content block for visual separation
-          state.currentStep.contents.push({
-            id: `model-${unit.unit_index}`,
-            type: unit.unit_type as any,
-            subType: outputSubType,
-            content: unit.unit_content,
-            expanded: true,
-            timestamp: Date.now(),
-          });
-          state.lastModelOutputIndex = state.currentStep.contents.length - 1;
-        }
-        state.lastContentType = unit.unit_type;
-        break;
-
-      case 'search_content_placeholder':
-        // Skip search_content_placeholder during reconstruction - matches streaming behavior
-        // In historical records, search placeholders are skipped; actual search results
-        // come from card units which are also skipped here
+        processThinkingCodeUnit(unit, state);
         break;
 
       case 'final_answer':
         state.finalAnswer = unit.unit_content;
         break;
 
-      case 'token_count':
-        // Skip token_count during reconstruction - metrics should be matched with steps by step_number
-        // This prevents creating separate steps for token metrics
-        break;
-
-      case 'parse':
-        // Skip parse during reconstruction - matches streaming behavior
-        // In historical records, parse goes to step.contents as "execution" type
-        // which is filtered out by TaskWindow. So skip to avoid showing it.
-        break;
-
-      case 'execution_logs':
-        // Skip execution_logs during reconstruction - matches streaming behavior
-        // In historical records, execution_logs goes to step.contents as "execution" type
-        // which is filtered out by TaskWindow. So skip to avoid showing it.
-        break;
-
-      case 'agent_new_run':
-      case 'tool':
-      case 'verification':
-      case 'memory_search':
-      case 'max_steps_reached':
-      case 'card':
-        // These types are metadata/loading indicators that don't create visible steps
-        // in the task window during normal streaming, so skip them during reconstruction
-        break;
-
-      default:
-        // For other types, save previous step if exists with contents
-        if (state.currentStep && state.currentStep.contents.length > 0) {
-          state.steps.push(state.currentStep);
+      default: {
+        if (isSkippedUnitType(unit.unit_type)) {
+          break;
         }
-        // Create a generic step for unknown types - use consistent step numbering
-        const stepNumUnknown = state.stepCounter > 0 ? state.stepCounter : state.steps.length + 1;
-        state.currentStep = {
-          id: `step-${stepNumUnknown}`,
-          title: unit.unit_type,
-          content: unit.unit_content,
-          expanded: true,
-          contents: [{
-            id: `content-${unit.unit_index}`,
-            type: unit.unit_type as any,
-            content: unit.unit_content,
-            expanded: true,
-            timestamp: Date.now(),
-          }],
-          metrics: null,
-          thinking: { content: '', expanded: true },
-          code: { content: '', expanded: true },
-          output: { content: '', expanded: true },
-        };
+        // For unknown types, create a generic step
+        finalizeCurrentStep(state);
+        const stepNumUnknown = getStepNumber(state);
+        state.currentStep = createNewStep(
+          stepNumUnknown,
+          state.steps.length,
+          `step-${stepNumUnknown}`,
+          unit.unit_type,
+          unit.unit_content,
+          unit.unit_type
+        );
+        state.currentStep.contents[0].id = `content-${unit.unit_index}`;
         break;
+      }
     }
   }
 
   // Don't forget to save the last currentStep if it has contents
-  if (state.currentStep && state.currentStep.contents.length > 0) {
-    state.steps.push(state.currentStep);
-  }
+  finalizeCurrentStep(state);
 
-  // Set currentStep to the last step (for resume continuation)
-  state.currentStep = state.steps[state.steps.length - 1] || null;
-
-  return state;
+  return {
+    currentStep: state.steps[state.steps.length - 1] || null,
+    lastContentType: state.lastContentType,
+    lastModelOutputIndex: state.lastModelOutputIndex,
+    lastCodeOutputIndex: state.lastCodeOutputIndex,
+    finalAnswer: state.finalAnswer,
+    steps: state.steps,
+  };
 }
 
 // Processing Streaming Response Data
@@ -327,8 +350,6 @@ export const handleStreamResponse = async (
   let allSearchResults: any[] = [];
   let finalAnswer = "";
   let lastModelOutputIndex = -1;
-  let lastCodeOutputIndex = -1;
-  let steps: AgentStep[] = [];
   let lastContentType: string | null = null;
 
   if (resumeConfig) {
@@ -339,9 +360,7 @@ export const handleStreamResponse = async (
     currentStep = recovered.currentStep || currentStep;
     lastContentType = recovered.lastContentType;
     lastModelOutputIndex = recovered.lastModelOutputIndex;
-    lastCodeOutputIndex = recovered.lastCodeOutputIndex;
     finalAnswer = recovered.finalAnswer;
-    steps = recovered.steps;
   }
 
   // Generate conversation title immediately when stream starts (for new conversations)
@@ -503,7 +522,6 @@ export const handleStreamResponse = async (
                   // Reset status tracking variables
                   lastContentType = null;
                   lastModelOutputIndex = -1;
-                  lastCodeOutputIndex = -1;
 
                   break;
 

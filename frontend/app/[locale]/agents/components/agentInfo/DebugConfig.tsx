@@ -666,7 +666,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
       // Process stream response
       await handleStreamResponse(
-        reader,
+        reader as ReadableStreamDefaultReader<Uint8Array>,
         setMessages,
         resetTimeout,
         stepIdCounter.current,

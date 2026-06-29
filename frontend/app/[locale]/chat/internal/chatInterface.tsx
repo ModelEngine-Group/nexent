@@ -637,7 +637,7 @@ export function ChatInterface() {
 
       // Call streaming processing function to handle response
       await handleStreamResponse(
-        reader,
+        reader as ReadableStreamDefaultReader<Uint8Array>,
         setCurrentSessionMessagesFactory(id),
         resetTimeout,
         stepIdCounter,
@@ -835,125 +835,154 @@ export function ChatInterface() {
   };
 
 
-  // Helper function to resume streaming after tab switch
-  const resumeStreamingConversation = async (
-    conversationId: number,
-    streamingMessage: StreamingMessage
-  ) => {
-    const lastUnit = streamingMessage.last_unit;
-    const resumeConfig: ResumeConfig = {
-      streamingMessage,
-      lastUnitIndex: lastUnit?.unit_index ?? -1,
-    };
+  // Helper to create a session messages updater for a specific conversation
+  const createSessionMessagesUpdater = useCallback(
+    (targetConversationId: number) => {
+      return (valueOrUpdater: React.SetStateAction<ChatMessageType[]>) => {
+        setSessionMessages((prev) => {
+          const prevArr = prev[targetConversationId] || [];
+          const nextArr =
+            typeof valueOrUpdater === "function"
+              ? (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(
+                  prevArr
+                )
+              : valueOrUpdater;
+          return {
+            ...prev,
+            [targetConversationId]: [...nextArr],
+          };
+        });
+      };
+    },
+    []
+  );
 
-    // Create new AbortController for the resume request
-    const controller = new AbortController();
-    conversationControllersRef.current.set(conversationId, controller);
-
-    try {
-      // Call resume API
-      const response = await conversationService.runAgent(
-        {
-          query: "", // Empty query for resume
-          conversation_id: conversationId,
-          history: [],
-          is_resume: true, // Flag to indicate resume mode
-        },
-        controller.signal
-      );
-
-      // Check if this is a JSON response (agent finished during disconnect)
-      if (response && typeof response === 'object' && 'type' in response && response.type === 'json') {
-        const jsonData = response.data as { status: string; message?: string };
-        // Agent finished while disconnected - mark message as complete
-        handleResumeCompletion(conversationId, jsonData.status);
-        return;
-      }
-
-      const reader = response as ReadableStreamDefaultReader<Uint8Array>;
-      if (!reader) {
-        throw new Error("Response body is null");
-      }
-
-      // Set streaming state
-      setStreamingConversations((prev) => {
-        const newSet = new Set(prev);
-        newSet.add(conversationId);
-        return newSet;
-      });
-      setIsStreaming(true);
-
-      // Create setCurrentSessionMessages factory
-      const setCurrentSessionMessagesFactory =
-        (targetConversationId: number) =>
-        (valueOrUpdater: React.SetStateAction<ChatMessageType[]>) => {
-          setSessionMessages((prev) => {
-            const prevArr = prev[targetConversationId] || [];
-            let nextArr: ChatMessageType[];
-            if (typeof valueOrUpdater === "function") {
-              nextArr = (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(prevArr);
-            } else {
-              nextArr = valueOrUpdater;
-            }
-            return {
-              ...prev,
-              [targetConversationId]: [...nextArr],
-            };
-          });
-        };
-
-      // Create resetTimeout function
-      const resetTimeout = () => {
-        const existingTimeout = conversationTimeoutsRef.current.get(conversationId);
-        if (existingTimeout) {
-          clearTimeout(existingTimeout);
+  // Helper to handle timeout expiration during resume streaming
+  const handleResumeTimeout = useCallback(
+    async (convId: number) => {
+      const ctrl = conversationControllersRef.current.get(convId);
+      if (ctrl && !ctrl.signal.aborted) {
+        try {
+          ctrl.abort(t("chatInterface.requestTimeout"));
+          await conversationService.stop(convId);
+        } catch (e) {
+          log.error(t("chatInterface.stopTimeoutRequestFailed"), e);
         }
-        const newTimeout = setTimeout(async () => {
-          const ctrl = conversationControllersRef.current.get(conversationId);
-          if (ctrl && !ctrl.signal.aborted) {
-            try {
-              ctrl.abort(t("chatInterface.requestTimeout"));
-              await conversationService.stop(conversationId);
-            } catch (e) {
-              log.error(t("chatInterface.stopTimeoutRequestFailed"), e);
-            }
-          }
-          conversationTimeoutsRef.current.delete(conversationId);
-        }, 120000);
-        conversationTimeoutsRef.current.set(conversationId, newTimeout);
+      }
+      conversationTimeoutsRef.current.delete(convId);
+    },
+    [t]
+  );
+
+  // Helper to set up and trigger a timeout for resume streaming
+  const startResumeTimeout = useCallback(
+    (convId: number) => {
+      const existingTimeout = conversationTimeoutsRef.current.get(convId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+      }
+      const newTimeout = setTimeout(() => {
+        handleResumeTimeout(convId);
+      }, 120000);
+      conversationTimeoutsRef.current.set(convId, newTimeout);
+    },
+    [handleResumeTimeout]
+  );
+
+  // Helper function to resume streaming after tab switch
+  const resumeStreamingConversation = useCallback(
+    async (conversationId: number, streamingMessage: StreamingMessage) => {
+      const lastUnit = streamingMessage.last_unit;
+      const resumeConfig: ResumeConfig = {
+        streamingMessage,
+        lastUnitIndex: lastUnit?.unit_index ?? -1,
       };
 
-      resetTimeout();
+      // Create new AbortController for the resume request
+      const controller = new AbortController();
+      conversationControllersRef.current.set(conversationId, controller);
 
-      // Call handleStreamResponse with resume config
-      await handleStreamResponse(
-        reader as ReadableStreamDefaultReader<Uint8Array>,
-        setCurrentSessionMessagesFactory(conversationId),
-        resetTimeout,
-        stepIdCounter,
-        setIsSwitchedConversation,
-        false, // isNewConversation
-        conversationManagement.setConversationTitle,
-        conversationManagement.fetchConversationList,
-        conversationId,
-        conversationService,
-        false, // isDebug
-        t,
-        resumeConfig
-      );
-    } catch (error) {
-      log.error(t("chatInterface.resumeStreamFailed"), error);
-    } finally {
-      // Clean up
-      conversationControllersRef.current.delete(conversationId);
-      setStreamingConversations((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(conversationId);
-        return newSet;
-      });
-      setIsStreaming(false);
-    }
-  };
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+      try {
+        // Call resume API
+        const response = await conversationService.runAgent(
+          {
+            query: "",
+            conversation_id: conversationId,
+            history: [],
+            is_resume: true,
+          },
+          controller.signal
+        );
+
+        // Check if this is a JSON response (agent finished during disconnect)
+        if (
+          response &&
+          typeof response === "object" &&
+          "type" in response &&
+          response.type === "json"
+        ) {
+          const jsonData = response.data as {
+            status: string;
+            message?: string;
+          };
+          handleResumeCompletion(conversationId, jsonData.status);
+          return;
+        }
+
+        reader = response as ReadableStreamDefaultReader<Uint8Array>;
+        if (!reader) {
+          throw new Error("Response body is null");
+        }
+
+        // Set streaming state
+        setStreamingConversations((prev) => {
+          const newSet = new Set(prev);
+          newSet.add(conversationId);
+          return newSet;
+        });
+        setIsStreaming(true);
+
+        // Set up timeout and call stream handler
+        startResumeTimeout(conversationId);
+
+        await handleStreamResponse(
+          reader,
+          createSessionMessagesUpdater(conversationId),
+          () => startResumeTimeout(conversationId),
+          stepIdCounter,
+          setIsSwitchedConversation,
+          false,
+          conversationManagement.setConversationTitle,
+          conversationManagement.fetchConversationList,
+          conversationId,
+          conversationService,
+          false,
+          t,
+          resumeConfig
+        );
+      } catch (error) {
+        log.error(t("chatInterface.resumeStreamFailed"), error);
+      } finally {
+        conversationControllersRef.current.delete(conversationId);
+        setStreamingConversations((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(conversationId);
+          return newSet;
+        });
+        setIsStreaming(false);
+      }
+    },
+    [
+      t,
+      conversationService,
+      conversationManagement,
+      createSessionMessagesUpdater,
+      startResumeTimeout,
+      handleResumeCompletion,
+    ]
+  );
 
   // When switching conversation, automatically load messages
   const handleDialogClick = async (dialog: ConversationListItem) => {
