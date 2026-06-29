@@ -41,13 +41,19 @@ class MockModelModule:
 consts_mock.model = MockModelModule()
 
 # Mock consts.tool_labels with BUILTIN_LABEL_MAP
-consts_mock.tool_labels = MagicMock()
-consts_mock.tool_labels.BUILTIN_LABEL_MAP = {}
+tool_labels_mock = MagicMock()
+tool_labels_mock.BUILTIN_LABEL_MAP = {}
+consts_mock.tool_labels = tool_labels_mock
+
+# consts_mock must have __path__ to be recognized as a package
+# so that `from consts.tool_labels import ...` works
+consts_mock.__path__ = []
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.model'] = consts_mock.model
+sys.modules['consts.tool_labels'] = tool_labels_mock
 
 # Mock utils module
 utils_mock = MagicMock()
