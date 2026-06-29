@@ -2388,6 +2388,8 @@
   "mcpTools.mine.onlineVersion": "Online",
   "mcpTools.mine.delete": "Delete",
   "mcpTools.mine.refreshToolCount": "Refresh Tool Count",
+  "mcpTools.mine.refreshToolCountSuccess": "Tool count refreshed successfully",
+  "mcpTools.mine.refreshToolCountFailed": "Failed to refresh tool count",
 
   "monitoring.topbar.openDashboard": "Open monitoring dashboard",
   "monitoring.dashboard.timeRange.24h": "Last 24h",

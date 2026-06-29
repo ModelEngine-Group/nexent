@@ -748,10 +748,10 @@ function MineView({
     setRefreshingMineKey(key);
     try {
       await refreshMcpToolCount(item.service.mcpId);
-      message.success(t("mcpTools.add.success"));
+      message.success(t("mcpTools.mine.refreshToolCountSuccess"));
       await refreshMineData();
     } catch {
-      message.error(t("mcpTools.add.failed"));
+      message.error(t("mcpTools.mine.refreshToolCountFailed"));
     } finally {
       setRefreshingMineKey(null);
     }
