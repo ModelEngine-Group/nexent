@@ -51,19 +51,9 @@ def get_env(key: str, default: str = "") -> str:
 def load_environment_from_host():
     """
     Load environment variables from host .env file.
-    Looks for the project root .env first, with docker/.env as a legacy fallback.
+    Looks for DEPLOYMENT_ROOT_ENV, deploy/env/.env, then docker/.env.
     """
-    script_dir = Path(__file__).resolve().parent
-    candidates = []
-    explicit_env = os.environ.get("DEPLOYMENT_ROOT_ENV")
-    if explicit_env:
-        candidates.append(Path(explicit_env))
-    candidates.extend([
-        script_dir.parent.parent.parent.parent / ".env",  # deploy/docker/assets/scripts
-        script_dir.parent.parent.parent / ".env",
-        script_dir.parent.parent / ".env",
-        script_dir.parent / ".env",
-    ])
+    candidates = get_host_env_candidates()
     env_file = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
 
     if env_file.is_file():
@@ -88,17 +78,7 @@ def get_root_dir() -> str:
     """Get ROOT_DIR from environment, normalized for the current OS."""
     root_dir = get_env("ROOT_DIR")
     if not root_dir:
-        script_dir = Path(__file__).resolve().parent
-        candidates = []
-        explicit_env = os.environ.get("DEPLOYMENT_ROOT_ENV")
-        if explicit_env:
-            candidates.append(Path(explicit_env))
-        candidates.extend([
-            script_dir.parent.parent.parent.parent / ".env",
-            script_dir.parent.parent.parent / ".env",
-            script_dir.parent.parent / ".env",
-            script_dir.parent / ".env",
-        ])
+        candidates = get_host_env_candidates()
         env_file = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
         if env_file.is_file():
             with open(env_file, 'r') as f:
@@ -111,6 +91,27 @@ def get_root_dir() -> str:
     if root_dir:
         root_dir = str(Path(root_dir))
     return root_dir
+
+
+def get_host_env_candidates():
+    """Return allowed host env files without consulting the project root .env."""
+    script_dir = Path(__file__).resolve().parent
+    candidates = []
+    explicit_env = os.environ.get("DEPLOYMENT_ROOT_ENV")
+    if explicit_env:
+        candidates.append(Path(explicit_env))
+
+    if len(script_dir.parents) >= 4:
+        deploy_root = script_dir.parents[2]
+        project_root = script_dir.parents[3]
+        candidates.extend([
+            deploy_root / "env" / ".env",
+            project_root / "docker" / ".env",
+        ])
+
+    if not candidates:
+        candidates.append(script_dir / "deploy" / "env" / ".env")
+    return candidates
 
 
 def check_container_running():

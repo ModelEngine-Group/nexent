@@ -43,6 +43,8 @@ const buildCapacityRequestBody = (model: {
   defaultOutputReserveTokens?: number;
   tokenizerFamily?: string;
   capacitySource?: string;
+  acceptedSuggestionMatchKind?: string;
+  acceptedCapabilityProfileVersion?: string;
 }) => ({
   ...(model.contextWindowTokens !== undefined
     ? { context_window_tokens: model.contextWindowTokens }
@@ -61,6 +63,18 @@ const buildCapacityRequestBody = (model: {
     : {}),
   ...(model.capacitySource !== undefined
     ? { capacity_source: model.capacitySource }
+    : {}),
+  // W11 accept-signal: audit-only fields the app layer pops before the
+  // service write so model_capacity_suggestion_accept_total can count
+  // accepted catalog matches.
+  ...(model.acceptedSuggestionMatchKind !== undefined
+    ? { accepted_suggestion_match_kind: model.acceptedSuggestionMatchKind }
+    : {}),
+  ...(model.acceptedCapabilityProfileVersion !== undefined
+    ? {
+        accepted_capability_profile_version:
+          model.acceptedCapabilityProfileVersion,
+      }
     : {}),
 });
 
@@ -198,6 +212,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -420,6 +436,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -923,6 +941,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const requestBody: any = {
@@ -1005,6 +1025,8 @@ export const modelService = {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }): Promise<void> => {
     try {
       const response = await fetch(

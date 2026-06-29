@@ -1598,7 +1598,7 @@ def test_get_version_detail_api_success(mocker, mock_auth_header):
     """Test get_version_detail_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app.get_version_detail_impl")
+        "apps.agent_app._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.return_value = {
@@ -1621,11 +1621,40 @@ def test_get_version_detail_api_success(mocker, mock_auth_header):
     assert "agent_snapshot" in response.json()
 
 
+def test_get_version_detail_api_draft_version_success(mocker, mock_auth_header):
+    """Test get_version_detail_api with draft version_no=0."""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_version_detail = mocker.patch(
+        "apps.agent_app._get_version_detail_or_draft")
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_get_version_detail.return_value = {
+        "agent_id": 123,
+        "name": "Draft Agent",
+        "version": {
+            "version_name": "Draft",
+            "version_status": "DRAFT",
+        },
+        "tools": [],
+    }
+
+    response = config_client.get(
+        "/agent/123/versions/0/detail",
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    mock_get_version_detail.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant_id", version_no=0
+    )
+    assert response.json()["name"] == "Draft Agent"
+
+
 def test_get_version_detail_api_not_found(mocker, mock_auth_header):
     """Test get_version_detail_api with ValueError (not found)."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app.get_version_detail_impl")
+        "apps.agent_app._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = ValueError("Version not found")
@@ -1643,7 +1672,7 @@ def test_get_version_detail_api_exception(mocker, mock_auth_header):
     """Test get_version_detail_api with general exception."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app.get_version_detail_impl")
+        "apps.agent_app._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = Exception("Database error")

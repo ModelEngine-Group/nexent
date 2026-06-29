@@ -7,11 +7,11 @@ const { createProxyServer } = require("http-proxy");
 const cookie = require("cookie");
 const path = require("path");
 
-// Load environment variables from .env file in parent directory (project root)
+// Load environment variables from deploy/env/.env
 // In container environments, env vars are injected directly by Docker, so .env file may not exist
 // Using optional: true to avoid errors if .env file is not found
 require("dotenv").config({
-  path: path.resolve(__dirname, "../.env"),
+  path: path.resolve(__dirname, "../deploy/env/.env"),
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
@@ -451,6 +451,7 @@ app.prepare().then(() => {
           pathname.startsWith("/api/agent/run") ||
           pathname.startsWith("/api/agent/stop") ||
           pathname.startsWith("/api/conversation/") ||
+          pathname.startsWith("/api/share/") ||
           pathname.startsWith("/api/memory/") ||
           pathname.startsWith("/api/file/storage") ||
           pathname.startsWith("/api/file/preprocess");

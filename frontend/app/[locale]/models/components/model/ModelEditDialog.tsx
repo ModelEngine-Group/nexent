@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Modal, Select, Input, Button, Switch, App } from "antd";
@@ -90,6 +90,23 @@ export const ModelEditDialog = ({
     status: null,
     message: "",
   });
+
+  // Monotonic request token for /suggest-capacity. Used by manual Check
+  // clicks: when the operator clicks twice quickly with different inputs,
+  // the slower response must not overwrite the faster newer one. The
+  // navigation race (open A, cancel, open B) is handled by the
+  // key-based remount on the parent (ModelDeleteDialog), so we no longer
+  // need a separate "reset on close" effect here.
+  const suggestionRequestRef = useRef(0);
+
+  // Auto-suggest fires at most once per dialog instance. With the parent's
+  // key remount, "per instance" == "per model", which is the desired
+  // semantic. The fired-once guard is needed because the auto-suggest
+  // effect depends on `form.name` and `form.url`, which change as the
+  // [model] effect populates the form on first mount AND every time the
+  // operator types in those inputs -- only the populate transition
+  // should trigger an API call.
+  const autoSuggestFiredRef = useRef(false);
 
   useEffect(() => {
     if (model) {
@@ -184,6 +201,13 @@ export const ModelEditDialog = ({
       message.warning(t("model.dialog.capacity.suggestion.missingInput"));
       return;
     }
+    // Capture a token for this call. The [isOpen] reset effect and any
+    // subsequent handleSuggestCapacity invocation will bump the ref;
+    // when we receive our response we check the ref hasn't moved on. If
+    // it has -- the user cancelled and reopened a different model, or
+    // they clicked "Check" again with different inputs -- silently drop
+    // the response so it cannot overwrite the newer state.
+    const myToken = (suggestionRequestRef.current += 1);
     setCheckingCapacitySuggestion(true);
     try {
       const suggestion = await modelService.suggestCapacity({
@@ -193,18 +217,61 @@ export const ModelEditDialog = ({
         apiKey: form.apiKey.trim() || undefined,
         modelType: connectivityModelType,
       });
+      if (myToken !== suggestionRequestRef.current) return;
       setCapacitySuggestion(suggestion);
       if (!suggestion.suggestions) {
         setAcceptedCapacitySuggestion(null);
       }
     } catch (error) {
+      if (myToken !== suggestionRequestRef.current) return;
       setCapacitySuggestion(null);
       setAcceptedCapacitySuggestion(null);
       message.error(t("model.dialog.capacity.suggestion.failed"));
     } finally {
-      setCheckingCapacitySuggestion(false);
+      if (myToken === suggestionRequestRef.current) {
+        setCheckingCapacitySuggestion(false);
+      }
     }
   };
+
+  // W11 V1.5: when the dialog opens on a bare-capacity LLM/VLM row
+  // (per-row badge condition: context_window_tokens or max_output_tokens
+  // is null), auto-fire /suggest-capacity once so the operator does not
+  // have to also click "Check". The trigger is derived from `model`
+  // itself rather than a caller-supplied flag, so any entry path (row
+  // click, badge click, future gear-icon shortcut) gets the same
+  // affordance. No-op if the model already has capacity, the suggestion
+  // switch is off, or required form fields are missing at open time.
+  //
+  // form.name and form.url are in the dependency list because the
+  // [model] effect above populates them asynchronously after this
+  // component mounts. With the parent's key remount, the first render
+  // here has form.name == "" / form.url == "", so canSuggestCapacity()
+  // is false and we cannot fire yet. The [model] effect's setForm
+  // then re-renders with populated values, this effect re-runs, and
+  // canSuggestCapacity() finally returns true. The autoSuggestFiredRef
+  // guards against re-firing later when the operator types into name
+  // or url -- only the populate transition should kick off auto-suggest.
+  const isBareCapacityModel = Boolean(
+    model &&
+      supportsCapacityFields &&
+      (!model.contextWindowTokens || !model.maxOutputTokens)
+  );
+  useEffect(() => {
+    if (autoSuggestFiredRef.current) return;
+    if (!isOpen || !isBareCapacityModel) return;
+    if (!capacitySuggestionEnabled) return;
+    if (!canSuggestCapacity()) return;
+    autoSuggestFiredRef.current = true;
+    handleSuggestCapacity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isOpen,
+    isBareCapacityModel,
+    capacitySuggestionEnabled,
+    form.name,
+    form.url,
+  ]);
 
   const isFormValid = () => {
     if (
@@ -392,6 +459,18 @@ export const ModelEditDialog = ({
                 : undefined
               : undefined,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(acceptedCapacitySuggestion
+            ? {
+                acceptedSuggestionMatchKind:
+                  acceptedCapacitySuggestion.matchKind,
+                ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                  ? {
+                      acceptedCapabilityProfileVersion:
+                        acceptedCapacitySuggestion.capabilityProfileVersion,
+                    }
+                  : {}),
+              }
+            : {}),
         });
       } else {
         await modelService.updateSingleModel({
@@ -437,6 +516,18 @@ export const ModelEditDialog = ({
               }
             : {}),
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(acceptedCapacitySuggestion
+            ? {
+                acceptedSuggestionMatchKind:
+                  acceptedCapacitySuggestion.matchKind,
+                ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                  ? {
+                      acceptedCapabilityProfileVersion:
+                        acceptedCapacitySuggestion.capabilityProfileVersion,
+                    }
+                  : {}),
+              }
+            : {}),
         });
       }
 
@@ -601,13 +692,8 @@ export const ModelEditDialog = ({
         {supportsCapacityFields && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-              <div>
-                <div className="text-sm font-medium text-gray-700">
-                  {t("model.dialog.capacity.suggestion.title")}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {t("model.dialog.capacity.suggestion.hint")}
-                </div>
+              <div className="text-sm font-medium text-gray-700">
+                {t("model.dialog.capacity.suggestion.title")}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Switch
@@ -638,18 +724,19 @@ export const ModelEditDialog = ({
               onUseSuggestion={() =>
                 applyCapacitySuggestion(capacitySuggestion)
               }
+              acceptedSuggestion={acceptedCapacitySuggestion}
               // Legacy max_tokens is now surfaced via the actionable
-              // legacyMaxTokensCandidate prompt (no more silent promote in
-              // capacityFormFromModel). Keep the plain deprecation banner
-              // fallback for the rare case where the record has neither
-              // column populated, so users still see the migration nudge.
-              showDeprecatedMaxTokensWarning={
-                Boolean(model.maxTokens) &&
-                !model.maxOutputTokens &&
-                !form.maxOutputTokens
-              }
+              // legacyMaxTokensCandidate prompt with two-target buttons
+              // (Context Window vs Max Output). The prompt is offered while
+              // EITHER target field is still empty -- ModelCapacityFields
+              // hides individual buttons once that column is filled, and the
+              // whole alert disappears once both are filled. The plain
+              // deprecation banner only kicks in if both targets are filled
+              // but the legacy column still has a value.
               legacyMaxTokensCandidate={
-                model.maxOutputTokens ? undefined : model.maxTokens
+                model.contextWindowTokens && model.maxOutputTokens
+                  ? undefined
+                  : model.maxTokens
               }
             />
           </div>
@@ -1025,13 +1112,8 @@ export const ProviderConfigEditDialog = ({
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
             // context_window/max_output optional; DEFAULT_* substitute at save.
-            showDeprecatedMaxTokensWarning={
-              Boolean(initialMaxTokens) &&
-              !initialCapacity?.maxOutputTokens &&
-              !capacityForm.maxOutputTokens
-            }
             legacyMaxTokensCandidate={
-              initialCapacity?.maxOutputTokens
+              initialCapacity?.contextWindowTokens && initialCapacity?.maxOutputTokens
                 ? undefined
                 : initialCapacity?.maxTokens
             }

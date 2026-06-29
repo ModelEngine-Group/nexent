@@ -88,11 +88,12 @@ deployment_password_validation_message() {
 deployment_ensure_root_env() {
   local project_root="$1"
   local docker_dir="${2:-$project_root/docker}"
-  local root_env="$project_root/.env"
-  local root_example="$project_root/.env.example"
-  local legacy_docker_env="$docker_dir/.env"
-  local legacy_docker_example="$docker_dir/.env.example"
+  local env_dir="$project_root/deploy/env"
+  local root_env="$env_dir/.env"
+  local root_example="$env_dir/.env.example"
+  local docker_env="$docker_dir/.env"
 
+  mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
   export DEPLOYMENT_ROOT_ENV
 
@@ -100,25 +101,19 @@ deployment_ensure_root_env() {
     return 0
   fi
 
-  if [ -f "$legacy_docker_env" ]; then
-    cp "$legacy_docker_env" "$root_env"
-    deployment_log "✅ Created root .env from legacy docker/.env"
+  if [ -f "$docker_env" ]; then
+    cp "$docker_env" "$root_env"
+    deployment_log "✅ Created deploy/env/.env from docker/.env"
     return 0
   fi
 
   if [ -f "$root_example" ]; then
     cp "$root_example" "$root_env"
-    deployment_log "✅ Created root .env from .env.example"
+    deployment_log "✅ Created deploy/env/.env from deploy/env/.env.example"
     return 0
   fi
 
-  if [ -f "$legacy_docker_example" ]; then
-    cp "$legacy_docker_example" "$root_env"
-    deployment_log "✅ Created root .env from legacy docker/.env.example"
-    return 0
-  fi
-
-  deployment_error ".env not found and no .env.example template is available"
+  deployment_error "deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available"
   return 1
 }
 
@@ -1217,10 +1212,9 @@ deployment_render_image_values() {
 }
 
 deployment_render_k8s_port_values() {
-  local northbound_type="ClusterIP"
+  local northbound_type="NodePort"
   local internal_type="ClusterIP"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
-    northbound_type="NodePort"
     internal_type="NodePort"
   fi
 
@@ -1263,11 +1257,10 @@ deployment_chart_enabled() {
 
 deployment_render_helm_chart_values() {
   local local_pull_policy="IfNotPresent"
-  local northbound_type="ClusterIP"
+  local northbound_type="NodePort"
   local internal_type="ClusterIP"
   [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
-    northbound_type="NodePort"
     internal_type="NodePort"
   fi
 

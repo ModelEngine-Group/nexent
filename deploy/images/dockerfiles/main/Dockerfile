@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM python:3.11-slim AS base
 ARG MIRROR
 ARG APT_MIRROR
@@ -16,17 +14,21 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     mkdir -p /var/cache/apt/archives /var/lib/apt/lists/partial && \
     if [ "$APT_MIRROR" = "tsinghua" ]; then \
-        rm -f /etc/apt/sources.list.d/* && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list; \
+        for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
+            [ -f "$apt_source" ] || continue; \
+            sed -i \
+                -e 's|https\?://deb.debian.org/debian-security|http://security.debian.org/debian-security|g' \
+                -e 's|https\?://security.debian.org/debian-security|http://security.debian.org/debian-security|g' \
+                -e 's|https\?://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+                "$apt_source"; \
+        done; \
     fi && \
     apt-get update && apt-get install -y --no-install-recommends curl postgresql-client
 
 FROM base AS builder
 ARG MIRROR
 ARG TARGETARCH
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 
 RUN --mount=type=cache,id=nexent-main-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
     pip install uv $(test -n "$MIRROR" && echo "-i $MIRROR")
@@ -36,6 +38,8 @@ WORKDIR /opt/backend
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv sync --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR")
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
+    /opt/backend/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 # Layer 1: install sdk in link mode
 COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
@@ -45,13 +49,12 @@ FROM base AS final
 
 ENV VIRTUAL_ENV=/opt/backend/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 WORKDIR /opt/backend
 
 COPY --from=builder /opt/backend/.venv /opt/backend/.venv
 COPY --from=builder /opt/sdk /opt/sdk
-
-# Pre-download tiktoken cl100k_base model to avoid network issues during runtime.
-RUN python -c "import tiktoken; enc = tiktoken.get_encoding('cl100k_base')"
+COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 
 # Layer 2: copy backend code
 COPY backend /opt/backend

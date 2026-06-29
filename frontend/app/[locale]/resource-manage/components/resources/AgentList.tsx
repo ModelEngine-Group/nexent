@@ -49,9 +49,8 @@ type AgentListRow = Pick<
   Agent,
   "id" | "name" | "display_name" | "description" | "author" | "is_available" | "unavailable_reasons" | "group_ids"
 > & {
-  model_id?: number;
-  model_name?: string;
-  model_display_name?: string;
+  model_ids?: number[];
+  model_names?: string[];
   is_published?: boolean;
   current_version_no?: number;
 };
@@ -233,8 +232,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       key: "llm_model",
       width: "18%",
       render: (_: unknown, record: AgentListRow) => {
-        const primary = record.model_display_name || record.model_name || "-";
-        const secondary = record.model_name || "";
+        const modelNames = Array.isArray(record.model_names) ? record.model_names : [];
+        const primary = modelNames[0] || "-";
+        const secondary = modelNames.length > 1 ? modelNames.slice(1).join(", ") : "";
         return (
           <div>
             <div className="font-medium">{primary}</div>

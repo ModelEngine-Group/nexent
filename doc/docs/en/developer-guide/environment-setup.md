@@ -26,7 +26,7 @@ bash deploy.sh docker --components infrastructure --port-policy development
 ```
 
 :::: info Important Notes
-Infrastructure mode launches PostgreSQL, Redis, Elasticsearch, and MinIO. The script generates required credentials and saves them in the project root `.env`. URLs are configured as localhost endpoints for easy local development.
+Infrastructure mode launches PostgreSQL, Redis, Elasticsearch, and MinIO. The script generates required credentials and saves them in `deploy/env/.env`. URLs are configured as localhost endpoints for easy local development.
 ::::
 
 ### 2. Backend Setup

@@ -32,7 +32,7 @@ export type EditableAgent = Pick<
   | "description"
   | "author"
   | "model"
-  | "model_id"
+  | "model_ids"
   | "max_step"
   | "requested_output_tokens"
   | "provide_run_summary"
@@ -49,6 +49,7 @@ export type EditableAgent = Pick<
   | "sub_agent_id_list"
   | "group_ids"
   | "ingroup_permission"
+  | "enable_context_manager"
   | "greeting_message"
   | "example_questions"
 > & {
@@ -165,7 +166,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     description: "",
     author: "",
     model: llmConfig?.name || "",
-    model_id: llmConfig?.id || 0,
+    model_ids: llmConfig?.id ? [llmConfig.id] : [],
     max_step: 15,
     requested_output_tokens: null,
     provide_run_summary: false,
@@ -198,7 +199,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         description: agent.description,
         author: agent.author || "",
         model: agent.model,
-        model_id: agent.model_id || 0,
+        model_ids: agent.model_ids || [],
         max_step: agent.max_step,
         requested_output_tokens: agent.requested_output_tokens ?? null,
         provide_run_summary: agent.provide_run_summary,
@@ -319,7 +320,7 @@ const isDirty = (
       editedAgent.description !== "" ||
       editedAgent.author !== "" ||
       editedAgent.model !== "" ||
-      editedAgent.model_id !== 0 ||
+      normalizeArray(editedAgent.model_ids || []).length > 0 ||
       editedAgent.max_step !== 0 ||
       editedAgent.requested_output_tokens != null ||
       editedAgent.provide_run_summary !== false ||
@@ -350,7 +351,8 @@ const isDirty = (
     baselineAgent.description !== editedAgent.description ||
     baselineAgent.author !== editedAgent.author ||
     baselineAgent.model !== editedAgent.model ||
-    baselineAgent.model_id !== editedAgent.model_id ||
+    JSON.stringify(normalizeArray(baselineAgent.model_ids ?? [])) !==
+      JSON.stringify(normalizeArray(editedAgent.model_ids ?? [])) ||
     baselineAgent.max_step !== editedAgent.max_step ||
     (baselineAgent.requested_output_tokens ?? null) !==
       (editedAgent.requested_output_tokens ?? null) ||
@@ -409,7 +411,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       if (cached && !cached.isGenerating) {
         // Generation completed while user was away, restore the cached data to editedAgent
         const cacheUpdates: Partial<EditableAgent> = {};
-        
+
         if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
         if (cached.constraintPrompt) cacheUpdates.constraint_prompt = cached.constraintPrompt;
         if (cached.fewShotsPrompt) cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
@@ -419,7 +421,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
             ? (() => { try { return JSON.parse(cached.exampleQuestions); } catch { return []; } })()
             : cached.exampleQuestions;
         }
-        
+
         // Only restore agent metadata if not already set in baseline
         if (cached.agentName && !editedAgent.name) cacheUpdates.name = cached.agentName;
         if (cached.agentDisplayName && !editedAgent.display_name) cacheUpdates.display_name = cached.agentDisplayName;

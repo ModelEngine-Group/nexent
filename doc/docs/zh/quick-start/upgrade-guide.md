@@ -15,7 +15,7 @@
 更新之前，先记录下当前部署的版本和数据目录
 
 - 当前部署版本信息的位置：根目录 `VERSION`
-- 数据目录信息的位置：`.env`中的 ROOT_DIR
+- 数据目录信息的位置：`deploy/env/.env`中的 ROOT_DIR
 
 **git 方式下载的代码**
 
@@ -40,8 +40,8 @@ bash deploy.sh docker
 缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
 
 > 💡 提示
-> - 已有 `.env` 会原样保留；如果不存在，部署脚本会优先复用已有 `docker/.env`，再回退到 `.env.example` 或 `docker/.env.example`。
-> - 若需配置语音模型（STT/TTS），请在 `.env` 中补充相关变量，我们将尽快提供前端配置入口。
+> - 已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+> - 若需配置语音模型（STT/TTS），请在 `deploy/env/.env` 中补充相关变量，我们将尽快提供前端配置入口。
 
 ## 🌐 步骤三：验证部署
 

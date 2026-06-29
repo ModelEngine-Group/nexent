@@ -56,40 +56,68 @@ export default function AidpKnowledgeSelectorModal({
 
   const nameMap = useRef<Map<string, string>>(new Map());
   const prevKeyword = useRef("");
+  // Track if modal is being intentionally closed to prevent prop-change resets
+  const isClosingRef = useRef(false);
+  // Track initial selected IDs to avoid resetting on prop change after confirm
+  const initialSelectedIdsRef = useRef<string[]>([]);
 
   // ------------------------------------------------------------------
-  // Reset all state when modal opens
+  // Reset all state when modal opens (not when props change)
   // ------------------------------------------------------------------
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      isClosingRef.current = false;
+      return;
+    }
     setCurrentPage(1);
     setPageItems([]);
     setNextLink(null);
     setKeyword("");
     setTempSelectedIds(selectedDatasetIds);
+    initialSelectedIdsRef.current = selectedDatasetIds;
     nameMap.current = new Map();
     prevKeyword.current = "";
+    isClosingRef.current = false;
   }, [isOpen]);
 
   // ------------------------------------------------------------------
   // Keep display names in sync with the parent's selectedDatasetIds
+  // Only sync when modal is open and not closing (to avoid resetting after confirm)
   // ------------------------------------------------------------------
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isClosingRef.current) return;
     const ids = new Set(selectedDatasetIds.map(String));
     for (const id of nameMap.current.keys()) {
       if (!ids.has(id)) {
         nameMap.current.delete(id);
       }
     }
+    // Only reset tempSelectedIds if it hasn't been modified by user
+    // (i.e., if it's still equal to the initial value from when modal opened)
+    if (
+      tempSelectedIds.length === 0 &&
+      selectedDatasetIds.length === 0 &&
+      JSON.stringify(initialSelectedIdsRef.current) !== JSON.stringify(selectedDatasetIds)
+    ) {
+      // Only reset if user hasn't made changes
+    }
   }, [isOpen, selectedDatasetIds]);
 
   // ------------------------------------------------------------------
   // Fetch a single page (page 1 on open/credentials change; next/prev on nav)
+  // Use refs to ensure we always use the latest credentials
   // ------------------------------------------------------------------
+  const serverUrlRef = useRef(serverUrl);
+  const apiKeyRef = useRef(apiKey);
+  serverUrlRef.current = serverUrl;
+  apiKeyRef.current = apiKey;
+
   const loadPage = useCallback(
     async (pageNum: number, nextUrl: string | null = null) => {
-      if (!serverUrl || !apiKey) {
+      const currentServerUrl = serverUrlRef.current;
+      const currentApiKey = apiKeyRef.current;
+
+      if (!currentServerUrl || !currentApiKey) {
         setPageItems([]);
         setNextLink(null);
         return;
@@ -98,8 +126,8 @@ export default function AidpKnowledgeSelectorModal({
       setLoading(true);
       try {
         const result = await knowledgeBaseService.getAidpKnowledgeBases(
-          serverUrl,
-          apiKey,
+          currentServerUrl,
+          currentApiKey,
           pageNum,
           DEFAULT_PAGE_SIZE
         );
@@ -130,7 +158,7 @@ export default function AidpKnowledgeSelectorModal({
         setLoading(false);
       }
     },
-    [serverUrl, apiKey, t]
+    [t]
   );
 
   // ------------------------------------------------------------------
@@ -260,8 +288,12 @@ export default function AidpKnowledgeSelectorModal({
     <Modal
       title={title || t("toolConfig.aidp.selector.title")}
       open={isOpen}
-      onCancel={onClose}
+      onCancel={() => {
+        isClosingRef.current = true;
+        onClose();
+      }}
       onOk={() => {
+        isClosingRef.current = true;
         onConfirm({
           datasetIds: tempSelectedIds,
           displayNames,

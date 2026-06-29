@@ -12,7 +12,7 @@ export type AgentConfigUpdate = Partial<Pick<
   | "display_name"
   | "author"
   | "model"
-  | "model_id"
+  | "model_ids"
   | "max_step"
   | "requested_output_tokens"
   | "provide_run_summary"
@@ -80,7 +80,8 @@ export interface Agent {
   author?: string;
   unavailable_reasons?: string[];
   model: string;
-  model_id?: number;
+  model_ids?: number[];
+  model_names?: string[];  // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
   provide_run_summary: boolean;

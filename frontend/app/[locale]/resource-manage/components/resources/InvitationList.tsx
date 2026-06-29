@@ -464,7 +464,17 @@ export default function InvitationList({
           dataSource={invitations}
           loading={isLoading}
           rowKey="invitation_id"
-          pagination={{ pageSize: 10 }}
+          pagination={{
+            current: currentPage,
+            pageSize: pageSize,
+            total: data?.total ?? 0,
+            showSizeChanger: true,
+            showTotal: (total) => t("common.pagination.total", { total }),
+            onChange: (page, size) => {
+              setCurrentPage(page);
+              setPageSize(size);
+            },
+          }}
           scroll={{ y: "calc(100vh - 560px)" }}
           className="flex-1 [&_.ant-table]:h-full"
         />

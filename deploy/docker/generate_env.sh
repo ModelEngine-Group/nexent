@@ -6,10 +6,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ENV_FILE="${DEPLOYMENT_ROOT_ENV:-$PROJECT_ROOT/.env}"
-ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
-LEGACY_ENV="$PROJECT_ROOT/docker/.env"
-LEGACY_ENV_EXAMPLE="$PROJECT_ROOT/docker/.env.example"
+ENV_FILE="${DEPLOYMENT_ROOT_ENV:-$DEPLOY_ROOT/env/.env}"
+ENV_EXAMPLE="$DEPLOY_ROOT/env/.env.example"
+DOCKER_ENV="$PROJECT_ROOT/docker/.env"
 
 if [ "${NEXENT_GENERATE_ENV_SKIP_MAIN:-false}" != "true" ]; then
   echo "   📁 Target .env location: $ENV_FILE"
@@ -27,7 +26,7 @@ update_env_var() {
   if grep -q "^${key}=" "$ENV_FILE"; then
     current_value="$(grep "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d'=' -f2- | sed 's/[[:space:]]*$//;s/^"//;s/"$//;s/^'\''//;s/'\''$//')"
     if [ "$current_value" = "$value" ]; then
-      echo "   ↺ root .env unchanged: $key"
+      echo "   ↺ deploy/env/.env unchanged: $key"
       return 0
     fi
     sed -i.bak "s~^${key}=.*~${key}=${escaped_value}~" "$ENV_FILE"
@@ -35,29 +34,26 @@ update_env_var() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
   fi
-  echo "   📝 root .env updated: $key"
+  echo "   📝 deploy/env/.env updated: $key"
 }
 
 # Function to copy and prepare .env file
 prepare_env_file() {
-  echo "   📝 Preparing root .env file..."
+  echo "   📝 Preparing deploy/env/.env file..."
+  mkdir -p "$(dirname "$ENV_FILE")"
 
   if [ -f "$ENV_FILE" ]; then
-    echo "   ✅ Using existing root .env"
-  elif [ -f "$LEGACY_ENV" ]; then
-    echo "   root .env not found, copying docker/.env..."
-    cp "$LEGACY_ENV" "$ENV_FILE"
-    echo "   Created root .env from docker/.env"
+    echo "   ✅ Using existing deploy/env/.env"
+  elif [ -f "$DOCKER_ENV" ]; then
+    echo "   deploy/env/.env not found, copying docker/.env..."
+    cp "$DOCKER_ENV" "$ENV_FILE"
+    echo "   Created deploy/env/.env from docker/.env"
   elif [ -f "$ENV_EXAMPLE" ]; then
-    echo "   📋 root .env not found, copying .env.example..."
+    echo "   📋 deploy/env/.env not found, copying .env.example..."
     cp "$ENV_EXAMPLE" "$ENV_FILE"
-    echo "   ✅ Created root .env from .env.example"
-  elif [ -f "$LEGACY_ENV_EXAMPLE" ]; then
-    echo "   📋 root .env not found, copying docker/.env.example..."
-    cp "$LEGACY_ENV_EXAMPLE" "$ENV_FILE"
-    echo "   ✅ Created root .env from docker/.env.example"
+    echo "   ✅ Created deploy/env/.env from .env.example"
   else
-    echo "   ERROR Neither root .env nor docker/.env nor .env.example exists"
+    echo "   ERROR Neither deploy/env/.env nor docker/.env nor deploy/env/.env.example exists"
     ERROR_OCCURRED=1
     return 1
   fi
@@ -65,10 +61,10 @@ prepare_env_file() {
 
 # Function to update .env file with generated keys
 update_env_file() {
-  echo "   📝 Updating root .env file with generated keys..."
+  echo "   📝 Updating deploy/env/.env file with generated keys..."
 
   if [ ! -f "$ENV_FILE" ]; then
-    echo "   ❌ ERROR root .env file does not exist"
+    echo "   ❌ ERROR deploy/env/.env file does not exist"
     ERROR_OCCURRED=1
     return 1
   fi
@@ -121,7 +117,7 @@ update_env_file() {
     update_env_var "SITE_URL" "http://localhost:3011"
   fi
 
-  echo "   ✅ root .env updated successfully with localhost development URLs"
+  echo "   ✅ deploy/env/.env updated successfully with localhost development URLs"
 }
 
 # Function to show summary

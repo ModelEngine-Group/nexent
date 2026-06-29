@@ -35,6 +35,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const effectivePath = getEffectiveRoutePath(pathname);
   const isHomePage = effectivePath === "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
+  const isSharePage = effectivePath.startsWith("/share/");
 
   // Sidebar collapse state
   const [collapsed, setCollapsed] = useState(false);
@@ -103,10 +104,26 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     backgroundColor: "#fff",
   };
 
+  if (isSharePage) {
+    return (
+      <Layout style={layoutStyle}>
+        <Content
+          style={{
+            height: "100%",
+            overflow: "hidden",
+            backgroundColor: "#fff",
+          }}
+        >
+          {children}
+        </Content>
+      </Layout>
+    );
+  }
+
   return (
     <Layout style={layoutStyle}>
       <Header style={headerStyle}>
-        <TopNavbar isChatPage={isChatPage}/>
+        <TopNavbar isChatPage={isChatPage} />
       </Header>
 
       <Layout>
@@ -148,11 +165,11 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
         {/* Don't render children until authorization is complete (except home page) */}
         <Content style={contentStyle}>
-          {isHomePage || isOAuthCompletePage || isAuthorized ? (
+          {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
             children
           ) : (
             <div className="flex items-center justify-center h-full w-full">
-              <Spin/>
+              <Spin />
             </div>
           )}
         </Content>

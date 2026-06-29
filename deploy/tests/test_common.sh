@@ -76,6 +76,14 @@ if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
   exit 1
 fi
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
+assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5013" "production should expose northbound"
+
+deployment_apply_image_source
+PRODUCTION_HELM_VALUES="$TMP_DIR/production-generated-values.yaml"
+deployment_render_helm_values "$PRODUCTION_HELM_VALUES"
+PRODUCTION_HELM_CONTENT="$(cat "$PRODUCTION_HELM_VALUES")"
+assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    northbound:\n      type: "NodePort"\n      nodePort: 30013' "production k8s should expose northbound as NodePort"
+assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "production k8s should expose web as NodePort"
 
 deployment_prepare_config --components supabase --port-policy development --app-version latest
 assert_eq "infrastructure,supabase" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
@@ -201,44 +209,87 @@ if deployment_validate_password "Nex123"; then
 fi
 
 ENV_TEST_ROOT="$TMP_DIR/env-root"
-mkdir -p "$ENV_TEST_ROOT/docker"
+mkdir -p "$ENV_TEST_ROOT/docker" "$ENV_TEST_ROOT/deploy/env"
+printf 'FROM_ROOT_SHOULD_NOT_COPY=yes\n' > "$ENV_TEST_ROOT/.env"
+printf 'FROM_ROOT_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$ENV_TEST_ROOT/.env.example"
 printf 'FROM_DOCKER=yes\n' > "$ENV_TEST_ROOT/docker/.env"
-printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/.env.example"
+printf 'FROM_EXAMPLE=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env.example"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
-assert_contains "$(cat "$ENV_TEST_ROOT/.env")" "FROM_DOCKER=yes" "root .env should migrate from docker/.env first"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "FROM_DOCKER=yes" "deploy/env/.env should migrate from docker/.env first"
+if grep -q "FROM_ROOT_SHOULD_NOT_COPY" "$ENV_TEST_ROOT/deploy/env/.env"; then
+  echo "FAIL: deploy/env/.env should not migrate from root .env"
+  exit 1
+fi
 
-printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/.env"
+DOCKER_EXAMPLE_ONLY_ROOT="$TMP_DIR/docker-example-only-root"
+mkdir -p "$DOCKER_EXAMPLE_ONLY_ROOT/docker" "$DOCKER_EXAMPLE_ONLY_ROOT/deploy/env"
+printf 'FROM_DOCKER_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$DOCKER_EXAMPLE_ONLY_ROOT/docker/.env.example"
+if deployment_ensure_root_env "$DOCKER_EXAMPLE_ONLY_ROOT" "$DOCKER_EXAMPLE_ONLY_ROOT/docker" 2>/dev/null; then
+  echo "FAIL: deploy/env/.env should not migrate from docker/.env.example"
+  exit 1
+fi
+if [ -f "$DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env" ]; then
+  echo "FAIL: docker/.env.example should not create deploy/env/.env"
+  exit 1
+fi
+
+printf 'ROOT_ONLY=yes\n' > "$ENV_TEST_ROOT/deploy/env/.env"
 deployment_ensure_root_env "$ENV_TEST_ROOT" "$ENV_TEST_ROOT/docker"
-assert_contains "$(cat "$ENV_TEST_ROOT/.env")" "ROOT_ONLY=yes" "existing root .env should not be overwritten"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "ROOT_ONLY=yes" "existing deploy/env/.env should not be overwritten"
 
-deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "ROOT_ONLY" "updated"
-assert_contains "$(cat "$ENV_TEST_ROOT/.env")" 'ROOT_ONLY="updated"' "env updater should update root env values"
+deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "ROOT_ONLY" "updated"
+assert_contains "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" 'ROOT_ONLY="updated"' "env updater should update deploy env values"
 assert_eq "true" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should mark changed writes"
 
-ENV_CONTENT_BEFORE="$(cat "$ENV_TEST_ROOT/.env")"
-deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "ROOT_ONLY" "updated"
+ENV_CONTENT_BEFORE="$(cat "$ENV_TEST_ROOT/deploy/env/.env")"
+deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "ROOT_ONLY" "updated"
 assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should mark identical writes unchanged"
-assert_eq "$ENV_CONTENT_BEFORE" "$(cat "$ENV_TEST_ROOT/.env")" "env updater should not rewrite identical quoted values"
+assert_eq "$ENV_CONTENT_BEFORE" "$(cat "$ENV_TEST_ROOT/deploy/env/.env")" "env updater should not rewrite identical quoted values"
 
-printf 'UNQUOTED=value\nSINGLE_QUOTED='\''value2'\''\n' >> "$ENV_TEST_ROOT/.env"
-assert_eq "value" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED")" "env getter should read unquoted values"
-assert_eq "value2" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/.env" "SINGLE_QUOTED")" "env getter should read single-quoted values"
-deployment_update_env_var_file "$ENV_TEST_ROOT/.env" "UNQUOTED" "value"
+printf 'UNQUOTED=value\nSINGLE_QUOTED='\''value2'\''\n' >> "$ENV_TEST_ROOT/deploy/env/.env"
+assert_eq "value" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "UNQUOTED")" "env getter should read unquoted values"
+assert_eq "value2" "$(deployment_get_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "SINGLE_QUOTED")" "env getter should read single-quoted values"
+deployment_update_env_var_file "$ENV_TEST_ROOT/deploy/env/.env" "UNQUOTED" "value"
 assert_eq "false" "$DEPLOYMENT_LAST_ENV_WRITE_CHANGED" "env updater should normalize unquoted identical values"
 
 GENERATE_ENV_TEST_ROOT="$TMP_DIR/generate-env-root"
-mkdir -p "$GENERATE_ENV_TEST_ROOT/docker"
+mkdir -p "$GENERATE_ENV_TEST_ROOT/docker" "$GENERATE_ENV_TEST_ROOT/deploy/env"
+printf 'FROM_GENERATE_ROOT_SHOULD_NOT_COPY=yes\n' > "$GENERATE_ENV_TEST_ROOT/.env"
+printf 'FROM_GENERATE_ROOT_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$GENERATE_ENV_TEST_ROOT/.env.example"
 printf 'FROM_GENERATE_DOCKER=yes\n' > "$GENERATE_ENV_TEST_ROOT/docker/.env"
-printf 'FROM_GENERATE_EXAMPLE=yes\n' > "$GENERATE_ENV_TEST_ROOT/.env.example"
+printf 'FROM_GENERATE_EXAMPLE=yes\n' > "$GENERATE_ENV_TEST_ROOT/deploy/env/.env.example"
 (
   NEXENT_GENERATE_ENV_SKIP_MAIN=true
   # shellcheck source=/dev/null
   source "$SCRIPT_DIR/../docker/generate_env.sh"
-  ENV_FILE="$GENERATE_ENV_TEST_ROOT/.env"
-  ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/.env.example"
-  LEGACY_ENV="$GENERATE_ENV_TEST_ROOT/docker/.env"
-  LEGACY_ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/docker/.env.example"
+  ENV_FILE="$GENERATE_ENV_TEST_ROOT/deploy/env/.env"
+  ENV_EXAMPLE="$GENERATE_ENV_TEST_ROOT/deploy/env/.env.example"
+  DOCKER_ENV="$GENERATE_ENV_TEST_ROOT/docker/.env"
   prepare_env_file >/dev/null
 )
-assert_contains "$(cat "$GENERATE_ENV_TEST_ROOT/.env")" "FROM_GENERATE_DOCKER=yes" "generate_env should migrate docker/.env before .env.example"
+assert_contains "$(cat "$GENERATE_ENV_TEST_ROOT/deploy/env/.env")" "FROM_GENERATE_DOCKER=yes" "generate_env should migrate docker/.env before deploy/env/.env.example"
+if grep -q "FROM_GENERATE_ROOT_SHOULD_NOT_COPY" "$GENERATE_ENV_TEST_ROOT/deploy/env/.env"; then
+  echo "FAIL: generate_env should not migrate from root .env"
+  exit 1
+fi
+
+GENERATE_DOCKER_EXAMPLE_ONLY_ROOT="$TMP_DIR/generate-docker-example-only-root"
+mkdir -p "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/docker" "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env"
+printf 'FROM_GENERATE_DOCKER_EXAMPLE_SHOULD_NOT_COPY=yes\n' > "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/docker/.env.example"
+if (
+  NEXENT_GENERATE_ENV_SKIP_MAIN=true
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/../docker/generate_env.sh"
+  ENV_FILE="$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env"
+  ENV_EXAMPLE="$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env.example"
+  DOCKER_ENV="$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/docker/.env"
+  prepare_env_file >/dev/null 2>&1
+); then
+  echo "FAIL: generate_env should not migrate from docker/.env.example"
+  exit 1
+fi
+if [ -f "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env" ]; then
+  echo "FAIL: generate_env should not create deploy/env/.env from docker/.env.example"
+  exit 1
+fi
 echo "All deployment common tests passed."

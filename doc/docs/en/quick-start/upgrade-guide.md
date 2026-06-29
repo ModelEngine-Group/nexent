@@ -41,8 +41,8 @@ bash deploy.sh docker
 If deploy.options is missing, the script will prompt you to select deployment settings again, such as components, port policy, and image source. Choose the same options you used for the previous deployment.
 
 >💡 Tip
-> Existing `.env` is kept as-is. If it is missing, the deploy script first reuses an existing `docker/.env`, then falls back to `.env.example` or `docker/.env.example`.
-> If you need to configure voice models (STT/TTS), add the relevant variables to `.env`. We will provide a front-end configuration interface as soon as possible.
+> Existing `deploy/env/.env` is kept as-is. If it is missing, the deploy script first reuses `docker/.env`, then falls back to `deploy/env/.env.example`.
+> If you need to configure voice models (STT/TTS), add the relevant variables to `deploy/env/.env`. We will provide a front-end configuration interface as soon as possible.
 
 
 ## 🌐 Step 3: Verify the deployment
