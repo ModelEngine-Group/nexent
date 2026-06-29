@@ -122,6 +122,7 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
     selectedKey,
     values,
     containerPort,
+    customName,
     submitting,
   } = controller;
   const unsupportedOci =
@@ -293,6 +294,18 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
             name: candidate?.server?.name || "-",
           })}
         </p>
+
+        {/* Editable service name */}
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            {t("mcpTools.registry.quickAddPicker.serviceName")}
+          </label>
+          <Input
+            value={customName}
+            onChange={(e) => controller.setCustomName(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
 
         <Form.Item
           name="selectedKey"

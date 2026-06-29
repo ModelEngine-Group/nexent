@@ -280,7 +280,7 @@ async def add_mcp_service(
     is_container = container_id is not None or container_config is not None
     resolved_config_json = container_config if is_container and isinstance(container_config, dict) else config_json
 
-    if enabled and check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
+    if check_mcp_name_exists(mcp_name=name, tenant_id=tenant_id):
         logger.error(f"MCP name already exists: {name}")
         raise MCPNameIllegal("MCP name already exists")
 

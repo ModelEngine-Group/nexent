@@ -7,11 +7,13 @@ import aiohttp
 
 from consts.exceptions import (
     MCPConnectionError,
+    McpNameConflictError,
     McpNotFoundError,
     McpValidationError,
     UnauthorizedError,
 )
 from database.market_mcp_db import (
+    check_mcp_market_name_exists,
     create_mcp_market_record,
     delete_mcp_market_record_by_id,
     get_mcp_market_record_by_id,
@@ -177,6 +179,10 @@ async def publish_community_mcp_service(
 
     community_transport_type = "container" if final_config_json is not None else "url"
 
+    # Check name uniqueness in the community market — globally across all tenants
+    if check_mcp_market_name_exists(final_name):
+        raise McpNameConflictError(f"MCP name '{final_name}' already exists in the community market")
+
     review_id = create_mcp_market_review(
         mcp_data={
             "mcp_name": final_name,
@@ -244,6 +250,10 @@ async def update_community_mcp_service(
         next_transport_type = "container"
     if next_transport_type is None and mcp_server is not None:
         next_transport_type = "url"
+
+    # Check name uniqueness in the market if the name is changing
+    if name is not None and name != current.get("mcp_name") and check_mcp_market_name_exists(name):
+        raise McpNameConflictError(f"MCP name '{name}' already exists in the community market")
 
     create_mcp_market_review(
         mcp_data={

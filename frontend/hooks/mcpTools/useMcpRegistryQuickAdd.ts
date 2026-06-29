@@ -54,6 +54,7 @@ export function useMcpRegistryQuickAdd({
     undefined
   );
   const [submitting, setSubmitting] = useState(false);
+  const [customName, setCustomName] = useState<string>("");
 
   const selectedOption = useMemo(
     () => options.find((option) => option.key === selectedKey) || null,
@@ -68,6 +69,7 @@ export function useMcpRegistryQuickAdd({
         return;
       }
       setCandidate(service);
+      setCustomName(service.server?.name || "");
       setOptions(nextOptions);
       const firstKey = nextOptions[0].key;
       setSelectedKey(firstKey);
@@ -83,6 +85,7 @@ export function useMcpRegistryQuickAdd({
     setSelectedKey("");
     setValues({});
     setContainerPort(undefined);
+    setCustomName("");
   }, []);
 
   const chooseOption = useCallback(
@@ -100,6 +103,11 @@ export function useMcpRegistryQuickAdd({
 
   const confirm = useCallback(async () => {
     if (!candidate || !selectedOption) return;
+    const name = customName.trim();
+    if (!name) {
+      message.warning(t("mcpTools.add.validate.nameRequired"));
+      return;
+    }
     const tags: string[] = [];
 
     const allFields = [
@@ -139,7 +147,7 @@ export function useMcpRegistryQuickAdd({
         }
         const runtimeArgs = resolveRuntimeArgs(selectedOption, values);
         const envValues = collectPackageEnvValues(selectedOption, values);
-        const serverKey = normalizeServerKey(candidate.server?.name);
+        const serverKey = normalizeServerKey(name);
 
         const mcpConfig: McpContainerConfigPayload = {
           mcpServers: {
@@ -152,7 +160,7 @@ export function useMcpRegistryQuickAdd({
         };
 
         await addContainerMcpToolService({
-          name: candidate.server?.name,
+          name,
           description: candidate.server?.description,
           tags,
           source: McpSource.REGISTRY,
@@ -178,7 +186,7 @@ export function useMcpRegistryQuickAdd({
         );
 
         await addMcpToolService({
-          name: candidate.server?.name,
+          name,
           description: candidate.server?.description || "",
           source: McpSource.REGISTRY,
           server_url: finalUrl,
@@ -204,7 +212,14 @@ export function useMcpRegistryQuickAdd({
       log.error("[useMcpRegistryQuickAdd] Failed to add from registry", {
         error,
       });
-      message.error(t("mcpTools.add.failed"));
+      const msg = error instanceof Error ? error.message : "";
+      if (/already exists|name conflict|name already used/i.test(msg)) {
+        message.error(t("mcpTools.add.error.nameExists"));
+      } else if (/connection|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
+        message.error(t("mcpTools.add.error.connectionFailed"));
+      } else {
+        message.error(msg || t("mcpTools.add.failed"));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -212,6 +227,7 @@ export function useMcpRegistryQuickAdd({
     candidate,
     close,
     containerPort,
+    customName,
     message,
     onSuccess,
     queryClient,
@@ -228,6 +244,8 @@ export function useMcpRegistryQuickAdd({
     selectedKey,
     values,
     containerPort,
+    customName,
+    setCustomName,
     setContainerPort,
     open,
     close,

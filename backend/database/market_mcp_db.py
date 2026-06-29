@@ -117,6 +117,19 @@ def get_mcp_market_record_by_id(market_id: int) -> Dict[str, Any] | None:
         return as_dict(record) if record else None
 
 
+def check_mcp_market_name_exists(mcp_name: str) -> bool:
+    """Check if an approved market record with the given name already exists.
+
+    The check is global across all tenants since market names are public.
+    """
+    with get_db_session() as session:
+        record = session.query(McpMarketRecord).filter(
+            McpMarketRecord.mcp_name == mcp_name,
+            McpMarketRecord.delete_flag != "Y",
+        ).first()
+        return record is not None
+
+
 def update_mcp_market_record_version(
     *,
     market_id: int,
