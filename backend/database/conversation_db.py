@@ -52,7 +52,11 @@ class ConversationHistory(TypedDict):
     image_records: List[ImageRecord]
 
 
-def create_conversation(conversation_title: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+def create_conversation(
+    conversation_title: str,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -66,6 +70,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
     with get_db_session() as session:
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": 'N'}
+        if tenant_id:
+            data["tenant_id"] = tenant_id
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -90,7 +96,11 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
         return result_dict
 
 
-def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
+def create_conversation_message(
+    message_data: Dict[str, Any],
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> int:
     """
     Create a conversation message record
 
@@ -122,6 +132,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_data['role'],
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N'}
+        if tenant_id:
+            data["tenant_id"] = tenant_id
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -134,7 +146,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
 
 
 def create_message_units(message_units: List[Dict[str, Any]], message_id: int, conversation_id: int,
-                         user_id: Optional[str] = None) -> List[int]:
+                         user_id: Optional[str] = None, tenant_id: Optional[str] = None) -> List[int]:
     """
     Batch create message unit records
 
@@ -169,6 +181,8 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 "unit_content": unit['content'],
                 "delete_flag": 'N'
             }
+            if tenant_id:
+                row_data["tenant_id"] = tenant_id
 
             if user_id:
                 row_data["created_by"] = user_id
@@ -184,7 +198,11 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
-def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def get_conversation(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Get conversation details
 
@@ -209,13 +227,17 @@ def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Opt
             stmt = stmt.where(
                 ConversationRecord.created_by == user_id
             )
+        if tenant_id:
+            stmt = stmt.where(
+                ConversationRecord.tenant_id == tenant_id
+            )
 
         # Execute the query
         record = session.scalars(stmt).first()
         return None if record is None else as_dict(record)
 
 
-def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
+def get_conversation_messages(conversation_id: int, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Get all messages in a conversation
 
@@ -234,6 +256,8 @@ def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.delete_flag == 'N'
         ).order_by(asc(ConversationMessage.message_index))
+        if tenant_id:
+            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
 
         # Execute the query
         records = session.scalars(stmt).all()
@@ -269,7 +293,7 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         return list(map(as_dict, records))
 
 
-def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_conversation_list(user_id: Optional[str] = None, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Get list of all undeleted conversations, sorted by creation time in descending order
 
@@ -297,6 +321,8 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
         # If user_id is provided, additional filter conditions can be added here
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the query
         records = session.execute(stmt)
@@ -312,7 +338,12 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
         return result
 
 
-def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[str] = None) -> bool:
+def rename_conversation(
+    conversation_id: int,
+    new_title: str,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> bool:
     """
     Rename a conversation
 
@@ -342,6 +373,10 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
         ).values(update_data)
+        if user_id:
+            stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the update statement
         result = session.execute(stmt)
@@ -350,7 +385,11 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
         return result.rowcount > 0
 
 
-def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> bool:
+def delete_conversation(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> bool:
     """
     Delete a conversation (soft delete)
 
@@ -378,13 +417,23 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
         ).values(update_data)
+        if user_id:
+            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            conversation_stmt = conversation_stmt.where(ConversationRecord.tenant_id == tenant_id)
         conversation_result = session.execute(conversation_stmt)
+        if conversation_result.rowcount <= 0:
+            return False
 
         # 2. Mark related messages as deleted
         message_stmt = update(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.delete_flag == 'N'
         ).values(update_data)
+        if user_id:
+            message_stmt = message_stmt.where(ConversationMessage.created_by == user_id)
+        if tenant_id:
+            message_stmt = message_stmt.where(ConversationMessage.tenant_id == tenant_id)
         session.execute(message_stmt)
 
         # 3. Mark message units as deleted
@@ -392,6 +441,10 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             ConversationMessageUnit.conversation_id == conversation_id,
             ConversationMessageUnit.delete_flag == 'N'
         ).values(update_data)
+        if user_id:
+            unit_stmt = unit_stmt.where(ConversationMessageUnit.created_by == user_id)
+        if tenant_id:
+            unit_stmt = unit_stmt.where(ConversationMessageUnit.tenant_id == tenant_id)
         session.execute(unit_stmt)
 
         # 4. Mark search sources as deleted
@@ -399,6 +452,10 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             ConversationSourceSearch.conversation_id == conversation_id,
             ConversationSourceSearch.delete_flag == 'N'
         ).values(update_data)
+        if user_id:
+            search_stmt = search_stmt.where(ConversationSourceSearch.created_by == user_id)
+        if tenant_id:
+            search_stmt = search_stmt.where(ConversationSourceSearch.tenant_id == tenant_id)
         session.execute(search_stmt)
 
         # 5. Mark image sources as deleted
@@ -406,13 +463,16 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             ConversationSourceImage.conversation_id == conversation_id,
             ConversationSourceImage.delete_flag == 'N'
         ).values(update_data)
+        if user_id:
+            image_stmt = image_stmt.where(ConversationSourceImage.created_by == user_id)
+        if tenant_id:
+            image_stmt = image_stmt.where(ConversationSourceImage.tenant_id == tenant_id)
         session.execute(image_stmt)
 
-        # Check if the conversation record was affected
-        return conversation_result.rowcount > 0
+        return True
 
 
-def soft_delete_all_conversations_by_user(user_id: str) -> int:
+def soft_delete_all_conversations_by_user(user_id: str, tenant_id: Optional[str] = None) -> int:
     """
     Soft-delete all conversations and related records created by a user.
 
@@ -429,6 +489,7 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             select(ConversationRecord.conversation_id).where(
                 ConversationRecord.delete_flag == 'N',
                 ConversationRecord.created_by == user_id,
+                *([ConversationRecord.tenant_id == tenant_id] if tenant_id else []),
             )
         ).all()
 
@@ -436,44 +497,63 @@ def soft_delete_all_conversations_by_user(user_id: str) -> int:
             return 0
 
         # 2) Mark conversations as deleted
-        session.execute(
-            update(ConversationRecord)
-            .where(ConversationRecord.conversation_id.in_(conv_ids), ConversationRecord.delete_flag == 'N')
-            .values(update_data)
+        record_update = update(ConversationRecord).where(
+            ConversationRecord.conversation_id.in_(conv_ids),
+            ConversationRecord.delete_flag == 'N',
         )
+        if tenant_id:
+            record_update = record_update.where(ConversationRecord.tenant_id == tenant_id)
+        session.execute(record_update.values(update_data))
 
         # 3) Mark messages as deleted
-        session.execute(
-            update(ConversationMessage)
-            .where(ConversationMessage.conversation_id.in_(conv_ids), ConversationMessage.delete_flag == 'N')
-            .values(update_data)
+        message_update = update(ConversationMessage).where(
+            ConversationMessage.conversation_id.in_(conv_ids),
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.created_by == user_id,
         )
+        if tenant_id:
+            message_update = message_update.where(ConversationMessage.tenant_id == tenant_id)
+        session.execute(message_update.values(update_data))
 
         # 4) Mark message units as deleted
-        session.execute(
-            update(ConversationMessageUnit)
-            .where(ConversationMessageUnit.conversation_id.in_(conv_ids), ConversationMessageUnit.delete_flag == 'N')
-            .values(update_data)
+        unit_update = update(ConversationMessageUnit).where(
+            ConversationMessageUnit.conversation_id.in_(conv_ids),
+            ConversationMessageUnit.delete_flag == 'N',
+            ConversationMessageUnit.created_by == user_id,
         )
+        if tenant_id:
+            unit_update = unit_update.where(ConversationMessageUnit.tenant_id == tenant_id)
+        session.execute(unit_update.values(update_data))
 
         # 5) Mark search sources as deleted
-        session.execute(
-            update(ConversationSourceSearch)
-            .where(ConversationSourceSearch.conversation_id.in_(conv_ids), ConversationSourceSearch.delete_flag == 'N')
-            .values(update_data)
+        search_update = update(ConversationSourceSearch).where(
+            ConversationSourceSearch.conversation_id.in_(conv_ids),
+            ConversationSourceSearch.delete_flag == 'N',
+            ConversationSourceSearch.created_by == user_id,
         )
+        if tenant_id:
+            search_update = search_update.where(ConversationSourceSearch.tenant_id == tenant_id)
+        session.execute(search_update.values(update_data))
 
         # 6) Mark image sources as deleted
-        session.execute(
-            update(ConversationSourceImage)
-            .where(ConversationSourceImage.conversation_id.in_(conv_ids), ConversationSourceImage.delete_flag == 'N')
-            .values(update_data)
+        image_update = update(ConversationSourceImage).where(
+            ConversationSourceImage.conversation_id.in_(conv_ids),
+            ConversationSourceImage.delete_flag == 'N',
+            ConversationSourceImage.created_by == user_id,
         )
+        if tenant_id:
+            image_update = image_update.where(ConversationSourceImage.tenant_id == tenant_id)
+        session.execute(image_update.values(update_data))
 
         return len(conv_ids)
 
 
-def update_message_opinion(message_id: int, opinion: str, user_id: Optional[str] = None) -> bool:
+def update_message_opinion(
+    message_id: int,
+    opinion: str,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> bool:
     """
     Update message like/dislike status
 
@@ -503,6 +583,18 @@ def update_message_opinion(message_id: int, opinion: str, user_id: Optional[str]
             ConversationMessage.message_id == message_id,
             ConversationMessage.delete_flag == 'N'
         ).values(update_data)
+        if tenant_id:
+            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
+        if user_id:
+            stmt = stmt.where(
+                ConversationMessage.conversation_id.in_(
+                    select(ConversationRecord.conversation_id).where(
+                        ConversationRecord.created_by == user_id,
+                        ConversationRecord.delete_flag == 'N',
+                        *([ConversationRecord.tenant_id == tenant_id] if tenant_id else []),
+                    )
+                )
+            )
 
         # Execute the update statement
         result = session.execute(stmt)
@@ -511,7 +603,11 @@ def update_message_opinion(message_id: int, opinion: str, user_id: Optional[str]
         return result.rowcount > 0
 
 
-def get_conversation_history(conversation_id: int, user_id: Optional[str] = None) -> Optional[ConversationHistory]:
+def get_conversation_history(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[ConversationHistory]:
     """
     Get complete conversation history, including all messages and message units' raw data
 
@@ -538,6 +634,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         if user_id:
             check_stmt = check_stmt.where(
                 ConversationRecord.created_by == user_id)
+        if tenant_id:
+            check_stmt = check_stmt.where(
+                ConversationRecord.tenant_id == tenant_id)
 
         conversation = session.execute(check_stmt).first()
 
@@ -573,9 +672,10 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             subquery.label('units')
         ).where(
             ConversationMessage.conversation_id == conversation_id,
-
             ConversationMessage.delete_flag == 'N'
         ).order_by(ConversationMessage.message_index)
+        if tenant_id:
+            query = query.where(ConversationMessage.tenant_id == tenant_id)
 
         message_records = session.execute(query).all()
 
@@ -584,6 +684,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationSourceSearch.conversation_id == conversation_id,
             ConversationSourceSearch.delete_flag == 'N'
         ).order_by(ConversationSourceSearch.search_id)
+        if tenant_id:
+            search_stmt = search_stmt.where(ConversationSourceSearch.tenant_id == tenant_id)
         search_records = session.scalars(search_stmt).all()
 
         # Get image data
@@ -591,6 +693,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationSourceImage.conversation_id == conversation_id,
             ConversationSourceImage.delete_flag == 'N'
         )
+        if tenant_id:
+            image_stmt = image_stmt.where(ConversationSourceImage.tenant_id == tenant_id)
         image_records = session.scalars(image_stmt).all()
 
         # Integrate message and unit data
@@ -632,7 +736,11 @@ def _image_exists(session, message_id: int, image_url: str) -> bool:
     return session.execute(stmt).scalar_one_or_none() is not None
 
 
-def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
+def create_source_image(
+    image_data: Dict[str, Any],
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> int:
     """
     Create image source reference (skips if the same message_id + image_url already exists).
 
@@ -663,6 +771,8 @@ def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = Non
             # Use the database's CURRENT_TIMESTAMP function
             "create_time": func.current_timestamp()
         }
+        if tenant_id:
+            data["tenant_id"] = tenant_id
 
         if user_id:
             data = add_creation_tracking(data, user_id)
@@ -716,7 +826,11 @@ def delete_source_image(image_id: int, user_id: Optional[str] = None) -> bool:
         return result.rowcount > 0
 
 
-def get_source_images_by_message(message_id: int, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_source_images_by_message(
+    message_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Get all associated image source information by message ID
 
@@ -745,6 +859,8 @@ def get_source_images_by_message(message_id: int, user_id: Optional[str] = None)
 
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the query
         image_records = session.scalars(stmt).all()
@@ -753,7 +869,11 @@ def get_source_images_by_message(message_id: int, user_id: Optional[str] = None)
         return [as_dict(record) for record in image_records]
 
 
-def get_source_images_by_conversation(conversation_id: int, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_source_images_by_conversation(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Get all associated image source information by conversation ID
 
@@ -780,6 +900,8 @@ def get_source_images_by_conversation(conversation_id: int, user_id: Optional[st
 
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the query
         image_records = session.scalars(stmt).all()
@@ -788,7 +910,11 @@ def get_source_images_by_conversation(conversation_id: int, user_id: Optional[st
         return [as_dict(record) for record in image_records]
 
 
-def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
+def create_source_search(
+    search_data: Dict[str, Any],
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> int:
     """
     Create search source reference
 
@@ -832,6 +958,8 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             # Use the database's CURRENT_TIMESTAMP function
             "create_time": func.current_timestamp()
         }
+        if tenant_id:
+            data["tenant_id"] = tenant_id
 
         # Add unit_id if provided
         if 'unit_id' in search_data and search_data['unit_id'] is not None:
@@ -897,7 +1025,11 @@ def delete_source_search(search_id: int, user_id: Optional[str] = None) -> bool:
         return result.rowcount > 0
 
 
-def get_source_searches_by_message(message_id: int, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_source_searches_by_message(
+    message_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Get all associated search source information by message ID
 
@@ -926,6 +1058,8 @@ def get_source_searches_by_message(message_id: int, user_id: Optional[str] = Non
 
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the query
         search_records = session.scalars(stmt).all()
@@ -934,7 +1068,11 @@ def get_source_searches_by_message(message_id: int, user_id: Optional[str] = Non
         return [as_dict(record) for record in search_records]
 
 
-def get_source_searches_by_conversation(conversation_id: int, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_source_searches_by_conversation(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Get all associated search source information by conversation ID
 
@@ -962,6 +1100,8 @@ def get_source_searches_by_conversation(conversation_id: int, user_id: Optional[
 
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the query and get all results
         search_records = session.scalars(stmt).all()
@@ -970,7 +1110,11 @@ def get_source_searches_by_conversation(conversation_id: int, user_id: Optional[
         return [as_dict(record) for record in search_records]
 
 
-def get_message(message_id: int, user_id: Optional[str] = None) -> Dict[str, Any]:
+def get_message(
+    message_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Get message details by message ID
 
@@ -995,6 +1139,8 @@ def get_message(message_id: int, user_id: Optional[str] = None) -> Dict[str, Any
 
         if user_id:
             stmt = stmt.where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         # Execute the query and get the first result
         record = session.scalars(stmt).first()
@@ -1003,7 +1149,12 @@ def get_message(message_id: int, user_id: Optional[str] = None) -> Dict[str, Any
         return as_dict(record) if record else None
 
 
-def get_message_id_by_index(conversation_id: int, message_index: int) -> Optional[int]:
+def get_message_id_by_index(
+    conversation_id: int,
+    message_index: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[int]:
     """
     Get message ID by conversation ID and message index
 
@@ -1025,6 +1176,18 @@ def get_message_id_by_index(conversation_id: int, message_index: int) -> Optiona
             ConversationMessage.message_index == message_index,
             ConversationMessage.delete_flag == 'N'
         )
+        if tenant_id:
+            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
+        if user_id:
+            stmt = stmt.where(
+                ConversationMessage.conversation_id.in_(
+                    select(ConversationRecord.conversation_id).where(
+                        ConversationRecord.created_by == user_id,
+                        ConversationRecord.delete_flag == 'N',
+                        *([ConversationRecord.tenant_id == tenant_id] if tenant_id else []),
+                    )
+                )
+            )
 
         # Execute the query and get the first result
         result = session.execute(stmt).scalar()
@@ -1032,7 +1195,11 @@ def get_message_id_by_index(conversation_id: int, message_index: int) -> Optiona
         return result
 
 
-def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str] = None) -> Optional[int]:
+def get_latest_assistant_message_id(
+    conversation_id: int,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[int]:
     """
     Get the most recent assistant message ID for a conversation.
 
@@ -1057,12 +1224,20 @@ def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str]
                 ConversationRecord,
                 ConversationMessage.conversation_id == ConversationRecord.conversation_id
             ).where(ConversationRecord.created_by == user_id)
+        if tenant_id:
+            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
+            if user_id:
+                stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
 
         result = session.execute(stmt).scalar()
         return result
 
 
-def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[str, Any]]) -> bool:
+def update_message_minio_files(
+    message_id: int,
+    skill_file_uploads: List[Dict[str, Any]],
+    tenant_id: Optional[str] = None,
+) -> bool:
     """
     Merge skill file uploads into an existing message's minio_files field.
 
@@ -1080,6 +1255,8 @@ def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[st
             ConversationMessage.message_id == message_id,
             ConversationMessage.delete_flag == 'N'
         )
+        if tenant_id:
+            stmt = stmt.where(ConversationMessage.tenant_id == tenant_id)
         record = session.scalars(stmt).first()
         if not record:
             return False

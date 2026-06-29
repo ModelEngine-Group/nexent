@@ -43,6 +43,7 @@ class ConversationRecord(TableBase):
     conversation_id = Column(Integer, Sequence(
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
+    tenant_id = Column(String(100), doc=_TENANT_ID_DOC)
 
 
 class ConversationMessage(TableBase):
@@ -56,6 +57,7 @@ class ConversationMessage(TableBase):
         "conversation_message_t_message_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation")
+    tenant_id = Column(String(100), doc=_TENANT_ID_DOC)
     message_index = Column(
         Integer, doc="Sequence number for frontend display sorting")
     message_role = Column(
@@ -80,6 +82,7 @@ class ConversationMessageUnit(TableBase):
         Integer, doc="Formal foreign key used to associate with the message")
     conversation_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation")
+    tenant_id = Column(String(100), doc=_TENANT_ID_DOC)
     unit_index = Column(
         Integer, doc="Sequence number for frontend display sorting")
     unit_type = Column(String(100), doc="Type of the smallest answer unit")
@@ -98,6 +101,7 @@ class ConversationSourceImage(TableBase):
         "conversation_source_image_t_image_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation to which the search source belongs")
+    tenant_id = Column(String(100), doc=_TENANT_ID_DOC)
     message_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation message to which the search source belongs")
     unit_id = Column(
@@ -124,6 +128,7 @@ class ConversationSourceSearch(TableBase):
         Integer, doc="Formal foreign key used to associate with the conversation message to which the search source belongs")
     conversation_id = Column(
         Integer, doc="Formal foreign key used to associate with the conversation to which the search source belongs")
+    tenant_id = Column(String(100), doc=_TENANT_ID_DOC)
     source_type = Column(String(
         100), doc="Source type, used to distinguish whether source_location is a URL or a path. Optional values: url/text")
     source_title = Column(

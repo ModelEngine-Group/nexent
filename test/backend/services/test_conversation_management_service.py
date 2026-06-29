@@ -46,6 +46,18 @@ sys.modules["jinja2"] = jinja2_mod
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
+class ContextIdentity:
+    def __init__(self, tenant_id, user_id, conversation_id):
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+        self.conversation_id = conversation_id
+        self.canonical_key = f"tenant={tenant_id}|user={user_id}|conversation={conversation_id}"
+        self.scoped_hash = "hash"
+agent_model_mod.ContextIdentity = ContextIdentity
+class ContextAuthorizationDecision:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+agent_model_mod.ContextAuthorizationDecision = ContextAuthorizationDecision
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
@@ -544,12 +556,12 @@ class TestConversationManagementService(unittest.TestCase):
         mock_rename_conversation.return_value = True
 
         # Execute
-        result = update_conversation_title(123, "New Title", self.user_id)
+        result = update_conversation_title(123, "New Title", self.user_id, tenant_id=self.tenant_id)
 
         # Assert
         self.assertTrue(result)
         mock_rename_conversation.assert_called_once_with(
-            123, "New Title", self.user_id)
+            123, "New Title", self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.create_conversation')
     def test_create_new_conversation(self, mock_create_conversation):
@@ -558,13 +570,13 @@ class TestConversationManagementService(unittest.TestCase):
             "conversation_id": 123, "title": "New Chat", "create_time": "2023-04-01"}
 
         # Execute
-        result = create_new_conversation("New Chat", self.user_id)
+        result = create_new_conversation("New Chat", self.user_id, self.tenant_id)
 
         # Assert
         self.assertEqual(result["conversation_id"], 123)
         self.assertEqual(result["title"], "New Chat")
         mock_create_conversation.assert_called_once_with(
-            "New Chat", self.user_id)
+            "New Chat", self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.get_conversation_list')
     def test_get_conversation_list_service(self, mock_get_conversation_list):
@@ -576,13 +588,13 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_conversation_list.return_value = mock_conversations
 
         # Execute
-        result = get_conversation_list_service(self.user_id)
+        result = get_conversation_list_service(self.user_id, self.tenant_id)
 
         # Assert
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["conversation_id"], 1)
         self.assertEqual(result[1]["title"], "Chat 2")
-        mock_get_conversation_list.assert_called_once_with(self.user_id)
+        mock_get_conversation_list.assert_called_once_with(self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.rename_conversation')
     def test_rename_conversation_service(self, mock_rename_conversation):
@@ -590,11 +602,11 @@ class TestConversationManagementService(unittest.TestCase):
         mock_rename_conversation.return_value = True
 
         # Execute
-        rename_conversation_service(123, "Updated Title", self.user_id)
+        rename_conversation_service(123, "Updated Title", self.user_id, self.tenant_id)
 
         # Assert
         mock_rename_conversation.assert_called_once_with(
-            123, "Updated Title", self.user_id)
+            123, "Updated Title", self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.delete_conversation')
     def test_delete_conversation_service(self, mock_delete_conversation):
@@ -602,10 +614,10 @@ class TestConversationManagementService(unittest.TestCase):
         mock_delete_conversation.return_value = True
 
         # Execute
-        delete_conversation_service(123, self.user_id)
+        delete_conversation_service(123, self.user_id, self.tenant_id)
 
         # Assert
-        mock_delete_conversation.assert_called_once_with(123, self.user_id)
+        mock_delete_conversation.assert_called_once_with(123, self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.get_conversation_history')
     def test_get_conversation_history_service(self, mock_get_conversation_history):
@@ -635,7 +647,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_conversation_history.return_value = mock_history
 
         # Execute
-        result = get_conversation_history_service(123, self.user_id)
+        result = get_conversation_history_service(123, self.user_id, self.tenant_id)
 
         # Assert
         self.assertEqual(len(result), 1)  # Result is wrapped in a list
@@ -688,7 +700,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_images.return_value = mock_images
 
         # Execute
-        result = get_sources_service(None, 2, user_id=self.user_id)
+        result = get_sources_service(None, 2, user_id=self.user_id, tenant_id=self.tenant_id)
 
         # Assert
         self.assertEqual(result["code"], 0)
@@ -712,10 +724,11 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_opinion.return_value = True
 
         # Execute
-        update_message_opinion_service(123, "Y")
+        update_message_opinion_service(123, "Y", user_id=self.user_id, tenant_id=self.tenant_id)
 
         # Assert
-        mock_update_opinion.assert_called_once_with(123, "Y")
+        mock_update_opinion.assert_called_once_with(
+            123, "Y", user_id=self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.update_message_opinion')
     def test_update_message_opinion_service_failure(self, mock_update_opinion):
@@ -725,18 +738,20 @@ class TestConversationManagementService(unittest.TestCase):
 
         # Execute & Assert
         with self.assertRaises(Exception) as context:
-            update_message_opinion_service(123, "Y")
+            update_message_opinion_service(123, "Y", user_id=self.user_id, tenant_id=self.tenant_id)
         self.assertIn("Message does not exist", str(context.exception))
-        mock_update_opinion.assert_called_once_with(123, "Y")
+        mock_update_opinion.assert_called_once_with(
+            123, "Y", user_id=self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.get_message_id_by_index')
     def test_get_message_id_by_index_impl_success(self, mock_get_message):
         """Should return message_id when found."""
         mock_get_message.return_value = 999
         import asyncio
-        result = asyncio.run(get_message_id_by_index_impl(123, 2))
+        result = asyncio.run(get_message_id_by_index_impl(123, 2, user_id=self.user_id, tenant_id=self.tenant_id))
         self.assertEqual(result, 999)
-        mock_get_message.assert_called_once_with(123, 2)
+        mock_get_message.assert_called_once_with(
+            123, 2, user_id=self.user_id, tenant_id=self.tenant_id)
 
     @patch('backend.services.conversation_management_service.get_message_id_by_index')
     def test_get_message_id_by_index_impl_not_found(self, mock_get_message):
@@ -744,9 +759,10 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_message.return_value = None
         import asyncio
         with self.assertRaises(Exception) as ctx:
-            asyncio.run(get_message_id_by_index_impl(123, 2))
+            asyncio.run(get_message_id_by_index_impl(123, 2, user_id=self.user_id, tenant_id=self.tenant_id))
         self.assertIn("Message not found", str(ctx.exception))
-        mock_get_message.assert_called_once_with(123, 2)
+        mock_get_message.assert_called_once_with(
+            123, 2, user_id=self.user_id, tenant_id=self.tenant_id)
 
     # Tests for generate_conversation_title_service
     @patch('backend.services.conversation_management_service.call_llm_for_title')

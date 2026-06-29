@@ -1,4 +1,6 @@
 import pytest
+import sys
+import types
 import threading
 from unittest.mock import Mock, MagicMock
 from backend.agents.agent_run_manager import AgentRunManager, agent_run_manager
@@ -11,6 +13,9 @@ class TestAgentRunManager:
         self.manager = AgentRunManager()
         # Clear any existing state
         self.manager.agent_runs.clear()
+        self.manager._conversation_context_managers.clear()
+        self.manager._conversation_run_counts.clear()
+        self.tenant_id = "tenant1"
 
     def test_singleton_pattern(self):
         """Test that AgentRunManager is a singleton"""
@@ -20,13 +25,13 @@ class TestAgentRunManager:
 
     def test_get_run_key(self):
         """Test _get_run_key method generates correct keys"""
-        key1 = self.manager._get_run_key(123, "user1")
-        key2 = self.manager._get_run_key(456, "user1")
-        key3 = self.manager._get_run_key(123, "user2")
+        key1 = self.manager._get_run_key(123, "user1", self.tenant_id)
+        key2 = self.manager._get_run_key(456, "user1", self.tenant_id)
+        key3 = self.manager._get_run_key(123, "user2", self.tenant_id)
         
-        assert key1 == "user1:123"
-        assert key2 == "user1:456"
-        assert key3 == "user2:123"
+        assert key1 == "tenant=tenant1|user=user1|conversation=123"
+        assert key2 == "tenant=tenant1|user=user1|conversation=456"
+        assert key3 == "tenant=tenant1|user=user2|conversation=123"
         assert key1 != key2
         assert key1 != key3
         assert key2 != key3
@@ -37,10 +42,10 @@ class TestAgentRunManager:
         user_id = "user1"
         mock_run_info = Mock()
         
-        self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info, user_id, tenant_id=self.tenant_id)
         
         # Check that the run is registered with correct key
-        run_key = f"{user_id}:{conversation_id}"
+        run_key = self.manager._get_run_key(conversation_id, user_id, self.tenant_id)
         assert run_key in self.manager.agent_runs
         assert self.manager.agent_runs[run_key] == mock_run_info
 
@@ -53,16 +58,76 @@ class TestAgentRunManager:
         mock_run_info2 = Mock()
         
         # Register runs for different users with same conversation_id
-        self.manager.register_agent_run(conversation_id, mock_run_info1, user1_id)
-        self.manager.register_agent_run(conversation_id, mock_run_info2, user2_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info1, user1_id, tenant_id=self.tenant_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info2, user2_id, tenant_id=self.tenant_id)
         
         # Both should be registered with different keys
-        key1 = f"{user1_id}:{conversation_id}"
-        key2 = f"{user2_id}:{conversation_id}"
+        key1 = self.manager._get_run_key(conversation_id, user1_id, self.tenant_id)
+        key2 = self.manager._get_run_key(conversation_id, user2_id, self.tenant_id)
         assert key1 in self.manager.agent_runs
         assert key2 in self.manager.agent_runs
         assert self.manager.agent_runs[key1] == mock_run_info1
         assert self.manager.agent_runs[key2] == mock_run_info2
+
+    def test_register_agent_run_same_user_conversation_different_tenants(self):
+        """Identical user/conversation IDs in different tenants must not collide."""
+        conversation_id = 123
+        user_id = "user1"
+        mock_run_info1 = Mock()
+        mock_run_info2 = Mock()
+
+        self.manager.register_agent_run(conversation_id, mock_run_info1, user_id, tenant_id="tenant-a")
+        self.manager.register_agent_run(conversation_id, mock_run_info2, user_id, tenant_id="tenant-b")
+
+        key1 = self.manager._get_run_key(conversation_id, user_id, "tenant-a")
+        key2 = self.manager._get_run_key(conversation_id, user_id, "tenant-b")
+        assert key1 in self.manager.agent_runs
+        assert key2 in self.manager.agent_runs
+        assert self.manager.agent_runs[key1] == mock_run_info1
+        assert self.manager.agent_runs[key2] == mock_run_info2
+        assert self.manager.get_agent_run_info(conversation_id, user_id, tenant_id="tenant-a") == mock_run_info1
+        assert self.manager.get_agent_run_info(conversation_id, user_id, tenant_id="tenant-b") == mock_run_info2
+
+    def test_context_manager_same_conversation_different_tenants(self, monkeypatch):
+        """Reusable ContextManager instances are scoped by full ContextIdentity."""
+        created = []
+
+        class FakeContextManager:
+            def __init__(self, config, max_steps):
+                self.config = config
+                self.max_steps = max_steps
+                created.append(self)
+
+        fake_module = types.ModuleType("nexent.core.agents.agent_context")
+        fake_module.ContextManager = FakeContextManager
+        monkeypatch.setitem(sys.modules, "nexent.core.agents.agent_context", fake_module)
+
+        config = Mock()
+        cm1 = self.manager.get_or_create_context_manager(
+            conversation_id=123,
+            config=config,
+            max_steps=5,
+            user_id="user1",
+            tenant_id="tenant-a",
+        )
+        cm2 = self.manager.get_or_create_context_manager(
+            conversation_id=123,
+            config=config,
+            max_steps=5,
+            user_id="user1",
+            tenant_id="tenant-b",
+        )
+        cm1_again = self.manager.get_or_create_context_manager(
+            conversation_id=123,
+            config=config,
+            max_steps=5,
+            user_id="user1",
+            tenant_id="tenant-a",
+        )
+
+        assert cm1 is not cm2
+        assert cm1_again is cm1
+        assert len(created) == 2
 
     def test_register_agent_run_same_user_different_conversations(self):
         """Test registering agent runs for same user with different conversation_ids"""
@@ -73,12 +138,12 @@ class TestAgentRunManager:
         mock_run_info2 = Mock()
         
         # Register runs for same user with different conversation_ids
-        self.manager.register_agent_run(conv_id1, mock_run_info1, user_id)
-        self.manager.register_agent_run(conv_id2, mock_run_info2, user_id)
+        self.manager.register_agent_run(conv_id1, mock_run_info1, user_id, tenant_id=self.tenant_id)
+        self.manager.register_agent_run(conv_id2, mock_run_info2, user_id, tenant_id=self.tenant_id)
         
         # Both should be registered with different keys
-        key1 = f"{user_id}:{conv_id1}"
-        key2 = f"{user_id}:{conv_id2}"
+        key1 = self.manager._get_run_key(conv_id1, user_id, self.tenant_id)
+        key2 = self.manager._get_run_key(conv_id2, user_id, self.tenant_id)
         assert key1 in self.manager.agent_runs
         assert key2 in self.manager.agent_runs
         assert self.manager.agent_runs[key1] == mock_run_info1
@@ -91,18 +156,18 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         # Register first
-        self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
-        run_key = f"{user_id}:{conversation_id}"
+        self.manager.register_agent_run(conversation_id, mock_run_info, user_id, tenant_id=self.tenant_id)
+        run_key = self.manager._get_run_key(conversation_id, user_id, self.tenant_id)
         assert run_key in self.manager.agent_runs
         
         # Then unregister
-        self.manager.unregister_agent_run(conversation_id, user_id)
+        self.manager.unregister_agent_run(conversation_id, user_id, tenant_id=self.tenant_id)
         assert run_key not in self.manager.agent_runs
 
     def test_unregister_agent_run_nonexistent(self):
         """Test unregistering a non-existent agent run"""
         # Should not raise an exception
-        self.manager.unregister_agent_run(999, "nonexistent_user")
+        self.manager.unregister_agent_run(999, "nonexistent_user", tenant_id=self.tenant_id)
         assert len(self.manager.agent_runs) == 0
 
     def test_get_agent_run_info(self):
@@ -112,13 +177,13 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         # Initially no run info
-        assert self.manager.get_agent_run_info(conversation_id, user_id) is None
+        assert self.manager.get_agent_run_info(conversation_id, user_id, tenant_id=self.tenant_id) is None
         
         # Register a run
-        self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info, user_id, tenant_id=self.tenant_id)
         
         # Should return the registered run info
-        retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id)
+        retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id, tenant_id=self.tenant_id)
         assert retrieved_info == mock_run_info
 
     def test_get_agent_run_info_wrong_user(self):
@@ -129,10 +194,10 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         # Register run for user1
-        self.manager.register_agent_run(conversation_id, mock_run_info, user1_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info, user1_id, tenant_id=self.tenant_id)
         
         # Try to get run info for user2 (should return None)
-        retrieved_info = self.manager.get_agent_run_info(conversation_id, user2_id)
+        retrieved_info = self.manager.get_agent_run_info(conversation_id, user2_id, tenant_id=self.tenant_id)
         assert retrieved_info is None
 
     def test_stop_agent_run(self):
@@ -144,17 +209,17 @@ class TestAgentRunManager:
         mock_run_info.stop_event = mock_stop_event
         
         # Register a run
-        self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info, user_id, tenant_id=self.tenant_id)
         
         # Stop the run
-        result = self.manager.stop_agent_run(conversation_id, user_id)
+        result = self.manager.stop_agent_run(conversation_id, user_id, tenant_id=self.tenant_id)
         
         assert result is True
         mock_stop_event.set.assert_called_once()
 
     def test_stop_agent_run_nonexistent(self):
         """Test stopping a non-existent agent run"""
-        result = self.manager.stop_agent_run(999, "nonexistent_user")
+        result = self.manager.stop_agent_run(999, "nonexistent_user", tenant_id=self.tenant_id)
         assert result is False
 
     def test_stop_agent_run_wrong_user(self):
@@ -165,10 +230,10 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         # Register run for user1
-        self.manager.register_agent_run(conversation_id, mock_run_info, user1_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info, user1_id, tenant_id=self.tenant_id)
         
         # Try to stop run for user2 (should return False)
-        result = self.manager.stop_agent_run(conversation_id, user2_id)
+        result = self.manager.stop_agent_run(conversation_id, user2_id, tenant_id=self.tenant_id)
         assert result is False
 
     def test_thread_safety(self):
@@ -178,10 +243,10 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         def register_run():
-            self.manager.register_agent_run(conversation_id, mock_run_info, user_id)
+            self.manager.register_agent_run(conversation_id, mock_run_info, user_id, tenant_id=self.tenant_id)
         
         def unregister_run():
-            self.manager.unregister_agent_run(conversation_id, user_id)
+            self.manager.unregister_agent_run(conversation_id, user_id, tenant_id=self.tenant_id)
         
         # Create multiple threads
         threads = []
@@ -213,30 +278,30 @@ class TestAgentRunManager:
         mock_run_info2 = Mock()
         
         # Register runs for different users with same conversation_id (-1)
-        self.manager.register_agent_run(conversation_id, mock_run_info1, user1_id)
-        self.manager.register_agent_run(conversation_id, mock_run_info2, user2_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info1, user1_id, tenant_id=self.tenant_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info2, user2_id, tenant_id=self.tenant_id)
         
         # Both should be registered with different keys
-        key1 = f"{user1_id}:{conversation_id}"
-        key2 = f"{user2_id}:{conversation_id}"
+        key1 = self.manager._get_run_key(conversation_id, user1_id, self.tenant_id)
+        key2 = self.manager._get_run_key(conversation_id, user2_id, self.tenant_id)
         assert key1 in self.manager.agent_runs
         assert key2 in self.manager.agent_runs
         assert self.manager.agent_runs[key1] == mock_run_info1
         assert self.manager.agent_runs[key2] == mock_run_info2
         
         # Should be able to get and stop each run independently
-        retrieved1 = self.manager.get_agent_run_info(conversation_id, user1_id)
-        retrieved2 = self.manager.get_agent_run_info(conversation_id, user2_id)
+        retrieved1 = self.manager.get_agent_run_info(conversation_id, user1_id, tenant_id=self.tenant_id)
+        retrieved2 = self.manager.get_agent_run_info(conversation_id, user2_id, tenant_id=self.tenant_id)
         assert retrieved1 == mock_run_info1
         assert retrieved2 == mock_run_info2
         
         # Stop one run, the other should still exist
-        result1 = self.manager.stop_agent_run(conversation_id, user1_id)
+        result1 = self.manager.stop_agent_run(conversation_id, user1_id, tenant_id=self.tenant_id)
         assert result1 is True
         
         # user1's run should be stopped, user2's should still exist
-        retrieved1_after = self.manager.get_agent_run_info(conversation_id, user1_id)
-        retrieved2_after = self.manager.get_agent_run_info(conversation_id, user2_id)
+        retrieved1_after = self.manager.get_agent_run_info(conversation_id, user1_id, tenant_id=self.tenant_id)
+        retrieved2_after = self.manager.get_agent_run_info(conversation_id, user2_id, tenant_id=self.tenant_id)
         assert retrieved1_after == mock_run_info1  # Still exists but stopped
         assert retrieved2_after == mock_run_info2  # Still exists and running
 
@@ -247,36 +312,40 @@ class TestAgentRunManager:
         mock_run_info = Mock()
         
         # Use the global instance
-        agent_run_manager.register_agent_run(conversation_id, mock_run_info, user_id)
+        agent_run_manager.register_agent_run(conversation_id, mock_run_info, user_id, tenant_id=self.tenant_id)
         
         # Should be able to retrieve it
-        retrieved_info = agent_run_manager.get_agent_run_info(conversation_id, user_id)
+        retrieved_info = agent_run_manager.get_agent_run_info(conversation_id, user_id, tenant_id=self.tenant_id)
         assert retrieved_info == mock_run_info
         
         # Should be able to stop it
-        result = agent_run_manager.stop_agent_run(conversation_id, user_id)
+        result = agent_run_manager.stop_agent_run(conversation_id, user_id, tenant_id=self.tenant_id)
         assert result is True
         
         # Clean up
-        agent_run_manager.unregister_agent_run(conversation_id, user_id)
+        agent_run_manager.unregister_agent_run(conversation_id, user_id, tenant_id=self.tenant_id)
 
     def test_key_generation_edge_cases(self):
         """Test _get_run_key with edge cases"""
-        # Test with empty string user_id
-        key1 = self.manager._get_run_key(123, "")
-        assert key1 == ":123"
+        # Empty user_id is invalid in W4 ContextIdentity
+        with pytest.raises(ValueError):
+            self.manager._get_run_key(123, "", self.tenant_id)
+
+        # Missing tenant_id is invalid in W4 ContextIdentity
+        with pytest.raises(ValueError):
+            self.manager._get_run_key(123, "user1")
         
         # Test with special characters in user_id
-        key2 = self.manager._get_run_key(123, "user:with:colons")
-        assert key2 == "user:with:colons:123"
+        key2 = self.manager._get_run_key(123, "user:with:colons", self.tenant_id)
+        assert key2 == "tenant=tenant1|user=user:with:colons|conversation=123"
         
         # Test with negative conversation_id
-        key3 = self.manager._get_run_key(-1, "user1")
-        assert key3 == "user1:-1"
+        key3 = self.manager._get_run_key(-1, "user1", self.tenant_id)
+        assert key3 == "tenant=tenant1|user=user1|conversation=-1"
         
         # Test with zero conversation_id
-        key4 = self.manager._get_run_key(0, "user1")
-        assert key4 == "user1:0"
+        key4 = self.manager._get_run_key(0, "user1", self.tenant_id)
+        assert key4 == "tenant=tenant1|user=user1|conversation=0"
 
     def test_concurrent_registration_same_key(self):
         """Test concurrent registration with same key (should overwrite)"""
@@ -286,12 +355,12 @@ class TestAgentRunManager:
         mock_run_info2 = Mock()
         
         # Register first run
-        self.manager.register_agent_run(conversation_id, mock_run_info1, user_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info1, user_id, tenant_id=self.tenant_id)
         
         # Register second run with same key (should overwrite)
-        self.manager.register_agent_run(conversation_id, mock_run_info2, user_id)
+        self.manager.register_agent_run(conversation_id, mock_run_info2, user_id, tenant_id=self.tenant_id)
         
         # Should have the second run info
-        retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id)
+        retrieved_info = self.manager.get_agent_run_info(conversation_id, user_id, tenant_id=self.tenant_id)
         assert retrieved_info == mock_run_info2
-        assert retrieved_info != mock_run_info1 
+        assert retrieved_info != mock_run_info1

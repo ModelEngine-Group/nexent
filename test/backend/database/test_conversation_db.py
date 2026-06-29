@@ -49,6 +49,7 @@ class ConversationMessage:
     message_role = MagicMock(name="ConversationMessage.message_role")
     unit_index = MagicMock(name="ConversationMessage.unit_index")
     conversation_id = MagicMock(name="ConversationMessage.conversation_id")
+    created_by = MagicMock(name="ConversationMessage.created_by")
     delete_flag = MagicMock(name="ConversationMessage.delete_flag")
 
 
@@ -59,12 +60,14 @@ class ConversationMessageUnit:
     unit_content = MagicMock(name="ConversationMessageUnit.unit_content")
     message_id = MagicMock(name="ConversationMessageUnit.message_id")
     conversation_id = MagicMock(name="ConversationMessageUnit.conversation_id")
+    created_by = MagicMock(name="ConversationMessageUnit.created_by")
     delete_flag = MagicMock(name="ConversationMessageUnit.delete_flag")
 
 
 class ConversationSourceSearch:
     search_id = MagicMock(name="ConversationSourceSearch.search_id")
     conversation_id = MagicMock(name="ConversationSourceSearch.conversation_id")
+    created_by = MagicMock(name="ConversationSourceSearch.created_by")
     delete_flag = MagicMock(name="ConversationSourceSearch.delete_flag")
 
 
@@ -72,6 +75,7 @@ class ConversationSourceImage:
     image_id = MagicMock(name="ConversationSourceImage.image_id")
     conversation_id = MagicMock(name="ConversationSourceImage.conversation_id")
     message_id = MagicMock(name="ConversationSourceImage.message_id")
+    created_by = MagicMock(name="ConversationSourceImage.created_by")
     delete_flag = MagicMock(name="ConversationSourceImage.delete_flag")
 
 
@@ -158,7 +162,7 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
     ok = delete_conversation(999)
 
     assert ok is False
-    assert session.execute.call_count == 5
+    assert session.execute.call_count == 1
 
 
 # Tests for rename_conversation

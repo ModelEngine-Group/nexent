@@ -77,8 +77,8 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
     """
     stop agent run and preprocess tasks for specified conversation_id
     """
-    user_id, _ = get_current_user_id(authorization)
-    return stop_agent_tasks(conversation_id, user_id)
+    user_id, tenant_id = get_current_user_id(authorization)
+    return stop_agent_tasks(conversation_id, user_id, tenant_id=tenant_id)
 
 
 @agent_config_router.post("/search_info")
@@ -620,5 +620,4 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-
 

@@ -36,6 +36,7 @@ from agents.agent_run_manager import agent_run_manager
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
+from services.context_identity_service import require_context_identity
 
 logger = logging.getLogger("conversation_management_service")
 
@@ -68,6 +69,12 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
         conversation_id = message_data.get('conversation_id')
         if not conversation_id:
             raise Exception("conversation_id is required, please call /conversation/create to create a conversation first")
+        require_context_identity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            operation="conversation.message.create",
+        )
 
         # Process different types of message units
         message_units = message_data['message']
@@ -95,7 +102,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
             message_data_copy = {'conversation_id': conversation_id, 'message_idx': message_data['message_idx'],
                                  'role': message_data['role'], 'content': string_content, 'minio_files': minio_files}
             message_id = create_conversation_message(
-                message_data_copy, user_id)
+                message_data_copy, user_id, tenant_id=tenant_id)
 
         # If there are other types of units but no string type, create an empty content message for them
         if other_units and message_id is None:
@@ -104,7 +111,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                                  'role': message_data['role'], 'content': "",
                                  'minio_files': minio_files}
             message_id = create_conversation_message(
-                message_data_copy, user_id)
+                message_data_copy, user_id, tenant_id=tenant_id)
 
         # Process other types of units
         filtered_message_units = []
@@ -138,7 +145,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                         for image_url in unique_urls:
                             image_data = {'message_id': message_id, 'conversation_id': conversation_id,
                                           'image_url': image_url}
-                            create_source_image(image_data)
+                            create_source_image(image_data, user_id=user_id, tenant_id=tenant_id)
                 except Exception as e:
                     logging.error(f"Failed to save image content: {str(e)}")
             else:
@@ -149,7 +156,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
         unit_ids = []
         if filtered_message_units and message_id is not None:
             unit_ids = create_message_units(
-                filtered_message_units, message_id, conversation_id)
+                filtered_message_units, message_id, conversation_id, user_id=user_id, tenant_id=tenant_id)
 
         # Process search content using corresponding unit_ids
         search_placeholder_index = 0
@@ -196,7 +203,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str):
                                    'cite_index': result.get('cite_index', None) if result.get('cite_index') != '' else None,
                                    'search_type': result.get('search_type') if result.get('search_type') and result.get(
                                        'search_type') != '' else None, 'tool_sign': result.get('tool_sign', '')}
-                    create_source_search(search_data, user_id)
+                    create_source_search(search_data, user_id, tenant_id=tenant_id)
 
                 search_placeholder_index += 1
 
@@ -294,7 +301,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     return remove_think_blocks(response.content.strip())
 
 
-def update_conversation_title(conversation_id: int, title: str, user_id: str = None) -> bool:
+def update_conversation_title(conversation_id: int, title: str, user_id: str = None, tenant_id: str = None) -> bool:
     """
     Update conversation title
 
@@ -305,7 +312,13 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     Returns:
         bool: Whether the update was successful
     """
-    success = rename_conversation(conversation_id, title, user_id)
+    require_context_identity(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        operation="conversation.title.update",
+    )
+    success = rename_conversation(conversation_id, title, user_id, tenant_id=tenant_id)
     if not success:
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or has been deleted"
@@ -313,7 +326,7 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     return success
 
 
-def create_new_conversation(title: str, user_id: str) -> Dict[str, Any]:
+def create_new_conversation(title: str, user_id: str, tenant_id: str) -> Dict[str, Any]:
     """
     Create a new conversation
 
@@ -325,14 +338,20 @@ def create_new_conversation(title: str, user_id: str) -> Dict[str, Any]:
         Dict containing conversation data
     """
     try:
-        conversation_data = create_conversation(title, user_id)
+        require_context_identity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id="new",
+            operation="conversation.create",
+        )
+        conversation_data = create_conversation(title, user_id, tenant_id=tenant_id)
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise Exception(str(e))
 
 
-def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
+def get_conversation_list_service(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get all conversation list
 
@@ -340,14 +359,21 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         List of conversation data
     """
     try:
-        conversations = get_conversation_list(user_id)
+        if not tenant_id or not user_id:
+            require_context_identity(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id="list",
+                operation="conversation.list",
+            )
+        conversations = get_conversation_list(user_id, tenant_id=tenant_id)
         return conversations
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise Exception(str(e))
 
 
-def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:
+def rename_conversation_service(conversation_id: int, name: str, user_id: str, tenant_id: str) -> bool:
     """
     Rename a conversation
 
@@ -360,7 +386,13 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str) -
         bool: Whether the rename was successful
     """
     try:
-        success = rename_conversation(conversation_id, name, user_id)
+        require_context_identity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            operation="conversation.rename",
+        )
+        success = rename_conversation(conversation_id, name, user_id, tenant_id=tenant_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
         return True
@@ -369,7 +401,7 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str) -
         raise Exception(str(e))
 
 
-def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
+def delete_conversation_service(conversation_id: int, user_id: str, tenant_id: str) -> bool:
     """
     Delete specified conversation
 
@@ -381,13 +413,19 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         bool: Whether the deletion was successful
     """
     try:
-        success = delete_conversation(conversation_id, user_id)
+        require_context_identity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            operation="conversation.delete",
+        )
+        success = delete_conversation(conversation_id, user_id, tenant_id=tenant_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
 
         # Defensive cleanup: release the ContextManager associated with this conversation
         # to avoid memory leaks in edge cases
-        agent_run_manager.clear_conversation_context_manager(conversation_id)
+        agent_run_manager.clear_conversation_context_manager(conversation_id, user_id, tenant_id=tenant_id)
 
         return True
     except Exception as e:
@@ -395,7 +433,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         raise Exception(str(e))
 
 
-def get_conversation_history_service(conversation_id: int, user_id: str) -> List[Dict[str, Any]]:
+def get_conversation_history_service(conversation_id: int, user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get complete history of specified conversation
 
@@ -408,7 +446,13 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
     """
     try:
         # Get original conversation history data
-        history_data = get_conversation_history(conversation_id, user_id)
+        require_context_identity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            operation="conversation.history.read",
+        )
+        history_data = get_conversation_history(conversation_id, user_id, tenant_id=tenant_id)
 
         if not history_data:
             logging.debug(
@@ -564,7 +608,13 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
         raise Exception(str(e))
 
 
-def get_sources_service(conversation_id: Optional[int], message_id: Optional[int], source_type: str = "all", user_id: str = "") -> Dict[str, Any]:
+def get_sources_service(
+    conversation_id: Optional[int],
+    message_id: Optional[int],
+    source_type: str = "all",
+    user_id: str = "",
+    tenant_id: str = "",
+) -> Dict[str, Any]:
     """
     Get message source information (images and search results)
 
@@ -587,7 +637,13 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
 
         # If conversation ID is provided
         if conversation_id:
-            conversation = get_conversation(conversation_id, user_id)
+            require_context_identity(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                operation="conversation.sources.read",
+            )
+            conversation = get_conversation(conversation_id, user_id, tenant_id=tenant_id)
             if not conversation:
                 return {
                     "code": 404,
@@ -602,10 +658,10 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
             images = []
             if message_id:
                 image_records = get_source_images_by_message(
-                    message_id, user_id)
+                    message_id, user_id, tenant_id=tenant_id)
             elif conversation_id:
                 image_records = get_source_images_by_conversation(
-                    conversation_id, user_id)
+                    conversation_id, user_id, tenant_id=tenant_id)
 
             for image in image_records:
                 images.append(image["image_url"])
@@ -618,10 +674,10 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
             search_records = []
             if message_id:
                 search_records = get_source_searches_by_message(
-                    message_id, user_id)
+                    message_id, user_id, tenant_id=tenant_id)
             elif conversation_id:
                 search_records = get_source_searches_by_conversation(
-                    conversation_id, user_id)
+                    conversation_id, user_id, tenant_id=tenant_id)
 
             for record in search_records:
                 search_item = {
@@ -685,7 +741,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         title = await asyncio.to_thread(call_llm_for_title, question, tenant_id, language)
 
         # Update conversation title
-        update_conversation_title(conversation_id, title, user_id)
+        update_conversation_title(conversation_id, title, user_id, tenant_id=tenant_id)
 
         return title
 
@@ -694,7 +750,12 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         raise Exception(str(e))
 
 
-def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> bool:
+def update_message_opinion_service(
+    message_id: int,
+    opinion: Optional[str],
+    user_id: str = None,
+    tenant_id: str = None,
+) -> bool:
     """
     Update message like/dislike status
 
@@ -706,7 +767,14 @@ def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> b
         bool: Whether the update was successful
     """
     try:
-        success = update_message_opinion(message_id, opinion)
+        if not tenant_id or not user_id:
+            require_context_identity(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=f"message:{message_id}",
+                operation="conversation.message.opinion.update",
+            )
+        success = update_message_opinion(message_id, opinion, user_id=user_id, tenant_id=tenant_id)
         if not success:
             raise Exception("Message does not exist or has been deleted")
         return True
@@ -715,8 +783,24 @@ def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> b
         raise Exception(str(e))
 
 
-async def get_message_id_by_index_impl(conversation_id: int, message_index: int) -> Optional[int]:
-    message_id = get_message_id_by_index(conversation_id, message_index)
+async def get_message_id_by_index_impl(
+    conversation_id: int,
+    message_index: int,
+    user_id: str = None,
+    tenant_id: str = None,
+) -> Optional[int]:
+    require_context_identity(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        operation="conversation.message_id.read",
+    )
+    message_id = get_message_id_by_index(
+        conversation_id,
+        message_index,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
     if message_id is None:
         raise Exception("Message not found.")
     return message_id
@@ -726,6 +810,7 @@ def save_skill_files_to_conversation(
     conversation_id: int,
     skill_file_uploads: List[Dict[str, Any]],
     user_id: str,
+    tenant_id: str,
 ) -> bool:
     """
     Append skill file upload records to the latest assistant message in a conversation.
@@ -737,6 +822,7 @@ def save_skill_files_to_conversation(
         conversation_id: Target conversation ID
         skill_file_uploads: List of upload metadata dicts (e.g., from upload_fileobj)
         user_id: User ID for ownership validation
+        tenant_id: Tenant ID for ownership validation
 
     Returns:
         bool: True if files were saved, False if no assistant message was found
@@ -745,7 +831,13 @@ def save_skill_files_to_conversation(
         return False
 
     try:
-        message_id = get_latest_assistant_message_id(conversation_id, user_id)
+        require_context_identity(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            operation="conversation.skill_files.update",
+        )
+        message_id = get_latest_assistant_message_id(conversation_id, user_id, tenant_id=tenant_id)
         if message_id is None:
             logging.warning(
                 "[skill-file] no assistant message found for conversation=%s, "
@@ -754,7 +846,7 @@ def save_skill_files_to_conversation(
             )
             return False
 
-        success = update_message_minio_files(message_id, skill_file_uploads)
+        success = update_message_minio_files(message_id, skill_file_uploads, tenant_id=tenant_id)
         if success:
             logging.info(
                 "[skill-file] persisted %d file(s) to message_id=%s conversation=%s",

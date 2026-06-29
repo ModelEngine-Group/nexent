@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from abc import ABC, abstractmethod
 from threading import Event
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -12,7 +13,7 @@ PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..utils.observer import MessageObserver
 
@@ -20,6 +21,50 @@ from ..utils.observer import MessageObserver
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .summary_config import ContextManagerConfig
+
+
+class ContextIdentity(BaseModel):
+    """Immutable owner identity for conversation/session context state."""
+
+    tenant_id: str = Field(description="Owning tenant ID")
+    user_id: str = Field(description="Owning user ID")
+    conversation_id: str = Field(description="Conversation ID")
+
+    model_config = {"frozen": True}
+
+    @field_validator("tenant_id", "user_id", "conversation_id", mode="before")
+    @classmethod
+    def _coerce_to_str(cls, value: Any) -> str:
+        return "" if value is None else str(value)
+
+    @model_validator(mode="after")
+    def _require_non_empty_fields(self) -> "ContextIdentity":
+        for field_name in ("tenant_id", "user_id", "conversation_id"):
+            value = getattr(self, field_name)
+            if value is None or str(value).strip() == "":
+                raise ValueError(f"{field_name} is required for ContextIdentity")
+            object.__setattr__(self, field_name, str(value))
+        return self
+
+    @property
+    def canonical_key(self) -> str:
+        return f"tenant={self.tenant_id}|user={self.user_id}|conversation={self.conversation_id}"
+
+    @property
+    def scoped_hash(self) -> str:
+        return hashlib.sha256(self.canonical_key.encode("utf-8")).hexdigest()
+
+
+class ContextAuthorizationDecision(BaseModel):
+    """Server-issued authorization decision for a context operation."""
+
+    allowed: bool = Field(description="Whether the operation is authorized")
+    policy_version: str = Field(default="w4.single-owner.v1", description="Authorization policy version")
+    reason_code: str = Field(description="Machine-readable reason code")
+    operation: str = Field(description="Context operation name")
+    resource: str = Field(description="Resource being accessed")
+    identity_hash: Optional[str] = Field(default=None, description="Scoped identity hash for audit/metrics")
+    audit_metadata: Dict[str, Any] = Field(default_factory=dict, description="Structured audit metadata")
 
 
 class ModelConfig(BaseModel):
@@ -256,6 +301,14 @@ class AgentRunInfo(BaseModel):
         description="Conversation-level reusable ContextManager instance. "
                     "If provided, it will be attached to the CoreAgent instead of creating a new one.",
         default=None
+    )
+    context_identity: Optional[ContextIdentity] = Field(
+        description="W4 immutable context identity authorized for this run",
+        default=None,
+    )
+    context_authorization_decision: Optional[ContextAuthorizationDecision] = Field(
+        description="Server-issued W4 authorization decision for model dispatch",
+        default=None,
     )
     capacity_snapshot: Optional[Dict[str, Any]] = Field(
         description="Resolved model capacity snapshot fields for request monitoring",

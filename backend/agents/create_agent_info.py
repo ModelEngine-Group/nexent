@@ -628,6 +628,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    _is_subagent: bool = False,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -636,6 +637,9 @@ async def create_agent_config(
     # create sub agent
     sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    if _is_subagent and sub_agent_relations:
+        raise ValueError("recursive_subagent_delegation_unsupported")
+
     managed_agents = []
     for rel in sub_agent_relations:
         sub_agent_id = rel['selected_agent_id']
@@ -654,11 +658,14 @@ async def create_agent_config(
             version_no=sub_agent_version_no,
             override_model_id=None,
             tool_params=normalized_tool_params,
+            _is_subagent=True,
         )
         managed_agents.append(sub_agent_config)
 
     # create external A2A agents (synchronous function, no await needed)
     external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
+    if _is_subagent and external_a2a_agents:
+        raise ValueError("recursive_subagent_delegation_unsupported")
 
     tool_list = await create_tool_config_list(
         agent_id,

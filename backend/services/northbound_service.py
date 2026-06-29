@@ -18,7 +18,7 @@ from consts.exceptions import (
     ConversationNotFoundError,
 )
 from consts.model import AgentRequest, ToolParamsRequest
-from database.conversation_db import get_conversation_messages, get_source_searches_by_message
+from database.conversation_db import get_conversation, get_conversation_messages, get_source_searches_by_message
 from database.token_db import log_token_usage, get_latest_usage_metadata
 from services.agent_service import (
     run_agent_stream,
@@ -336,7 +336,11 @@ async def start_streaming_chat(
         # If conversation_id is not provided, create a new conversation
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(title="New Conversation", user_id=ctx.user_id)
+            new_conversation = create_new_conversation(
+                title="New Conversation",
+                user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
+            )
             conversation_id = new_conversation["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
@@ -412,7 +416,7 @@ async def start_streaming_chat(
 
 async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
-        stop_result = stop_agent_tasks(conversation_id, ctx.user_id)
+        stop_result = stop_agent_tasks(conversation_id, ctx.user_id, tenant_id=ctx.tenant_id)
 
         # Log token usage
         if ctx.token_id > 0:
@@ -433,7 +437,7 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
 
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
-    conversations = get_conversation_list_service(ctx.user_id)
+    conversations = get_conversation_list_service(ctx.user_id, ctx.tenant_id)
     # get_conversation_list_service is sync
 
     # Add meta_data from token usage log if available
@@ -489,7 +493,11 @@ def _format_search_record(record: Dict[str, Any]) -> Dict[str, Any]:
 
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
-    history = get_conversation_messages(conversation_id)
+    conversation = get_conversation(conversation_id, ctx.user_id, tenant_id=ctx.tenant_id)
+    if not conversation:
+        raise ConversationNotFoundError(f"Conversation {conversation_id} does not exist or has been deleted")
+
+    history = get_conversation_messages(conversation_id, tenant_id=ctx.tenant_id)
     result = []
     for message in history:
         # Parse minio_files from database (stored as JSON string)
@@ -506,7 +514,11 @@ async def get_conversation_history_internal(ctx: NorthboundContext, conversation
         search_results = []
         if message_id:
             try:
-                search_records = get_source_searches_by_message(message_id, user_id=ctx.user_id)
+                search_records = get_source_searches_by_message(
+                    message_id,
+                    user_id=ctx.user_id,
+                    tenant_id=ctx.tenant_id,
+                )
                 search_results = [_format_search_record(r) for r in search_records]
             except Exception as e:
                 logger.warning(f"Failed to get search records for message {message_id}: {str(e)}")
@@ -566,7 +578,7 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
         )
         await idempotency_start(composed_key)
 
-        update_conversation_title_service(conversation_id, title, ctx.user_id)
+        update_conversation_title_service(conversation_id, title, ctx.user_id, tenant_id=ctx.tenant_id)
 
         # Log token usage
         if ctx.token_id > 0:

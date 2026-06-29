@@ -39,6 +39,10 @@ from consts.model import (
     ToolSourceEnum, ModelConnectStatusEnum
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
+try:
+    from services.context_identity_service import authorize_context_operation, require_context_identity
+except ModuleNotFoundError:  # pragma: no cover - repository-root test imports
+    from backend.services.context_identity_service import authorize_context_operation, require_context_identity
 from database.agent_db import (
     create_agent,
     delete_agent_by_id,
@@ -838,6 +842,22 @@ async def _stream_agent_chunks(
     captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
+    auth_decision = getattr(agent_run_info, "context_authorization_decision", None)
+    if (
+        auth_decision is None
+        or not getattr(auth_decision, "allowed", False)
+        or getattr(auth_decision, "operation", None) != "model_dispatch"
+        or getattr(auth_decision, "resource", None) != "agent_run"
+    ):
+        logger.warning(
+            "model_dispatch rejected because context authorization is missing or mismatched "
+            "conversation_id=%s tenant_id=%s user_id=%s",
+            agent_request.conversation_id,
+            tenant_id,
+            user_id,
+        )
+        yield _safe_agent_stream_error_chunk()
+        return
     try:
         async for chunk in agent_run(agent_run_info):
             local_messages.append(chunk)
@@ -895,7 +915,7 @@ async def _stream_agent_chunks(
                 user_id=user_id,
             )
         agent_run_manager.unregister_agent_run(
-            agent_request.conversation_id, user_id)
+            agent_request.conversation_id, user_id, tenant_id=tenant_id)
 
         try:
             skill_file_content_local = "\n".join(
@@ -933,6 +953,7 @@ async def _stream_agent_chunks(
                             conversation_id=agent_request.conversation_id,
                             skill_file_uploads=frontend_files,
                             user_id=user_id,
+                            tenant_id=tenant_id,
                         )
                     except Exception:
                         logger.exception(
@@ -2309,6 +2330,18 @@ async def prepare_agent_run(
     """
     Prepare for an agent run by creating context and run info, and registering the run.
     """
+    context_identity = require_context_identity(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=agent_request.conversation_id,
+        operation="model_dispatch",
+        resource="agent_run",
+    )
+    context_authorization_decision = authorize_context_operation(
+        identity=context_identity,
+        operation="model_dispatch",
+        resource="agent_run",
+    )
 
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
@@ -2327,6 +2360,8 @@ async def prepare_agent_run(
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
     )
+    agent_run_info.context_identity = context_identity
+    agent_run_info.context_authorization_decision = context_authorization_decision
 
     # Mount conversation-level reusable ContextManager if enabled
     cm_config = getattr(agent_run_info.agent_config,
@@ -2335,12 +2370,14 @@ async def prepare_agent_run(
         cm = agent_run_manager.get_or_create_context_manager(
             conversation_id=str(agent_request.conversation_id),
             config=cm_config,
-            max_steps=agent_run_info.agent_config.max_steps
+            max_steps=agent_run_info.agent_config.max_steps,
+            user_id=user_id,
+            tenant_id=tenant_id,
         )
         agent_run_info.context_manager = cm
 
     agent_run_manager.register_agent_run(
-        agent_request.conversation_id, agent_run_info, user_id)
+        agent_request.conversation_id, agent_run_info, user_id, tenant_id=tenant_id)
     return agent_run_info, memory_context
 
 
@@ -2371,7 +2408,11 @@ async def generate_stream_with_memory(
     current_task = asyncio.current_task()
     if current_task:
         preprocess_manager.register_preprocess_task(
-            task_id, conversation_id, current_task
+            task_id,
+            conversation_id,
+            current_task,
+            user_id=user_id,
+            tenant_id=tenant_id,
         )
 
     # Helper to emit memory_search token
@@ -2584,17 +2625,17 @@ async def run_agent_stream(
     )
 
 
-def stop_agent_tasks(conversation_id: int, user_id: str):
+def stop_agent_tasks(conversation_id: int, user_id: str, tenant_id: str = None):
     """
     Stop agent run and preprocess tasks for the specified conversation_id.
     Matches the behavior of agent_app.agent_stop_api.
     """
     # Stop agent run
-    agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
+    agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, tenant_id=tenant_id)
 
     # Stop preprocess tasks
     preprocess_stopped = preprocess_manager.stop_preprocess_tasks(
-        conversation_id)
+        conversation_id, user_id=user_id, tenant_id=tenant_id)
 
     if agent_stopped or preprocess_stopped:
         message_parts = []

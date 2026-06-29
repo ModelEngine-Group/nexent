@@ -68,6 +68,7 @@ sys.modules["database.token_db"] = token_db_mod
 
 # Mock conversation_db
 conversation_db_mod = types.ModuleType("database.conversation_db")
+conversation_db_mod.get_conversation = MagicMock(return_value={"conversation_id": 123})
 conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
     {"message_role": "user", "message_content": "Hello"}
 ])

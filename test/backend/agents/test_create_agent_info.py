@@ -1986,6 +1986,33 @@ class TestCreateAgentConfig:
                 )
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_rejects_recursive_sub_agents(self):
+        """W4 prohibits a sub-agent from creating sub-subagents."""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub:
+            mock_search_agent.return_value = {
+                "name": "sub_agent",
+                "description": "nested subagent",
+                "duty_prompt": "",
+                "constraint_prompt": "",
+                "few_shots_prompt": "",
+                "max_steps": 5,
+                "model_id": None,
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = [
+                {"selected_agent_id": "sub_sub_agent", "selected_agent_version_no": None}
+            ]
+
+            with pytest.raises(ValueError, match="recursive_subagent_delegation_unsupported"):
+                await create_agent_config(
+                    "sub_agent",
+                    "tenant_1",
+                    "user_1",
+                    _is_subagent=True,
+                )
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_with_pinned_sub_agent_version(self):
         """Test sub-agent config uses pinned selected_agent_version_no from relation"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \

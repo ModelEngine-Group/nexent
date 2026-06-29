@@ -46,7 +46,7 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        conversation_data = create_new_conversation(request.title, user_id)
+        conversation_data = create_new_conversation(request.title, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=conversation_data)
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
@@ -68,7 +68,7 @@ async def list_conversations_endpoint(authorization: Optional[str] = Header(None
         user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
-        conversations = get_conversation_list_service(user_id)
+        conversations = get_conversation_list_service(user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=conversations)
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
@@ -92,7 +92,7 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         rename_conversation_service(
-            request.conversation_id, request.name, user_id)
+            request.conversation_id, request.name, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
@@ -113,7 +113,7 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        delete_conversation_service(conversation_id, user_id)
+        delete_conversation_service(conversation_id, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
@@ -135,7 +135,7 @@ async def get_conversation_history_endpoint(conversation_id: int, authorization:
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         history_data = get_conversation_history_service(
-            conversation_id, user_id)
+            conversation_id, user_id, tenant_id)
         return ConversationResponse(code=0, message="success", data=history_data)
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
@@ -162,7 +162,7 @@ async def get_sources_endpoint(request: Dict[str, Any], authorization: Optional[
         conversation_id = request.get("conversation_id")
         message_id = request.get("message_id")
         source_type = request.get("type", "all")
-        return get_sources_service(conversation_id, message_id, source_type, user_id)
+        return get_sources_service(conversation_id, message_id, source_type, user_id, tenant_id=tenant_id)
     except Exception as e:
         logging.error(f"Failed to get message sources: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -214,7 +214,8 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
         ConversationResponse object
     """
     try:
-        update_message_opinion_service(request.message_id, request.opinion)
+        user_id, tenant_id = get_current_user_id(authorization)
+        update_message_opinion_service(request.message_id, request.opinion, user_id=user_id, tenant_id=tenant_id)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to update message like/dislike: {str(e)}")
@@ -222,7 +223,7 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
 
 
 @router.post("/message/id", response_model=ConversationResponse)
-async def get_message_id_endpoint(request: MessageIdRequest):
+async def get_message_id_endpoint(request: MessageIdRequest, authorization: Optional[str] = Header(None)):
     """
     Get message ID by conversation ID and message index
 
@@ -235,7 +236,13 @@ async def get_message_id_endpoint(request: MessageIdRequest):
         ConversationResponse object containing message_id
     """
     try:
-        message_id = await get_message_id_by_index_impl(request.conversation_id, request.message_index)
+        user_id, tenant_id = get_current_user_id(authorization)
+        message_id = await get_message_id_by_index_impl(
+            request.conversation_id,
+            request.message_index,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
         return ConversationResponse(code=0, message="success", data=message_id)
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")

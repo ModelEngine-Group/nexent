@@ -3774,6 +3774,8 @@ def mock_http_request():
 
 
 @pytest.mark.asyncio
+@patch('backend.services.agent_service.authorize_context_operation')
+@patch('backend.services.agent_service.require_context_identity')
 @patch('backend.services.agent_service.build_memory_context')
 @patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
 @patch('backend.services.agent_service.agent_run_manager')
@@ -3781,6 +3783,8 @@ async def test_prepare_agent_run(
     mock_agent_run_manager,
     mock_create_run_info,
     mock_build_memory_context,
+    mock_require_context_identity,
+    mock_authorize_context_operation,
     mock_agent_request,
     mock_http_request,
 ):
@@ -3790,6 +3794,18 @@ async def test_prepare_agent_run(
     mock_create_run_info.return_value = mock_run_info
     mock_memory_context = MagicMock()
     mock_build_memory_context.return_value = mock_memory_context
+    context_identity = types.SimpleNamespace(
+        tenant_id="test_tenant",
+        user_id="test_user",
+        conversation_id="123",
+    )
+    auth_decision = types.SimpleNamespace(
+        allowed=True,
+        operation="model_dispatch",
+        resource="agent_run",
+    )
+    mock_require_context_identity.return_value = context_identity
+    mock_authorize_context_operation.return_value = auth_decision
 
     # Execute
     agent_run_info, memory_context = await prepare_agent_run(
@@ -3801,6 +3817,20 @@ async def test_prepare_agent_run(
     # Assert
     assert agent_run_info == mock_run_info
     assert memory_context == mock_memory_context
+    mock_require_context_identity.assert_called_once_with(
+        tenant_id="test_tenant",
+        user_id="test_user",
+        conversation_id=123,
+        operation="model_dispatch",
+        resource="agent_run",
+    )
+    mock_authorize_context_operation.assert_called_once_with(
+        identity=context_identity,
+        operation="model_dispatch",
+        resource="agent_run",
+    )
+    assert mock_run_info.context_identity is context_identity
+    assert mock_run_info.context_authorization_decision is auth_decision
     mock_build_memory_context.assert_called_once_with(
         "test_user", "test_tenant", 1, skip_query=False)
     mock_create_run_info.assert_called_once_with(
@@ -3819,7 +3849,7 @@ async def test_prepare_agent_run(
         tool_params=None,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
-        123, mock_run_info, "test_user")
+        123, mock_run_info, "test_user", tenant_id="test_tenant")
 
 
 @patch('backend.services.agent_service.submit')
@@ -3957,24 +3987,26 @@ def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
     mock_agent_run_manager.stop_agent_run.return_value = True
     mock_preprocess_manager.stop_preprocess_tasks.return_value = True
 
-    result = stop_agent_tasks(123, "test_user")
+    result = stop_agent_tasks(123, "test_user", tenant_id="test_tenant")
     assert result["status"] == "success"
     assert "successfully stopped agent run and preprocess tasks" in result["message"]
 
     mock_agent_run_manager.stop_agent_run.assert_called_once_with(
-        123, "test_user")
+        123, "test_user", tenant_id="test_tenant")
+    mock_preprocess_manager.stop_preprocess_tasks.assert_called_with(
+        123, user_id="test_user", tenant_id="test_tenant")
 
     # Test only agent stopped
     mock_agent_run_manager.stop_agent_run.return_value = True
     mock_preprocess_manager.stop_preprocess_tasks.return_value = False
-    result = stop_agent_tasks(123, "test_user")
+    result = stop_agent_tasks(123, "test_user", tenant_id="test_tenant")
     assert result["status"] == "success"
     assert "successfully stopped agent run" in result["message"]
 
     # Test neither stopped
     mock_agent_run_manager.stop_agent_run.return_value = False
     mock_preprocess_manager.stop_preprocess_tasks.return_value = False
-    result = stop_agent_tasks(123, "test_user")
+    result = stop_agent_tasks(123, "test_user", tenant_id="test_tenant")
     assert result["status"] == "success"
     assert "no running agent or preprocess tasks found" in result["message"]
     assert result.get("already_stopped") is True
@@ -4331,6 +4363,16 @@ def test_get_agent_call_relationship_impl_tool_name_fallback(mock_query_sub_agen
 #############################
 
 
+def _authorized_run_info(**kwargs):
+    run_info = MagicMock(**kwargs)
+    run_info.context_authorization_decision = MagicMock(
+        allowed=True,
+        operation="model_dispatch",
+        resource="agent_run",
+    )
+    return run_info
+
+
 @pytest.mark.asyncio
 async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     """Ensure _stream_agent_chunks yields chunks, saves assistant messages (when not debug) and always unregisters the run regardless of errors."""
@@ -4369,9 +4411,10 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
         unregister_called["user_id"] = user_id
+        unregister_called["tenant_id"] = tenant_id
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.unregister_agent_run",
@@ -4382,7 +4425,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     # Collect streamed chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -4393,6 +4436,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     assert save_calls, "save_messages should have been called for assistant messages"
     assert unregister_called.get("conv_id") == 999
     assert unregister_called.get("user_id") == "u"
+    assert unregister_called.get("tenant_id") == "t"
 
 
 @pytest.mark.asyncio
@@ -4416,9 +4460,10 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
 
     called = {"unregistered": None, "user_id": None}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         called["unregistered"] = conv_id
         called["user_id"] = user_id
+        called["tenant_id"] = tenant_id
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.unregister_agent_run",
@@ -4429,7 +4474,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
     # Collect streamed chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -4442,6 +4487,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
     assert "Traceback" in caplog.text
     assert called["unregistered"] == 1001
     assert called["user_id"] == "u"
+    assert called["tenant_id"] == "t"
 
 
 @pytest.mark.asyncio
@@ -4504,7 +4550,7 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
     # Run stream
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(query="hello"), memory_ctx
+        agent_request, "u", "t", _authorized_run_info(query="hello"), memory_ctx
     ):
         collected.append(out)
 
@@ -4557,7 +4603,7 @@ async def test__stream_agent_chunks_skips_memory_when_switch_off(monkeypatch):
     memory_ctx.user_config = MagicMock(memory_switch=False)
 
     async for _ in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(query="q"), memory_ctx
+        agent_request, "u", "t", _authorized_run_info(query="q"), memory_ctx
     ):
         pass
 
@@ -4611,7 +4657,7 @@ async def test__stream_agent_chunks_background_add_exception(monkeypatch):
     monkeypatch.setattr(asyncio, "create_task", capture_task)
 
     async for _ in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(query="q"), memory_ctx
+        agent_request, "u", "t", _authorized_run_info(query="q"), memory_ctx
     ):
         pass
 
@@ -4655,11 +4701,44 @@ async def test__stream_agent_chunks_schedule_task_failure(monkeypatch):
 
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(query="q"), memory_ctx
+        agent_request, "u", "t", _authorized_run_info(query="q"), memory_ctx
     ):
         collected.append(out)
 
     assert collected  # Stream still produced data without crashing
+
+
+@pytest.mark.asyncio
+async def test__stream_agent_chunks_rejects_missing_context_authorization(monkeypatch):
+    """Model dispatch requires a current server-issued W4 authorization decision."""
+    agent_request = AgentRequest(
+        agent_id=6,
+        conversation_id=6007,
+        query="q",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    run_info = MagicMock(query="q")
+    run_info.context_authorization_decision = None
+    called = {"agent_run": False}
+
+    async def should_not_run(*_, **__):
+        called["agent_run"] = True
+        yield "unexpected"
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.agent_run", should_not_run, raising=False
+    )
+
+    collected = []
+    async for out in agent_service._stream_agent_chunks(
+        agent_request, "u", "t", run_info, MagicMock()
+    ):
+        collected.append(out)
+
+    assert collected == [agent_service._safe_agent_stream_error_chunk()]
+    assert called["agent_run"] is False
 
 
 def test_insert_related_agent_impl_failure_returns_400():
@@ -4734,10 +4813,11 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
 
     registered = {}
 
-    def fake_register(conv_id, run_info, user_id):
+    def fake_register(conv_id, run_info, user_id, tenant_id=None):
         registered["conv_id"] = conv_id
         registered["run_info"] = run_info
         registered["user_id"] = user_id
+        registered["tenant_id"] = tenant_id
 
     monkeypatch.setattr(
         "backend.services.agent_service.agent_run_manager.register_agent_run",
@@ -4765,6 +4845,7 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
 
     assert registered.get("conv_id") == 555
     assert registered.get("user_id") == "u"
+    assert registered.get("tenant_id") == "t"
     assert registered.get("run_info") is not None
     assert collected == ["data: body1\n\n", "data: body2\n\n"]
 
@@ -4878,8 +4959,8 @@ async def test_generate_stream_with_memory_emits_tokens_and_unregisters(monkeypa
     # Track preprocess register/unregister
     calls = {"registered": None, "unregistered": None}
 
-    def fake_register(task_id, conv_id, task):
-        calls["registered"] = (task_id, conv_id, bool(task))
+    def fake_register(task_id, conv_id, task, user_id=None, tenant_id=None):
+        calls["registered"] = (task_id, conv_id, bool(task), user_id, tenant_id)
 
     def fake_unregister(task_id):
         calls["unregistered"] = task_id
