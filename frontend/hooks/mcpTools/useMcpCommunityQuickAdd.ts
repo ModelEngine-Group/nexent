@@ -139,7 +139,6 @@ export function useMcpCommunityQuickAdd({
           version: draft.version,
           registry_json: registryJson,
           market_id: source.marketId,
-          enabled: true,
         });
       }
 
