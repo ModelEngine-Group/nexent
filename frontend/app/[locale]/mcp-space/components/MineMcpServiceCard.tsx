@@ -64,7 +64,7 @@ export default function MineMcpServiceCard({
   const reviewStatus = onlineService?.reviewStatus || service.reviewStatus;
   const isPending = reviewStatus === "pending";
   const isInRepository = isLocal
-    ? Boolean(localService?.isListedInRepository) && onlineService?.reviewStatus === "approved"
+    ? Boolean(localService?.isListedInRepository)
     : reviewStatus === "approved";
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
