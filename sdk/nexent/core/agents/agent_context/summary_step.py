@@ -1,6 +1,8 @@
 """Summary step types for context compression."""
 
 from dataclasses import dataclass
+from typing import Any, Tuple
+
 from smolagents.memory import TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
@@ -20,3 +22,14 @@ class SummaryTaskStep(TaskStep):
     def to_messages(self, summary_mode: bool = False) -> list:
         content = [{"type": "text", "text": f"{self.prefix}:\n{self.task}"}]
         return [ChatMessage(role=MessageRole.USER, content=content)]
+
+
+@dataclass(frozen=True)
+class ManagedRunContext:
+    """Run-local component partition owned by ManagedContextRuntime."""
+
+    component_messages: Tuple[dict, ...] = ()
+    stable_messages: Tuple[dict, ...] = ()
+    dynamic_messages: Tuple[dict, ...] = ()
+    selected_component_types: Tuple[str, ...] = ()
+    components: Tuple[Any, ...] = ()

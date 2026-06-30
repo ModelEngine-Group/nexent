@@ -20,7 +20,6 @@ from ..utils.constants import THINK_TAG_PATTERN, THINK_PREFIX_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .agent_context import ContextManager
 
 # Safe base imports for Python interpreter - excludes file modification and system access modules
 SAFE_PYTHON_INTERPRETER_IMPORTS = [
@@ -414,11 +413,14 @@ extra_body=model_config.extra_body,
                 except Exception as e:
                     raise ValueError(f"Error in creating external A2A agent wrapper: {e}")
 
-            # Build ContextManager before agent so the reload tool can be
-            # included in tool_list and properly sandboxed by the Python executor.
+            # Build the ContextRuntime before the agent so the reload tool can
+            # be included in tool_list and properly sandboxed by the Python
+            # executor.  CoreAgent expects the factory to inject exactly one
+            # runtime (managed when context_manager is enabled, legacy
+            # otherwise) and does not assemble context itself.
             ctx_config = getattr(agent_config, 'context_manager_config', None)
-            ctx_manager = None
-            if ctx_config:
+            if ctx_config and ctx_config.enabled:
+                from .agent_context import ContextManager
                 ctx_manager = ContextManager(
                     config=ctx_config,
                     max_steps=agent_config.max_steps,
@@ -430,6 +432,14 @@ extra_body=model_config.extra_body,
                             offload_store=ctx_manager.offload_store,
                         )
                     )
+                from nexent.core.context_runtime.managed.runtime import ManagedContextRuntime
+                context_runtime = ManagedContextRuntime(
+                    ctx_manager,
+                    components=getattr(agent_config, 'context_components', None) or [],
+                )
+            else:
+                from nexent.core.context_runtime.legacy.runtime import LegacyContextRuntime
+                context_runtime = LegacyContextRuntime()
 
             # Create the agent
             agent = CoreAgent(
@@ -445,18 +455,9 @@ extra_body=model_config.extra_body,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
+                context_runtime=context_runtime,
             )
             agent.stop_event = self.stop_event
-
-            # Mount context manager if configured
-            if ctx_manager:
-                agent.context_manager = ctx_manager
-
-            # Register context components if provided
-            context_components = getattr(agent_config, 'context_components', None)
-            if context_components and agent.context_manager:
-                for component in context_components:
-                    agent.context_manager.register_component(component)
 
             return agent
         except Exception as e:
@@ -717,7 +718,7 @@ extra_body=model_config.extra_body,
         lines.append(
             "-----"
         )
-        print("\n".join(lines))
+        logger.debug("\n".join(lines))
 
         # Optional: write to local file
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:

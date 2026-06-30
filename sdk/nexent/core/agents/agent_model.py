@@ -141,7 +141,7 @@ class AgentConfig(BaseModel):
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
-    max_steps: int = Field(description="Maximum number of steps for current Agent", default=5)
+    max_steps: int = Field(description="Maximum number of steps for current Agent", default=5, ge=1, le=30)
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
@@ -394,7 +394,10 @@ class MemoryComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, str]]:
         if self.formatted_content:
-            return [{"role": "system", "content": self.formatted_content}]
+            # Memory is user/session-specific dynamic context.  Keeping it out
+            # of the authoritative system prefix preserves cross-turn cache
+            # reuse without changing its content or selection semantics.
+            return [{"role": "user", "content": self.formatted_content}]
         return []
 
     def add_memory(self, content: str, memory_type: str = "user", metadata: Dict[str, Any] = None) -> None:
@@ -414,7 +417,10 @@ class KnowledgeBaseComponent(ContextComponent):
 
     def to_messages(self) -> List[Dict[str, str]]:
         if self.summary:
-            return [{"role": "system", "content": self.summary}]
+            # Retrieved knowledge is request-dependent evidence, not
+            # authoritative instruction.  Keeping it dynamic protects the
+            # stable cache prefix when retrieval results change between turns.
+            return [{"role": "user", "content": self.summary}]
         return []
 
 

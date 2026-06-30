@@ -67,6 +67,3 @@ sdk/benchmark/.env
 doc/mermaid
 
 .claude/skills/python-import-triage
-
-# Debug scripts preserved on feat/opt-agent-context-temp-scripts
-sdk/nexent/core/agents/temp_scripts/

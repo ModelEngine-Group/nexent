@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from contextvars import copy_context
 from threading import Thread
@@ -6,11 +7,82 @@ from typing import Any, Dict, Union
 
 from smolagents import ToolCollection
 
+from ...monitor import (
+    set_monitoring_capacity_snapshot,
+    set_monitoring_safe_input_budget_snapshot,
+)
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
+    snapshot = getattr(agent_run_info, "safe_input_budget_snapshot", None)
+    if not isinstance(snapshot, dict):
+        return
+    warnings = snapshot.get("warnings") or []
+    if "uncertainty_reserve_active" not in warnings:
+        return
+
+    payload = {
+        "code": "uncertainty_reserve_active",
+        "message": (
+            "W2 applied the unified 10% uncertainty reserve because selected "
+            "model capability behavior is not fully verified."
+        ),
+        "budget_fingerprint": snapshot.get("fingerprint"),
+        "w1_fingerprint": snapshot.get("w1_fingerprint"),
+        "uncertainty_reserve_tokens": snapshot.get("uncertainty_reserve_tokens"),
+        "hard_input_budget_tokens": snapshot.get("hard_input_budget_tokens"),
+    }
+    logger.warning(
+        "W2 uncertainty reserve active: budget_fingerprint=%s w1_fingerprint=%s "
+        "uncertainty_reserve_tokens=%s hard_input_budget_tokens=%s",
+        payload["budget_fingerprint"],
+        payload["w1_fingerprint"],
+        payload["uncertainty_reserve_tokens"],
+        payload["hard_input_budget_tokens"],
+    )
+    try:
+        agent_run_info.observer.add_message(
+            "",
+            ProcessType.OTHER,
+            json.dumps(payload, ensure_ascii=False),
+        )
+    except Exception:
+        logger.debug("Failed to emit W2 uncertainty reserve observer warning", exc_info=True)
+
+
+def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo) -> None:
+    """Mount the reusable conversation-level ContextManager into the active runtime.
+
+    W3 made ``agent.context_runtime`` the execution authority for context
+    assembly.  ``agent.context_manager`` is kept only as a compatibility and
+    observability alias, so mounting a conversation-level ContextManager must
+    update the managed runtime first and then mirror the alias.
+    """
+    context_manager = getattr(agent_run_info, "context_manager", None)
+    if context_manager is None:
+        return
+
+    context_runtime = getattr(agent, "context_runtime", None)
+    if getattr(context_runtime, "context_manager", None) is None:
+        raise RuntimeError(
+            "Conversation-level ContextManager requires an active managed context runtime"
+        )
+
+    context_runtime.context_manager = context_manager
+    context_components = getattr(agent_run_info.agent_config, "context_components", None)
+    replace_runtime_components = getattr(context_runtime, "replace_components", None)
+    if callable(replace_runtime_components):
+        replace_runtime_components(context_components or [])
+    else:
+        raise RuntimeError(
+            "Managed context runtime does not support run-local component replacement"
+        )
+    agent.context_manager = context_manager
 
 
 def _detect_transport(url: str) -> str:
@@ -76,6 +148,13 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
     try:
+        set_monitoring_capacity_snapshot(
+            getattr(agent_run_info, "capacity_snapshot", None)
+        )
+        set_monitoring_safe_input_budget_snapshot(
+            getattr(agent_run_info, "safe_input_budget_snapshot", None)
+        )
+        _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
         if mcp_host is None or len(mcp_host) == 0:
             nexent = NexentAgent(
@@ -86,13 +165,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent = nexent.create_single_agent(agent_run_info.agent_config)
             nexent.set_agent(agent)
 
-            if getattr(agent_run_info, 'context_manager', None) is not None:
-                agent.context_manager = agent_run_info.context_manager
-                # Sync reload tool to the swapped store (otherwise it still
-                # points to the internal store created by create_single_agent).
-                if 'reload_original_context_messages' in agent.tools:
-                    agent.tools['reload_original_context_messages']._offload_store = \
-                        agent.context_manager.offload_store
+            _mount_conversation_context_manager(agent, agent_run_info)
 
             nexent.add_history_to_agent(agent_run_info.history)
             nexent.agent_run_with_observer(
@@ -112,11 +185,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 agent = nexent.create_single_agent(agent_run_info.agent_config)
                 nexent.set_agent(agent)
 
-                if getattr(agent_run_info, 'context_manager', None) is not None:
-                    agent.context_manager = agent_run_info.context_manager
-                    if 'reload_original_context_messages' in agent.tools:
-                        agent.tools['reload_original_context_messages']._offload_store = \
-                            agent.context_manager.offload_store
+                _mount_conversation_context_manager(agent, agent_run_info)
 
                 nexent.add_history_to_agent(agent_run_info.history)
                 nexent.agent_run_with_observer(

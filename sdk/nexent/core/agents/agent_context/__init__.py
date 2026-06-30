@@ -6,7 +6,7 @@ supporting incremental summarization with cache-based optimization.
 
 from .manager import ContextManager
 from .offload_store import OffloadStore
-from .summary_step import SummaryTaskStep
+from .summary_step import SummaryTaskStep, ManagedRunContext
 from .llm_summary import format_summary_output, _is_context_length_error
 from .step_renderer import compress_history_offline
 
@@ -19,6 +19,7 @@ __all__ = [
     "ContextManager",
     "OffloadStore",
     "SummaryTaskStep",
+    "ManagedRunContext",
     "format_summary_output",
     "_is_context_length_error",
     "compress_history_offline",

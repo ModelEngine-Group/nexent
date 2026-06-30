@@ -459,7 +459,9 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
     # Verify the result
     assert result == mock_model_instance
 
-    # Verify OpenAIModel was constructed with correct parameters
+    # Verify OpenAIModel was constructed with correct parameters.
+    # W1 renamed the SDK's `max_tokens` kwarg to `max_output_tokens`; the
+    # production code path here builds the same kwarg under the new name.
     mock_openai_model_class.assert_called_once_with(
         observer=nexent_agent_with_models.observer,
         model_id=mock_model_config.model_name,

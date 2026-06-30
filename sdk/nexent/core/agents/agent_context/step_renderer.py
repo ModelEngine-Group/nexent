@@ -99,7 +99,7 @@ def compress_history_offline(
     # Build prompt
     schema_desc = json.dumps(config.summary_json_schema, ensure_ascii=False, indent=2)
     if is_incremental:
-        system_prompt = config.incremental_summary_system_prompt
+        system_prompt = config.incremental_summary_system_prompt or config.summary_system_prompt
         user_prompt = (
             f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
             f"{input_text}"

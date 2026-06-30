@@ -56,6 +56,9 @@ class AnalyzeImageTool(Tool):
         "vlm_model": {
             "description": "The image understanding model to use"
         },
+        "selected_model_id": {
+            "description": "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used."
+        },
         "storage_client": {
             "description": "Storage client for downloading files"
         },
@@ -77,6 +80,9 @@ class AnalyzeImageTool(Tool):
                 description="The image understanding model to use",
                 default=None,
                 exclude=True),
+            selected_model_id: int = Field(
+                description="Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
+                default=None),
             storage_client: MinIOStorageClient = Field(
                 description="Storage client for downloading files from S3 URLs、HTTP URLs、HTTPS URLs.",
                 default=None,
@@ -89,6 +95,7 @@ class AnalyzeImageTool(Tool):
         super().__init__()
         self.observer = observer
         self.vlm_model = vlm_model
+        self.selected_model_id = selected_model_id
         self.storage_client = storage_client
 
         # Determine if the language is Chinese for internationalization
