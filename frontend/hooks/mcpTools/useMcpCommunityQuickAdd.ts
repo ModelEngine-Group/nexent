@@ -97,6 +97,15 @@ export function useMcpCommunityQuickAdd({
       }
     }
 
+    // Embed author metadata into registryJson so the "我的" card can display
+    // the original developer's name (onlineService is unavailable for MCPs
+    // published by other users).
+    const registryJson = {
+      ...(draft.registryJson || {}),
+      ...(source.authorDisplayName ? { _authorDisplayName: source.authorDisplayName } : {}),
+      ...(source.authorName ? { _authorName: source.authorName } : {}),
+    };
+
     setSubmitting(true);
     try {
       if (isContainer) {
@@ -113,7 +122,8 @@ export function useMcpCommunityQuickAdd({
           tags: draft.tags,
           source: McpSource.COMMUNITY,
           authorization_token: draft.authorizationToken?.trim() || undefined,
-          registry_json: draft.registryJson,
+          registry_json: registryJson,
+          market_id: source.marketId,
           port: draft.containerPort as number,
           mcp_config: mcpConfig,
         });
@@ -127,7 +137,8 @@ export function useMcpCommunityQuickAdd({
           custom_headers: customHeaders,
           tags: draft.tags,
           version: draft.version,
-          registry_json: draft.registryJson,
+          registry_json: registryJson,
+          market_id: source.marketId,
           enabled: true,
         });
       }

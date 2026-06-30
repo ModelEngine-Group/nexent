@@ -234,7 +234,13 @@ export default function MineMcpServiceCard({
         <User className="mr-0.5 inline h-3 w-3" />
         {isLocal && localService?.source === McpSource.LOCAL
           ? t("mcpTools.mine.createdByMe")
-          : onlineService?.authorDisplayName || onlineService?.authorName || "-"}
+          : (
+            onlineService?.authorDisplayName
+            || onlineService?.authorName
+            || (service.registryJson as Record<string, string> | undefined)?._authorDisplayName
+            || (service.registryJson as Record<string, string> | undefined)?._authorName
+            || "-"
+          )}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">

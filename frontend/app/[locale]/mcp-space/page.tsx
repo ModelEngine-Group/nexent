@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, ConfigProvider, Empty, Modal, Segmented, Spin, Steps, Tag, type StepsProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
@@ -14,6 +15,7 @@ import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
+import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import { useMcpCommunityReview } from "@/hooks/mcpTools/useMcpCommunityReview";
@@ -543,6 +545,7 @@ function MineView({
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const toggle = useMcpServiceToggle();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [deploymentType, setDeploymentType] =
     useState<DeploymentFilter>(FILTER_ALL);
@@ -735,6 +738,13 @@ function MineView({
           }
           message.success(t("mcpTools.mine.deleteSuccess"));
           await refreshMineData();
+          // Force-refresh all caches the agent config page relies on
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY }),
+            queryClient.invalidateQueries({ queryKey: ["tools"] }),
+            queryClient.invalidateQueries({ queryKey: ["agents"] }),
+            queryClient.refetchQueries({ queryKey: MCP_SERVERS_QUERY_KEY, type: 'all' }),
+          ]);
         } catch {
           message.error(t("mcpTools.mine.deleteFailed"));
         }
