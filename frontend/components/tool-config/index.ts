@@ -80,21 +80,24 @@ export function getToolTypeForSkill(skillName: string): ToolKbType {
 /**
  * Check whether a skill has a knowledge-base-related parameter
  * that requires opening the knowledge base selector.
- * Supports both index_names (Nexent/DataMate) and dataset_ids (Dify/iData).
+ * Supports index_names (Nexent/DataMate), dataset_ids (Dify/iData), and kds_list (AIDP).
  */
 export function skillRequiresKbSelection(params: { name: string }[]): boolean {
   return params.some(
-    (p) => p.name === "index_names" || p.name === "dataset_ids"
+    (p) => p.name === "index_names" || p.name === "dataset_ids" || p.name === "kds_list"
   );
 }
 
 /**
  * Determine the parameter name used to store knowledge base IDs for a given skill.
- * Returns "index_names" for Nexent/DataMate, "dataset_ids" for Dify/iData.
+ * Returns "index_names" for Nexent/DataMate, "kds_list" for AIDP, "dataset_ids" for Dify/iData.
  */
 export function getKbParamNameForSkill(skillName: string): string {
   const toolType = getToolTypeForSkill(skillName);
-  if (toolType === "dify_search" || toolType === "idata_search" || toolType === "haotian_search" || toolType === "aidp_search") {
+  if (toolType === "aidp_search") {
+    return "kds_list";
+  }
+  if (toolType === "dify_search" || toolType === "idata_search" || toolType === "haotian_search") {
     return "dataset_ids";
   }
   return "index_names";

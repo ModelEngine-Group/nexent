@@ -35,6 +35,7 @@ from services.agent_version_service import (
     get_version_list_impl,
     get_version_impl,
     get_version_detail_impl,
+    _get_version_detail_or_draft,
     rollback_version_impl,
     update_version_status_impl,
     update_version_impl,
@@ -447,7 +448,7 @@ async def get_version_detail_api(
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        result = get_version_detail_impl(
+        result = _get_version_detail_or_draft(
             agent_id=agent_id,
             tenant_id=tenant_id,
             version_no=version_no,

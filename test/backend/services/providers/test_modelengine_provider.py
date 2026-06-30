@@ -69,6 +69,56 @@ class TestModelEngineProvider:
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
         assert result[0]["max_tokens"] > 0  # LLM type should have max_tokens
+        assert "capacity_source" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_get_models_surfaces_capacity_hints(self, mocker: MockFixture):
+        """Provider token metadata is returned as advisory capacity hints."""
+        mock_response_data = {
+            "data": [
+                {
+                    "id": "llm-model-1",
+                    "type": "chat",
+                    "context_window_tokens": 65536,
+                    "max_input_tokens": "60000",
+                    "max_output_tokens": 4096,
+                    "tokenizer_type": "deepseek",
+                }
+            ]
+        }
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=mock_response_data)
+
+        mock_get_cm = MagicMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session_instance = MagicMock()
+        mock_session_instance.get = MagicMock(return_value=mock_get_cm)
+
+        mock_session_cm = MagicMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session_instance)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            return_value=mock_session_cm
+        )
+
+        provider = ModelEngineProvider()
+        result = await provider.get_models({
+            "model_type": "llm",
+            "base_url": "https://test.example.com",
+            "api_key": "test-api-key",
+        })
+
+        assert result[0]["context_window_tokens"] == 65536
+        assert result[0]["max_input_tokens"] == 60000
+        assert result[0]["max_output_tokens"] == 4096
+        assert result[0]["tokenizer_family"] == "deepseek"
+        assert result[0]["capacity_source"] == "provider_candidate"
 
     @pytest.mark.asyncio
     async def test_get_models_with_type_filter(self, mocker: MockFixture):

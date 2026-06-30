@@ -1,27 +1,20 @@
-import logging
-import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Collection, Dict, List, Optional
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import and_, case, false, func, or_, true, update
 
-from database.client import as_dict, filter_property, get_db_session
-from database.db_models import AgentRepository
-
-logger = logging.getLogger("agent_repository_db")
-
-# Listing status: NOT_SHARED (未共享), PENDING_REVIEW (待审核),
-# REJECTED (审核驳回), SHARED (已共享)
-STATUS_NOT_SHARED = "NOT_SHARED"
-STATUS_PENDING_REVIEW = "PENDING_REVIEW"
-STATUS_REJECTED = "REJECTED"
-STATUS_SHARED = "SHARED"
-
-VALID_REPOSITORY_STATUSES = frozenset({
+from consts.agent_repository import (
+    OWNERSHIP_ALL,
+    OWNERSHIP_CREATED,
+    OWNERSHIP_OTHERS,
     STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-})
+)
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_EDIT,
+)
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import AgentInfo, AgentRepository, AgentVersion
+from database.group_db import query_group_ids_by_user
 
 _UPSERT_IMMUTABLE_FIELDS = frozenset({
     "agent_id",
@@ -30,7 +23,7 @@ _UPSERT_IMMUTABLE_FIELDS = frozenset({
 })
 
 _UPSERT_SNAPSHOT_FIELDS = frozenset({
-    "source_version_no",
+    "version_no",
     "name",
     "display_name",
     "description",
@@ -38,7 +31,9 @@ _UPSERT_SNAPSHOT_FIELDS = frozenset({
     "category_id",
     "tags",
     "tool_count",
-    "version_label",
+    "version_name",
+    "icon",
+    "downloads",
     "agent_info_json",
 })
 
@@ -93,13 +88,27 @@ def get_agent_repository_by_id_and_publisher(
         return as_dict(record) if record else None
 
 
-def get_agent_repository_by_agent_id(agent_id: int) -> Optional[dict]:
-    """Fetch an active repository listing by root agent_id."""
+def get_agent_repository_by_agent_id(
+    agent_id: int,
+    version_no: Optional[int] = None,
+    *,
+    publisher_tenant_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Fetch an active repository listing by root agent_id and optional version."""
     with get_db_session() as session:
-        record = session.query(AgentRepository).filter(
+        query = session.query(AgentRepository).filter(
             AgentRepository.agent_id == agent_id,
             AgentRepository.delete_flag != "Y",
-        ).first()
+        )
+        if publisher_tenant_id is not None:
+            query = query.filter(
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
+            )
+        if version_no is not None:
+            query = query.filter(
+                AgentRepository.version_no == version_no
+            )
+        record = query.first()
         return as_dict(record) if record else None
 
 
@@ -111,8 +120,8 @@ def upsert_agent_repository_record(
     """Insert or update a repository listing keyed by agent_id.
 
     When no record exists, inserts a new listing. When a record exists:
-    - Same source_version_no: updates status (and updated_by) only.
-    - Different source_version_no: updates all snapshot fields, preserving
+    - Same version_no: updates status (and updated_by) only.
+    - Different version_no: updates all snapshot fields, preserving
       agent_id, agent_repository_id, and publisher_tenant_id.
 
     Returns:
@@ -122,7 +131,10 @@ def upsert_agent_repository_record(
     if agent_id is None:
         raise ValueError("agent_id is required for repository upsert")
 
-    existing = get_agent_repository_by_agent_id(int(agent_id))
+    existing = get_agent_repository_by_agent_id(
+        int(agent_id),
+        publisher_tenant_id=publisher_tenant_id,
+    )
     if not existing:
         repository_id = insert_agent_repository_record(
             repository_data=repository_data,
@@ -131,8 +143,8 @@ def upsert_agent_repository_record(
         )
         return repository_id, False
 
-    existing_version = existing.get("source_version_no")
-    incoming_version = repository_data.get("source_version_no")
+    existing_version = existing.get("version_no")
+    incoming_version = repository_data.get("version_no")
     repository_id = int(existing["agent_repository_id"])
 
     if existing_version == incoming_version:
@@ -164,97 +176,59 @@ def upsert_agent_repository_record(
 
 
 def list_agent_repository_summaries(
+    publisher_tenant_id: str,
     *,
     status: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    category_id: Optional[int] = None,
 ) -> List[dict]:
-    """List all active repository summaries without heavy JSON blobs."""
+    """List active repository summaries for a publisher tenant without heavy JSON blobs."""
     with get_db_session() as session:
         query = session.query(
             AgentRepository.agent_repository_id,
+            AgentRepository.agent_id,
             AgentRepository.author,
+            AgentRepository.submitted_by,
             AgentRepository.name,
             AgentRepository.display_name,
             AgentRepository.description,
             AgentRepository.status,
+            AgentRepository.category_id,
+            AgentRepository.tags,
+            AgentRepository.tool_count,
+            AgentRepository.version_name,
+            AgentRepository.icon,
+            AgentRepository.downloads,
         ).filter(
             AgentRepository.delete_flag != "Y",
+            AgentRepository.publisher_tenant_id == publisher_tenant_id,
         )
         if status:
             query = query.filter(AgentRepository.status == status)
+        if agent_id is not None:
+            query = query.filter(AgentRepository.agent_id == agent_id)
+        if category_id is not None:
+            query = query.filter(AgentRepository.category_id == category_id)
         rows = query.order_by(AgentRepository.agent_repository_id.desc()).all()
         return [
             {
                 "agent_repository_id": row.agent_repository_id,
+                "agent_id": row.agent_id,
                 "author": row.author,
+                "submitted_by": row.submitted_by,
                 "name": row.name,
                 "display_name": row.display_name,
                 "description": row.description,
                 "status": row.status,
+                "category_id": row.category_id,
+                "tags": row.tags,
+                "tool_count": row.tool_count,
+                "version_name": row.version_name,
+                "icon": row.icon,
+                "downloads": row.downloads,
             }
             for row in rows
         ]
-
-
-def query_agent_repository_list(
-    *,
-    page: int = 1,
-    page_size: int = 20,
-    search: Optional[str] = None,
-    tag: Optional[str] = None,
-    category_id: Optional[int] = None,
-    status: Optional[str] = STATUS_SHARED,
-    publisher_tenant_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Query repository listings with offset pagination."""
-    page = max(page, 1)
-    page_size = max(min(page_size, 100), 1)
-    offset = (page - 1) * page_size
-
-    with get_db_session() as session:
-        query = session.query(AgentRepository).filter(
-            AgentRepository.delete_flag != "Y",
-        )
-
-        if status:
-            query = query.filter(AgentRepository.status == status)
-        if publisher_tenant_id:
-            query = query.filter(
-                AgentRepository.publisher_tenant_id == publisher_tenant_id
-            )
-        if category_id is not None:
-            query = query.filter(AgentRepository.category_id == category_id)
-        if tag:
-            query = query.filter(AgentRepository.tags.any(tag))
-        if search:
-            keyword = f"%{search}%"
-            query = query.filter(
-                or_(
-                    AgentRepository.name.ilike(keyword),
-                    AgentRepository.display_name.ilike(keyword),
-                    AgentRepository.description.ilike(keyword),
-                    AgentRepository.author.ilike(keyword),
-                    func.array_to_string(AgentRepository.tags, ",").ilike(keyword),
-                )
-            )
-
-        total = query.count()
-        rows = (
-            query.order_by(AgentRepository.agent_repository_id.desc())
-            .offset(offset)
-            .limit(page_size)
-            .all()
-        )
-
-        total_pages = math.ceil(total / page_size) if total else 0
-        return {
-            "items": [as_dict(row) for row in rows],
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total": total,
-                "total_pages": total_pages,
-            },
-        }
 
 
 def update_agent_repository_by_id(
@@ -269,11 +243,14 @@ def update_agent_repository_by_id(
         "display_name",
         "description",
         "author",
+        "submitted_by",
         "category_id",
         "tags",
         "tool_count",
-        "version_label",
-        "source_version_no",
+        "version_name",
+        "icon",
+        "downloads",
+        "version_no",
         "agent_info_json",
         "status",
     }
@@ -305,16 +282,59 @@ def update_agent_repository_status_by_id(
     repository_id: int,
     status: str,
     user_id: str,
+    filter_publisher_tenant_id: Optional[str] = None,
+    publisher_tenant_id: Optional[str] = None,
+    publisher_user_id: Optional[str] = None,
+    submitted_by: Optional[str] = None,
 ) -> int:
     """Update repository listing status by primary key. Returns affected row count."""
+    update_values: Dict[str, Any] = {
+        "status": status,
+        "updated_by": user_id,
+    }
+    if publisher_tenant_id is not None:
+        update_values["publisher_tenant_id"] = publisher_tenant_id
+    if publisher_user_id is not None:
+        update_values["publisher_user_id"] = publisher_user_id
+    if submitted_by is not None:
+        update_values["submitted_by"] = submitted_by
+
+    with get_db_session() as session:
+        where_clauses = [
+            AgentRepository.agent_repository_id == repository_id,
+            AgentRepository.delete_flag != "Y",
+        ]
+        if filter_publisher_tenant_id is not None:
+            where_clauses.append(
+                AgentRepository.publisher_tenant_id == filter_publisher_tenant_id
+            )
+        result = session.execute(
+            update(AgentRepository)
+            .where(*where_clauses)
+            .values(**update_values)
+        )
+        return int(result.rowcount or 0)
+
+
+def reset_agent_repository_status(
+    *,
+    agent_repository_id: int,
+    agent_id: int,
+    status: str,
+    publisher_tenant_id: str,
+) -> int:
+    """Set other active listings with the same agent and status to not_shared."""
     with get_db_session() as session:
         result = session.execute(
             update(AgentRepository)
             .where(
-                AgentRepository.agent_repository_id == repository_id,
+                AgentRepository.agent_id == agent_id,
+                AgentRepository.status == status,
+                AgentRepository.agent_repository_id != agent_repository_id,
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
                 AgentRepository.delete_flag != "Y",
             )
-            .values(status=status, updated_by=user_id)
+            .values(status=STATUS_NOT_SHARED)
         )
         return int(result.rowcount or 0)
 
@@ -356,3 +376,143 @@ def list_agent_repository_by_publisher(
             )
         rows = query.order_by(AgentRepository.agent_repository_id.desc()).all()
         return [as_dict(row) for row in rows]
+
+
+
+def list_agent_repository_by_agent_ids(
+    agent_ids: List[int],
+    *,
+    statuses: Collection[str],
+    publisher_tenant_id: str,
+) -> List[dict]:
+    """List repository rows for the given agents, scoped to publisher tenant and statuses."""
+    if not agent_ids:
+        return []
+
+    status_list = list(statuses)
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                AgentRepository.agent_repository_id,
+                AgentRepository.agent_id,
+                AgentRepository.status,
+                AgentRepository.version_no,
+                AgentRepository.version_name,
+                AgentRepository.create_time,
+            )
+            .filter(
+                AgentRepository.delete_flag != "Y",
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
+                AgentRepository.agent_id.in_(agent_ids),
+                AgentRepository.status.in_(status_list),
+            )
+            .order_by(
+                AgentRepository.agent_id,
+                AgentRepository.create_time.desc(),
+            )
+            .all()
+        )
+
+    return [
+        {
+            "agent_repository_id": row.agent_repository_id,
+            "agent_id": row.agent_id,
+            "status": row.status,
+            "version_no": row.version_no,
+            "version_name": row.version_name,
+            "create_time": row.create_time,
+        }
+        for row in rows
+    ]
+
+
+def increment_agent_repository_downloads(agent_repository_id: int) -> int:
+    """Increment download count for an active repository listing."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentRepository)
+            .where(
+                AgentRepository.agent_repository_id == agent_repository_id,
+                AgentRepository.delete_flag != "Y",
+            )
+            .values(downloads=func.coalesce(AgentRepository.downloads, 0) + 1)
+        )
+        return int(result.rowcount or 0)
+
+
+def sum_agent_repository_downloads_by_agent_ids(
+    agent_ids: List[int],
+) -> Dict[int, int]:
+    """Sum downloads across all repository rows for each agent_id.
+
+    Includes soft-deleted rows and does not filter by status or publisher.
+    """
+    if not agent_ids:
+        return {}
+
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                AgentRepository.agent_id,
+                func.coalesce(func.sum(AgentRepository.downloads), 0).label(
+                    "total_downloads"
+                ),
+            )
+            .filter(AgentRepository.agent_id.in_(agent_ids))
+            .group_by(AgentRepository.agent_id)
+            .all()
+        )
+
+    return {int(row.agent_id): int(row.total_downloads) for row in rows}
+
+
+def fetch_draft_agent_mine_metadata(
+    tenant_id: str,
+    agent_ids: List[int],
+) -> Dict[int, dict]:
+    """Batch-fetch draft agent fields needed by the mine tab.
+
+    Returns a map of agent_id to created_by, current_version_no, version_name,
+    and version_create_time (from the published version row when present).
+    """
+    if not agent_ids:
+        return {}
+
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                AgentInfo.agent_id,
+                AgentInfo.created_by,
+                AgentInfo.current_version_no,
+                AgentVersion.version_name,
+                AgentVersion.create_time,
+            )
+            .outerjoin(
+                AgentVersion,
+                and_(
+                    AgentInfo.agent_id == AgentVersion.agent_id,
+                    AgentInfo.current_version_no == AgentVersion.version_no,
+                    AgentInfo.tenant_id == AgentVersion.tenant_id,
+                    AgentVersion.delete_flag == "N",
+                ),
+            )
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != "Y",
+                AgentInfo.enabled.is_(True),
+                AgentInfo.agent_id.in_(agent_ids),
+            )
+            .all()
+        )
+
+    return {
+        int(row.agent_id): {
+            "created_by": row.created_by,
+            "current_version_no": row.current_version_no,
+            "version_name": row.version_name,
+            "version_create_time": row.create_time,
+        }
+        for row in rows
+    }
+

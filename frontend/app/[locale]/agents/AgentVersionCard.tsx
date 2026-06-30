@@ -315,7 +315,14 @@ export function VersionCardItem({
     {
       key: '2',
       label: t("agent.version.field.modelName"),
-      children: <span>{agentVersionDetail?.model_name}</span>,
+      children: (
+        <span>
+          {Array.isArray((agentVersionDetail as any)?.model_names) &&
+          (agentVersionDetail as any).model_names.length > 0
+            ? (agentVersionDetail as any).model_names.join(", ")
+            : (agentVersionDetail as any)?.model_name || "-"}
+        </span>
+      ),
     },
   ];
 

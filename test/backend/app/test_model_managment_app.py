@@ -82,6 +82,194 @@ def sample_model_data():
     }
 
 
+@pytest.mark.asyncio
+async def test_suggest_capacity_success(client, auth_header, user_credentials, mocker):
+    """Test standalone capacity suggestion endpoint."""
+    from backend.consts.model import CapacitySuggestionFields, ModelCapacitySuggestionResponse
+
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_suggest = mocker.patch(
+        'backend.apps.model_managment_app._suggest_capacity_for_request',
+        return_value=ModelCapacitySuggestionResponse(
+            suggestions=CapacitySuggestionFields(
+                context_window_tokens=128000,
+                max_output_tokens=16384,
+                default_output_reserve_tokens=4096,
+                tokenizer_family="o200k_base",
+            ),
+            match_kind="catalog_exact",
+            match_confidence="high",
+            match_explanation="Matched approved catalog profile openai/gpt-4o@1",
+            suggested_provider="openai",
+            canonical_model_name="gpt-4o",
+            capability_profile_version="openai/gpt-4o@1",
+            capacity_source_on_accept="operator",
+        )
+    )
+
+    response = client.post(
+        "/model/suggest-capacity",
+        json={
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "llm",
+        },
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    # Response uses the shared {message, data} envelope so the frontend
+    # service layer can unwrap /model/* responses uniformly. See
+    # suggest_model_capacity for the rationale.
+    assert body["message"] == "Successfully suggested model capacity"
+    data = body["data"]
+    assert data["match_kind"] == "catalog_exact"
+    assert data["suggestions"]["context_window_tokens"] == 128000
+    assert data["suggested_provider"] == "openai"
+    mock_suggest.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_suggest_capacity_real_serialization_uses_envelope(client, auth_header, user_credentials, mocker):
+    """End-to-end serialization test: hit /model/suggest-capacity without
+    mocking the catalog matcher, so the response goes through the real
+    Pydantic serializer and JSONResponse envelope. Asserts the {message,
+    data} envelope shape and the nested catalog match. This is the safety
+    net for wire-format drift -- the headline W11 V1 bug shipped past
+    every existing unit test because nothing exercised the real
+    backend-to-wire format.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    response = client.post(
+        "/model/suggest-capacity",
+        json={
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "model_type": "llm",
+        },
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    # Envelope must be present at the top level. This is the contract the
+    # frontend modelService reads (`result.data`); breaking it makes both
+    # the suggestion alert and the coverage banner dead end-to-end without
+    # any unit test catching it.
+    assert isinstance(body, dict)
+    assert set(body.keys()) >= {"message", "data"}
+    assert body["message"] == "Successfully suggested model capacity"
+
+    data = body["data"]
+    assert data["match_kind"] == "catalog_exact"
+    assert data["match_confidence"] == "high"
+    assert data["suggested_provider"] == "openai"
+    assert data["canonical_model_name"] == "gpt-4o"
+    assert data["capability_profile_version"] == "openai/gpt-4o@1"
+    assert data["capacity_source_on_accept"] == "operator"
+    # Nested capacity dict is also envelope-free at this level: it sits
+    # directly under data.suggestions, mirroring the snake_case wire format
+    # that mapCapacitySuggestionFromApi expects.
+    assert data["suggestions"]["context_window_tokens"] > 0
+    assert data["suggestions"]["max_output_tokens"] > 0
+
+
+@pytest.mark.asyncio
+async def test_capacity_coverage_real_serialization_uses_envelope(client, auth_header, user_credentials, mocker):
+    """End-to-end serialization test for /model/capacity-coverage. Mocks the
+    service layer but lets the route serialize a real dict through
+    JSONResponse so the envelope contract is enforced at the wire boundary.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.get_capacity_coverage',
+        return_value={
+            "total_llm_vlm": 3,
+            "bare_count": 1,
+            "bare_models": [
+                {
+                    "model_id": 99,
+                    "model_name": "glm-5",
+                    "model_factory": "OpenAI-API-Compatible",
+                    "model_type": "llm",
+                    "max_tokens": 131072,
+                    "suggestion_available": False,
+                }
+            ],
+        },
+    )
+
+    response = client.get("/model/capacity-coverage", headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert isinstance(body, dict)
+    assert set(body.keys()) >= {"message", "data"}
+    assert body["message"] == "Successfully retrieved model capacity coverage"
+
+    data = body["data"]
+    assert data["total_llm_vlm"] == 3
+    assert data["bare_count"] == 1
+    assert data["bare_models"][0]["model_id"] == 99
+    assert data["bare_models"][0]["suggestion_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_suggest_capacity_bad_request(client, auth_header, user_credentials, mocker):
+    """Test standalone capacity suggestion endpoint maps invalid input to 400."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app._suggest_capacity_for_request',
+        side_effect=ValueError("model_name is required"),
+    )
+
+    response = client.post(
+        "/model/suggest-capacity",
+        json={"model_name": "gpt-4o"},
+        headers=auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "model_name is required" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_capacity_coverage_success(client, auth_header, user_credentials, mocker):
+    """Test capacity coverage endpoint uses current tenant."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_coverage = mocker.patch(
+        'backend.apps.model_managment_app.get_capacity_coverage',
+        return_value={
+            "total_llm_vlm": 2,
+            "bare_count": 1,
+            "bare_models": [
+                {
+                    "model_id": 11,
+                    "model_name": "gpt-4o",
+                    "model_factory": "openai",
+                    "model_type": "llm",
+                    "max_tokens": 16384,
+                    "suggestion_available": True,
+                }
+            ],
+        },
+    )
+
+    response = client.get("/model/capacity-coverage", headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["message"] == "Successfully retrieved model capacity coverage"
+    data = body["data"]
+    assert data["total_llm_vlm"] == 2
+    assert data["bare_count"] == 1
+    assert data["bare_models"][0]["max_tokens"] == 16384
+    assert data["bare_models"][0]["suggestion_available"] is True
+    mock_coverage.assert_called_once_with(user_credentials[1])
+
+
 # Tests for /model/create endpoint
 @pytest.mark.asyncio
 async def test_create_model_success(client, auth_header, user_credentials, sample_model_data, mocker):
@@ -100,6 +288,67 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
     data = response.json()
     assert "Model created successfully" in data.get("message", "")
     mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_model_records_accept_signal_when_present(client, auth_header, user_credentials, sample_model_data, mocker):
+    """End-to-end SLO data-flow check: when the frontend ships the W11 accept
+    signal on a successful save, the app layer must (1) strip the audit-only
+    fields before the DB write, and (2) call the metric recorder so
+    model_capacity_suggestion_accept_total increments. Spec L709-710.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def _create(*args, **kwargs):
+        return None
+
+    mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
+
+    payload = {
+        **sample_model_data,
+        "model_factory": "huggingface",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+    response = client.post("/model/create", json=payload, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+
+    # Audit fields must NOT reach the service layer.
+    create_args = mock_create.await_args
+    sent = create_args.args[2]
+    assert "accepted_suggestion_match_kind" not in sent
+    assert "accepted_capability_profile_version" not in sent
+    # Real capacity fields ARE forwarded.
+    assert sent["context_window_tokens"] == 128000
+    assert sent["max_output_tokens"] == 16384
+
+    # Metric recorder called with the labels the SLO dashboard expects.
+    mock_record.assert_called_once_with("catalog_exact", payload["model_factory"])
+
+
+@pytest.mark.asyncio
+async def test_create_model_skips_accept_recorder_without_match_kind(client, auth_header, user_credentials, sample_model_data, mocker):
+    """Ordinary saves (no Use-suggestion click) must NOT fire the recorder.
+    Otherwise accept_total inflates and the SLO ratio against
+    dispatch_profile_hit_total becomes meaningless.
+    """
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def _create(*args, **kwargs):
+        return None
+
+    mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
+    mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
+
+    response = client.post("/model/create", json=sample_model_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    mock_record.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -238,6 +487,55 @@ async def test_provider_batch_create_exception(client, auth_header, user_credent
     # Now we return the actual error message
     assert "boom" in data.get("detail", "")
     mock_batch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_provider_batch_create_strips_accept_signal_and_records(
+    client, auth_header, user_credentials, mocker
+):
+    """Same audit-only contract as /create: per-model accept-signal fields
+    must be popped before the batch reaches the service layer (otherwise
+    SQLAlchemy raises 'Unconsumed column names' on insert), and the SLO
+    counter fires once per accepted row after the persist call succeeds.
+    """
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+
+    async def _batch(*args, **kwargs):
+        return None
+
+    mock_batch = mocker.patch(
+        'backend.apps.model_managment_app.batch_create_models_for_tenant',
+        side_effect=_batch,
+    )
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    payload = {
+        "models": [
+            {
+                "id": "prov/modelA",
+                "accepted_suggestion_match_kind": "catalog_exact",
+                "accepted_capability_profile_version": "prov/modelA@1",
+            },
+            {"id": "prov/modelB"},
+        ],
+        "provider": "prov",
+        "type": "llm",
+        "api_key": "k",
+    }
+    response = client.post(
+        "/model/provider/batch_create", json=payload, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    sent = mock_batch.await_args.args[2]
+    for model in sent["models"]:
+        assert "accepted_suggestion_match_kind" not in model
+        assert "accepted_capability_profile_version" not in model
+    mock_record.assert_called_once_with("catalog_exact", "prov")
 
 
 # Tests for /model/delete endpoint
@@ -443,6 +741,13 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
     )
+    mock_suggest = mocker.patch(
+        'backend.apps.model_managment_app._capacity_suggestion_for_model_request',
+        return_value={
+            "suggestions": {"context_window_tokens": 128000},
+            "match_kind": "catalog_exact",
+        },
+    )
     
     response = client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
@@ -451,9 +756,11 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     data = response.json()
     assert data["message"] == "Successfully verified model connectivity"
     assert data["data"]["connectivity"] is True
+    assert data["data"]["capacity_suggestion"]["match_kind"] == "catalog_exact"
     # Success case should not have error field in response
     assert "error" not in data["data"]
     mock_verify.assert_called_once()
+    mock_suggest.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -467,6 +774,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
             "error": "Failed to connect to model 'gpt-4' at https://api.openai.com. Please verify the URL, API key, and network connection."
         }
     )
+    mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
@@ -477,9 +785,11 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     assert data["data"]["connectivity"] is False
     # Failure case should have error field with descriptive message
     assert "error" in data["data"]
+    assert data["data"]["capacity_suggestion"] is None
     assert "Failed to connect to model" in data["data"]["error"]
     assert "Please verify the URL, API key, and network connection" in data["data"]["error"]
     mock_verify.assert_called_once()
+    mock_suggest.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -810,6 +1120,57 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
 
 
 @pytest.mark.asyncio
+async def test_manage_create_model_records_accept_signal_when_present(
+    client, auth_header, user_credentials, mocker
+):
+    """Same SLO contract as /create: when SU/asset-owner saves a model
+    through /manage/create with the accept signal in the payload, the
+    audit fields must be stripped before reaching the service and the
+    accept_total recorder must fire with provider=model_factory. Before
+    the fix the manage Pydantic schema did not declare the two fields,
+    so Pydantic silently dropped them and the SLO numerator missed
+    every accept that landed via the SU surface.
+    """
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+
+    async def _create(*args, **kwargs):
+        return None
+
+    mock_create = mocker.patch(
+        'backend.apps.model_managment_app.create_model_for_tenant',
+        side_effect=_create,
+    )
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "model_name": "gpt-4o",
+        "model_type": "llm",
+        "model_factory": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "k",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_exact",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+    response = client.post(
+        "/model/manage/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    sent = mock_create.await_args.args[2]
+    assert "accepted_suggestion_match_kind" not in sent
+    assert "accepted_capability_profile_version" not in sent
+    mock_record.assert_called_once_with("catalog_exact", "openai")
+
+
+@pytest.mark.asyncio
 async def test_manage_create_model_conflict(client, auth_header, user_credentials, mocker):
     """Test model creation with conflict error."""
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
@@ -886,6 +1247,54 @@ async def test_manage_update_model_success(client, auth_header, user_credentials
         "Old Model Name",
         ANY  # The dict may contain additional optional fields like chunk settings
     )
+
+
+@pytest.mark.asyncio
+async def test_manage_update_model_records_accept_signal_when_present(
+    client, auth_header, user_credentials, mocker
+):
+    """Mirror of test_manage_create_model_records_accept_signal_when_present
+    for the /manage/update path. The SU surface routes the same accept
+    signal through updateManageTenantModel; the recorder must fire with
+    provider=model_factory and the audit fields must not leak into the
+    DB update.
+    """
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+
+    async def _update(*args, **kwargs):
+        return None
+
+    mock_update = mocker.patch(
+        'backend.apps.model_managment_app.update_single_model_for_tenant',
+        side_effect=_update,
+    )
+    mock_record = mocker.patch(
+        'backend.apps.model_managment_app._record_capacity_suggestion_accept'
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "current_display_name": "GPT-4o",
+        "model_factory": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "k",
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "capacity_source": "operator",
+        "accepted_suggestion_match_kind": "catalog_fuzzy",
+        "accepted_capability_profile_version": "openai/gpt-4o@1",
+    }
+    response = client.post(
+        "/model/manage/update", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    sent = mock_update.await_args.args[3]
+    assert "accepted_suggestion_match_kind" not in sent
+    assert "accepted_capability_profile_version" not in sent
+    mock_record.assert_called_once_with("catalog_fuzzy", "openai")
 
 
 @pytest.mark.asyncio

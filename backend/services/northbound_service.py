@@ -133,7 +133,7 @@ def _normalize_northbound_attachments(
     tenant_id: str,
 ) -> Optional[List[Dict[str, Any]]]:
     """Convert northbound attachment references into internal minio_files objects.
-    
+
     Supports two formats:
     1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
     2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]
@@ -326,6 +326,7 @@ async def start_streaming_chat(
     attachments: Optional[List[Any]] = None,
     meta_data: Optional[Dict[str, Any]] = None,
     tool_params: Optional[ToolParamsRequest] = None,
+    model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
@@ -360,6 +361,7 @@ async def start_streaming_chat(
             minio_files=normalized_attachments,
             is_debug=False,
             tool_params=tool_params,
+            model_id=model_id,
         )
 
         # Synchronously persist the user message before starting the stream to avoid race conditions

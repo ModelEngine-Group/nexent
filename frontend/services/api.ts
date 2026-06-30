@@ -2,6 +2,10 @@ import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
+import type {
+  AgentRepositoryListingListParams,
+  MyEditableAgentListParams,
+} from "@/types/agentRepository";
 import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
@@ -28,7 +32,8 @@ export const API_ENDPOINTS = {
     pending: `${API_BASE_URL}/user/oauth/pending`,
     complete: `${API_BASE_URL}/user/oauth/complete`,
     accounts: `${API_BASE_URL}/user/oauth/accounts`,
-    unlink: (provider: string) => `${API_BASE_URL}/user/oauth/accounts/${provider}`,
+    unlink: (provider: string) =>
+      `${API_BASE_URL}/user/oauth/accounts/${provider}`,
   },
   cas: {
     config: `${API_BASE_URL}/user/cas/config`,
@@ -48,6 +53,23 @@ export const API_ENDPOINTS = {
     opinion: `${API_BASE_URL}/conversation/message/update_opinion`,
     messageId: `${API_BASE_URL}/conversation/message/id`,
   },
+  share: {
+    createConversation: (conversationId: number) =>
+      `${API_BASE_URL}/share/conversation/${conversationId}`,
+    detail: (shareId: string) => `${API_BASE_URL}/share/${shareId}`,
+    assetPreview: (shareId: string, assetId: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+      return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/preview${suffix}`;
+    },
+    assetDownload: (shareId: string, assetId: string, filename?: string) => {
+      const queryParams = new URLSearchParams();
+      if (filename) queryParams.append("filename", filename);
+      const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+      return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/download${suffix}`;
+    },
+  },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     update: `${API_BASE_URL}/agent/update`,
@@ -63,18 +85,27 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
-    byName: (agentName: string) => `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
-    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    byName: (agentName: string) =>
+      `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
+    clearNew: (agentId: string | number) =>
+      `${API_BASE_URL}/agent/clear_new/${agentId}`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     versions: {
-      version: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
-      detail: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/detail`,
+      version: (agentId: number, versionNo: number) =>
+        `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      detail: (agentId: number, versionNo: number) =>
+        `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/detail`,
       list: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions`,
-      current: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/current_version`,
-      rollback: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
-      compare: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions/compare`,
-      delete: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
-      update: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      current: (agentId: number) =>
+        `${API_BASE_URL}/agent/${agentId}/current_version`,
+      rollback: (agentId: number, versionNo: number) =>
+        `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
+      compare: (agentId: number) =>
+        `${API_BASE_URL}/agent/${agentId}/versions/compare`,
+      delete: (agentId: number, versionNo: number) =>
+        `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      update: (agentId: number, versionNo: number) =>
+        `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
   tool: {
@@ -97,10 +128,13 @@ export const API_ENDPOINTS = {
   },
   promptTemplates: {
     list: `${API_BASE_URL}/prompt_templates`,
-    detail: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    detail: (templateId: number) =>
+      `${API_BASE_URL}/prompt_templates/${templateId}`,
     create: `${API_BASE_URL}/prompt_templates`,
-    update: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
-    delete: (templateId: number) => `${API_BASE_URL}/prompt_templates/${templateId}`,
+    update: (templateId: number) =>
+      `${API_BASE_URL}/prompt_templates/${templateId}`,
+    delete: (templateId: number) =>
+      `${API_BASE_URL}/prompt_templates/${templateId}`,
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
@@ -187,6 +221,8 @@ export const API_ENDPOINTS = {
         displayName
       )}&model_type=${encodeURIComponent(modelType)}`,
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
+    suggestCapacity: `${API_BASE_URL}/model/suggest-capacity`,
+    capacityCoverage: `${API_BASE_URL}/model/capacity-coverage`,
     updateSingleModel: (displayName: string) =>
       `${API_BASE_URL}/model/update?display_name=${encodeURIComponent(displayName)}`,
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
@@ -262,6 +298,7 @@ export const API_ENDPOINTS = {
   },
   aidp: {
     knowledgeBases: `${API_BASE_URL}/aidp/knowledge-bases`,
+    knowledgeBasesAll: `${API_BASE_URL}/aidp/knowledge-bases-all`,
   },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
@@ -301,25 +338,35 @@ export const API_ENDPOINTS = {
     // External agent management
     agents: `${API_BASE_URL}/a2a/client/agents`,
     agent: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}`,
-    agentRefresh: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
-    agentProtocol: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
+    agentRefresh: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/refresh`,
+    agentProtocol: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/protocol`,
     // External agent relations
     relations: `${API_BASE_URL}/a2a/client/relations`,
     relation: (localAgentId: number, externalAgentId: number) =>
       `${API_BASE_URL}/a2a/client/relations?local_agent_id=${localAgentId}&external_agent_id=${externalAgentId}`,
-    subAgents: (localAgentId: number) => `${API_BASE_URL}/a2a/client/sub-agents/${localAgentId}`,
-    externalRelations: (localAgentId: number) => `${API_BASE_URL}/a2a/client/relations/${localAgentId}`,
+    subAgents: (localAgentId: number) =>
+      `${API_BASE_URL}/a2a/client/sub-agents/${localAgentId}`,
+    externalRelations: (localAgentId: number) =>
+      `${API_BASE_URL}/a2a/client/relations/${localAgentId}`,
     // Nacos config management
     nacosConfigs: `${API_BASE_URL}/a2a/client/nacos-configs`,
-    nacosConfig: (configId: string) => `${API_BASE_URL}/a2a/client/nacos-configs/${configId}`,
+    nacosConfig: (configId: string) =>
+      `${API_BASE_URL}/a2a/client/nacos-configs/${configId}`,
     nacosTestConnection: `${API_BASE_URL}/a2a/client/nacos-configs/test-connection`,
     // A2A Server management
     serverAgents: `${API_BASE_URL}/a2a/management/agents`,
-    serverAgent: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}`,
-    serverAgentEnable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/enable`,
-    serverAgentDisable: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/disable`,
-    serverAgentSettings: (agentId: number) => `${API_BASE_URL}/a2a/management/agents/${agentId}/settings`,
-    agentChat: (agentId: string) => `${API_BASE_URL}/a2a/client/agents/${agentId}/chat`,
+    serverAgent: (agentId: number) =>
+      `${API_BASE_URL}/a2a/management/agents/${agentId}`,
+    serverAgentEnable: (agentId: number) =>
+      `${API_BASE_URL}/a2a/management/agents/${agentId}/enable`,
+    serverAgentDisable: (agentId: number) =>
+      `${API_BASE_URL}/a2a/management/agents/${agentId}/disable`,
+    serverAgentSettings: (agentId: number) =>
+      `${API_BASE_URL}/a2a/management/agents/${agentId}/settings`,
+    agentChat: (agentId: string) =>
+      `${API_BASE_URL}/a2a/client/agents/${agentId}/chat`,
   },
   skills: {
     list: `${API_BASE_URL}/skills`,
@@ -327,9 +374,11 @@ export const API_ENDPOINTS = {
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
-    updateUpload: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/upload`,
+    updateUpload: (skillName: string) =>
+      `${API_BASE_URL}/skills/${skillName}/upload`,
     delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
-    deleteFile: (skillName: string, filePath: string) => `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
+    deleteFile: (skillName: string, filePath: string) =>
+      `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
     files: (skillName: string) => `${API_BASE_URL}/skills/${skillName}/files`,
     fileContent: (skillName: string, filePath: string) =>
       `${API_BASE_URL}/skills/${skillName}/files/${filePath}`,
@@ -373,6 +422,59 @@ export const API_ENDPOINTS = {
         `${API_BASE_URL}/memory/delete/${memoryId}`,
       clear: `${API_BASE_URL}/memory/clear`,
     },
+  },
+  agentRepository: {
+    listings: (params?: AgentRepositoryListingListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.status) queryParams.append("status", params.status);
+      if (params?.agent_id != null) {
+        queryParams.append("agent_id", String(params.agent_id));
+      }
+      if (params?.category_id != null) {
+        queryParams.append("category_id", String(params.category_id));
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
+    },
+    mineAgents: (params?: MyEditableAgentListParams) => {
+      const queryParams = new URLSearchParams();
+      if (params?.ownership) {
+        queryParams.append("ownership", params.ownership);
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.new_agent_padding) {
+        queryParams.append("new_agent_padding", "true");
+      }
+      const queryString = queryParams.toString();
+      return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
+    },
+    detail: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    importPrecheck: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
+    import: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import`,
+    updateStatus: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
+    createListing: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
   },
   market: {
     agents: (params?: MarketAgentListParams) => {
@@ -556,7 +658,6 @@ export const fetchWithErrorHandling = async (
     throw error;
   }
 };
-
 
 // Add global interface extensions for TypeScript
 declare global {

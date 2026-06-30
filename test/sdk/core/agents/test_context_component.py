@@ -23,7 +23,7 @@ import types
 import importlib.util
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -324,7 +324,7 @@ class TestSystemPromptComponent:
         messages = comp.to_messages()
         assert len(messages) == 1
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "Test prompt content"
+        assert messages[0]["content"] == [{"type": "text", "text": "Test prompt content"}]
 
     def test_with_template_name(self):
         comp = agent_model_module.SystemPromptComponent(
@@ -340,6 +340,14 @@ class TestSystemPromptComponent:
         tokens = comp.estimate_tokens(chars_per_token=1.5)
         assert tokens > 0
         assert tokens == int(len("This is a test prompt with some words.") / 1.5)
+
+    def test_estimate_tokens_with_string_content_fallback(self):
+        """estimate_tokens handles legacy string content via str() fallback."""
+        comp = agent_model_module.SystemPromptComponent(content="hello world")
+        with patch.object(agent_model_module.SystemPromptComponent, "to_messages",
+                          return_value=[{"role": "system", "content": "hello world"}]):
+            tokens = comp.estimate_tokens(chars_per_token=1.5)
+            assert tokens == int(len("hello world") / 1.5)
 
     def test_default_priority(self):
         comp = agent_model_module.SystemPromptComponent(content="test")
@@ -455,6 +463,7 @@ class TestMemoryComponent:
         comp = agent_model_module.MemoryComponent(formatted_content="Retrieved memories")
         messages = comp.to_messages()
         assert len(messages) == 1
+        assert messages[0]["role"] == "user"
 
     def test_to_messages_empty(self):
         comp = agent_model_module.MemoryComponent()
@@ -496,6 +505,7 @@ class TestKnowledgeBaseComponent:
         comp = agent_model_module.KnowledgeBaseComponent(summary="Knowledge base summary")
         messages = comp.to_messages()
         assert len(messages) == 1
+        assert messages[0]["role"] == "user"
 
     def test_to_messages_empty(self):
         comp = agent_model_module.KnowledgeBaseComponent()
@@ -781,6 +791,21 @@ class TestExtendedContextManagerConfig:
         assert config.enabled is True
         assert config.token_threshold == 5000
         assert config.keep_recent_steps == 3
+
+    def test_w2_budget_fields_default_to_legacy_threshold_mode(self):
+        config = summary_config_module.ContextManagerConfig()
+        assert config.soft_input_budget_tokens == 0
+        assert config.hard_input_budget_tokens == 0
+
+    def test_w2_budget_fields_can_be_set(self):
+        config = summary_config_module.ContextManagerConfig(
+            token_threshold=8000,
+            soft_input_budget_tokens=7000,
+            hard_input_budget_tokens=9000,
+        )
+        assert config.token_threshold == 8000
+        assert config.soft_input_budget_tokens == 7000
+        assert config.hard_input_budget_tokens == 9000
 
 
 class TestAgentConfigWithContextComponents:

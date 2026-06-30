@@ -343,10 +343,10 @@ class TestRateLimiting:
         # First, add a request to create an old bucket
         old_bucket = str(int(ns._now_seconds() // 60) - 1)
         ns._RATE_STATE["tenant-cleanup"] = {old_bucket: 50}
-        
+
         # Make a new request - should trigger cleanup of old bucket
         await ns.check_and_consume_rate_limit("tenant-cleanup")
-        
+
         # Old bucket should be cleaned up, new bucket should have 1 request
         current_bucket = ns._minute_bucket()
         assert old_bucket not in ns._RATE_STATE["tenant-cleanup"]
@@ -492,6 +492,95 @@ class TestStartStreamingChat:
             )
 
             mock_norm.assert_called_once()
+
+    async def test_start_streaming_chat_with_model_id_override(self):
+        """Test that model_id is passed through to AgentRequest to override the agent's default model."""
+        ctx = MockNorthboundContext(token_id=0)
+        override_model_id = 42
+
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        async def mock_get_history(*args, **kwargs):
+            return {"data": {"history": []}}
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history):
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query",
+                model_id=override_model_id
+            )
+
+            # Verify run_agent_stream was called with an AgentRequest that has the override model_id
+            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            agent_request = call_kwargs.get("agent_request")
+            assert agent_request is not None
+            assert getattr(agent_request, "model_id", None) == override_model_id
+
+    async def test_start_streaming_chat_model_id_null_uses_agent_default(self):
+        """Test that omitting model_id results in None, preserving agent's default model."""
+        ctx = MockNorthboundContext(token_id=0)
+
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        async def mock_get_history(*args, **kwargs):
+            return {"data": {"history": []}}
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history):
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query",
+                # model_id not provided -> defaults to None
+            )
+
+            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            agent_request = call_kwargs.get("agent_request")
+            assert agent_request is not None
+            assert getattr(agent_request, "model_id", None) is None
+
+    async def test_start_streaming_chat_with_model_id_and_attachments(self):
+        """Test streaming chat with both model_id override and attachments."""
+        ctx = MockNorthboundContext(token_id=0)
+        attachments = ["s3://bucket/file.txt"]
+
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        agent_service_mod.run_agent_stream.return_value = mock_response
+
+        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
+                patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
+                patch.object(ns, 'get_conversation_history_internal', new_callable=AsyncMock) as mock_history, \
+                patch.object(ns, '_normalize_northbound_attachments', return_value=[{"name": "file.txt"}]) as mock_norm:
+            mock_history.return_value = {"data": {"history": []}}
+
+            await ns.start_streaming_chat(
+                ctx=ctx,
+                conversation_id=123,
+                agent_name="test_agent",
+                query="test query",
+                attachments=attachments,
+                model_id=99
+            )
+
+            mock_norm.assert_called_once()
+            call_kwargs = agent_service_mod.run_agent_stream.call_args.kwargs
+            agent_request = call_kwargs.get("agent_request")
+            assert agent_request is not None
+            assert getattr(agent_request, "model_id", None) == 99
 
 
 @pytest.mark.asyncio
@@ -946,7 +1035,7 @@ class TestGetAgentInfoListErrorHandling:
     async def test_get_agent_info_by_name_success(self):
         """Test successful agent ID retrieval."""
         agent_service_mod.get_agent_id_by_name.return_value = 42
-        
+
         result = await ns.get_agent_info_by_name("test_agent", "tenant-1")
         assert result == 42
 
@@ -954,7 +1043,7 @@ class TestGetAgentInfoListErrorHandling:
     async def test_get_agent_info_by_name_error(self):
         """Test that errors are wrapped properly."""
         agent_service_mod.get_agent_id_by_name.side_effect = Exception("Agent not found")
-        
+
         with pytest.raises(Exception) as exc_info:
             await ns.get_agent_info_by_name("nonexistent", "tenant-1")
         assert "Failed to get agent id" in str(exc_info.value)

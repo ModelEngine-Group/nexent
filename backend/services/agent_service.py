@@ -282,55 +282,105 @@ def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
         return ""
 
 
-def _resolve_model_with_fallback(
-    model_display_name: str | None,
-    exported_model_id: str | None,
+def _resolve_model_ids_with_fallback(
+    model_ids: List[int] | None,
+    model_display_names: List[str] | None,
     model_label: str,
-    tenant_id: str
-) -> str | None:
+    tenant_id: str,
+) -> List[int] | None:
     """
-    Resolve model_id from model_display_name with fallback to quick config LLM model.
+    Resolve model_ids from an import payload, merging two sources in priority order:
+
+      1. Explicit `model_ids` provided in the payload. Each id is validated against
+         the target tenant's catalog; missing ids are dropped (logged).
+      2. `model_display_names` resolved via ``get_model_id_by_display_name`` to
+         cover ids that were lost in step 1.
+      3. A single quick config LLM model id is appended if any of the desired
+         models could not be resolved (so the agent always has at least one
+         usable model after import).
 
     Args:
-        model_display_name: Display name of the model to lookup
-        exported_model_id: Original model_id from export (for logging only)
-        model_label: Label for logging (e.g., "Model", "Business logic model")
-        tenant_id: Tenant ID for model lookup
+        model_ids: Optional list of model ids from the export payload.
+        model_display_names: Optional list of display names for fallback lookup.
+        model_label: Label for logging (e.g., "Model", "Business logic model").
+        tenant_id: Tenant ID for catalog lookup.
 
     Returns:
-        Resolved model_id or None if not found and no fallback available
+        Ordered, de-duplicated list of resolved model_ids; empty list if no
+        input was provided (caller should skip persisting model_ids).
     """
-    if not model_display_name:
+    if not model_ids and not model_display_names:
         return None
 
-    # Try to find model by display name in current tenant
-    resolved_id = get_model_id_by_display_name(model_display_name, tenant_id)
+    resolved_ids: List[int] = []
+    seen: set[int] = set()
+    missing_ids: List[int] = []
 
-    if resolved_id:
+    # Step 1: validate explicit ids against the current tenant catalog.
+    for mid in model_ids or []:
+        if mid in seen:
+            continue
+        info = get_model_by_model_id(mid)
+        if info:
+            seen.add(mid)
+            resolved_ids.append(mid)
+        else:
+            missing_ids.append(mid)
+
+    if resolved_ids:
         logger.info(
-            f"{model_label} '{model_display_name}' found in tenant {tenant_id}, "
-            f"mapped to model_id: {resolved_id} (exported model_id was: {exported_model_id})")
-        return resolved_id
+            f"{model_label} import: kept {len(resolved_ids)}/{len(model_ids or [])} "
+            f"explicit model_ids in tenant {tenant_id}"
+            + (f"; missing ids: {missing_ids}" if missing_ids else "")
+        )
+        # When the caller explicitly provides model_ids, the selection is intentional —
+        # do NOT supplement with extra models from model_display_names.
+        return resolved_ids
 
-    # Model not found, try fallback to quick config LLM model
-    logger.warning(
-        f"{model_label} '{model_display_name}' (exported model_id: {exported_model_id}) "
-        f"not found in tenant {tenant_id}, falling back to quick config LLM model.")
+    # Step 2: resolve remaining slots by display name.
+    # Only reached when model_ids was empty/None (caller did not specify a preference),
+    # so we use display names to find a suitable model in the target tenant.
+    used_name_indices: set[int] = set()
+    missing_names: List[str] = []
 
-    quick_config_model = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"],
-        tenant_id=tenant_id
-    )
+    for idx, display_name in enumerate(model_display_names or []):
+        if not display_name:
+            continue
 
-    if quick_config_model:
-        fallback_id = quick_config_model.get("model_id")
+        resolved_id = get_model_id_by_display_name(display_name, tenant_id)
+        if resolved_id and resolved_id not in seen:
+            seen.add(resolved_id)
+            resolved_ids.append(resolved_id)
+            used_name_indices.add(idx)
+        else:
+            missing_names.append(display_name)
+            used_name_indices.add(idx)
+
+    if model_display_names:
         logger.info(
-            f"Using quick config LLM model for {model_label.lower()}: "
-            f"{quick_config_model.get('display_name')} (model_id: {fallback_id})")
-        return fallback_id
+            f"{model_label} import: resolved {len(used_name_indices) - len(missing_names)}/"
+            f"{len(model_display_names)} display names in tenant {tenant_id}"
+            + (f"; missing names: {missing_names}" if missing_names else "")
+        )
 
-    logger.warning(f"No quick config LLM model found for tenant {tenant_id}")
-    return None
+    # Step 3: quick config LLM fallback when still nothing resolved.
+    if not resolved_ids and (missing_ids or missing_names):
+        quick_config_model = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"],
+            tenant_id=tenant_id,
+        )
+        if quick_config_model:
+            fallback_id = quick_config_model.get("model_id")
+            if fallback_id is not None and fallback_id not in seen:
+                logger.warning(
+                    f"{model_label} import: no usable model found in tenant {tenant_id} "
+                    f"(missing ids: {missing_ids}, missing names: {missing_names}); "
+                    f"falling back to quick config LLM model "
+                    f"'{quick_config_model.get('display_name')}' (model_id: {fallback_id})"
+                )
+                resolved_ids.append(fallback_id)
+
+    return resolved_ids
 
 
 def _normalize_language_key(language: str) -> str:
@@ -1034,10 +1084,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         logger.error(f"Failed to get external sub agents: {str(e)}")
         agent_info["external_sub_agent_id_list"] = []
 
-    if agent_info["model_id"] is not None:
-        model_info = get_model_by_model_id(agent_info["model_id"])
-        agent_info["model_name"] = model_info.get(
-            "display_name", None) if model_info is not None else None
+    # Get model names from model_ids array
+    model_ids = agent_info.get("model_ids")
+    model_names: List[str] = []
+    if model_ids and len(model_ids) > 0:
+        for mid in model_ids:
+            model_info = get_model_by_model_id(mid)
+            if model_info:
+                display_name = model_info.get("display_name")
+                if display_name:
+                    model_names.append(display_name)
+    agent_info["model_names"] = model_names
+    # Always derive model_name from model_ids so the API contract is consistent.
+    if model_ids and len(model_ids) > 0:
+        first_model_info = get_model_by_model_id(model_ids[0])
+        agent_info["model_name"] = first_model_info.get(
+            "display_name", None) if first_model_info is not None else None
     else:
         agent_info["model_name"] = None
 
@@ -1106,9 +1168,10 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
             "display_name": agent_info.get("display_name"),
             "description": agent_info.get("description"),
             "enable_tool_id_list": enable_tool_id_list,
-            "model_name": agent_info["model_name"],
-            "model_id": agent_info.get("model_id"),
+            "model_ids": agent_info.get("model_ids"),
+            "model_names": agent_info.get("model_names"),
             "max_steps": agent_info["max_steps"],
+            "requested_output_tokens": agent_info.get("requested_output_tokens"),
             "business_description": agent_info["business_description"],
             "duty_prompt": agent_info.get("duty_prompt"),
             "constraint_prompt": agent_info.get("constraint_prompt"),
@@ -1116,11 +1179,51 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
             "sub_agent_id_list": query_sub_agents_id_list(main_agent_id=sub_agent_id, tenant_id=tenant_id)}
 
 
+def _validate_requested_output_tokens_for_agent(
+    request: AgentInfoRequest,
+    tenant_id: str,
+) -> None:
+    requested_output_tokens = request.requested_output_tokens
+    if requested_output_tokens is None:
+        return
+
+    model_id = request.model_id
+    if model_id is None and request.agent_id is not None:
+        try:
+            existing_agent = search_agent_info_by_agent_id(
+                agent_id=request.agent_id,
+                tenant_id=tenant_id,
+                version_no=request.version_no,
+            )
+            model_id = existing_agent.get("model_id")
+        except Exception as exc:
+            logger.warning(
+                "Could not resolve existing agent model for requested_output_tokens validation: %s",
+                exc,
+            )
+
+    if model_id is None:
+        return
+
+    model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+    max_output_tokens = model_info.get("max_output_tokens") if model_info else None
+    if max_output_tokens is not None and requested_output_tokens > max_output_tokens:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            (
+                "requested_output_tokens cannot exceed the selected model "
+                f"max_output_tokens ({max_output_tokens})"
+            ),
+        )
+
+
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "example_questions cannot exceed 6 items")
+
+    _validate_requested_output_tokens_for_agent(request, tenant_id)
 
     prompt_template_id, prompt_template_name = get_prompt_template_summary(
         template_id=request.prompt_template_id,
@@ -1140,13 +1243,13 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "description": request.description,
                 "business_description": request.business_description,
                 "author": request.author,
-                "model_id": request.model_id,
-                "model_name": request.model_name,
+                "model_ids": request.model_ids,
                 "business_logic_model_id": request.business_logic_model_id,
                 "business_logic_model_name": request.business_logic_model_name,
                 "prompt_template_id": prompt_template_id,
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
+                "requested_output_tokens": request.requested_output_tokens,
                 "provide_run_summary": request.provide_run_summary,
                 "verification_config": request.verification_config,
                 "duty_prompt": request.duty_prompt,
@@ -1199,7 +1302,9 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                      if inst.get("tool_id") == tool_id),
                     None
                 )
-                params = (existing_instance or {}).get("params", {})
+                # Safely get params, default to empty dict if None or not present
+                raw_params = (existing_instance or {}).get("params")
+                params = raw_params if raw_params is not None else {}
                 create_or_update_tool_by_tool_info(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,
@@ -1648,13 +1753,15 @@ async def export_agent_by_agent_id(
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
 
-    # Get model_id and model display name from agent_info
-    model_id = agent_info.get("model_id")
-    model_display_name = None
-    if model_id is not None:
-        model_info = get_model_by_model_id(model_id)
-        model_display_name = model_info.get(
-            "display_name") if model_info is not None else None
+    # Resolve model display names from model_ids array
+    model_ids_list = agent_info.get("model_ids") or []
+    model_names_list: List[str] = []
+    for mid in model_ids_list:
+        mid_info = get_model_by_model_id(mid)
+        if mid_info:
+            display = mid_info.get("display_name")
+            if display:
+                model_names_list.append(display)
 
     # Get business_logic_model_id and business logic model display name
     business_logic_model_id = agent_info.get("business_logic_model_id")
@@ -1673,6 +1780,7 @@ async def export_agent_by_agent_id(
                                           business_description=agent_info["business_description"],
                                           author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
+                                          requested_output_tokens=agent_info.get("requested_output_tokens"),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           verification_config=agent_info.get("verification_config"),
                                           duty_prompt=agent_info.get(
@@ -1684,8 +1792,8 @@ async def export_agent_by_agent_id(
                                           enabled=agent_info["enabled"],
                                           tools=tool_list,
                                           managed_agents=agent_relation_in_db,
-                                          model_id=model_id,
-                                          model_name=model_display_name,
+                                          model_ids=model_ids_list,
+                                          model_names=model_names_list,
                                           business_logic_model_id=business_logic_model_id,
                                           business_logic_model_name=business_logic_model_display_name,
                                           skill_names=skill_names,
@@ -1794,21 +1902,25 @@ async def import_agent_by_agent_id(
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
 
-    # Resolve model IDs with fallback
-    # Note: We use model_display_name for cross-tenant compatibility
-    # The exported model_id is kept for reference/debugging only
-    model_id = _resolve_model_with_fallback(
-        model_display_name=import_agent_info.model_name,
-        exported_model_id=import_agent_info.model_id,
+    # Resolve model_ids from the export payload.
+    # Payload may carry explicit model_ids (preferred when still valid in the
+    # target tenant) plus model_names for cross-tenant compatibility.
+    model_ids = _resolve_model_ids_with_fallback(
+        model_ids=import_agent_info.model_ids,
+        model_display_names=import_agent_info.model_names,
         model_label="Model",
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
     )
 
-    business_logic_model_id = _resolve_model_with_fallback(
-        model_display_name=import_agent_info.business_logic_model_name,
-        exported_model_id=import_agent_info.business_logic_model_id,
+    business_logic_model_id = _resolve_model_ids_with_fallback(
+        model_ids=[import_agent_info.business_logic_model_id]
+        if import_agent_info.business_logic_model_id is not None
+        else None,
+        model_display_names=[import_agent_info.business_logic_model_name]
+        if import_agent_info.business_logic_model_name
+        else None,
         model_label="Business logic model",
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
     )
 
     agent_name = import_agent_info.name
@@ -1821,13 +1933,16 @@ async def import_agent_by_agent_id(
                                          "description": import_agent_info.description,
                                          "business_description": import_agent_info.business_description,
                                          "author": import_agent_info.author,
-                                         "model_id": model_id,
-                                         "model_name": import_agent_info.model_name,
-                                         "business_logic_model_id": business_logic_model_id,
+                                         "model_ids": model_ids,
+                                         "business_logic_model_id": (
+                                             business_logic_model_id[0]
+                                             if business_logic_model_id else None
+                                         ),
                                          "business_logic_model_name": import_agent_info.business_logic_model_name,
                                          "prompt_template_id": import_agent_info.prompt_template_id or SYSTEM_PROMPT_TEMPLATE_ID,
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
                                          "max_steps": import_agent_info.max_steps,
+                                         "requested_output_tokens": import_agent_info.requested_output_tokens,
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
@@ -1843,18 +1958,18 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
-    # Auto-publish initial version v1 for market-imported agents
+    # Auto-publish initial version V1 for market-imported agents
     try:
         publish_version_impl(
             agent_id=new_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            version_name="v1",
+            version_name="V1",
             release_note="Initial version from Agent Market"
         )
     except Exception as e:
         logger.warning(
-            f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
+            f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 
@@ -1965,13 +2080,18 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             unavailable_reasons = list(
                 dict.fromkeys(entry["unavailable_reasons"]))
 
-            model_id = agent.get("model_id")
-            model_info = None
-            if model_id is not None:
-                if model_id not in model_cache:
-                    model_cache[model_id] = get_model_by_model_id(
-                        model_id, tenant_id)
-                model_info = model_cache.get(model_id)
+            # Get model names from model_ids array
+            model_ids = agent.get("model_ids") or []
+            model_names: List[str] = []
+            for mid in model_ids:
+                if mid not in model_cache:
+                    model_cache[mid] = get_model_by_model_id(mid, tenant_id)
+                mid_info = model_cache.get(mid)
+                if mid_info and mid_info.get("display_name"):
+                    model_names.append(mid_info["display_name"])
+
+            # Derive legacy model_name from the first entry in model_ids for backward compat.
+            first_model_name = model_names[0] if model_names else None
 
             # Permission logic (ASSET_OWNER-scoped + non-ASSET_OWNER role => READ_ONLY first):
             permission = resolve_agent_list_permission(
@@ -1987,9 +2107,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
                 "author": agent.get("author"),
-                "model_id": model_id,
-                "model_name": model_info.get("model_name") if model_info is not None else agent.get("model_name"),
-                "model_display_name": model_info.get("display_name") if model_info is not None else None,
+                "model_ids": model_ids,
+                "model_names": model_names,
+                "model_name": first_model_name,
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),
@@ -2049,14 +2169,21 @@ def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> Non
 def _collect_model_availability_reasons(agent: dict, tenant_id: str, model_cache: Dict[int, Optional[dict]]) -> list[str]:
     """
     Build a list of reasons related to model availability issues for a given agent.
+    Iterates over model_ids (the canonical field) and collects one unavailable reason
+    per model that is missing or not in AVAILABLE status.
     """
     reasons: list[str] = []
-    reasons.extend(_check_single_model_availability(
-        model_id=agent.get("model_id"),
-        tenant_id=tenant_id,
-        model_cache=model_cache,
-        reason_key=AgentUnavailableReason.MODEL_UNAVAILABLE
-    ))
+    model_ids = agent.get("model_ids") or []
+    if model_ids:
+        for mid in model_ids:
+            reasons.extend(_check_single_model_availability(
+                model_id=mid,
+                tenant_id=tenant_id,
+                model_cache=model_cache,
+                reason_key=AgentUnavailableReason.MODEL_UNAVAILABLE,
+            ))
+    else:
+        reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
 
     return reasons
 
@@ -2197,6 +2324,7 @@ async def prepare_agent_run(
         is_debug=agent_request.is_debug,
         override_version_no=agent_request.version_no,
         override_model_id=agent_request.model_id,
+        requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
     )
 

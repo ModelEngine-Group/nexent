@@ -46,13 +46,17 @@ Quick and straightforward for most users. Prerequisites: Docker 24+ and Docker C
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/docker
-bash deploy.sh
+cd nexent
+bash deploy.sh docker
 ```
 
-The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source. `infrastructure` is required; `application` is selected by default but can be disabled. Use `b`/Backspace to return to the previous TUI step and `q` to quit. Non-interactive runs can pass the same choices with `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
+The root `deploy.sh` only forwards to the target deploy script; the native Docker implementation is `bash deploy/docker/deploy.sh`. The Docker and Kubernetes deploy scripts share the same deployment configuration model. Interactive runs show Bash TUI menus for component selection, port policy, and image source. `infrastructure` is required; `application`, `data-process`, and `supabase` are selected by default and can be disabled when you want a smaller deployment. Use `b`/Backspace to return to the previous TUI step and `q` to quit. Non-interactive runs can pass the same choices with `--version`, `--components`, `--port-policy development|production`, and `--image-source general|mainland|local-latest`. Successful deployments save non-sensitive choices to each deploy directory's `deploy.options` for reuse on the next run.
 
-Docker uninstall is handled by `bash uninstall.sh`. It can preserve or delete data volumes: run it interactively, pass `--delete-volumes true|false`, or use `bash uninstall.sh delete-all` to remove containers and persistent data.
+Docker and Kubernetes both use `deploy/env/.env` as the runtime configuration file. Existing `deploy/env/.env` is kept as-is. If it does not exist, the deploy scripts first reuse `docker/.env`, then fall back to `deploy/env/.env.example`.
+
+Docker uninstall is handled by `bash uninstall.sh docker`. It can preserve or delete data volumes: run it interactively, pass `--delete-volumes true|false`, or use `bash uninstall.sh docker delete-all` to remove containers and persistent data.
+
+Offline image packages can be built with `bash deploy/offline/build_offline_package.sh --target docker --compress true`. The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, deployment scripts, SQL files, `manifest.yaml`, and `checksums.txt`; deploy it with `bash deploy.sh --load-images docker ...` on the target host.
 
 For detailed deployment instructions, see [Docker Installation](https://modelengine-group.github.io/nexent/en/quick-start/installation.html).
 
@@ -62,11 +66,15 @@ Ideal for enterprise scenarios requiring high availability and elastic scaling. 
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/k8s/helm
-./deploy.sh
+cd nexent
+bash deploy.sh k8s
 ```
 
-Kubernetes uninstall is handled by `bash uninstall.sh`. It removes the Helm release first, then can optionally delete the namespace and local hostPath data. Use `--delete-namespace true|false`, `--delete-local-data true|false`, or `bash uninstall.sh delete-all`; pass `--keep-local-data` with `delete-all` to preserve local volume contents.
+The native Kubernetes implementation is `bash deploy/k8s/deploy.sh`. It reads the same `deploy/env/.env` as Docker and renders explicit values into Helm ConfigMap and Secret overrides. Use `--persistence-mode local|dynamic|existing`, `--storage-class`/`--sc`, `--local-path`, `--local-node-name`, and `--existing-claim-prefix` to control PVC behavior. Local mode renders `hostPath` PVs and does not require node affinity.
+
+Kubernetes uninstall is handled by `bash uninstall.sh k8s`. It removes the Helm release first, then can optionally delete the namespace and local PV data. Use `--delete-namespace true|false`, `--delete-local-data true|false`, or `bash uninstall.sh k8s delete-all`; pass `--keep-local-data` with `delete-all` to preserve local volume contents.
+
+Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or push the loaded images to an internal registry before deploying with the same version and image-source options used during packaging.
 
 For detailed deployment instructions, see [Kubernetes Installation](https://modelengine-group.github.io/nexent/en/quick-start/kubernetes-installation.html).
 

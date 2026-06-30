@@ -96,3 +96,33 @@ export function getEffectiveRoutePath(pathname: string): string {
   }
   return "/" + (segments.join("/") || "");
 }
+
+/**
+ * Roles whose users can manage the tenant's model catalog (add/edit/delete
+ * model records, fix bare-capacity rows). Used by W11 V1.5 bare-capacity
+ * surfaces (per-row badge in Manage Models, agent-edit selector warning,
+ * dashboard widget) to gate the "open repair" affordance per spec L167-178.
+ *
+ * USER is intentionally excluded: regular agent authors see a non-actionable
+ * notice telling them to ask an administrator, not a link they cannot follow.
+ * ASSET_OWNER manages assets (knowledge/agents) but not model records.
+ */
+const MODEL_MANAGEMENT_ROLES: ReadonlySet<string> = new Set([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.DEV,
+  USER_ROLES.SPEED,
+]);
+
+/**
+ * Return true when the given role can act on the W11 repair affordances.
+ * Speed-mode deployments bypass role gating (single-user dev experience).
+ */
+export function canManageModels(
+  role: string | undefined | null,
+  isSpeedMode = false
+): boolean {
+  if (isSpeedMode) return true;
+  if (!role) return false;
+  return MODEL_MANAGEMENT_ROLES.has(role);
+}

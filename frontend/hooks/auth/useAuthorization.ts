@@ -175,13 +175,27 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Check if current route has access
   const cleanPath = getEffectiveRoutePath(pathname);
-  // Support prefix matching: /space/agents/1/evaluate matches /space
+
+  // Share pages are always accessible to any logged-in user (covers /share/...).
+  const isSharePage = cleanPath.startsWith("/share/");
+
+  // Support prefix matching so nested routes such as
+  // /space/agents/{id}/evaluate (agent evaluator) are covered by /space.
+  const isWithinAccessiblePrefix = accessibleRoutes.some(
+    (route) => route !== "/" && cleanPath.startsWith(route + "/")
+  );
+
   const hasAccess =
+    isSharePage ||
     accessibleRoutes.includes(cleanPath) ||
-    accessibleRoutes.some((route) => cleanPath.startsWith(route + "/"));
+    isWithinAccessiblePrefix;
 
   // Route guard
   useLayoutEffect(() => {
+    if (isSharePage) {
+      return;
+    }
+
     if (isLoading || !user || accessibleRoutes.length === 0 || pathname === lastCheckedPath) {
       return;
     }
@@ -198,7 +212,7 @@ export function useAuthorization(): AuthorizationContextType {
     }
 
     setLastCheckedPath(pathname);
-  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, router, openAuthzPromptModal]);
+  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, isSharePage, router, openAuthzPromptModal]);
 
   // Permission checking utilities
   const hasPermission = useCallback((permission: string): boolean => {
