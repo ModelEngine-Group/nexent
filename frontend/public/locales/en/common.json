@@ -568,6 +568,7 @@
   "toolPool.tag.local": "Local Tool",
   "toolPool.tag.langchain": "LangChain Tool",
   "toolPool.group.local": "Local",
+  "toolPool.group.mcp": "MCP",
   "toolPool.group.langchain": "LangChain",
   "toolPool.group.other": "Other Tools",
   "toolPool.category.other": "other",

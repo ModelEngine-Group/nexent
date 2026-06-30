@@ -198,6 +198,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                     size="small"
                     icon={<Wrench size={14} />}
                     onClick={() => setIsToolSelectOpen(true)}
+                    disabled={currentAgentId === null && !isCreatingMode}
                     className="h-7 gap-1 text-xs bg-white border border-gray-200 hover:!border-gray-300 hover:!bg-gray-50"
                   >
                     {t("toolPool.selectTools")}
