@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -333,6 +333,12 @@ export const ModelAddDialog = ({
   // can be rendered against this row-scoped state.
   const [modelCapacity, setModelCapacity] =
     useState<ModelCapacityFormState>(emptyCapacityForm);
+
+  const [gearCapacitySuggestionEnabled, setGearCapacitySuggestionEnabled] = useState(true);
+  const [gearCheckingCapacitySuggestion, setGearCheckingCapacitySuggestion] = useState(false);
+  const [gearCapacitySuggestion, setGearCapacitySuggestion] = useState<CapacitySuggestion | null>(null);
+  const [gearAcceptedCapacitySuggestion, setGearAcceptedCapacitySuggestion] = useState<CapacitySuggestion | null>(null);
+  const gearSuggestionRequestRef = useRef(0);
 
   // Use the silicon model list hook
   const siliconHook = useSiliconModelList({
@@ -998,6 +1004,9 @@ export const ModelAddDialog = ({
   const handleSettingsClick = (model: any) => {
     setSelectedModelForSettings(model);
     setModelMaxTokens(model.max_tokens?.toString() || "");
+    setGearCapacitySuggestion(null);
+    setGearAcceptedCapacitySuggestion(null);
+    setGearCapacitySuggestionEnabled(true);
     if (rowSupportsCapacityFields(model)) {
       // Merge order: row's W2 capacity values (from provider catalog hints)
       // win, falling back to the top-level batch defaults typed into the
@@ -1034,6 +1043,47 @@ export const ModelAddDialog = ({
       setModelCapacity(emptyCapacityForm);
     }
     setSettingsModalVisible(true);
+  };
+
+  const handleGearSuggestCapacity = async () => {
+    if (!selectedModelForSettings) return;
+    const modelName = (selectedModelForSettings.name || "").trim();
+    const baseUrl = (selectedModelForSettings.url || "").trim();
+    if (!modelName || !baseUrl) {
+      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
+      return;
+    }
+    const myToken = (gearSuggestionRequestRef.current += 1);
+    setGearCheckingCapacitySuggestion(true);
+    try {
+      const suggestion = await modelService.suggestCapacity({
+        modelName,
+        baseUrl,
+        providerHint: selectedModelForSettings.provider || undefined,
+        modelType: selectedModelForSettings.type || undefined,
+      });
+      if (myToken !== gearSuggestionRequestRef.current) return;
+      setGearCapacitySuggestion(suggestion);
+      if (!suggestion.suggestions) {
+        setGearAcceptedCapacitySuggestion(null);
+      }
+    } catch {
+      if (myToken !== gearSuggestionRequestRef.current) return;
+      setGearCapacitySuggestion(null);
+      setGearAcceptedCapacitySuggestion(null);
+      message.error(t("model.dialog.capacity.suggestion.failed"));
+    } finally {
+      if (myToken === gearSuggestionRequestRef.current) {
+        setGearCheckingCapacitySuggestion(false);
+      }
+    }
+  };
+
+  const applyGearCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
+    const next = capacityFormFromSuggestion(suggestion);
+    if (!next || Object.keys(next).length === 0) return;
+    setModelCapacity((prev) => ({ ...prev, ...next }));
+    setGearAcceptedCapacitySuggestion(suggestion);
   };
 
   // Handle settings save
@@ -1083,6 +1133,8 @@ export const ModelAddDialog = ({
                 // Mirror max_output_tokens into legacy max_tokens so the
                 // backend coercion path stays consistent for rows that bypass it.
                 max_tokens: payload.max_output_tokens ?? model.max_tokens,
+                accepted_suggestion_match_kind: gearAcceptedCapacitySuggestion?.matchKind || undefined,
+                accepted_capability_profile_version: gearAcceptedCapacitySuggestion?.capabilityProfileVersion || undefined,
               }
             : model
         )
@@ -2453,6 +2505,28 @@ export const ModelAddDialog = ({
             destroyOnHidden
           >
             <div className="space-y-3">
+              {useCapacity && (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 mb-3">
+                  <div className="text-sm font-medium text-gray-700">
+                    {t("model.dialog.capacity.suggestion.title")}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Switch
+                      size="small"
+                      checked={gearCapacitySuggestionEnabled}
+                      onChange={setGearCapacitySuggestionEnabled}
+                    />
+                    <Button
+                      size="small"
+                      onClick={handleGearSuggestCapacity}
+                      loading={gearCheckingCapacitySuggestion}
+                      disabled={!gearCapacitySuggestionEnabled || !selectedModelForSettings?.name?.trim() || !selectedModelForSettings?.url?.trim()}
+                    >
+                      {t("model.dialog.capacity.suggestion.check")}
+                    </Button>
+                  </div>
+                </div>
+              )}
               {useCapacity ? (
                 <ModelCapacityFields
                   value={modelCapacity}
@@ -2461,6 +2535,10 @@ export const ModelAddDialog = ({
                   }
                   validationError={settingsCapacityError}
                   formMode="add"
+                  suggestion={gearCapacitySuggestionEnabled ? gearCapacitySuggestion : null}
+                  suggestionLoading={gearCheckingCapacitySuggestion}
+                  onUseSuggestion={() => applyGearCapacitySuggestion(gearCapacitySuggestion)}
+                  acceptedSuggestion={gearAcceptedCapacitySuggestion}
                   // context_window/max_output not required; defaults land at
                   // save via capacityFormToSnakePayload when input is empty.
                 />

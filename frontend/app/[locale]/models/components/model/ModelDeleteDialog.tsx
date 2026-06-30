@@ -1814,6 +1814,8 @@ export const ModelDeleteDialog = ({
         }
         modelType={deletingModelType || undefined}
         showApiKeyField={false}
+        modelName={selectedSingleModel?.model_name || selectedSingleModel?.name || ""}
+        baseUrl={selectedSingleModel?.base_url || selectedSingleModel?.url || ""}
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {
@@ -1847,6 +1849,18 @@ export const ModelDeleteDialog = ({
               defaultOutputReserveTokens: config.defaultOutputReserveTokens,
               tokenizerFamily: config.tokenizerFamily,
               capacitySource: config.capacitySource,
+              ...(config.acceptedSuggestionMatchKind
+                ? {
+                    accepted_suggestion_match_kind:
+                      config.acceptedSuggestionMatchKind,
+                  }
+                : {}),
+              ...(config.acceptedCapabilityProfileVersion
+                ? {
+                    accepted_capability_profile_version:
+                      config.acceptedCapabilityProfileVersion,
+                  }
+                : {}),
             };
 
             if (config.apiKey) {

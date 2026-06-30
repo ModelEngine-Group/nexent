@@ -915,6 +915,8 @@ interface ProviderConfigEditDialogProps {
   hideCapacityFields?: boolean; // Suppress capacity controls when caller is a provider-level batch (not per-model)
   modelType?: ModelType;
   showApiKeyField?: boolean; // Whether to show API Key field (default: true)
+  modelName?: string;
+  baseUrl?: string;
   onClose: () => void;
   onSave: (config: {
     apiKey?: string;
@@ -927,6 +929,8 @@ interface ProviderConfigEditDialogProps {
     defaultOutputReserveTokens?: number;
     tokenizerFamily?: string;
     capacitySource?: string;
+    acceptedSuggestionMatchKind?: string;
+    acceptedCapabilityProfileVersion?: string;
   }) => Promise<void> | void;
 }
 
@@ -940,10 +944,13 @@ export const ProviderConfigEditDialog = ({
   hideCapacityFields = false,
   modelType,
   showApiKeyField = true,
+  modelName,
+  baseUrl,
   onClose,
   onSave,
 }: ProviderConfigEditDialogProps) => {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const [apiKey, setApiKey] = useState<string>(initialApiKey);
   const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens);
   const [timeoutSeconds, setTimeoutSeconds] = useState<string>(
@@ -956,6 +963,15 @@ export const ProviderConfigEditDialog = ({
     initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
   );
   const [saving, setSaving] = useState<boolean>(false);
+  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
+    useState(true);
+  const [checkingCapacitySuggestion, setCheckingCapacitySuggestion] =
+    useState(false);
+  const [capacitySuggestion, setCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
+  const [acceptedCapacitySuggestion, setAcceptedCapacitySuggestion] =
+    useState<CapacitySuggestion | null>(null);
+  const suggestionRequestRef = useRef(0);
 
   useEffect(() => {
     setApiKey(initialApiKey);
@@ -1010,6 +1026,43 @@ export const ProviderConfigEditDialog = ({
     value: string
   ) => {
     setCapacityForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSuggestCapacity = async () => {
+    if (!modelName?.trim() || !baseUrl?.trim()) {
+      message.warning(t("model.dialog.capacity.suggestion.missingInput"));
+      return;
+    }
+    const myToken = (suggestionRequestRef.current += 1);
+    setCheckingCapacitySuggestion(true);
+    try {
+      const suggestion = await modelService.suggestCapacity({
+        modelName: modelName.trim(),
+        baseUrl: baseUrl.trim(),
+        modelType: modelType || undefined,
+      });
+      if (myToken !== suggestionRequestRef.current) return;
+      setCapacitySuggestion(suggestion);
+      if (!suggestion.suggestions) {
+        setAcceptedCapacitySuggestion(null);
+      }
+    } catch {
+      if (myToken !== suggestionRequestRef.current) return;
+      setCapacitySuggestion(null);
+      setAcceptedCapacitySuggestion(null);
+      message.error(t("model.dialog.capacity.suggestion.failed"));
+    } finally {
+      if (myToken === suggestionRequestRef.current) {
+        setCheckingCapacitySuggestion(false);
+      }
+    }
+  };
+
+  const applyCapacitySuggestion = (suggestion: CapacitySuggestion | null) => {
+    const next = capacityFormFromSuggestion(suggestion);
+    if (!next || Object.keys(next).length === 0) return;
+    setCapacityForm((prev) => ({ ...prev, ...next }));
+    setAcceptedCapacitySuggestion(suggestion);
   };
 
   const valid = () => {
@@ -1076,6 +1129,18 @@ export const ProviderConfigEditDialog = ({
           : supportsBulkCapacity
             ? buildCapacityPayload(capacityForm, { applyDefaults: false })
             : {}),
+        ...(supportsCapacityFields && acceptedCapacitySuggestion
+          ? {
+              acceptedSuggestionMatchKind:
+                acceptedCapacitySuggestion.matchKind,
+              ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                ? {
+                    acceptedCapabilityProfileVersion:
+                      acceptedCapacitySuggestion.capabilityProfileVersion,
+                  }
+                : {}),
+            }
+          : {}),
       });
       onClose();
     } finally {
@@ -1105,6 +1170,28 @@ export const ProviderConfigEditDialog = ({
           </div>
         )}
         {supportsCapacityFields && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 mb-3">
+            <div className="text-sm font-medium text-gray-700">
+              {t("model.dialog.capacity.suggestion.title")}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Switch
+                size="small"
+                checked={capacitySuggestionEnabled}
+                onChange={setCapacitySuggestionEnabled}
+              />
+              <Button
+                size="small"
+                onClick={handleSuggestCapacity}
+                loading={checkingCapacitySuggestion}
+                disabled={!capacitySuggestionEnabled || !modelName?.trim() || !baseUrl?.trim()}
+              >
+                {t("model.dialog.capacity.suggestion.check")}
+              </Button>
+            </div>
+          </div>
+        )}
+        {supportsCapacityFields && (
           <ModelCapacityFields
             value={capacityForm}
             onChange={handleCapacityChange}
@@ -1117,6 +1204,10 @@ export const ProviderConfigEditDialog = ({
                 ? undefined
                 : initialCapacity?.maxTokens
             }
+            suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
+            suggestionLoading={checkingCapacitySuggestion}
+            onUseSuggestion={() => applyCapacitySuggestion(capacitySuggestion)}
+            acceptedSuggestion={acceptedCapacitySuggestion}
           />
         )}
         {supportsBulkCapacity && (
