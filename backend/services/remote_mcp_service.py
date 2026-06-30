@@ -102,6 +102,65 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
         return []
 
 
+async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
+    """Lightweight MCP connectivity check: establish an MCP initialize handshake only.
+
+    Uses fastmcp.Client in an async context manager. The ``async with client:``
+    block performs the MCP initialize handshake. After that,
+    ``client.is_connected()`` returns True if the handshake succeeded.
+
+    This is significantly faster than _mcp_protocol_health_check() which
+    additionally calls list_tools().
+    """
+    try:
+        if url_stripped.endswith("/sse"):
+            transport = SSETransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client,
+            )
+        elif url_stripped.endswith("/mcp"):
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client,
+            )
+        else:
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers,
+                httpx_client_factory=create_httpx_client,
+            )
+
+        client = Client(transport=transport)
+        async with client:
+            return client.is_connected()
+    except BaseException as e:
+        logger.debug(f"MCP protocol connect handshake failed: {e}")
+        return False
+
+
+async def test_mcp_connection(
+    server_url: str,
+    authorization_token: str | None = None,
+    custom_headers: dict | None = None,
+) -> bool:
+    """Test connectivity to an MCP server using a lightweight initialize handshake.
+
+    Returns True if the MCP initialize handshake succeeded, False otherwise.
+    Does NOT call list_tools(), making it faster and lighter than
+    mcp_server_health().
+    """
+    url_stripped = server_url.strip()
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    return await _mcp_protocol_connect(url_stripped, headers)
+
+
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------

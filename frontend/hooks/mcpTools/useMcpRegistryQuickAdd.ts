@@ -8,6 +8,7 @@ import log from "@/lib/logger";
 import {
   addContainerMcpToolService,
   addMcpToolService,
+  testMcpConnectionService,
 } from "@/services/mcpToolsService";
 import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
@@ -55,6 +56,11 @@ export function useMcpRegistryQuickAdd({
   );
   const [submitting, setSubmitting] = useState(false);
   const [customName, setCustomName] = useState<string>("");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<{
+    success: boolean;
+    error?: string;
+  } | null>(null);
 
   const selectedOption = useMemo(
     () => options.find((option) => option.key === selectedKey) || null,
@@ -69,6 +75,7 @@ export function useMcpRegistryQuickAdd({
         return;
       }
       setCandidate(service);
+      setConnectionResult(null);
       setCustomName(service.server?.name || "");
       setOptions(nextOptions);
       const firstKey = nextOptions[0].key;
@@ -81,6 +88,7 @@ export function useMcpRegistryQuickAdd({
 
   const close = useCallback(() => {
     setCandidate(null);
+    setConnectionResult(null);
     setOptions([]);
     setSelectedKey("");
     setValues({});
@@ -91,6 +99,7 @@ export function useMcpRegistryQuickAdd({
   const chooseOption = useCallback(
     (key: string) => {
       setSelectedKey(key);
+      setConnectionResult(null);
       const next = options.find((option) => option.key === key) || null;
       setValues(buildInitialQuickAddValues(next));
     },
@@ -100,6 +109,40 @@ export function useMcpRegistryQuickAdd({
   const setValue = useCallback((formKey: string, value: string) => {
     setValues((prev) => ({ ...prev, [formKey]: value }));
   }, []);
+
+  const testConnection = useCallback(async () => {
+    if (!candidate || !selectedOption) return;
+    if (selectedOption.transportType === McpTransportType.CONTAINER) return;
+    if (!selectedOption.serverUrl) return;
+    const finalUrl = resolveHttpServerUrl(selectedOption, values);
+    if (!finalUrl || hasUnresolvedUrlTemplate(finalUrl)) return;
+    setTestingConnection(true);
+    setConnectionResult(null);
+    try {
+      const authorization = resolveAuthorizationFromHeaders(
+        [
+          ...(selectedOption.remoteHeaders || []),
+          ...(selectedOption.packageTransportHeaders || []),
+        ],
+        values
+      );
+      const result = await testMcpConnectionService({
+        server_url: finalUrl,
+        authorization_token: authorization,
+      });
+      setConnectionResult({
+        success: result.data.success,
+        error: result.data.error,
+      });
+    } catch (error) {
+      setConnectionResult({
+        success: false,
+        error: error instanceof Error ? error.message : "Connection failed",
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  }, [candidate, selectedOption, values]);
 
   const confirm = useCallback(async () => {
     if (!candidate || !selectedOption) return;
@@ -257,5 +300,8 @@ export function useMcpRegistryQuickAdd({
     setValue,
     confirm,
     submitting,
+    testingConnection,
+    connectionResult,
+    testConnection,
   };
 }

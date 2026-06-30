@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Form, Input, Modal, Radio, Spin } from "antd";
+import { CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type {
   RegistryMcpCard,
@@ -15,6 +16,10 @@ import McpRegistryDetailModal from "./McpRegistryDetailModal";
 import ContainerPortField from "../../shared/ContainerPortField";
 import { McpTransportType } from "@/const/mcpTools";
 import { fetchRegistryServerDetail } from "@/services/mcpToolsService";
+import {
+  hasUnresolvedUrlTemplate,
+  resolveHttpServerUrl,
+} from "@/lib/mcpTools";
 
 interface AddMcpServiceRegistrySectionProps {
   active: boolean;
@@ -138,6 +143,9 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
     containerPort,
     customName,
     submitting,
+    testingConnection,
+    connectionResult,
+    testConnection,
   } = controller;
   const unsupportedOci =
     selectedOption?.sourceType === "package" &&
@@ -147,6 +155,15 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
     if (!visible) return;
     form.setFieldsValue({ selectedKey, containerPort, ...values });
   }, [visible, form, selectedKey, containerPort, values]);
+
+  const isUrlBased =
+    selectedOption?.transportType !== McpTransportType.CONTAINER &&
+    Boolean(selectedOption?.serverUrl);
+  const canTest = useMemo(() => {
+    if (!isUrlBased || !selectedOption) return false;
+    const url = resolveHttpServerUrl(selectedOption, values);
+    return Boolean(url && !hasUnresolvedUrlTemplate(url));
+  }, [isUrlBased, selectedOption, values]);
 
   const handleConfirm = async () => {
     try {
@@ -423,16 +440,43 @@ function QuickAddPickerModal({ controller }: QuickAddPickerModalProps) {
           </>
         )}
 
-        <div className="flex justify-end gap-2">
-          <Button onClick={controller.close}>{t("common.cancel")}</Button>
-          <Button
-            type="primary"
-            loading={submitting}
-            disabled={!selectedKey || unsupportedOci}
-            onClick={handleConfirm}
-          >
-            {t("mcpTools.registry.quickAddPicker.confirm")}
-          </Button>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            {connectionResult?.success === true ? (
+              <span className="flex items-center gap-1 text-sm text-green-600">
+                <CheckCircleOutlined />{" "}
+                {t("mcpTools.registry.quickAddPicker.connectionSuccess")}
+              </span>
+            ) : connectionResult?.success === false ? (
+              <span className="flex items-center gap-1 text-sm text-red-500">
+                <CloseCircleOutlined />{" "}
+                {t("mcpTools.registry.quickAddPicker.connectionFailed")}
+                {connectionResult.error
+                  ? `: ${connectionResult.error}`
+                  : ""}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={!canTest || testingConnection || submitting}
+              loading={testingConnection}
+              onClick={testConnection}
+            >
+              {t("mcpTools.registry.quickAddPicker.testConnection")}
+            </Button>
+            <Button onClick={controller.close}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="primary"
+              loading={submitting}
+              disabled={!selectedKey || unsupportedOci}
+              onClick={handleConfirm}
+            >
+              {t("mcpTools.registry.quickAddPicker.confirm")}
+            </Button>
+          </div>
         </div>
       </Form>
     </Modal>

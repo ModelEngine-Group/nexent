@@ -1399,6 +1399,13 @@ class HealthcheckMcpServiceRequest(BaseModel):
     mcp_id: int = Field(..., gt=0, description="MCP record ID to health check")
 
 
+class TestMcpConnectionRequest(BaseModel):
+    """Request model for testing MCP server connectivity (lightweight handshake)"""
+    server_url: str = Field(..., min_length=1, description="MCP server URL to test")
+    authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
+    custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+
+
 class ListMcpToolsRequest(BaseModel):
     """Request model for listing MCP service tools"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID")

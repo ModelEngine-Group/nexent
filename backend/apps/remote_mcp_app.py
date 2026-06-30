@@ -25,6 +25,7 @@ from consts.model import (
     EnableMcpServiceRequest,
     DisableMcpServiceRequest,
     HealthcheckMcpServiceRequest,
+    TestMcpConnectionRequest,
     ListMcpServicesQuery,
 )
 from services.remote_mcp_service import (
@@ -43,6 +44,7 @@ from services.remote_mcp_service import (
     update_mcp_service_enabled,
     delete_mcp_service,
     check_mcp_service_health,
+    test_mcp_connection,
     check_container_port_conflict,
     suggest_container_port,
 )
@@ -641,6 +643,43 @@ async def check_mcp_health(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to check MCP health"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test Connection Endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/test-connection")
+async def test_mcp_connection_endpoint(
+    payload: TestMcpConnectionRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
+    """Lightweight MCP connectivity test. Performs only the initialize handshake.
+
+    This is faster than a full health check (which calls list_tools()) and is
+    intended for pre-install validation in the Quick Add modal.
+    """
+    try:
+        get_current_user_info(authorization, http_request)
+
+        success = await test_mcp_connection(
+            server_url=payload.server_url,
+            authorization_token=payload.authorization_token,
+            custom_headers=payload.custom_headers,
+        )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"success": success}
+        )
+    except Exception as e:
+        logger.error(f"MCP test connection failed: {e}")
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"success": False, "error": str(e) or "Connection failed"}
         )
 
 

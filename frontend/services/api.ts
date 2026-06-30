@@ -313,6 +313,7 @@ export const API_ENDPOINTS = {
     portSuggest: `${API_BASE_URL}/mcp/port/suggest`,
     enable: `${API_BASE_URL}/mcp/enable`,
     disable: `${API_BASE_URL}/mcp/disable`,
+    testConnection: `${API_BASE_URL}/mcp/test-connection`,
   },
   // A2A Client endpoints
   a2a: {

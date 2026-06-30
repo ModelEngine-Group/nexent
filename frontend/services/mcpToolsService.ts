@@ -712,6 +712,45 @@ export const healthcheckMcpToolService = async (
   }
 };
 
+export interface TestConnectionPayload {
+  server_url: string;
+  authorization_token?: string;
+  custom_headers?: Record<string, unknown>;
+}
+
+export interface TestConnectionResult {
+  success: boolean;
+  error?: string;
+}
+
+export const testMcpConnectionService = async (
+  payload: TestConnectionPayload
+): Promise<McpToolsApiResult<TestConnectionResult>> => {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.mcp.testConnection,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+    const data = await parseJson<{ success: boolean; error?: string }>(response);
+    return {
+      success: true,
+      data: { success: data.success, error: data.error },
+    } as McpToolsApiResult<TestConnectionResult>;
+  } catch (error) {
+    log.error("testMcpConnectionService failed", error);
+    return {
+      success: true,
+      data: {
+        success: false,
+        error: error instanceof Error ? error.message : "Connection failed",
+      },
+    } as McpToolsApiResult<TestConnectionResult>;
+  }
+};
+
 export const deleteMcpToolService = async (mcpId: number) => {
   try {
     const response = await fetchWithAuth(API_ENDPOINTS.mcp.delete(mcpId), {
