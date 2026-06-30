@@ -47,6 +47,18 @@ output="$(bash "$BUILD_SCRIPT" --main --version latest --platform linux/amd64 --
 assert_contains "$output" "--platform linux/amd64" "explicit platform should be forwarded"
 assert_contains "$output" "nexent/nexent:latest" "explicit platform build should still build selected image"
 
+output="$(bash "$BUILD_SCRIPT" --main --version latest --no-cache --dry-run)"
+assert_contains "$output" "--no-cache" "explicit no-cache option should be forwarded"
+assert_contains "$output" "nexent/nexent:latest" "explicit no-cache build should still build selected image"
+
+output="$(bash "$BUILD_SCRIPT" --web --version v9.9.9 --registry mainland --dry-run)"
+assert_contains "$output" "--no-cache" "mainland web build should avoid stale Docker cache"
+assert_contains "$output" "nexent/nexent-web:v9.9.9" "mainland web build without push should keep local Nexent tag"
+
+output="$(bash "$BUILD_SCRIPT" --web --version v9.9.9 --registry mainland --push --dry-run)"
+assert_contains "$output" "--no-cache" "mainland web push should avoid stale Docker cache"
+assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-web:v9.9.9" "mainland web push should use CCS tag"
+
 output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --dry-run)"
 assert_contains "$output" "nexent/nexent-ubuntu-terminal:v9.9.9" "mainland build without push should keep local Nexent tag"
 assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "mainland build without push should not use CCS tag"

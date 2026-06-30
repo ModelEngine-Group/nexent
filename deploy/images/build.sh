@@ -25,6 +25,7 @@ DEPENDENCY_VARIANT="cpu"
 TERMINAL_VARIANT="slim"
 PUSH=false
 LOAD=false
+NO_CACHE=false
 DRY_RUN=false
 INTERACTIVE=false
 ARGS_COUNT=$#
@@ -58,6 +59,7 @@ Options:
                              terminal image variant. Defaults to slim.
   --push
   --load
+  --no-cache
   --dry-run
   --interactive              Prompt for images, version, and registry.
 USAGE
@@ -82,6 +84,7 @@ while [ $# -gt 0 ]; do
     --terminal-variant) TERMINAL_VARIANT="$2"; shift 2 ;;
     --push) PUSH=true; shift ;;
     --load) LOAD=true; shift ;;
+    --no-cache) NO_CACHE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --interactive) INTERACTIVE=true; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -366,6 +369,9 @@ build_one() {
   local cmd=(docker buildx build)
   if [ -n "$PLATFORM" ]; then
     cmd+=(--platform "$PLATFORM")
+  fi
+  if [ "$NO_CACHE" = true ] || { [ "$REGISTRY" = "mainland" ] && [ "$name" = "nexent-web" ]; }; then
+    cmd+=(--no-cache)
   fi
   cmd+=(-t "$tag" -f "$dockerfile")
   if [ "$PUSH" = true ]; then
