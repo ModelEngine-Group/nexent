@@ -516,17 +516,6 @@ export const ModelCapacityFields = ({
         />
       )}
 
-      {/* The empty hint suggested "fill later if needed", which contradicts
-          required-field asterisks. Only render it when there are no required
-          fields, so edit dialogs with required capacity stay self-consistent. */}
-      {!source && !hasValues && !isAddMode && requiredSet.size === 0 && (
-        <Alert
-          type="info"
-          showIcon
-          message={t("model.dialog.capacity.emptyHint")}
-        />
-      )}
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {renderNumberInput(
           "contextWindowTokens",

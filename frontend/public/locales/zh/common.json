@@ -809,7 +809,6 @@
   "model.dialog.capacity.title": "可选容量配置",
   "model.dialog.capacity.description": "用于覆盖或确认模型容量；不填不会影响添加模型。",
   "model.dialog.capacity.emptySummary": "供应商未返回容量候选值，可留空直接添加。",
-  "model.dialog.capacity.emptyHint": "当前供应商列表没有返回这个模型的容量信息。可以留空直接添加，后续需要精确上下文控制时再编辑补充。",
   "model.dialog.capacity.contextWindowTokens": "上下文窗口",
   "model.dialog.capacity.contextWindowTokens.tooltip": "输入和输出合计的上下文窗口上限。",
   "model.dialog.capacity.maxInputTokens": "最大输入Token数",

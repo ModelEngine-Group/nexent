@@ -838,7 +838,6 @@
   "model.dialog.capacity.title": "Optional Capacity Settings",
   "model.dialog.capacity.description": "Override or confirm model capacity. Leaving this empty will not block adding the model.",
   "model.dialog.capacity.emptySummary": "The provider did not return capacity candidates; you can leave this empty.",
-  "model.dialog.capacity.emptyHint": "The provider model list did not include capacity information for this model. You can add it now and fill these fields later if precise context control is needed.",
   "model.dialog.capacity.contextWindowTokens": "Context Window",
   "model.dialog.capacity.contextWindowTokens.tooltip": "Total combined input and output context window.",
   "model.dialog.capacity.maxInputTokens": "Max Input Tokens",
