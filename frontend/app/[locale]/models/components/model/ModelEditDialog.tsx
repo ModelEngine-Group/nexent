@@ -983,12 +983,18 @@ export const ProviderConfigEditDialog = ({
         ? capacityFormFromModel(initialCapacity)
         : emptyCapacityForm
     );
+    setCapacitySuggestion(null);
+    setAcceptedCapacitySuggestion(null);
+    setCapacitySuggestionEnabled(true);
+    setCheckingCapacitySuggestion(false);
   }, [
     initialApiKey,
     initialMaxTokens,
     initialTimeoutSeconds,
     initialConcurrencyLimit,
     initialCapacity,
+    modelName,
+    baseUrl,
   ]);
 
   const isEmbeddingModel =
