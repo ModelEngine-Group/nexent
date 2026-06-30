@@ -52,6 +52,7 @@ import {
   resolveDeploymentType,
 } from "@/lib/mcpTools";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
+import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
 import McpCommunityDetailModal from "./components/add/community/McpCommunityDetailModal";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
@@ -225,23 +226,7 @@ export default function McpToolsPage() {
   const reviewCount = reviewBrowser.services.length;
 
   const searchActions = tab === McpToolsServicesTab.MINE ? (
-    <>
-      <Button
-        icon={<Download className="h-4 w-4" />}
-        onClick={openImportModal}
-        className="h-10 rounded-xl px-4 font-medium"
-      >
-        {t("mcpTools.page.importService")}
-      </Button>
-      <Button
-        type="primary"
-        icon={<Plus className="h-4 w-4" />}
-        onClick={openAddModal}
-        className="h-10 rounded-xl px-4 font-semibold shadow-sm"
-      >
-        {t("mcpTools.page.addService")}
-      </Button>
-    </>
+    <></>
   ) : null;
 
   const userTabOptions = [
@@ -367,6 +352,7 @@ export default function McpToolsPage() {
                   localList={localList}
                   myPublished={myPublished}
                   actions={searchActions}
+                  onAdd={openAddModal}
                   onEditLocal={openLocalDetail}
                   onEditCommunity={setSelectedPublished}
                   onToggled={handleToggled}
@@ -531,6 +517,7 @@ function MineView({
   localList,
   myPublished,
   actions,
+  onAdd,
   onEditLocal,
   onEditCommunity,
   onToggled,
@@ -538,6 +525,7 @@ function MineView({
   localList: ReturnType<typeof useMcpServicesList>;
   myPublished: ReturnType<typeof useMyCommunityMcp>;
   actions: React.ReactNode;
+  onAdd: () => void;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggled: (mcpId: number) => Promise<void>;
@@ -788,6 +776,7 @@ function MineView({
         </PlaceholderBox>
       ) : (
         <ResponsiveCardGrid>
+          <AddMcpServiceCard onClick={onAdd} />
           {pagedItems.map((item) => {
             const key = getMineItemKey(item);
             const onlineService =
