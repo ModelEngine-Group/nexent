@@ -73,6 +73,13 @@ _monitoring_operation: ContextVar[str] = ContextVar(
 _monitoring_display_name: ContextVar[Optional[str]] = ContextVar(
     "_monitoring_display_name", default=None)
 
+# Resolved model capacity / W2 safe-input budget snapshots, bound per request
+# by run_agent and read by the monitoring layer when recording model calls.
+_monitoring_capacity_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "_monitoring_capacity_snapshot", default=None)
+_monitoring_safe_input_budget_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "_monitoring_safe_input_budget_snapshot", default=None)
+
 
 def set_monitoring_context(
     tenant_id: Optional[str] = None,
@@ -109,6 +116,26 @@ def get_monitoring_context() -> Dict[str, Any]:
         "agent_id": _monitoring_agent_id.get(),
         "conversation_id": _monitoring_conversation_id.get(),
     }
+
+
+def set_monitoring_capacity_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
+    """Bind resolved model capacity metadata for the current request scope."""
+    _monitoring_capacity_snapshot.set(snapshot)
+
+
+def get_monitoring_capacity_snapshot() -> Optional[Dict[str, Any]]:
+    """Return the resolved capacity metadata bound to the current request."""
+    return _monitoring_capacity_snapshot.get()
+
+
+def set_monitoring_safe_input_budget_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
+    """Bind resolved W2 safe-input budget metadata for the current request."""
+    _monitoring_safe_input_budget_snapshot.set(snapshot)
+
+
+def get_monitoring_safe_input_budget_snapshot() -> Optional[Dict[str, Any]]:
+    """Return the resolved W2 safe-input budget metadata bound to the current request."""
+    return _monitoring_safe_input_budget_snapshot.get()
 
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -2537,6 +2564,10 @@ __all__ = [
     'is_opentelemetry_available',
     'set_monitoring_context',
     'get_monitoring_context',
+    'set_monitoring_capacity_snapshot',
+    'get_monitoring_capacity_snapshot',
+    'set_monitoring_safe_input_budget_snapshot',
+    'get_monitoring_safe_input_budget_snapshot',
     'set_agent_monitoring_context',
     'get_agent_monitoring_context',
     'agent_monitoring_context',
