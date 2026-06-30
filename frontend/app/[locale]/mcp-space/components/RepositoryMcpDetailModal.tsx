@@ -151,6 +151,8 @@ function StatItem({
 function resolveToolCount(service: CommunityMcpCard): number {
   const registryTools = service.registryJson?.tools;
   if (Array.isArray(registryTools)) return registryTools.length;
+  const toolNames = service.registryJson?._toolNames;
+  if (Array.isArray(toolNames)) return toolNames.length;
   if (service.packages?.length) return service.packages.length;
   if (service.remotes?.length) return service.remotes.length;
   return 0;

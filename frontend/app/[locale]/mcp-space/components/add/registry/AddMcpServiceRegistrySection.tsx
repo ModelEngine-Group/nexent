@@ -46,6 +46,20 @@ export default function AddMcpServiceRegistrySection({
     }
   };
 
+  const handleQuickAdd = async (service: RegistryMcpCard) => {
+    const isSmithery = (service._meta as Record<string, unknown> | undefined)?.source === "smithery";
+    const qualifiedName = String((service._meta as Record<string, unknown> | undefined)?.qualifiedName || service.server?.qualifiedName || "");
+    if (isSmithery && qualifiedName) {
+      // Smithery list data lacks connections/packages; fetch detail for quick-add data
+      const detail = await fetchRegistryServerDetail("smithery", qualifiedName);
+      if (detail) {
+        quickAdd.open(detail);
+        return;
+      }
+    }
+    quickAdd.open(service);
+  };
+
   const handleCloseDetail = () => {
     setSelected(null);
     setSelectedDetail(null);
@@ -83,7 +97,7 @@ export default function AddMcpServiceRegistrySection({
           onPrevPage={browser.prevPage}
           onNextPage={browser.nextPage}
           onSelect={handleSelect}
-          onQuickAdd={quickAdd.open}
+          onQuickAdd={handleQuickAdd}
         />
       </div>
 

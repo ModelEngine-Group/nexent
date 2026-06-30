@@ -905,19 +905,18 @@ function getDeduplicatedMineItems(
   publishedServices: CommunityMcpCard[]
 ): MineMcpCardItem[] {
   const linkedCommunityIds = new Set<number>();
-  const linkedSourceMcpIds = new Set<number>();
   const localNames = new Set<string>();
 
   for (const service of localServices) {
     if (service.communityId) linkedCommunityIds.add(service.communityId);
-    linkedSourceMcpIds.add(service.mcpId);
     localNames.add(normalizeMcpName(service.name));
   }
 
   const visiblePublishedServices = publishedServices.filter((service) => {
-    if (service.sourceMcpId != null && linkedSourceMcpIds.has(service.sourceMcpId)) {
-      return false;
-    }
+    // Published-by-me items (have sourceMcpId) are hidden from "我的" tab.
+    // They are managed via the repository tab. This prevents them from
+    // reappearing after the local copy is deleted.
+    if (service.sourceMcpId != null) return false;
     if (service.communityId && linkedCommunityIds.has(service.communityId)) {
       return false;
     }

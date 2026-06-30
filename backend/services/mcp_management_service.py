@@ -61,9 +61,18 @@ def _get_mcp_review_admin_scope(user_id: str, tenant_id: str) -> str | None:
     return tenant_id
 
 
+def _resolve_author_display_name(user_id: str | None) -> str | None:
+    """Resolve a user ID to a display name (email) for author display."""
+    if not user_id:
+        return None
+    user_tenant = get_user_tenant_by_user_id(user_id) or {}
+    email = str(user_tenant.get("user_email") or "").strip()
+    return email or None
+
+
 def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "communityId": row.get("market_id") or row.get("community_id"),
+        "communityId": row.get("market_id") or row.get("review_id"),
         "marketId": row.get("market_id"),
         "reviewId": row.get("review_id"),
         "sourceMcpId": row.get("source_mcp_id"),
@@ -84,6 +93,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "previousVersion": row.get("previous_version"),
         "pendingVersion": row.get("version") if row.get("review_status") == MCP_REVIEW_PENDING else None,
         "installCount": row.get("download_count") or 0,
+        "authorDisplayName": _resolve_author_display_name(row.get("user_id")),
     }
 
 
@@ -398,36 +408,53 @@ async def delete_community_mcp_service(
 ) -> None:
     """Delete a market MCP service and all its associated reviews.
 
+    Handles both approved records (in mcp_market_record_t) and pending
+    review records (in mcp_market_review_t). When a record exists only as
+    a pending review (no market record yet), it deletes the review directly.
+
     Args:
         tenant_id: Tenant ID
         user_id: User ID
-        market_id: Market record ID
+        market_id: Market record ID (or review record ID for pending items)
 
     Raises:
-        McpNotFoundError: If market MCP record is not found
+        McpNotFoundError: If neither a market nor review record is found
     """
     current = get_mcp_market_record_by_id(market_id=market_id)
-    if not current:
-        raise McpNotFoundError("Market MCP record not found")
-    # Soft-delete the market record
-    delete_mcp_market_record_by_id(
-        market_id=market_id,
-        user_id=user_id,
-    )
-    # Soft-delete all associated reviews
-    for review in list_mcp_market_review_records_by_market_id(market_id=market_id):
+    if current:
+        # Approved record — soft-delete the market record
+        delete_mcp_market_record_by_id(
+            market_id=market_id,
+            user_id=user_id,
+        )
+        # Soft-delete all associated reviews
+        for review in list_mcp_market_review_records_by_market_id(market_id=market_id):
+            update_mcp_market_review_status(
+                review_id=review.get("review_id"),
+                tenant_id=None,
+                user_id=user_id,
+                review_status=MCP_REVIEW_REJECTED,
+            )
+        # Clear FK references from local MCP records
+        clear_mcp_record_market_id(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            market_id=market_id,
+        )
+        return
+
+    # Not found in market table — check review table (pending / unapproved item)
+    review = get_mcp_market_review_by_id(review_id=market_id, tenant_id=None)
+    if review:
         update_mcp_market_review_status(
-            review_id=review.get("review_id"),
+            review_id=market_id,
             tenant_id=None,
             user_id=user_id,
             review_status=MCP_REVIEW_REJECTED,
         )
-    # Clear FK references from local MCP records
-    clear_mcp_record_market_id(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        market_id=market_id,
-    )
+        return
+
+    raise McpNotFoundError("Market MCP record not found")
 
 
 async def list_my_community_mcp_services(
@@ -658,10 +685,34 @@ async def _get_smithery_server_detail(
     remotes = []
     for conn in connections:
         if isinstance(conn, dict) and conn.get("deploymentUrl"):
-            remotes.append({
+            remote: Dict[str, Any] = {
                 "type": conn.get("type", "unknown"),
                 "url": conn.get("deploymentUrl"),
-            })
+            }
+
+            # Map configSchema to variables format expected by the frontend
+            config_schema = conn.get("configSchema")
+            if isinstance(config_schema, dict):
+                required_fields = config_schema.get("required", [])
+                properties = config_schema.get("properties", {})
+                variables = {}
+                for field_name, field_schema in properties.items():
+                    if isinstance(field_schema, dict):
+                        is_required = field_name in required_fields
+                        variable = {
+                            "description": field_schema.get("description", ""),
+                            "isRequired": is_required,
+                            "isSecret": field_schema.get("format") == "password" or field_schema.get("x-secret", False),
+                        }
+                        if field_schema.get("default"):
+                            variable["default"] = field_schema["default"]
+                        if field_schema.get("title"):
+                            variable["label"] = field_schema["title"]
+                        variables[field_name] = variable
+                if variables:
+                    remote["variables"] = variables
+
+            remotes.append(remote)
 
     return {
         "server": {
