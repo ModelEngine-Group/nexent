@@ -425,6 +425,7 @@ class ToolInfo(TableBase):
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
+    labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
