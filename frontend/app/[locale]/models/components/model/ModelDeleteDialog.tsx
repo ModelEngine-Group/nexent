@@ -1814,8 +1814,8 @@ export const ModelDeleteDialog = ({
         }
         modelType={deletingModelType || undefined}
         showApiKeyField={false}
-        modelName={selectedSingleModel?.model_name || selectedSingleModel?.name || ""}
-        baseUrl={selectedSingleModel?.base_url || selectedSingleModel?.url || ""}
+        modelName={selectedSingleModel?.model_name || selectedSingleModel?.name || selectedSingleModel?.id || ""}
+        baseUrl={getProviderBaseUrlByType(deletingModelType) || ""}
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {

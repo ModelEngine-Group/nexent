@@ -1047,9 +1047,10 @@ export const ModelAddDialog = ({
 
   const handleGearSuggestCapacity = async () => {
     if (!selectedModelForSettings) return;
-    const modelName = (selectedModelForSettings.name || "").trim();
-    const baseUrl = (selectedModelForSettings.url || "").trim();
-    if (!modelName || !baseUrl) {
+    const modelName = (selectedModelForSettings.name || selectedModelForSettings.id || "").trim();
+    const baseUrl = (selectedModelForSettings.url || form.url || "").trim();
+    const providerHint = (selectedModelForSettings.provider || form.provider || "").trim() || undefined;
+    if (!modelName || (!baseUrl && !providerHint)) {
       message.warning(t("model.dialog.capacity.suggestion.missingInput"));
       return;
     }
@@ -1058,9 +1059,9 @@ export const ModelAddDialog = ({
     try {
       const suggestion = await modelService.suggestCapacity({
         modelName,
-        baseUrl,
-        providerHint: selectedModelForSettings.provider || undefined,
-        modelType: selectedModelForSettings.type || undefined,
+        baseUrl: baseUrl || undefined,
+        providerHint,
+        modelType: selectedModelForSettings.type || form.type || undefined,
       });
       if (myToken !== gearSuggestionRequestRef.current) return;
       setGearCapacitySuggestion(suggestion);
@@ -2520,7 +2521,7 @@ export const ModelAddDialog = ({
                       size="small"
                       onClick={handleGearSuggestCapacity}
                       loading={gearCheckingCapacitySuggestion}
-                      disabled={!gearCapacitySuggestionEnabled || !selectedModelForSettings?.name?.trim() || !selectedModelForSettings?.url?.trim()}
+                      disabled={!gearCapacitySuggestionEnabled || !(selectedModelForSettings?.name || selectedModelForSettings?.id)?.trim() || (!(selectedModelForSettings?.url || form.url)?.trim() && !(selectedModelForSettings?.provider || form.provider)?.trim())}
                     >
                       {t("model.dialog.capacity.suggestion.check")}
                     </Button>
