@@ -1,7 +1,7 @@
 import { Button, Dropdown, Tag, type MenuProps } from "antd";
 import { ArrowDownFromLine, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, Upload, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { McpServiceStatus } from "@/const/mcpTools";
+import { McpServiceStatus, McpSource } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import {
   formatRegistryDate,
@@ -69,7 +69,11 @@ export default function MineMcpServiceCard({
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
 
-  const isOwned = item.kind === "community" || localService?.permission === "EDIT";
+  // Owned = user-created MCP can be published/updated; community-installed
+  // or registry-installed MCPs only permit deletion.
+  const isOwned = item.kind === "community" || (
+    localService?.permission === "EDIT" && localService?.source === McpSource.LOCAL
+  );
 
   const actionItems: MenuProps["items"] = (() => {
     if (!isOwned) {
@@ -228,7 +232,9 @@ export default function MineMcpServiceCard({
       {/* Creator */}
       <p className="mt-2 text-xs text-slate-400">
         <User className="mr-0.5 inline h-3 w-3" />
-        {t("mcpTools.mine.createdByMe")}
+        {isLocal && localService?.source === McpSource.LOCAL
+          ? t("mcpTools.mine.createdByMe")
+          : onlineService?.authorDisplayName || onlineService?.authorName || "-"}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
