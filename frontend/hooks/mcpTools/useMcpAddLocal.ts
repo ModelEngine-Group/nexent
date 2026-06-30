@@ -15,6 +15,7 @@ import { McpDeploymentType, McpSource, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpT
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { uploadMcpImage } from "@/services/mcpService";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface UseMcpAddLocalParams {
   onSuccess: () => void;
@@ -28,6 +29,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const { user } = useAuthorizationContext();
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (draft: LocalAddMcpDraft): Promise<boolean> => {
@@ -79,6 +81,12 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
 
     setSubmitting(true);
     try {
+      // Embed creator identity so the "我的" card can display the developer
+      const registryJson: Record<string, unknown> = {};
+      if (user?.email) {
+        registryJson["_authorDisplayName"] = user.email;
+      }
+
       if (isLocalImage) {
         const file = draft.uploadImageFile;
         if (!file) {
@@ -112,6 +120,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           tags: draft.tags,
           source: McpSource.LOCAL,
           authorization_token: draft.authorizationToken?.trim() || undefined,
+          registry_json: registryJson,
           port: draft.containerPort as number,
           mcp_config: mcpConfig,
         });
@@ -124,6 +133,7 @@ export function useMcpAddLocal({ onSuccess }: UseMcpAddLocalParams) {
           authorization_token: draft.authorizationToken?.trim() || undefined,
           custom_headers: customHeaders,
           config_json: configJson,
+          registry_json: registryJson,
           tags: draft.tags,
         });
       }

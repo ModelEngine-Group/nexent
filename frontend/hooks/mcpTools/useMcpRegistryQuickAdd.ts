@@ -193,7 +193,11 @@ export function useMcpRegistryQuickAdd({
           tags,
           authorization_token: authorization,
           version: candidate.server?.version,
-          registry_json: candidate.server as unknown as Record<string, unknown>,
+          registry_json: {
+            ...(candidate.server as unknown as Record<string, unknown>),
+            _source: candidate._meta?.source,
+            _authorDisplayName: candidate._meta?.qualifiedName || candidate.server?.name,
+          } as Record<string, unknown>,
         });
       }
 

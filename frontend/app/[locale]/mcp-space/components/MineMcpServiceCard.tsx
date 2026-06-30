@@ -69,6 +69,12 @@ export default function MineMcpServiceCard({
   const updatedAt = formatRegistryDate(service.updatedAt || "");
   const toolCount = resolveToolCount(item);
 
+  const authorName = onlineService?.authorDisplayName
+    || onlineService?.authorName
+    || (service.registryJson as Record<string, string> | undefined)?._authorDisplayName
+    || (service.registryJson as Record<string, string> | undefined)?._authorName
+    || null;
+
   // Owned = user-created MCP can be published/updated; community-installed
   // or registry-installed MCPs only permit deletion.
   const isOwned = item.kind === "community" || (
@@ -232,15 +238,9 @@ export default function MineMcpServiceCard({
       {/* Creator */}
       <p className="mt-2 text-xs text-slate-400">
         <User className="mr-0.5 inline h-3 w-3" />
-        {isLocal && localService?.source === McpSource.LOCAL
+        {isLocal && localService?.source === McpSource.LOCAL && !authorName
           ? t("mcpTools.mine.createdByMe")
-          : (
-            onlineService?.authorDisplayName
-            || onlineService?.authorName
-            || (service.registryJson as Record<string, string> | undefined)?._authorDisplayName
-            || (service.registryJson as Record<string, string> | undefined)?._authorName
-            || "-"
-          )}
+          : authorName || "-"}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
