@@ -19,6 +19,8 @@ COMPONENTS=""
 PLATFORM=""
 VERSION="$(deployment_read_version)"
 REGISTRY="general"
+REPO_PREFIX="nexent"
+MAINLAND_REPO_PREFIX="ccr.ccs.tencentyun.com/nexent-hub"
 DEPENDENCY_VARIANT="cpu"
 TERMINAL_VARIANT="slim"
 PUSH=false
@@ -245,11 +247,11 @@ run_interactive_configuration() {
   esac
 
   echo ""
-  echo "Image registry:"
-  echo "  1) general (nexent/*)"
-  echo "  2) mainland (ccr.ccs.tencentyun.com/nexent-hub/*)"
+  echo "Image source:"
+  echo "  1) general (public image sources)"
+  echo "  2) mainland (mainland China image sources and build mirrors)"
   local registry_choice
-  registry_choice="$(prompt_choice "Choose registry [1/2] (default: 1): " "1")"
+  registry_choice="$(prompt_choice "Choose image source [1/2] (default: 1): " "1")"
   case "$registry_choice" in
     2|mainland) REGISTRY="mainland" ;;
     1|general|"") REGISTRY="general" ;;
@@ -264,12 +266,10 @@ fi
 
 case "$REGISTRY" in
   general)
-    REPO_PREFIX="nexent"
     PY_MIRROR_ARGS=()
     WEB_MIRROR_ARGS=()
     ;;
   mainland)
-    REPO_PREFIX="ccr.ccs.tencentyun.com/nexent-hub"
     PY_MIRROR_ARGS=(--build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua)
     WEB_MIRROR_ARGS=(--build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua)
     ;;
@@ -360,6 +360,9 @@ build_one() {
   local dockerfile="$2"
   shift 2
   local tag="$REPO_PREFIX/$name:$VERSION"
+  if [ "$PUSH" = true ] && [ "$REGISTRY" = "mainland" ]; then
+    tag="$MAINLAND_REPO_PREFIX/$name:$VERSION"
+  fi
   local cmd=(docker buildx build)
   if [ -n "$PLATFORM" ]; then
     cmd+=(--platform "$PLATFORM")

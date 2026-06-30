@@ -48,8 +48,13 @@ assert_contains "$output" "--platform linux/amd64" "explicit platform should be 
 assert_contains "$output" "nexent/nexent:latest" "explicit platform build should still build selected image"
 
 output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --dry-run)"
-assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "terminal option should build terminal image with selected version"
+assert_contains "$output" "nexent/nexent-ubuntu-terminal:v9.9.9" "mainland build without push should keep local Nexent tag"
+assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "mainland build without push should not use CCS tag"
 assert_not_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent:v9.9.9" "main image should not be built for terminal-only option"
+
+output="$(bash "$BUILD_SCRIPT" --terminal --version v9.9.9 --registry mainland --push --dry-run)"
+assert_contains "$output" "ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:v9.9.9" "mainland push should use CCS tag"
+assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:v9.9.9" "mainland push should not use local Nexent tag"
 
 output="$(bash "$BUILD_SCRIPT" --web --docs --version v8.8.8 --registry general --dry-run)"
 assert_contains "$output" "nexent/nexent-web:v8.8.8" "web option should build web image"
