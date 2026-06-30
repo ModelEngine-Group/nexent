@@ -21,7 +21,7 @@ spec:
       labels:
         app: nexent-supabase-db
       annotations:
-        checksum/nexent-supabase: {{ dig "rolloutChecksums" "supabase" "" .Values.global | quote }}
+        checksum/nexent-supabase-secret: {{ dig "rolloutChecksums" "supabaseSecret" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
       initContainers:

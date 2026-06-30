@@ -24,6 +24,17 @@ assert_eq() {
   fi
 }
 
+assert_not_eq() {
+  local first="$1"
+  local second="$2"
+  local message="$3"
+  if [ "$first" = "$second" ]; then
+    echo "FAIL: $message"
+    echo "  both: $first"
+    exit 1
+  fi
+}
+
 assert_contains() {
   local haystack="$1"
   local needle="$2"
@@ -31,6 +42,18 @@ assert_contains() {
   if [[ "$haystack" != *"$needle"* ]]; then
     echo "FAIL: $message"
     echo "  missing: $needle"
+    echo "  in: $haystack"
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "FAIL: $message"
+    echo "  unexpected: $needle"
     echo "  in: $haystack"
     exit 1
   fi
@@ -131,6 +154,176 @@ deployment_render_helm_values "$LOCAL_HELM_VALUES"
 assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
 assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
 assert_contains "$(sed -n '140,180p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
+
+FAKE_DOCKER_DIR="$TMP_DIR/fake-docker"
+FAKE_DOCKER_LOG="$TMP_DIR/fake-docker.log"
+mkdir -p "$FAKE_DOCKER_DIR"
+cat > "$FAKE_DOCKER_DIR/docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+
+if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
+  shift 2
+  image=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format)
+        shift 2
+        ;;
+      *)
+        image="$1"
+        shift
+        ;;
+    esac
+  done
+  [ "$image" = "missing/nexent:latest" ] && exit 1
+  printf '%s\n' "${FAKE_DOCKER_IMAGE_ID:-sha256:fake-image-id}"
+  exit 0
+fi
+
+echo "unexpected docker command: $*" >&2
+exit 2
+SH
+chmod +x "$FAKE_DOCKER_DIR/docker"
+
+(
+  PATH="$FAKE_DOCKER_DIR:$PATH"
+  export PATH FAKE_DOCKER_LOG
+  FAKE_DOCKER_IMAGE_ID="sha256:first-local-image"
+  export FAKE_DOCKER_IMAGE_ID
+
+  first_image_checksum="$(deployment_image_rollout_checksum "nexent/nexent:latest")"
+  first_rollout_checksums="$(
+    NEXENT_IMAGE="nexent/nexent:latest" \
+    NEXENT_WEB_IMAGE="nexent/nexent-web:latest" \
+    NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest" \
+    OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest" \
+      deployment_render_image_rollout_checksums
+  )"
+
+  FAKE_DOCKER_IMAGE_ID="sha256:second-local-image"
+  export FAKE_DOCKER_IMAGE_ID
+  second_image_checksum="$(deployment_image_rollout_checksum "nexent/nexent:latest")"
+  second_rollout_checksums="$(
+    NEXENT_IMAGE="nexent/nexent:latest" \
+    NEXENT_WEB_IMAGE="nexent/nexent-web:latest" \
+    NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest" \
+    OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest" \
+      deployment_render_image_rollout_checksums
+  )"
+
+  assert_not_eq "$first_image_checksum" "$second_image_checksum" "local image ID changes should change image rollout checksum"
+  assert_not_eq "$first_rollout_checksums" "$second_rollout_checksums" "rendered image rollout checksums should change when local image IDs change"
+  assert_contains "$first_rollout_checksums" "backendImage:" "image rollout checksums should include backend image"
+  assert_contains "$first_rollout_checksums" "webImage:" "image rollout checksums should include web image"
+  assert_contains "$first_rollout_checksums" "dataProcessImage:" "image rollout checksums should include data-process image"
+  assert_contains "$first_rollout_checksums" "sshImage:" "image rollout checksums should include ssh image"
+
+  missing_checksum_a="$(deployment_image_rollout_checksum "missing/nexent:latest" 2>/dev/null)"
+  FAKE_DOCKER_IMAGE_ID="sha256:third-local-image"
+  export FAKE_DOCKER_IMAGE_ID
+  missing_checksum_b="$(deployment_image_rollout_checksum "missing/nexent:latest" 2>/dev/null)"
+  assert_eq "$missing_checksum_a" "$missing_checksum_b" "missing local image should use stable image reference fallback"
+)
+
+assert_contains "$(cat "$FAKE_DOCKER_LOG")" "image inspect --format {{.Id}} nexent/nexent:latest" "image fingerprint should inspect local Docker image"
+if grep -Eq '(^| )(pull|manifest|buildx|imagetools)( |$)' "$FAKE_DOCKER_LOG"; then
+  echo "FAIL: image fingerprint should not use remote Docker commands"
+  cat "$FAKE_DOCKER_LOG"
+  exit 1
+fi
+
+K8S_CHART_DIR="$SCRIPT_DIR/../k8s/helm/nexent"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-config/templates/deployment.yaml")" "checksum/nexent-backend-image" "config deployment should include backend image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-config/templates/deployment.yaml")" "checksum/nexent-env" "config deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-config/templates/deployment.yaml")" "checksum/nexent-backend:" "config deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-runtime/templates/deployment.yaml")" "checksum/nexent-backend-image" "runtime deployment should include backend image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-runtime/templates/deployment.yaml")" "checksum/nexent-env" "runtime deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-runtime/templates/deployment.yaml")" "checksum/nexent-backend:" "runtime deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend-image" "mcp deployment should include backend image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-env" "mcp deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend:" "mcp deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend-image" "northbound deployment should include backend image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-env" "northbound deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web-image" "web deployment should include web image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-env" "web deployment should include env rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-data-process-image" "data-process deployment should include data-process image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-env" "data-process deployment should include env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-backend:" "data-process deployment should not keep removed backend rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh-image" "openssh deployment should include ssh image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-env" "openssh deployment should include env rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase auth deployment should include supabase secret rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-env" "supabase auth deployment should not use full env rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase db deployment should include supabase secret rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-sql" "supabase db deployment should keep SQL rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-env" "supabase db deployment should not use full env rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase kong deployment should include supabase secret rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-env" "supabase kong deployment should not use full env rollout annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web:" "web deployment should not keep component-named env checksum annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh:" "openssh deployment should not keep component-named env checksum annotation"
+assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
+
+ENV_CHECKSUM_A="$TMP_DIR/env-checksum-a.env"
+cat > "$ENV_CHECKSUM_A" <<'ENV'
+# ignored comment
+
+BETA=two
+ALPHA=one
+export GAMMA="three"
+not an assignment
+ENV
+DEPLOYMENT_ROOT_ENV="$ENV_CHECKSUM_A"
+ENV_CHECKSUM_PAYLOAD_A="$(deployment_env_values_payload)"
+ENV_CHECKSUM_A_VALUE="$(deployment_env_values_checksum)"
+assert_eq $'ALPHA=one\nBETA=two\nGAMMA="three"' "$ENV_CHECKSUM_PAYLOAD_A" "env checksum payload should normalize valid assignments by key"
+
+ENV_CHECKSUM_B="$TMP_DIR/env-checksum-b.env"
+cat > "$ENV_CHECKSUM_B" <<'ENV'
+
+export GAMMA="three"
+# another ignored comment
+ALPHA=one
+BETA=two
+ENV
+DEPLOYMENT_ROOT_ENV="$ENV_CHECKSUM_B"
+ENV_CHECKSUM_B_VALUE="$(deployment_env_values_checksum)"
+assert_eq "$ENV_CHECKSUM_A_VALUE" "$ENV_CHECKSUM_B_VALUE" "env checksum should ignore comments, blank lines, and assignment order"
+
+ENV_CHECKSUM_C="$TMP_DIR/env-checksum-c.env"
+cat > "$ENV_CHECKSUM_C" <<'ENV'
+ALPHA=one
+BETA=changed
+GAMMA="three"
+ENV
+DEPLOYMENT_ROOT_ENV="$ENV_CHECKSUM_C"
+ENV_CHECKSUM_C_VALUE="$(deployment_env_values_checksum)"
+assert_not_eq "$ENV_CHECKSUM_A_VALUE" "$ENV_CHECKSUM_C_VALUE" "env checksum should change when any valid env value changes"
+
+DEPLOYMENT_ROOT_ENV="$TMP_DIR/missing-env-file.env"
+MISSING_ENV_CHECKSUM_A="$(deployment_env_values_checksum 2>/dev/null)"
+MISSING_ENV_CHECKSUM_B="$(deployment_env_values_checksum 2>/dev/null)"
+assert_eq "$MISSING_ENV_CHECKSUM_A" "$MISSING_ENV_CHECKSUM_B" "missing env file should use a stable empty checksum fallback"
+
+K8S_DEPLOY_CHECKSUM_BLOCK="$(awk '/render_runtime_secret_values\(\) {/,/deployment_render_image_rollout_checksums/' "$SCRIPT_DIR/../k8s/deploy.sh")"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'env_checksum="$(deployment_env_values_checksum)"' "k8s deploy should compute rollout checksum from full .env"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    env: %s\\n'" "k8s deploy should render the full .env checksum under the env name"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "supabase_secret_checksum" "k8s deploy should compute a dedicated Supabase secret rollout checksum"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    supabaseSecret: %s\\n'" "k8s deploy should render the Supabase secret checksum"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'JWT_SECRET:-' "supabase secret checksum should include JWT secret"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SECRET_KEY_BASE:-' "supabase secret checksum should include secret key base"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'VAULT_ENC_KEY:-' "supabase secret checksum should include vault encryption key"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SUPABASE_ANON_KEY:-' "supabase secret checksum should include anon key"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SUPABASE_SERVICE_ROLE_KEY:-' "supabase secret checksum should include service role key"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'supabase_postgres_password' "supabase secret checksum should include Supabase postgres password"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'gotrue_db_url' "supabase secret checksum should include gotrue DB URL"
+assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    backend:" "k8s deploy should not render the removed backend rollout checksum"
+assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "backend_checksum" "k8s deploy should not compute the removed backend rollout checksum"
+assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'ELASTICSEARCH_API_KEY' "k8s deploy should not enumerate backend env variables in rollout checksum"
+assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'DASHBOARD_USERNAME' "supabase secret checksum should not include direct Supabase env values"
+assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SITE_URL' "supabase secret checksum should not include direct Supabase env values"
+assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    web:" "k8s deploy should not render component-named env checksum keys"
 
 DEPLOYMENT_VERSION="speed"
 deployment_prepare_config --local-config "$FULL_CONFIG" --reconfigure --image-source general --app-version latest

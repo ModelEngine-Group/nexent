@@ -889,32 +889,24 @@ pull_mcp_image() {
 
 render_runtime_secret_values() {
     local gotrue_db_url
-    local runtime_config_hash
-    local backend_checksum
-    local minio_checksum
-    local supabase_checksum
-    local web_checksum
-    local ssh_checksum
+    local env_checksum
     local sql_checksum
+    local supabase_postgres_password
+    local supabase_secret_checksum
 
-    gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
-    runtime_config_hash="$(deployment_sha256_file "$GENERATED_RUNTIME_VALUES")"
+    supabase_postgres_password="$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")"
+    gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:${supabase_postgres_password}@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
+    env_checksum="$(deployment_env_values_checksum)"
     sql_checksum="$(sql_files_checksum)"
-    backend_checksum="$(deployment_sha256_string "runtime=${runtime_config_hash}|sql=${sql_checksum}|elastic=$(env_or_default ELASTICSEARCH_API_KEY "")|postgres=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")|minio=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
-    minio_checksum="$(deployment_sha256_string "root=$(env_or_default MINIO_ROOT_USER "nexent"):$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")|client=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
-    supabase_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|base=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|pg=$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")|db=${gotrue_db_url}")"
-    web_checksum="$(deployment_sha256_string "market=$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")|model=$(env_or_default MODEL_ENGINE_ENABLED "false")")"
-    ssh_checksum="$(deployment_sha256_string "ssh=$(env_or_default SSH_USERNAME "nexent"):$(env_or_default SSH_PASSWORD "nexent@2025")")"
+    supabase_secret_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|secretKeyBase=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|postgres=${supabase_postgres_password}|gotrue=${gotrue_db_url}")"
 
     {
         echo "global:"
         echo "  rolloutChecksums:"
-        printf '    backend: %s\n' "$(yaml_quote "$backend_checksum")"
-        printf '    minio: %s\n' "$(yaml_quote "$minio_checksum")"
-        printf '    supabase: %s\n' "$(yaml_quote "$supabase_checksum")"
-        printf '    web: %s\n' "$(yaml_quote "$web_checksum")"
-        printf '    ssh: %s\n' "$(yaml_quote "$ssh_checksum")"
+        printf '    env: %s\n' "$(yaml_quote "$env_checksum")"
         printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
+        printf '    supabaseSecret: %s\n' "$(yaml_quote "$supabase_secret_checksum")"
+        deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  secrets:"
         printf '    elasticPassword: %s\n' "$(yaml_quote "$(env_or_default ELASTIC_PASSWORD "nexent@2025")")"
@@ -935,7 +927,7 @@ render_runtime_secret_values() {
             printf '      vaultEncKey: %s\n' "$(yaml_quote "$VAULT_ENC_KEY")"
             printf '      anonKey: %s\n' "$(yaml_quote "$SUPABASE_ANON_KEY")"
             printf '      serviceRoleKey: %s\n' "$(yaml_quote "$SUPABASE_SERVICE_ROLE_KEY")"
-            printf '      postgresPassword: %s\n' "$(yaml_quote "$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")")"
+            printf '      postgresPassword: %s\n' "$(yaml_quote "$supabase_postgres_password")"
             printf '      gotrueDbUrl: %s\n' "$(yaml_quote "$gotrue_db_url")"
         fi
     } > "$GENERATED_SECRETS_VALUES"

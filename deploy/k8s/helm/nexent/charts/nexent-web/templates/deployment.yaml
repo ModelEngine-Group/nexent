@@ -17,7 +17,8 @@ spec:
       labels:
         app: nexent-web
       annotations:
-        checksum/nexent-web: {{ dig "rolloutChecksums" "web" "" .Values.global | quote }}
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-web-image: {{ dig "rolloutChecksums" "webImage" "" .Values.global | quote }}
     spec:
       containers:
         - name: nexent-web

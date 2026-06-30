@@ -129,6 +129,41 @@ deployment_source_root_env() {
   set +a
 }
 
+deployment_env_values_payload() {
+  local env_file="${DEPLOYMENT_ROOT_ENV:-}"
+
+  if [ -z "$env_file" ] || [ ! -f "$env_file" ]; then
+    deployment_warn "deploy/env/.env is not available; environment rollout checksum will use an empty payload."
+    return 0
+  fi
+
+  sed 's/\r$//' "$env_file" | awk '
+    /^[[:space:]]*($|#)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
+      if (line !~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        next
+      }
+      key = line
+      sub(/=.*/, "", key)
+      value = line
+      sub(/^[^=]*=/, "", value)
+      values[key] = key "=" value
+    }
+    END {
+      for (key in values) {
+        print values[key]
+      }
+    }
+  ' | LC_ALL=C sort -t '=' -k1,1
+}
+
+deployment_env_values_checksum() {
+  deployment_sha256_string "$(deployment_env_values_payload)"
+}
+
 deployment_update_env_var_file() {
   local env_file="$1"
   local key="$2"
@@ -1065,6 +1100,31 @@ deployment_image_repo() {
 deployment_image_tag() {
   local image="$1"
   printf '%s' "${image##*:}"
+}
+
+deployment_image_rollout_checksum() {
+  local image="$1"
+  local image_id=""
+
+  if command -v docker >/dev/null 2>&1; then
+    image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+    if [ -n "$image_id" ]; then
+      deployment_sha256_string "local-image=${image}|id=${image_id}"
+      return 0
+    fi
+    deployment_warn "Local image not found: $image; same-tag image changes cannot be detected from this host."
+  else
+    deployment_warn "Docker is not available; same-tag image changes cannot be detected for $image."
+  fi
+
+  deployment_sha256_string "image-ref=${image}"
+}
+
+deployment_render_image_rollout_checksums() {
+  printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
+  printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
+  printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
+  printf '    sshImage: "%s"\n' "$(deployment_image_rollout_checksum "$OPENSSH_SERVER_IMAGE")"
 }
 
 deployment_apply_image_source() {
