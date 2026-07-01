@@ -233,6 +233,7 @@ sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
     get_llm_model=MagicMock(return_value="stub_llm_model"),
+    build_llm_model=MagicMock(return_value="stub_llm_model_from_config"),
     validate_urls_access=MagicMock(),
 )
 sys.modules['services.tool_configuration_service'] = _create_stub_module(
@@ -887,16 +888,19 @@ class TestCreateToolConfigList:
             assert callable(mock_tool_instance.metadata["validate_url_access"])
 
     @pytest.mark.asyncio
-    async def test_create_tool_config_list_with_analyze_text_file_tool(self):
-        """Ensure AnalyzeTextFileTool receives text-specific metadata."""
+    async def test_create_tool_config_list_analyze_text_file_uses_agent_model(self):
+        """AnalyzeTextFileTool should use the agent-configured LLM, not the tenant default."""
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "AnalyzeTextFileTool"
         mock_tool_config.return_value = mock_tool_instance
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.build_llm_model') as mock_build_llm_model, \
                 patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
-                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
             mock_search_tools.return_value = [
                 {
@@ -910,19 +914,119 @@ class TestCreateToolConfigList:
                     "usage": None
                 }
             ]
-            mock_get_llm_model.return_value = "mock_llm_model"
+            mock_search_agent.return_value = {"name": "agent", "model_id": 42}
+            agent_model_config = {
+                "model_repo": "openai",
+                "model_name": "agent-llm",
+                "base_url": "https://agent.example.com/v1",
+                "api_key": "agent-key",
+                "max_tokens": 8192,
+                "ssl_verify": True,
+                "timeout_seconds": 30,
+            }
+            mock_get_model_by_id.return_value = agent_model_config
+            mock_build_llm_model.return_value = "agent_llm_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1")
-            # Verify metadata includes validate_url_access lambda
-            assert "llm_model" in mock_tool_instance.metadata
+            # Agent model is resolved and built; tenant default is not used.
+            mock_get_model_by_id.assert_called_once_with(42, tenant_id="tenant_1")
+            mock_build_llm_model.assert_called_once_with(agent_model_config)
+            mock_get_llm_model.assert_not_called()
+            assert mock_tool_instance.metadata["llm_model"] == "agent_llm_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert "data_process_service_url" in mock_tool_instance.metadata
-            assert "validate_url_access" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_analyze_text_file_falls_back_to_tenant_model(self):
+        """When the agent has no configured model, fall back to the tenant default LLM."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeTextFileTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.build_llm_model') as mock_build_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeTextFileTool",
+                    "name": "analyze_text_file",
+                    "description": "Analyze text file tool",
+                    "inputs": "string",
+                    "output_type": "array",
+                    "params": [{"name": "prompt", "default": "describe"}],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_search_agent.return_value = {"name": "agent", "model_id": None}
+            mock_get_llm_model.return_value = "tenant_llm_model"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            mock_get_model_by_id.assert_not_called()
+            mock_build_llm_model.assert_not_called()
+            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1")
+            assert mock_tool_instance.metadata["llm_model"] == "tenant_llm_model"
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_analyze_text_file_override_model(self):
+        """An explicit override_model_id should win over the persisted agent model."""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "AnalyzeTextFileTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.build_llm_model') as mock_build_llm_model, \
+                patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
+                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "AnalyzeTextFileTool",
+                    "name": "analyze_text_file",
+                    "description": "Analyze text file tool",
+                    "inputs": "string",
+                    "output_type": "array",
+                    "params": [{"name": "prompt", "default": "describe"}],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_search_agent.return_value = {"name": "agent", "model_id": 42}
+            override_model_config = {
+                "model_repo": "openai",
+                "model_name": "override-llm",
+                "base_url": "https://override.example.com/v1",
+                "api_key": "override-key",
+                "max_tokens": 16384,
+                "ssl_verify": False,
+                "timeout_seconds": 45,
+            }
+            mock_get_model_by_id.return_value = override_model_config
+            mock_build_llm_model.return_value = "override_llm_model"
+
+            result = await create_tool_config_list(
+                "agent_1", "tenant_1", "user_1", override_model_id=99)
+
+            assert len(result) == 1
+            # Override id (99) takes precedence over the persisted agent model_id (42).
+            mock_get_model_by_id.assert_called_once_with(99, tenant_id="tenant_1")
+            mock_build_llm_model.assert_called_once_with(override_model_config)
+            mock_get_llm_model.assert_not_called()
+            assert mock_tool_instance.metadata["llm_model"] == "override_llm_model"
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool_metadata(self):
@@ -1667,7 +1771,23 @@ class TestCreateAgentConfig:
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            result = await create_agent_config(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                "zh",
+                "test query",
+                override_model_id=456,
+            )
+
+            mock_create_tools.assert_called_once_with(
+                "agent_1",
+                "tenant_1",
+                "user_1",
+                version_no=0,
+                tool_params=ANY,
+                override_model_id=456,
+            )
 
             # Verify that AgentConfig was called correctly
             mock_agent_config.assert_called_once_with(

@@ -448,22 +448,27 @@ async def list_files_impl(prefix: str, limit: Optional[int] = None):
     return files
 
 
+def build_llm_model(model_config):
+    """Build an OpenAILongContextModel from a model configuration dict."""
+    timeout_seconds = model_config.get(
+        "timeout_seconds") if model_config else None
+    long_text_to_text_model = OpenAILongContextModel(
+        observer=MessageObserver(),
+        model_id=get_model_name_from_config(model_config),
+        api_base=model_config.get("base_url"),
+        api_key=model_config.get("api_key"),
+        max_context_tokens=model_config.get("max_tokens"),
+        ssl_verify=model_config.get("ssl_verify", True),
+        timeout_seconds=timeout_seconds,
+    )
+    return long_text_to_text_model
+
+
 def get_llm_model(tenant_id: str):
     # Get the tenant config
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    timeout_seconds = main_model_config.get(
-        "timeout_seconds") if main_model_config else None
-    long_text_to_text_model = OpenAILongContextModel(
-        observer=MessageObserver(),
-        model_id=get_model_name_from_config(main_model_config),
-        api_base=main_model_config.get("base_url"),
-        api_key=main_model_config.get("api_key"),
-        max_context_tokens=main_model_config.get("max_tokens"),
-        ssl_verify=main_model_config.get("ssl_verify", True),
-        timeout_seconds=timeout_seconds,
-    )
-    return long_text_to_text_model
+    return build_llm_model(main_model_config)
 
 
 async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
