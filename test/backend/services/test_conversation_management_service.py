@@ -575,7 +575,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_conversation_history.return_value = mock_history
 
         # Execute
-        result = get_conversation_history_service(123, self.user_id)
+        result = get_conversation_history_service(123, self.user_id, self.tenant_id)
 
         # Assert: should only have one final_answer, not duplicated
         assistant_message = result[0]["message"][0]
@@ -699,7 +699,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_call_llm.assert_called_once_with(
             "How to use Python effectively?", self.tenant_id, "en")
         mock_update_title.assert_called_once_with(
-            123, "Python Tips", self.user_id)
+            123, "Python Tips", self.user_id, tenant_id=self.tenant_id)
 
 
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
@@ -995,7 +995,7 @@ class TestUpdateConversationTitle(unittest.TestCase):
         from consts.exceptions import ConversationNotFoundError
 
         with self.assertRaises(ConversationNotFoundError):
-            update_conversation_title(123, "New Title", "user-1")
+            update_conversation_title(123, "New Title", "user-1", tenant_id="tenant-1")
 
 
 class TestCreateNewConversation(unittest.TestCase):
@@ -1008,7 +1008,7 @@ class TestCreateNewConversation(unittest.TestCase):
         from backend.services.conversation_management_service import create_new_conversation
 
         with self.assertRaises(Exception) as ctx:
-            create_new_conversation("Title", "user-1")
+            create_new_conversation("Title", "user-1", "tenant-1")
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1022,7 +1022,7 @@ class TestGetConversationListService(unittest.TestCase):
         from backend.services.conversation_management_service import get_conversation_list_service
 
         with self.assertRaises(Exception) as ctx:
-            get_conversation_list_service("user-1")
+            get_conversation_list_service("user-1", "tenant-1")
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1036,7 +1036,7 @@ class TestRenameConversationService(unittest.TestCase):
         from backend.services.conversation_management_service import rename_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            rename_conversation_service(123, "New Title", "user-1")
+            rename_conversation_service(123, "New Title", "user-1", "tenant-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
     @patch('backend.services.conversation_management_service.rename_conversation')
@@ -1046,7 +1046,7 @@ class TestRenameConversationService(unittest.TestCase):
         from backend.services.conversation_management_service import rename_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            rename_conversation_service(123, "Title", "user-1")
+            rename_conversation_service(123, "Title", "user-1", "tenant-1")
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1061,7 +1061,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from backend.services.conversation_management_service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            delete_conversation_service(123, "user-1", "tenant-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
     @patch('backend.services.conversation_management_service.agent_run_manager')
@@ -1071,10 +1071,11 @@ class TestDeleteConversationService(unittest.TestCase):
         mock_delete.return_value = True
         from backend.services.conversation_management_service import delete_conversation_service
 
-        result = delete_conversation_service(123, "user-1")
+        result = delete_conversation_service(123, "user-1", "tenant-1")
 
         self.assertTrue(result)
-        mock_mgr.clear_conversation_context_manager.assert_called_once_with(123)
+        mock_mgr.clear_conversation_context_manager.assert_called_once_with(
+            123, "user-1", tenant_id="tenant-1")
 
     @patch('backend.services.conversation_management_service.agent_run_manager')
     @patch('backend.services.conversation_management_service.delete_conversation')
@@ -1084,7 +1085,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from backend.services.conversation_management_service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            delete_conversation_service(123, "user-1", "tenant-1")
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1144,7 +1145,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
         # Returns list with conversation data even if no messages
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["conversation_id"], "123")
@@ -1170,7 +1171,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         # Check search is grouped by message
         msg = result[0]["message"][0]
@@ -1199,7 +1200,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             ]
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         msg = result[0]["message"][0]
         self.assertIn("picture", msg)
@@ -1221,7 +1222,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         msg = result[0]["message"][0]
         # Find the placeholder unit
@@ -1251,7 +1252,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         msg = result[0]["message"][0]
         search = msg["search"][0]
@@ -1274,7 +1275,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         self.assertIn("streaming_message", result[0])
         self.assertEqual(result[0]["streaming_message"]["message_id"], 2)
@@ -1294,7 +1295,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         msg = result[0]["message"][0]
         self.assertIn("minio_files", msg)
@@ -1314,7 +1315,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "image_records": []
         }
         from backend.services.conversation_management_service import get_conversation_history_service
-        result = get_conversation_history_service(123, "user-1")
+        result = get_conversation_history_service(123, "user-1", "tenant-1")
 
         msg = result[0]["message"][0]
         self.assertIn("minio_files", msg)
@@ -1410,7 +1411,7 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
     def test_empty_file_list_returns_false(self):
         """Should return False when skill_file_uploads is empty."""
         from backend.services.conversation_management_service import save_skill_files_to_conversation
-        result = save_skill_files_to_conversation(123, [], "user-1")
+        result = save_skill_files_to_conversation(123, [], "user-1", "tenant-1")
         self.assertFalse(result)
 
     @patch('backend.services.conversation_management_service.update_message_minio_files')
@@ -1419,7 +1420,7 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
         """Should return False when no assistant message found."""
         mock_get_msg_id.return_value = None
         from backend.services.conversation_management_service import save_skill_files_to_conversation
-        result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
+        result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1", "tenant-1")
         self.assertFalse(result)
         mock_update.assert_not_called()
 
@@ -1430,9 +1431,10 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
         mock_get_msg_id.return_value = 456
         mock_update.return_value = True
         from backend.services.conversation_management_service import save_skill_files_to_conversation
-        result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
+        result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1", "tenant-1")
         self.assertTrue(result)
-        mock_update.assert_called_once_with(456, [{"name": "file.pdf"}])
+        mock_update.assert_called_once_with(
+            456, [{"name": "file.pdf"}], user_id="user-1", tenant_id="tenant-1")
 
     @patch('backend.services.conversation_management_service.update_message_minio_files')
     @patch('backend.services.conversation_management_service.get_latest_assistant_message_id')
@@ -1441,7 +1443,7 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
         mock_get_msg_id.return_value = 456
         mock_update.side_effect = Exception("DB error")
         from backend.services.conversation_management_service import save_skill_files_to_conversation
-        result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
+        result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1", "tenant-1")
         self.assertFalse(result)
 
 

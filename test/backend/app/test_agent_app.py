@@ -283,7 +283,7 @@ def test_agent_stop_api_success(mocker, mock_conversation_id):
     assert response.status_code == 200
     mock_get_user_id.assert_called_once_with("Bearer test_token")
     mock_stop_tasks.assert_called_once_with(
-        mock_conversation_id, "test_user_id")
+        mock_conversation_id, "test_user_id", tenant_id="test_tenant_id")
     assert response.json()["status"] == "success"
 
 

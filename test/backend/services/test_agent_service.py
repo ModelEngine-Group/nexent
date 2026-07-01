@@ -4821,7 +4821,7 @@ async def test__stream_agent_chunks_schedule_task_failure(monkeypatch):
     # When create_task fails, the exception propagates
     with pytest.raises(RuntimeError, match="schedule fail"):
         async for out in agent_service._stream_agent_chunks(
-            agent_request, "u", "t", MagicMock(query="q"), memory_ctx
+            agent_request, "u", "t", _authorized_run_info(query="q"), memory_ctx
         ):
             pass
 
@@ -11123,7 +11123,7 @@ def test_stop_agent_tasks():
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
         with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
             result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            mock_preprocess.assert_called_once_with(123)
+            mock_preprocess.assert_called_once_with(123, user_id="user1", tenant_id=None)
 
 
 # ============================================================================
@@ -11837,7 +11837,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Track unregister calls
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -11849,7 +11849,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Collect chunks - should still yield despite save_message failure
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -11891,7 +11891,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -11903,7 +11903,7 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
     # Collect chunks - should yield malformed chunk as-is
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -11958,7 +11958,7 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -11970,7 +11970,7 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
     # Collect chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12029,7 +12029,7 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12041,7 +12041,7 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
     # Collect chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12113,7 +12113,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12125,7 +12125,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
     # Collect chunks - should still complete despite update_unit_content failure
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12195,7 +12195,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12207,7 +12207,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
     # Collect chunks - should still complete
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12276,7 +12276,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12288,7 +12288,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
     # Collect chunks - should still complete
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12339,7 +12339,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12371,7 +12371,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
     # Collect chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12415,7 +12415,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12427,7 +12427,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
     # Collect chunks - should handle invalid JSON gracefully
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12471,7 +12471,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12483,7 +12483,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
     # Collect chunks - should handle invalid JSON gracefully
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+        agent_request, "u", "t", _authorized_run_info(), MagicMock()
     ):
         collected.append(out)
 
@@ -12524,7 +12524,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12536,7 +12536,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
     # Call with resume_from_unit_index > 0
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock(), resume_from_unit_index=5
+        agent_request, "u", "t", _authorized_run_info(), MagicMock(), resume_from_unit_index=5
     ):
         collected.append(out)
 
@@ -12581,7 +12581,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12601,7 +12601,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
     # Collect chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), memory_ctx
+        agent_request, "u", "t", _authorized_run_info(), memory_ctx
     ):
         collected.append(out)
 
@@ -12641,7 +12641,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id):
+    def fake_unregister(conv_id, user_id, tenant_id=None):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
@@ -12662,7 +12662,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
     # Collect chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), memory_ctx
+        agent_request, "u", "t", _authorized_run_info(), memory_ctx
     ):
         collected.append(out)
 
@@ -13613,9 +13613,6 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
 
     assert result["should_resume"] is True
     assert result["resume_from_unit_index"] == 0
-
-
-
 
 
 

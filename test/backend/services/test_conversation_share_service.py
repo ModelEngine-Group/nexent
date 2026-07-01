@@ -123,11 +123,11 @@ def test_register_asset_falls_back_when_metadata_lookup_fails(mocker):
 
 def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
     expire_time = datetime(2030, 1, 1)
-    mocker.patch(
-        "services.conversation_share_service.get_conversation",
+    mock_authorize = mocker.patch(
+        "services.conversation_share_service.authorize_conversation_owner",
         return_value={"conversation_id": 7, "conversation_title": "Conversation title"},
     )
-    mocker.patch(
+    mock_get_history = mocker.patch(
         "services.conversation_share_service.get_conversation_history_service",
         return_value=[
             {
@@ -188,6 +188,13 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
         share_payload["snapshot_json"]["message"][0]["minio_files"][0]["preview_url"]
         == "/api/share/share_token/assets/asset_1/preview"
     )
+    mock_authorize.assert_called_once_with(
+        conversation_id=7,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        operation="conversation.share.create",
+    )
+    mock_get_history.assert_called_once_with(7, "user_1", "tenant_1")
     mock_create_share.assert_called_once()
     mock_create_assets.assert_called_once_with(
         "share_token",
@@ -211,11 +218,11 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
 
 
 def test_create_share_snapshot_service_all_messages_without_assets(mocker):
-    mocker.patch(
-        "services.conversation_share_service.get_conversation",
+    mock_authorize = mocker.patch(
+        "services.conversation_share_service.authorize_conversation_owner",
         return_value={"conversation_id": 8, "conversation_title": "All messages"},
     )
-    mocker.patch(
+    mock_get_history = mocker.patch(
         "services.conversation_share_service.get_conversation_history_service",
         return_value=[
             {
@@ -249,11 +256,21 @@ def test_create_share_snapshot_service_all_messages_without_assets(mocker):
     share_payload = mock_create_share.call_args.args[0]
     assert share_payload["mode"] == "all"
     assert [msg["message_id"] for msg in share_payload["snapshot_json"]["message"]] == [1, 2, 3]
+    mock_authorize.assert_called_once_with(
+        conversation_id=8,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        operation="conversation.share.create",
+    )
+    mock_get_history.assert_called_once_with(8, "user_1", "tenant_1")
     mock_create_assets.assert_called_once_with("share_token", [], "user_1")
 
 
 def test_create_share_snapshot_service_rejects_missing_conversation(mocker):
-    mocker.patch("services.conversation_share_service.get_conversation", return_value=None)
+    mock_authorize = mocker.patch(
+        "services.conversation_share_service.authorize_conversation_owner",
+        side_effect=ValueError("Conversation 404 does not exist or is not accessible"),
+    )
 
     with pytest.raises(ValueError, match="does not exist or is not accessible"):
         service.create_share_snapshot_service(
@@ -261,14 +278,20 @@ def test_create_share_snapshot_service_rejects_missing_conversation(mocker):
             user_id="user_1",
             tenant_id="tenant_1",
         )
+    mock_authorize.assert_called_once_with(
+        conversation_id=404,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        operation="conversation.share.create",
+    )
 
 
 def test_create_share_snapshot_service_rejects_empty_history(mocker):
     mocker.patch(
-        "services.conversation_share_service.get_conversation",
+        "services.conversation_share_service.authorize_conversation_owner",
         return_value={"conversation_id": 7, "conversation_title": "Conversation title"},
     )
-    mocker.patch(
+    mock_get_history = mocker.patch(
         "services.conversation_share_service.get_conversation_history_service",
         return_value=[],
     )
@@ -279,6 +302,49 @@ def test_create_share_snapshot_service_rejects_empty_history(mocker):
             user_id="user_1",
             tenant_id="tenant_1",
         )
+    mock_get_history.assert_called_once_with(7, "user_1", "tenant_1")
+
+
+def test_authorize_conversation_owner_checks_tenant_and_user(mocker):
+    conversation = {"conversation_id": 7, "conversation_title": "Conversation title"}
+    mock_get_conversation = mocker.patch(
+        "database.conversation_db.get_conversation",
+        return_value=conversation,
+    )
+    mock_authorize = mocker.patch("services.context_identity_service.authorize_context_operation")
+
+    result = service.authorize_conversation_owner(
+        conversation_id=7,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        operation="conversation.share.create",
+    )
+
+    assert result is conversation
+    mock_get_conversation.assert_called_once_with(7, "user_1", tenant_id="tenant_1")
+    mock_authorize.assert_called_once()
+    assert mock_authorize.call_args.kwargs["allowed"] is True
+
+
+def test_authorize_conversation_owner_rejects_unowned_conversation(mocker):
+    mock_get_conversation = mocker.patch(
+        "database.conversation_db.get_conversation",
+        return_value=None,
+    )
+    mock_authorize = mocker.patch("services.context_identity_service.authorize_context_operation")
+
+    with pytest.raises(ValueError, match="does not exist or is not accessible"):
+        service.authorize_conversation_owner(
+            conversation_id=404,
+            user_id="user_1",
+            tenant_id="tenant_1",
+            operation="conversation.share.create",
+        )
+
+    mock_get_conversation.assert_called_once_with(404, "user_1", tenant_id="tenant_1")
+    mock_authorize.assert_called_once()
+    assert mock_authorize.call_args.kwargs["allowed"] is False
+    assert mock_authorize.call_args.kwargs["reason_code"] == "conversation_not_owned"
 
 
 def test_get_share_snapshot_service_success(mocker):

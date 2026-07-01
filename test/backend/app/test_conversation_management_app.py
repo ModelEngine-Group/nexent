@@ -121,7 +121,7 @@ async def test_create_new_conversation_success(conversation_mocks):
     conversation_mocks['get_current_user_id'].assert_called_once_with(
         mock_auth_header)
     conversation_mocks['create_new_convo'].assert_called_once_with(
-        conversation_title, "user_id")
+        conversation_title, "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio
@@ -170,7 +170,7 @@ async def test_list_conversations_success(conversation_mocks):
     conversation_mocks['get_current_user_id'].assert_called_once_with(
         mock_auth_header)
     conversation_mocks['get_conversation_list'].assert_called_once_with(
-        "user_id")
+        "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_rename_conversation_success(conversation_mocks):
     conversation_mocks['get_current_user_id'].assert_called_once_with(
         mock_auth_header)
     conversation_mocks['rename_conversation'].assert_called_once_with(
-        conversation_id, new_title, "user_id")
+        conversation_id, new_title, "user_id", "tenant_id")
 
 
 # -----------------------------
@@ -270,7 +270,7 @@ async def test_delete_conversation_success(conversation_mocks):
 
     assert result.code == 0 and result.data is True
     conversation_mocks['delete_conversation'].assert_called_once_with(
-        conversation_id, "user_id")
+        conversation_id, "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio
@@ -310,7 +310,7 @@ async def test_get_history_success(conversation_mocks):
 
     assert result.code == 0 and result.data == dummy_history
     conversation_mocks['history_service'].assert_called_once_with(
-        conversation_id, "user_id")
+        conversation_id, "user_id", "tenant_id")
 
 
 @pytest.mark.asyncio
@@ -346,7 +346,7 @@ async def test_get_sources_success(conversation_mocks):
 
     assert result == dummy_sources
     conversation_mocks['sources_service'].assert_called_once_with(
-        1, 2, "all", "user_id")
+        1, 2, "all", "user_id", tenant_id="tenant_id")
 
 
 @pytest.mark.asyncio
@@ -415,15 +415,19 @@ async def test_generate_title_failure(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_update_opinion_success(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
     request_obj = MagicMock()
     request_obj.message_id = 5
     request_obj.opinion = "like"
 
-    result = await update_opinion_endpoint(request_obj)
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+
+    result = await update_opinion_endpoint(request_obj, authorization=mock_auth_header)
 
     assert result.code == 0 and result.data is True
     conversation_mocks['update_opinion_service'].assert_called_once_with(
-        5, "like")
+        5, "like", user_id="user_id", tenant_id="tenant_id")
 
 
 @pytest.mark.asyncio
@@ -447,17 +451,20 @@ async def test_update_opinion_failure(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_get_message_id_success(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
     request_obj = MagicMock()
     request_obj.conversation_id = 1
     request_obj.message_index = 3
 
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
     conversation_mocks['get_message_id_impl'].return_value = 99
 
-    result = await get_message_id_endpoint(request_obj)
+    result = await get_message_id_endpoint(request_obj, authorization=mock_auth_header)
 
     assert result.code == 0 and result.data == 99
     conversation_mocks['get_message_id_impl'].assert_called_once_with(
-        request_obj.conversation_id, request_obj.message_index)
+        request_obj.conversation_id, request_obj.message_index, user_id="user_id", tenant_id="tenant_id")
 
 
 @pytest.mark.asyncio

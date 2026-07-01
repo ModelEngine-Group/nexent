@@ -94,3 +94,39 @@ def require_context_identity(
         allowed=True,
     )
     return identity
+
+
+def authorize_conversation_owner(
+    *,
+    conversation_id: Any,
+    user_id: Optional[str],
+    tenant_id: Optional[str],
+    operation: str,
+    resource: str = "conversation",
+) -> Dict[str, Any]:
+    """Resolve identity and require that the conversation belongs to that owner."""
+    from database.conversation_db import get_conversation
+
+    identity = resolve_context_identity(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+    conversation = get_conversation(conversation_id, user_id, tenant_id=tenant_id)
+    if not conversation:
+        authorize_context_operation(
+            identity=identity,
+            operation=operation,
+            resource=resource,
+            allowed=False,
+            reason_code="conversation_not_owned",
+        )
+        raise ValueError(f"Conversation {conversation_id} does not exist or is not accessible")
+
+    authorize_context_operation(
+        identity=identity,
+        operation=operation,
+        resource=resource,
+        allowed=True,
+    )
+    return conversation

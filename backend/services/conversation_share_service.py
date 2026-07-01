@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from database.attachment_db import get_content_type, get_file_size_from_minio
-from database.conversation_db import get_conversation
 from database.conversation_share_db import (
     create_conversation_share,
     create_conversation_share_assets,
@@ -16,6 +15,7 @@ from database.conversation_share_db import (
     get_share_asset,
 )
 from services.conversation_management_service import get_conversation_history_service
+from services.context_identity_service import authorize_conversation_owner
 
 logger = logging.getLogger("conversation_share_service")
 
@@ -302,11 +302,14 @@ def create_share_snapshot_service(
     selected_user_message_ids: Optional[List[int]] = None,
     expire_time: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    conversation = get_conversation(conversation_id, user_id)
-    if not conversation:
-        raise ValueError(f"Conversation {conversation_id} does not exist or is not accessible")
+    conversation = authorize_conversation_owner(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        operation="conversation.share.create",
+    )
 
-    history_payload = get_conversation_history_service(conversation_id, user_id)
+    history_payload = get_conversation_history_service(conversation_id, user_id, tenant_id)
     if not history_payload:
         raise ValueError(f"No history data found for conversation_id: {conversation_id}")
 
