@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROOT_ENV_FILE="$PROJECT_ROOT/deploy/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
+MONITORING_ENV_FILE="$SCRIPT_DIR/assets/monitoring/monitoring.env"
 cd "$SCRIPT_DIR"
 
 DELETE_VOLUMES=""
@@ -189,6 +190,69 @@ remove_docker_named_volumes() {
   fi
 }
 
+monitoring_container_names() {
+  printf '%s\n' \
+    nexent-otel-collector \
+    nexent-phoenix \
+    nexent-langfuse-worker \
+    nexent-langfuse-web \
+    nexent-langfuse-clickhouse \
+    nexent-langfuse-minio \
+    nexent-langfuse-redis \
+    nexent-langfuse-postgres \
+    nexent-grafana \
+    nexent-tempo \
+    nexent-zipkin
+}
+
+monitoring_volume_names() {
+  printf '%s\n' \
+    monitor_phoenix-data \
+    monitor_langfuse-postgres-data \
+    monitor_langfuse-clickhouse-data \
+    monitor_langfuse-clickhouse-logs \
+    monitor_langfuse-minio-data \
+    monitor_langfuse-redis-data \
+    monitor_grafana-data \
+    monitor_tempo-data
+}
+
+remove_docker_containers_by_name() {
+  command -v docker >/dev/null 2>&1 || return 0
+
+  local containers_to_remove=()
+  local container
+  while IFS= read -r container; do
+    [ -n "$container" ] || continue
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$container"; then
+      containers_to_remove+=("$container")
+    fi
+  done
+
+  if [ "${#containers_to_remove[@]}" -gt 0 ]; then
+    echo "🧹 Removing Docker containers: ${containers_to_remove[*]}"
+    docker rm -f "${containers_to_remove[@]}" >/dev/null 2>&1 || true
+  fi
+}
+
+remove_docker_volumes_by_name() {
+  command -v docker >/dev/null 2>&1 || return 0
+
+  local volumes_to_remove=()
+  local volume
+  while IFS= read -r volume; do
+    [ -n "$volume" ] || continue
+    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$volume"; then
+      volumes_to_remove+=("$volume")
+    fi
+  done
+
+  if [ "${#volumes_to_remove[@]}" -gt 0 ]; then
+    echo "🧹 Removing Docker volumes: ${volumes_to_remove[*]}"
+    docker volume rm -f "${volumes_to_remove[@]}" >/dev/null 2>&1 || true
+  fi
+}
+
 docker_compose_down_file() {
   local compose_file="$1"
   local use_project_name="$2"
@@ -203,6 +267,9 @@ docker_compose_down_file() {
   fi
   if [ -f "$ROOT_ENV_FILE" ]; then
     env_file_args=(--env-file "$ROOT_ENV_FILE")
+  fi
+  if [ "$(basename "$compose_file")" = "docker-compose-monitoring.yml" ] && [ -f "$MONITORING_ENV_FILE" ]; then
+    env_file_args+=(--env-file "$MONITORING_ENV_FILE")
   fi
 
   if [ "$use_project_name" = "true" ]; then
@@ -259,6 +326,10 @@ main() {
   fi
 
   docker_compose_down_file "$COMPOSE_DIR/docker-compose-monitoring.yml" false "$remove_volumes"
+  remove_docker_containers_by_name < <(monitoring_container_names)
+  if [ "$remove_volumes" = "true" ]; then
+    remove_docker_volumes_by_name < <(monitoring_volume_names)
+  fi
   docker_compose_down_file "$COMPOSE_DIR/docker-compose-supabase.prod.yml" true "$remove_volumes"
   docker_compose_down_file "$COMPOSE_DIR/docker-compose-supabase.yml" true "$remove_volumes"
   docker_compose_down_file "$COMPOSE_DIR/docker-compose.prod.yml" true "$remove_volumes"

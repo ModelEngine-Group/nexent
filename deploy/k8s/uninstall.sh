@@ -280,12 +280,41 @@ cleanup_leftover_data_process_resources() {
   kubectl delete rs,pod -n "$NAMESPACE" -l app=nexent-data-process --ignore-not-found=true 2>/dev/null || true
 }
 
+cleanup_leftover_monitoring_resources() {
+  if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Cleaning up leftover monitoring resources..."
+  local app
+  for app in \
+    nexent-otel-collector \
+    nexent-phoenix \
+    nexent-tempo \
+    nexent-grafana \
+    nexent-zipkin \
+    nexent-langfuse-postgres \
+    nexent-langfuse-clickhouse \
+    nexent-langfuse-minio \
+    nexent-langfuse-redis \
+    nexent-langfuse-web \
+    nexent-langfuse-worker
+  do
+    kubectl delete deployment,service,configmap,rs,pod -n "$NAMESPACE" -l app="$app" --ignore-not-found=true 2>/dev/null || true
+  done
+}
+
+cleanup_leftover_nexent_resources() {
+  cleanup_leftover_data_process_resources
+  cleanup_leftover_monitoring_resources
+}
+
 uninstall_preserve_data() {
   echo "Uninstalling Helm release..."
   if ! helm_uninstall_release; then
-    echo "Helm uninstall failed; continuing best-effort cleanup of nexent-data-process."
+    echo "Helm uninstall failed; continuing best-effort cleanup of known Nexent resources."
   fi
-  cleanup_leftover_data_process_resources
+  cleanup_leftover_nexent_resources
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   echo "Cleanup completed. Helm-managed resources were removed."
@@ -300,10 +329,10 @@ delete_all_data() {
   echo "Deleting Helm release..."
   if ! helm_uninstall_release; then
     echo "Helm uninstall failed. Namespace was not deleted."
-    cleanup_leftover_data_process_resources
+    cleanup_leftover_nexent_resources
     return 1
   fi
-  cleanup_leftover_data_process_resources
+  cleanup_leftover_nexent_resources
   maybe_delete_local_volume_data
   maybe_delete_namespace_after_uninstall
   echo "Cleanup completed. Helm-managed PV/PVC resources were deleted with the release."

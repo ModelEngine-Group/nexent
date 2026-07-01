@@ -245,10 +245,14 @@ configure_stack() {
             COMPOSE_PROFILES=(--profile langfuse)
             LANGFUSE_INIT_PROJECT_PUBLIC_KEY="${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-nexent-local}"
             LANGFUSE_INIT_PROJECT_SECRET_KEY="${LANGFUSE_INIT_PROJECT_SECRET_KEY:-sk-lf-nexent-local}"
+            if [ -z "${LANGFUSE_OTLP_AUTH_HEADER:-}" ] && [ -n "${LANGFUSE_OLTP_AUTH_HEADER:-}" ]; then
+                LANGFUSE_OTLP_AUTH_HEADER="$LANGFUSE_OLTP_AUTH_HEADER"
+            fi
             if [ -z "${LANGFUSE_OTLP_AUTH_HEADER:-}" ]; then
                 LANGFUSE_OTLP_AUTH_HEADER="Basic $(printf "%s:%s" "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "$LANGFUSE_INIT_PROJECT_SECRET_KEY" | base64 | tr -d '\n')"
             fi
-            export LANGFUSE_OTLP_AUTH_HEADER
+            LANGFUSE_OLTP_AUTH_HEADER="$LANGFUSE_OTLP_AUTH_HEADER"
+            export LANGFUSE_OTLP_AUTH_HEADER LANGFUSE_OLTP_AUTH_HEADER
             ;;
         langsmith)
             BACKEND_MONITORING_PROVIDER="langsmith"
