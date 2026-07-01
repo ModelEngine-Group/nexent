@@ -94,12 +94,15 @@ export function useAuthenticationUI({
     []
   );
 
-  const openAuthPromptModal = useCallback(() => {
-    if (isSharePage) return;
-    redirectToCasIfForced(effectivePath).then((redirected) => {
-      if (!redirected) setIsAuthPromptModalOpen(true);
-    });
-  }, [effectivePath, isSharePage, redirectToCasIfForced]);
+  const openAuthPromptModal = useCallback(
+    (redirect?: string) => {
+      if (isSharePage) return;
+      redirectToCasIfForced(redirect || effectivePath).then((redirected) => {
+        if (!redirected) setIsAuthPromptModalOpen(true);
+      });
+    },
+    [effectivePath, isSharePage, redirectToCasIfForced]
+  );
 
   const closeAuthPromptModal = useCallback(() => {
     setIsAuthPromptModalOpen(false);

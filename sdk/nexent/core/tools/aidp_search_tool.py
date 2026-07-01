@@ -6,7 +6,7 @@ Dual-channel output: all chunks via SEARCH_CONTENT, image file_urls via PICTURE_
 """
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import httpx
@@ -77,7 +77,13 @@ class AidpSearchTool(Tool):
             "type": "string",
             "description": "The search query string.",
             "description_zh": "搜索查询词",
-        }
+        },
+        "kds_list": {
+            "type": "array",
+            "description": "The list of knowledge base IDs (kds_id) to search. If not provided, uses the kds_list from tool configuration.",
+            "description_zh": "要检索的知识库 ID 列表，如不提供则使用工具配置中的 kds_list",
+            "nullable": True,
+        },
     }
 
     init_param_descriptions = {
@@ -190,10 +196,10 @@ class AidpSearchTool(Tool):
     def _build_retrieve_url(self) -> str:
         return urljoin(self.base_url, _RETRIEVE_PATH)
 
-    def _build_retrieve_payload(self, query: str) -> Dict[str, Any]:
+    def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
         payload = {
             "query": query,
-            "kds_list": self.kds_list,
+            "kds_list": kds_list,
             "search_method": self.search_method,
             "reranking_enable": self.reranking_enable,
             "rewrite_enable": self.rewrite_enable,
@@ -292,10 +298,10 @@ class AidpSearchTool(Tool):
                 json.dumps({"images_url": images_url}, ensure_ascii=False),
             )
 
-    def _execute_request(self, query: str):
+    def _execute_request(self, query: str, kds_list: List[str]):
         """POST to the AIDP FusionSearch endpoint and return parsed records."""
         url = self._build_retrieve_url()
-        payload = self._build_retrieve_payload(query.strip())
+        payload = self._build_retrieve_payload(query.strip(), kds_list)
         resp = self._http_client.post(
             url,
             headers={
@@ -307,22 +313,36 @@ class AidpSearchTool(Tool):
         resp.raise_for_status()
         return self._parse_response(resp.json())
 
-    def forward(self, query: str) -> str:
+    def forward(
+        self,
+        query: str,
+        kds_list: Optional[List[str]] = None,
+    ) -> str:
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
+
+        # Use kds_list from runtime parameters if provided, otherwise fall back to instance kds_list
+        search_kds_list = self.kds_list
+        if kds_list is not None and len(kds_list) > 0:
+            search_kds_list = kds_list
 
         self._emit_running_prompt(query)
 
         logger.info(
             "AidpSearchTool called query='%s' kds_list=%s method=%s top_k=%d",
             query,
-            self.kds_list,
+            search_kds_list,
             self.search_method,
             self.top_k,
         )
 
+        if not search_kds_list:
+            raise AidpSearchError(
+                "No knowledge base selected. Please select at least one knowledge base."
+            )
+
         try:
-            records = self._execute_request(query)
+            records = self._execute_request(query, search_kds_list)
         except httpx.HTTPError as e:
             logger.exception("AIDP HTTP error: %s", e)
             raise AidpSearchError(f"AIDP HTTP error: {e}") from e

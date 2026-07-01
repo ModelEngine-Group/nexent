@@ -210,7 +210,7 @@ export function ChatAgentSelector({
     }
 
     const agent = agentId !== null ? agents.find((a: Agent) => a.id === agentId) : null;
-    onAgentSelect(agentId, agent?.greeting_message, agent?.example_questions);
+    onAgentSelect(agentId, agent?.greeting_message, agent?.example_questions, agent?.model_ids, agent?.model_names);
     setIsOpen(false);
 
     // If it's an iframe embedded page, send postMessage to the parent page

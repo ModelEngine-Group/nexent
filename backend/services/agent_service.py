@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from http import HTTPStatus
 import io
 import json
 import logging
@@ -7,7 +8,7 @@ import os
 import uuid
 import zipfile
 from collections import deque
-from typing import Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict, List
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -21,10 +22,11 @@ from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
-    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
+    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
+from nexent.core.utils.observer import ProcessType
 from consts.model import (
     AgentInfoRequest,
     AgentRequest,
@@ -33,6 +35,8 @@ from consts.model import (
     ExportAndImportAgentInfo,
     ExportAndImportDataFormat,
     MCPInfo,
+    MessageRequest,
+    MessageUnit,
     SkillInstanceInfoRequest,
     SkillZipEntry,
     ToolInstanceInfoRequest,
@@ -83,8 +87,22 @@ from services.prompt_template_service import (
     get_prompt_template_summary,
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
-from services.conversation_management_service import save_conversation_assistant, save_conversation_user, save_skill_files_to_conversation
+from services.conversation_management_service import (
+    get_latest_assistant_message,
+    get_last_unit_for_message,
+    save_conversation_user,
+    save_message,
+    save_message_unit,
+    save_source_image,
+    save_source_search,
+    save_skill_files_to_conversation,
+    update_message_content,
+    update_message_status,
+    update_unit_content,
+    update_unit_status,
+)
 from services.memory_config_service import build_memory_context
+from services.streaming_channel import streaming_channel_manager
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.memory_utils import build_memory_config
@@ -100,6 +118,15 @@ from utils.monitoring import monitoring_manager
 
 logger = logging.getLogger(__name__)
 SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
+
+
+async def _cleanup_channel_later(conversation_id: int, user_id: str, delay: float = 5.0):
+    """
+    Remove the streaming channel after a delay to allow subscribers to finish.
+    This gives reconnected clients time to receive the final chunks before cleanup.
+    """
+    await asyncio.sleep(delay)
+    await streaming_channel_manager.remove_channel(conversation_id, user_id)
 
 
 def _extract_json_objects_from_text(text: str) -> list[dict]:
@@ -282,55 +309,105 @@ def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
         return ""
 
 
-def _resolve_model_with_fallback(
-    model_display_name: str | None,
-    exported_model_id: str | None,
+def _resolve_model_ids_with_fallback(
+    model_ids: List[int] | None,
+    model_display_names: List[str] | None,
     model_label: str,
-    tenant_id: str
-) -> str | None:
+    tenant_id: str,
+) -> List[int] | None:
     """
-    Resolve model_id from model_display_name with fallback to quick config LLM model.
+    Resolve model_ids from an import payload, merging two sources in priority order:
+
+      1. Explicit `model_ids` provided in the payload. Each id is validated against
+         the target tenant's catalog; missing ids are dropped (logged).
+      2. `model_display_names` resolved via ``get_model_id_by_display_name`` to
+         cover ids that were lost in step 1.
+      3. A single quick config LLM model id is appended if any of the desired
+         models could not be resolved (so the agent always has at least one
+         usable model after import).
 
     Args:
-        model_display_name: Display name of the model to lookup
-        exported_model_id: Original model_id from export (for logging only)
-        model_label: Label for logging (e.g., "Model", "Business logic model")
-        tenant_id: Tenant ID for model lookup
+        model_ids: Optional list of model ids from the export payload.
+        model_display_names: Optional list of display names for fallback lookup.
+        model_label: Label for logging (e.g., "Model", "Business logic model").
+        tenant_id: Tenant ID for catalog lookup.
 
     Returns:
-        Resolved model_id or None if not found and no fallback available
+        Ordered, de-duplicated list of resolved model_ids; empty list if no
+        input was provided (caller should skip persisting model_ids).
     """
-    if not model_display_name:
+    if not model_ids and not model_display_names:
         return None
 
-    # Try to find model by display name in current tenant
-    resolved_id = get_model_id_by_display_name(model_display_name, tenant_id)
+    resolved_ids: List[int] = []
+    seen: set[int] = set()
+    missing_ids: List[int] = []
 
-    if resolved_id:
+    # Step 1: validate explicit ids against the current tenant catalog.
+    for mid in model_ids or []:
+        if mid in seen:
+            continue
+        info = get_model_by_model_id(mid)
+        if info:
+            seen.add(mid)
+            resolved_ids.append(mid)
+        else:
+            missing_ids.append(mid)
+
+    if resolved_ids:
         logger.info(
-            f"{model_label} '{model_display_name}' found in tenant {tenant_id}, "
-            f"mapped to model_id: {resolved_id} (exported model_id was: {exported_model_id})")
-        return resolved_id
+            f"{model_label} import: kept {len(resolved_ids)}/{len(model_ids or [])} "
+            f"explicit model_ids in tenant {tenant_id}"
+            + (f"; missing ids: {missing_ids}" if missing_ids else "")
+        )
+        # When the caller explicitly provides model_ids, the selection is intentional —
+        # do NOT supplement with extra models from model_display_names.
+        return resolved_ids
 
-    # Model not found, try fallback to quick config LLM model
-    logger.warning(
-        f"{model_label} '{model_display_name}' (exported model_id: {exported_model_id}) "
-        f"not found in tenant {tenant_id}, falling back to quick config LLM model.")
+    # Step 2: resolve remaining slots by display name.
+    # Only reached when model_ids was empty/None (caller did not specify a preference),
+    # so we use display names to find a suitable model in the target tenant.
+    used_name_indices: set[int] = set()
+    missing_names: List[str] = []
 
-    quick_config_model = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"],
-        tenant_id=tenant_id
-    )
+    for idx, display_name in enumerate(model_display_names or []):
+        if not display_name:
+            continue
 
-    if quick_config_model:
-        fallback_id = quick_config_model.get("model_id")
+        resolved_id = get_model_id_by_display_name(display_name, tenant_id)
+        if resolved_id and resolved_id not in seen:
+            seen.add(resolved_id)
+            resolved_ids.append(resolved_id)
+            used_name_indices.add(idx)
+        else:
+            missing_names.append(display_name)
+            used_name_indices.add(idx)
+
+    if model_display_names:
         logger.info(
-            f"Using quick config LLM model for {model_label.lower()}: "
-            f"{quick_config_model.get('display_name')} (model_id: {fallback_id})")
-        return fallback_id
+            f"{model_label} import: resolved {len(used_name_indices) - len(missing_names)}/"
+            f"{len(model_display_names)} display names in tenant {tenant_id}"
+            + (f"; missing names: {missing_names}" if missing_names else "")
+        )
 
-    logger.warning(f"No quick config LLM model found for tenant {tenant_id}")
-    return None
+    # Step 3: quick config LLM fallback when still nothing resolved.
+    if not resolved_ids and (missing_ids or missing_names):
+        quick_config_model = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"],
+            tenant_id=tenant_id,
+        )
+        if quick_config_model:
+            fallback_id = quick_config_model.get("model_id")
+            if fallback_id is not None and fallback_id not in seen:
+                logger.warning(
+                    f"{model_label} import: no usable model found in tenant {tenant_id} "
+                    f"(missing ids: {missing_ids}, missing names: {missing_names}); "
+                    f"falling back to quick config LLM model "
+                    f"'{quick_config_model.get('display_name')}' (model_id: {fallback_id})"
+                )
+                resolved_ids.append(fallback_id)
+
+    return resolved_ids
 
 
 def _normalize_language_key(language: str) -> str:
@@ -781,71 +858,368 @@ async def _stream_agent_chunks(
     tenant_id: str,
     agent_run_info,
     memory_ctx,
+    resume_from_unit_index: int = 0,
+    resume_message_id: Optional[int] = None,
+    channel: Optional[Any] = None,
 ):
-    """Yield SSE chunks from agent_run while persisting messages and cleanup."""
+    """
+    Yield SSE chunks from agent_run while persisting messages incrementally.
 
-    local_messages = []
+    Args:
+        resume_from_unit_index: If > 0, we're in resume mode and should start
+                                the unit index counter from this position.
+        resume_message_id: The existing message_id to use in resume mode
+                          (instead of creating a new one).
+        channel: Optional StreamingChannel for multi-subscriber support.
+    """
+
+    # Types whose chunks should be merged into the previous unit boundary,
+    # matching the legacy batch merge logic.
+    _MERGEABLE_TYPES = {
+        ProcessType.MODEL_OUTPUT_CODE.value,
+        ProcessType.MODEL_OUTPUT_THINKING.value,
+        ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
+    }
+
     captured_final_answer = None
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
+
+    # Determine if we're in resume mode
+    is_resume_mode = resume_from_unit_index > 0
+
+    # Persist the parent ConversationMessage row up front with status='streaming'
+    # so that units saved incrementally have a valid message_id to reference.
+    streaming_message_id: Optional[int] = resume_message_id
+    if not is_resume_mode and not agent_request.is_debug:
+        user_role_count = sum(
+            1 for item in getattr(agent_request, "history", [])
+            if item.role == MESSAGE_ROLE["USER"]
+        )
+        assistant_message_req = MessageRequest(
+            conversation_id=agent_request.conversation_id,
+            message_idx=user_role_count * 2 + 1,
+            role=MESSAGE_ROLE["ASSISTANT"],
+            message=[],
+            minio_files=None,
+        )
+        try:
+            streaming_message_id = save_message(
+                assistant_message_req,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                status="streaming",
+            )
+        except Exception as msg_exc:
+            logger.error(
+                "Failed to create streaming message row: %r", msg_exc, exc_info=True)
+
+    # Tracks the unit currently being accumulated in memory. Each entry is
+    # a dict with keys: type, content, unit_id, unit_index, mergeable.
+    current_unit: Optional[Dict[str, Any]] = None
+    # The next unit_index to assign to a brand-new (non-merge) unit.
+    # In resume mode, start from the position after the last persisted unit.
+    next_unit_index: int = resume_from_unit_index
+    # Set when the agent run loop finishes successfully.
+    stream_completed_normally: bool = False
+
+    # Get or create streaming channel for multi-subscriber support
+    if channel is None:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=user_id
+        )
+
+    # In resume mode, emit a status event first
+    if is_resume_mode:
+        await channel.publish(STREAM_STATUS_EVENT)
+        await channel.publish(f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n')
+        yield STREAM_STATUS_EVENT
+        yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
+
     try:
         async for chunk in agent_run(agent_run_info):
-            local_messages.append(chunk)
+            chunk_type: Optional[str] = None
+            chunk_content: str = ""
             try:
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
-                if chunk_type == "final_answer":
-                    captured_final_answer = data.get("content")
+                chunk_content = data.get("content", "") or ""
 
-                should_parse_skill_file = chunk_type in {"execution_logs", "parse"} or data.get("role") == "tool-response"
-                if should_parse_skill_file:
-                    extracted_payload_count = 0
-                    content_value = data.get("content")
-                    if isinstance(content_value, list):
-                        content_items = content_value
-                    elif content_value:
-                        content_items = [{"type": "text", "text": str(content_value)}]
-                    else:
-                        content_items = []
-
-                    for item in content_items:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_value = item.get("text")
-                            if text_value:
-                                extracted_payloads = _extract_json_objects_from_text(text_value)
-                                for payload in extracted_payloads:
-                                    absolute_path = str(payload.get("absolute_path") or "").strip()
-                                    if not absolute_path:
-                                        continue
-                                    if absolute_path in captured_skill_files:
-                                        continue
-                                    if not os.path.exists(absolute_path):
-                                        continue
-                                    captured_skill_files[absolute_path] = payload
-                                    extracted_payload_count += 1
-                    if extracted_payload_count:
-                        logger.info(
-                            "[skill-file] captured payloads count=%s current_total=%s",
-                            extracted_payload_count,
-                            len(captured_skill_files),
-                        )
+                # Add unit_index to the chunk data for frontend resume skip logic.
+                # This allows frontend to accurately skip chunks that were already persisted.
+                # For mergeable types (continuing chunks), use the current unit's index.
+                # For new units, use the next_unit_index that will be assigned.
+                if streaming_message_id is not None and chunk_type:
+                    mergeable = chunk_type in _MERGEABLE_TYPES
+                    if current_unit is not None and mergeable and current_unit.get("type") == chunk_type:
+                        # Continuing chunk - use current unit's index
+                        data["unit_index"] = current_unit["unit_index"]
+                    elif chunk_type not in ("search_content_placeholder",):
+                        # New unit - this will be the next index after assignment
+                        data["unit_index"] = next_unit_index
+                    # Re-serialize the chunk with unit_index for accurate frontend skip
+                    chunk = json.dumps(data)
+                    logger.debug(f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}")
             except Exception:
-                pass
+                # Malformed chunk: emit as-is and skip persistence bookkeeping.
+                await channel.publish(f"data: {chunk}\n\n")
+                yield f"data: {chunk}\n\n"
+                continue
+
+            if chunk_type == "final_answer":
+                captured_final_answer = chunk_content
+
+            should_parse_skill_file = (
+                chunk_type in {"execution_logs", "parse"}
+                or data.get("role") == "tool-response"
+            )
+            if should_parse_skill_file:
+                extracted_payload_count = 0
+                content_value = data.get("content")
+                if isinstance(content_value, list):
+                    content_items = content_value
+                elif content_value:
+                    content_items = [{"type": "text", "text": str(content_value)}]
+                else:
+                    content_items = []
+
+                for item in content_items:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_value = item.get("text")
+                        if text_value:
+                            extracted_payloads = _extract_json_objects_from_text(text_value)
+                            for payload in extracted_payloads:
+                                absolute_path = str(payload.get("absolute_path") or "").strip()
+                                if not absolute_path:
+                                    continue
+                                if absolute_path in captured_skill_files:
+                                    continue
+                                if not os.path.exists(absolute_path):
+                                    continue
+                                captured_skill_files[absolute_path] = payload
+                                extracted_payload_count += 1
+                if extracted_payload_count:
+                    logger.info(
+                        "[skill-file] captured payloads count=%s current_total=%s",
+                        extracted_payload_count,
+                        len(captured_skill_files),
+                    )
+
+            # Incremental unit persistence: when a new chunk belongs to a different
+            # unit than the one currently being buffered, flush the previous unit
+            # and insert a fresh row for the new chunk.
+            if streaming_message_id is not None and chunk_type:
+                mergeable = chunk_type in _MERGEABLE_TYPES
+                is_continuation = (
+                    current_unit is not None
+                    and mergeable
+                    and current_unit.get("type") == chunk_type
+                )
+
+                if is_continuation:
+                    # Same mergeable unit: append to the in-memory buffer and
+                    # update the DB row to keep content in sync.
+                    # Use synchronous write to prevent race condition: the async submit()
+                    # approach has a critical bug where concurrent submits can read stale
+                    # content and overwrite the DB with incomplete data. Since the main
+                    # loop is async but the DB operations are I/O-bound with network
+                    # latency, synchronous writes here are acceptably fast and guarantee
+                    # that each chunk is fully persisted before the next chunk arrives.
+                    old_len = len(current_unit["content"])
+                    current_unit["content"] += chunk_content
+                    new_len = len(current_unit["content"])
+                    update_unit_content(
+                        current_unit["unit_id"],
+                        current_unit["content"],
+                        user_id,
+                    )
+                else:
+                    # Boundary detected: close the previous unit (if any) and
+                    # open a new one for this chunk.
+                    if current_unit is not None:
+                        submit(
+                            update_unit_status,
+                            current_unit["unit_id"],
+                            "completed",
+                            user_id,
+                        )
+
+                    # Special-case: final_answer also updates message_content
+                    if chunk_type == "final_answer":
+                        submit(
+                            update_message_content,
+                            streaming_message_id,
+                            chunk_content,
+                            user_id,
+                        )
+
+                    # Special-case: picture_web saves image source references
+                    if chunk_type == "picture_web":
+                        try:
+                            content_json = json.loads(chunk_content)
+                            if isinstance(content_json, dict) and "images_url" in content_json:
+                                seen_urls: set[str] = set()
+                                unique_urls: list[str] = []
+                                for image_url in content_json["images_url"]:
+                                    if image_url not in seen_urls:
+                                        seen_urls.add(image_url)
+                                        unique_urls.append(image_url)
+                                for image_url in unique_urls:
+                                    submit(
+                                        save_source_image,
+                                        {
+                                            "message_id": streaming_message_id,
+                                            "conversation_id": agent_request.conversation_id,
+                                            "image_url": image_url,
+                                        },
+                                    )
+                        except Exception as img_exc:
+                            logger.error(
+                                "Failed to persist picture_web unit: %r", img_exc, exc_info=True
+                            )
+
+                    # Special-case: search_content creates a placeholder unit
+                    # and inserts each search result as a source_search row
+                    # linked back to the unit_id we just created.
+                    if chunk_type == "search_content":
+                        placeholder_unit_id = submit(
+                            save_message_unit,
+                            message_id=streaming_message_id,
+                            conversation_id=agent_request.conversation_id,
+                            unit_index=next_unit_index,
+                            unit_type="search_content_placeholder",
+                            unit_content='{"placeholder": true}',
+                            user_id=user_id,
+                            unit_status="completed",
+                        ).result()
+                        try:
+                            search_results = json.loads(chunk_content)
+                            if not isinstance(search_results, list):
+                                search_results = [search_results]
+                            for result in search_results:
+                                search_data = {
+                                    "message_id": streaming_message_id,
+                                    "conversation_id": agent_request.conversation_id,
+                                    "unit_id": placeholder_unit_id,
+                                    "source_type": result.get("source_type", ""),
+                                    "source_title": result.get("title", ""),
+                                    "source_location": result.get("url", ""),
+                                    "source_content": result.get("text", ""),
+                                    "score_overall": float(result.get("score"))
+                                    if result.get("score") not in (None, "")
+                                    else None,
+                                    "score_accuracy": float(result.get("score_details", {}).get("accuracy"))
+                                    if result.get("score_details", {}).get("accuracy") not in (None, "")
+                                    else None,
+                                    "score_semantic": float(result.get("score_details", {}).get("semantic"))
+                                    if result.get("score_details", {}).get("semantic") not in (None, "")
+                                    else None,
+                                    "published_date": result.get("published_date")
+                                    if result.get("published_date") not in (None, "")
+                                    else None,
+                                    "cite_index": result.get("cite_index")
+                                    if result.get("cite_index") != ""
+                                    else None,
+                                    "search_type": result.get("search_type")
+                                    if result.get("search_type")
+                                    else None,
+                                    "tool_sign": result.get("tool_sign", ""),
+                                }
+                                submit(save_source_search, search_data, user_id)
+                        except Exception as src_exc:
+                            logger.error(
+                                "Failed to persist search_content unit: %r", src_exc, exc_info=True
+                            )
+                        current_unit = None
+                        next_unit_index += 1
+                        await channel.publish(f"data: {chunk}\n\n")
+                        yield f"data: {chunk}\n\n"
+                        continue
+
+                    # Default path: insert a new unit row with unit_status='streaming'.
+                    if streaming_message_id is not None and chunk_type not in (
+                        "search_content_placeholder",
+                    ):
+                        new_unit_id = submit(
+                            save_message_unit,
+                            message_id=streaming_message_id,
+                            conversation_id=agent_request.conversation_id,
+                            unit_index=next_unit_index,
+                            unit_type=chunk_type,
+                            unit_content=chunk_content,
+                            user_id=user_id,
+                            unit_status="streaming",
+                        ).result()
+                        current_unit = {
+                            "type": chunk_type,
+                            "content": chunk_content,
+                            "unit_id": new_unit_id,
+                            "unit_index": next_unit_index,
+                            "mergeable": mergeable,
+                        }
+                        next_unit_index += 1
+
+            await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
+        stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
+        await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
     finally:
-        if not agent_request.is_debug:
-            save_messages(
-                agent_request,
-                target=MESSAGE_ROLE["ASSISTANT"],
-                messages=local_messages,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
+        # Finalize any in-flight unit and transition the parent message to its
+        # terminal status before releasing the agent run slot.
+        if streaming_message_id is not None:
+            if current_unit is not None:
+                try:
+                    # First update the content to ensure the last chunk is persisted
+                    # This must be done synchronously before updating status
+                    final_content = current_unit["content"]
+                    update_unit_content(
+                        current_unit["unit_id"],
+                        final_content,
+                        user_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to update last unit content")
+                try:
+                    update_unit_status(
+                        current_unit["unit_id"],
+                        "completed",
+                        user_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to mark last unit as completed")
+
+            terminal_status = "completed" if stream_completed_normally else "failed"
+            try:
+                update_message_status(
+                    streaming_message_id,
+                    terminal_status,
+                    user_id,
+                )
+            except Exception:
+                logger.exception("Failed to mark assistant message as %s", terminal_status)
+
         agent_run_manager.unregister_agent_run(
             agent_request.conversation_id, user_id)
+
+        # Mark channel as completed and schedule cleanup
+        if channel is not None:
+            terminal_status = 'completed' if stream_completed_normally else 'failed'
+            await streaming_channel_manager.complete_channel(
+                conversation_id=agent_request.conversation_id,
+                user_id=user_id,
+                status=terminal_status
+            )
+            # Schedule channel removal (give subscribers time to receive final chunks)
+            cleanup_task = asyncio.create_task(
+                _cleanup_channel_later(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=user_id
+                )
+            )
 
         try:
             skill_file_content_local = "\n".join(
@@ -1034,10 +1408,22 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         logger.error(f"Failed to get external sub agents: {str(e)}")
         agent_info["external_sub_agent_id_list"] = []
 
-    if agent_info["model_id"] is not None:
-        model_info = get_model_by_model_id(agent_info["model_id"])
-        agent_info["model_name"] = model_info.get(
-            "display_name", None) if model_info is not None else None
+    # Get model names from model_ids array
+    model_ids = agent_info.get("model_ids")
+    model_names: List[str] = []
+    if model_ids and len(model_ids) > 0:
+        for mid in model_ids:
+            model_info = get_model_by_model_id(mid)
+            if model_info:
+                display_name = model_info.get("display_name")
+                if display_name:
+                    model_names.append(display_name)
+    agent_info["model_names"] = model_names
+    # Always derive model_name from model_ids so the API contract is consistent.
+    if model_ids and len(model_ids) > 0:
+        first_model_info = get_model_by_model_id(model_ids[0])
+        agent_info["model_name"] = first_model_info.get(
+            "display_name", None) if first_model_info is not None else None
     else:
         agent_info["model_name"] = None
 
@@ -1106,8 +1492,8 @@ async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
             "display_name": agent_info.get("display_name"),
             "description": agent_info.get("description"),
             "enable_tool_id_list": enable_tool_id_list,
-            "model_name": agent_info["model_name"],
-            "model_id": agent_info.get("model_id"),
+            "model_ids": agent_info.get("model_ids"),
+            "model_names": agent_info.get("model_names"),
             "max_steps": agent_info["max_steps"],
             "requested_output_tokens": agent_info.get("requested_output_tokens"),
             "business_description": agent_info["business_description"],
@@ -1181,8 +1567,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "description": request.description,
                 "business_description": request.business_description,
                 "author": request.author,
-                "model_id": request.model_id,
-                "model_name": request.model_name,
+                "model_ids": request.model_ids,
                 "business_logic_model_id": request.business_logic_model_id,
                 "business_logic_model_name": request.business_logic_model_name,
                 "prompt_template_id": prompt_template_id,
@@ -1692,13 +2077,15 @@ async def export_agent_by_agent_id(
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
 
-    # Get model_id and model display name from agent_info
-    model_id = agent_info.get("model_id")
-    model_display_name = None
-    if model_id is not None:
-        model_info = get_model_by_model_id(model_id)
-        model_display_name = model_info.get(
-            "display_name") if model_info is not None else None
+    # Resolve model display names from model_ids array
+    model_ids_list = agent_info.get("model_ids") or []
+    model_names_list: List[str] = []
+    for mid in model_ids_list:
+        mid_info = get_model_by_model_id(mid)
+        if mid_info:
+            display = mid_info.get("display_name")
+            if display:
+                model_names_list.append(display)
 
     # Get business_logic_model_id and business logic model display name
     business_logic_model_id = agent_info.get("business_logic_model_id")
@@ -1729,8 +2116,8 @@ async def export_agent_by_agent_id(
                                           enabled=agent_info["enabled"],
                                           tools=tool_list,
                                           managed_agents=agent_relation_in_db,
-                                          model_id=model_id,
-                                          model_name=model_display_name,
+                                          model_ids=model_ids_list,
+                                          model_names=model_names_list,
                                           business_logic_model_id=business_logic_model_id,
                                           business_logic_model_name=business_logic_model_display_name,
                                           skill_names=skill_names,
@@ -1839,21 +2226,25 @@ async def import_agent_by_agent_id(
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
 
-    # Resolve model IDs with fallback
-    # Note: We use model_display_name for cross-tenant compatibility
-    # The exported model_id is kept for reference/debugging only
-    model_id = _resolve_model_with_fallback(
-        model_display_name=import_agent_info.model_name,
-        exported_model_id=import_agent_info.model_id,
+    # Resolve model_ids from the export payload.
+    # Payload may carry explicit model_ids (preferred when still valid in the
+    # target tenant) plus model_names for cross-tenant compatibility.
+    model_ids = _resolve_model_ids_with_fallback(
+        model_ids=import_agent_info.model_ids,
+        model_display_names=import_agent_info.model_names,
         model_label="Model",
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
     )
 
-    business_logic_model_id = _resolve_model_with_fallback(
-        model_display_name=import_agent_info.business_logic_model_name,
-        exported_model_id=import_agent_info.business_logic_model_id,
+    business_logic_model_id = _resolve_model_ids_with_fallback(
+        model_ids=[import_agent_info.business_logic_model_id]
+        if import_agent_info.business_logic_model_id is not None
+        else None,
+        model_display_names=[import_agent_info.business_logic_model_name]
+        if import_agent_info.business_logic_model_name
+        else None,
         model_label="Business logic model",
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
     )
 
     agent_name = import_agent_info.name
@@ -1866,9 +2257,11 @@ async def import_agent_by_agent_id(
                                          "description": import_agent_info.description,
                                          "business_description": import_agent_info.business_description,
                                          "author": import_agent_info.author,
-                                         "model_id": model_id,
-                                         "model_name": import_agent_info.model_name,
-                                         "business_logic_model_id": business_logic_model_id,
+                                         "model_ids": model_ids,
+                                         "business_logic_model_id": (
+                                             business_logic_model_id[0]
+                                             if business_logic_model_id else None
+                                         ),
                                          "business_logic_model_name": import_agent_info.business_logic_model_name,
                                          "prompt_template_id": import_agent_info.prompt_template_id or SYSTEM_PROMPT_TEMPLATE_ID,
                                          "prompt_template_name": import_agent_info.prompt_template_name or SYSTEM_PROMPT_TEMPLATE_NAME,
@@ -1889,18 +2282,18 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
-    # Auto-publish initial version v1 for market-imported agents
+    # Auto-publish initial version V1 for market-imported agents
     try:
         publish_version_impl(
             agent_id=new_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            version_name="v1",
+            version_name="V1",
             release_note="Initial version from Agent Market"
         )
     except Exception as e:
         logger.warning(
-            f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
+            f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 
@@ -2011,13 +2404,18 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             unavailable_reasons = list(
                 dict.fromkeys(entry["unavailable_reasons"]))
 
-            model_id = agent.get("model_id")
-            model_info = None
-            if model_id is not None:
-                if model_id not in model_cache:
-                    model_cache[model_id] = get_model_by_model_id(
-                        model_id, tenant_id)
-                model_info = model_cache.get(model_id)
+            # Get model names from model_ids array
+            model_ids = agent.get("model_ids") or []
+            model_names: List[str] = []
+            for mid in model_ids:
+                if mid not in model_cache:
+                    model_cache[mid] = get_model_by_model_id(mid, tenant_id)
+                mid_info = model_cache.get(mid)
+                if mid_info and mid_info.get("display_name"):
+                    model_names.append(mid_info["display_name"])
+
+            # Derive legacy model_name from the first entry in model_ids for backward compat.
+            first_model_name = model_names[0] if model_names else None
 
             # Permission logic (ASSET_OWNER-scoped + non-ASSET_OWNER role => READ_ONLY first):
             permission = resolve_agent_list_permission(
@@ -2033,9 +2431,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
                 "author": agent.get("author"),
-                "model_id": model_id,
-                "model_name": model_info.get("model_name") if model_info is not None else agent.get("model_name"),
-                "model_display_name": model_info.get("display_name") if model_info is not None else None,
+                "model_ids": model_ids,
+                "model_names": model_names,
+                "model_name": first_model_name,
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),
@@ -2095,14 +2493,21 @@ def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> Non
 def _collect_model_availability_reasons(agent: dict, tenant_id: str, model_cache: Dict[int, Optional[dict]]) -> list[str]:
     """
     Build a list of reasons related to model availability issues for a given agent.
+    Iterates over model_ids (the canonical field) and collects one unavailable reason
+    per model that is missing or not in AVAILABLE status.
     """
     reasons: list[str] = []
-    reasons.extend(_check_single_model_availability(
-        model_id=agent.get("model_id"),
-        tenant_id=tenant_id,
-        model_cache=model_cache,
-        reason_key=AgentUnavailableReason.MODEL_UNAVAILABLE
-    ))
+    model_ids = agent.get("model_ids") or []
+    if model_ids:
+        for mid in model_ids:
+            reasons.extend(_check_single_model_availability(
+                model_id=mid,
+                tenant_id=tenant_id,
+                model_cache=model_cache,
+                reason_key=AgentUnavailableReason.MODEL_UNAVAILABLE,
+            ))
+    else:
+        reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
 
     return reasons
 
@@ -2263,18 +2668,24 @@ async def prepare_agent_run(
     return agent_run_info, memory_context
 
 
-# Helper function for run_agent_stream, used to save messages for either user or assistant
+# Helper function for run_agent_stream, used to save the user-side message
+# before streaming begins. Assistant-side persistence is handled incrementally
+# inside _stream_agent_chunks (see save_message / save_message_unit).
 def save_messages(agent_request, target: str, user_id: str, tenant_id: str, messages=None):
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
         submit(save_conversation_user, agent_request, user_id, tenant_id)
-    elif target == MESSAGE_ROLE["ASSISTANT"]:
-        if messages is None:
-            raise ValueError(
-                "Messages cannot be None when saving for assistant.")
-        submit(save_conversation_assistant,
-               agent_request, messages, user_id, tenant_id)
+        return
+
+    if target == MESSAGE_ROLE["ASSISTANT"]:
+        raise ValueError(
+            "save_messages no longer persists the assistant message; "
+            "_stream_agent_chunks persists units incrementally via "
+            "save_message_unit."
+        )
+
+    raise ValueError(f"Unsupported target for save_messages: {target!r}")
 
 
 # Helper function for run_agent_stream, used to generate stream response with memory preprocess tokens
@@ -2310,6 +2721,12 @@ async def generate_stream_with_memory(
     # Note: the actual streaming happens via `_stream_agent_chunks` helper
     # ------------------------------------------------------------------
 
+    # Create channel for multi-subscriber support
+    channel = await streaming_channel_manager.get_or_create_channel(
+        conversation_id=agent_request.conversation_id,
+        user_id=user_id
+    )
+
     memory_enabled = False
     try:
         memory_context_preview = build_memory_context(
@@ -2319,6 +2736,7 @@ async def generate_stream_with_memory(
 
         if memory_enabled:
             # Emit start token before memory retrieval
+            await channel.publish(f"data: {_memory_token(msg_start)}\n\n")
             yield f"data: {_memory_token(msg_start)}\n\n"
 
         # Prepare run (will execute memory retrieval inside create_agent_run_info)
@@ -2336,6 +2754,7 @@ async def generate_stream_with_memory(
 
         if memory_enabled:
             # Emit completion token once memory is ready
+            await channel.publish(f"data: {_memory_token(msg_done)}\n\n")
             yield f"data: {_memory_token(msg_done)}\n\n"
 
         async for data_chunk in _stream_agent_chunks(
@@ -2344,12 +2763,14 @@ async def generate_stream_with_memory(
             tenant_id=tenant_id,
             agent_run_info=agent_run_info,
             memory_ctx=memory_context,
+            channel=channel,
         ):
             yield data_chunk
 
     except MemoryPreparationException:
         # Memory retrieval failure: emit failure token when memory is enabled, and continue without blocking
         if memory_enabled:
+            await channel.publish(f"data: {_memory_token(msg_fail)}\n\n")
             yield f"data: {_memory_token(msg_fail)}\n\n"
 
         try:
@@ -2358,6 +2779,7 @@ async def generate_stream_with_memory(
                 agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                channel=channel,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -2366,6 +2788,7 @@ async def generate_stream_with_memory(
                 run_exc,
                 exc_info=True,
             )
+            await channel.publish(_safe_agent_stream_error_chunk())
             yield _safe_agent_stream_error_chunk()
             return
     except Exception as stream_exc:
@@ -2374,6 +2797,7 @@ async def generate_stream_with_memory(
             stream_exc,
             exc_info=True,
         )
+        await channel.publish(_safe_agent_stream_error_chunk())
         yield _safe_agent_stream_error_chunk()
         return
     finally:
@@ -2387,6 +2811,7 @@ async def generate_stream_no_memory(
     user_id: str,
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
+    channel: Optional[Any] = None,
 ):
     """Stream agent responses without any memory preprocessing tokens or fallback logic."""
 
@@ -2405,8 +2830,83 @@ async def generate_stream_no_memory(
         tenant_id=tenant_id,
         agent_run_info=agent_run_info,
         memory_ctx=memory_context,
+        channel=channel,
     ):
         yield data_chunk
+
+
+def _detect_resume_position(
+    conversation_id: int,
+    user_id: str,
+) -> Dict[str, Any]:
+    """
+    Determine the position to resume streaming from.
+
+    This function queries the database to check if there's an in-progress
+    streaming message for the given conversation. Used when frontend reconnects
+    after tab switch.
+
+    Returns:
+        Dict containing:
+            - should_resume: bool - whether we should resume streaming
+            - message_id: int - the assistant message ID
+            - message_status: str - current status (streaming/completed/failed/stopped)
+            - resume_from_unit_index: int - the unit index to resume from
+            - reason: str - explanation of the decision
+    """
+    latest_msg = get_latest_assistant_message(conversation_id, user_id)
+
+    if latest_msg is None:
+        return {
+            'should_resume': False,
+            'message_id': None,
+            'message_status': None,
+            'resume_from_unit_index': None,
+            'reason': 'no_assistant_message'
+        }
+
+    message_status = latest_msg.get('status')
+    message_id = latest_msg['message_id']
+
+    # Check if channel exists and is still active
+    channel = streaming_channel_manager.get_channel(conversation_id, user_id)
+    channel_active = channel is not None and not channel.is_completed
+
+    if message_status == 'streaming':
+        # Backend still running - get last unit position
+        last_unit = get_last_unit_for_message(message_id)
+        resume_from = last_unit['unit_index'] + 1 if last_unit else 0
+        return {
+            'should_resume': True,
+            'message_id': message_id,
+            'message_status': message_status,
+            'resume_from_unit_index': resume_from,
+            'resume_message_id': message_id,
+            'reason': 'backend_streaming'
+        }
+    elif channel_active:
+        # Message shows completed but channel is still active - resume to get remaining chunks
+        # This handles edge case where message status was updated but channel not yet cleaned up
+        last_unit = get_last_unit_for_message(message_id)
+        resume_from = last_unit['unit_index'] + 1 if last_unit else 0
+        return {
+            'should_resume': True,
+            'message_id': message_id,
+            'message_status': message_status,
+            'resume_from_unit_index': resume_from,
+            'resume_message_id': message_id,
+            'reason': 'channel_active'
+        }
+    else:
+        # Backend finished - no more chunks to stream
+        return {
+            'should_resume': False,
+            'message_id': message_id,
+            'message_status': message_status,
+            'resume_from_unit_index': None,
+            'resume_message_id': None,
+            'reason': f'backend_{message_status}'
+        }
 
 
 async def run_agent_stream(
@@ -2416,10 +2916,14 @@ async def run_agent_stream(
     user_id: str = None,
     tenant_id: str = None,
     skip_user_save: bool = False,
+    resume: bool = False,
 ):
     """
     Start an agent run and stream responses.
     If user_id or tenant_id is provided, authorization will be overridden. (Useful in northbound apis)
+
+    Args:
+        resume: If True, check for existing streaming message and continue from where it left off
     """
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
         authorization=authorization,
@@ -2428,6 +2932,95 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
+    # Resume mode: check for existing streaming message
+    if resume:
+        resume_info = _detect_resume_position(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+        )
+
+        if not resume_info['should_resume']:
+            # Backend already finished
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    'status': resume_info['message_status'],
+                    'message': f"Stream already {resume_info['message_status']}: {resume_info['reason']}",
+                }
+            )
+
+        # Check if the agent is still running by querying the agent_run_manager
+        existing_run_info = agent_run_manager.get_agent_run_info(
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id
+        )
+
+        if existing_run_info is None:
+            # Agent has finished while frontend was disconnected
+            # Update message status to completed if it's still streaming
+            try:
+                update_message_status(
+                    message_id=resume_info['message_id'],
+                    status='completed'
+                )
+            except Exception:
+                pass
+
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    'status': 'completed',
+                    'message': 'Agent finished during disconnection',
+                }
+            )
+
+        # Agent is still running - subscribe to the channel to receive new chunks
+        channel = streaming_channel_manager.get_channel(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id
+        )
+
+        if channel is None:
+            # No channel exists, agent might be in a different state
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    'status': 'streaming',
+                    'message': 'Stream channel not found',
+                }
+            )
+
+        # Subscribe to the channel and stream chunks to the frontend
+        async def channel_stream():
+            # Include the current buffer size so frontend knows how many chunks to skip
+            replay_chunk_count = channel.history_size if channel else 0
+
+            # Emit status event first with chunk count for skip tracking
+            yield STREAM_STATUS_EVENT
+            yield f'data: {{"status": "resumed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}, "replay_chunk_count": {replay_chunk_count}}}\n\n'
+
+            # Use subscribe_with_history(0) to replay ALL chunks from the buffer
+            # This ensures no chunks are lost even if frontend disconnected during streaming
+            # The frontend skips all chunks until replay_chunk_count is reached
+            async for chunk in channel.subscribe_with_history(0):
+                yield chunk
+
+            # Mark as complete when channel ends
+            yield STREAM_STATUS_EVENT
+            yield f'data: {{"status": "completed", "last_unit_index": {resume_info["resume_from_unit_index"] - 1}}}\n\n'
+
+        return StreamingResponse(
+            channel_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Stream-Status": "resumed",
+                "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+            },
+        )
+
+    # Normal mode: start new stream
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
             agent_request,

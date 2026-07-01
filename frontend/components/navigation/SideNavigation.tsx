@@ -25,8 +25,6 @@ import { SIDER_CONFIG } from "@/const/layoutConstants";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents } from "@/lib/authEvents";
-import { authFlowState } from "@/lib/authFlow";
-import { casService } from "@/services/casService";
 
 interface SideNavigationProps {
   collapsed?: boolean;
@@ -273,17 +271,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
         // Pre-check authentication - show auth prompt if user is not authenticated
         if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
           setPendingNavigationPath(route.path);
-          casService.getConfig().then((config) => {
-            if (
-              !authFlowState.isExplicitLogoutInProgress() &&
-              config.enabled &&
-              config.login_mode === "force"
-            ) {
-              casService.startLogin(route.path);
-              return;
-            }
-            openAuthPromptModal();
-          });
+          openAuthPromptModal(route.path);
           return; // Prevent navigation
         }
 
@@ -309,17 +297,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
               setSelectedKey(child.path);
               if (!isAuthenticated && !isSpeedMode && child.path !== "/") {
                 setPendingNavigationPath(child.path);
-                casService.getConfig().then((config) => {
-                  if (
-                    !authFlowState.isExplicitLogoutInProgress() &&
-                    config.enabled &&
-                    config.login_mode === "force"
-                  ) {
-                    casService.startLogin(child.path);
-                    return;
-                  }
-                  openAuthPromptModal();
-                });
+                openAuthPromptModal(child.path);
                 return;
               }
               router.push(child.path);

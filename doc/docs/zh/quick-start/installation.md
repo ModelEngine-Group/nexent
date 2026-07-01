@@ -21,7 +21,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **💡 提示**: `deploy.sh` 使用 `deploy/env/.env` 作为运行配置。已有 `deploy/env/.env` 会原样保留；如果不存在，会优先复用旧的根目录 `.env` 或 `docker/.env`，再回退到 `deploy/env/.env.example` 或旧模板。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
+> **💡 提示**: `deploy.sh` 使用 `deploy/env/.env` 作为运行配置。已有 `deploy/env/.env` 会原样保留；如果不存在，会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
 
 ### 2. 部署选项
 

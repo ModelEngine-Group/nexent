@@ -121,6 +121,7 @@ export const API_ENDPOINTS = {
     openapiServices: `${API_BASE_URL}/tool/openapi_services`,
     deleteOpenapiService: (serviceName: string) =>
       `${API_BASE_URL}/tool/openapi_service/${encodeURIComponent(serviceName)}`,
+    labels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
@@ -413,14 +414,17 @@ export const API_ENDPOINTS = {
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
       }
-      if (params?.deduplicate_by_agent_id != null) {
-        queryParams.append(
-          "deduplicate_by_agent_id",
-          String(params.deduplicate_by_agent_id)
-        );
-      }
       if (params?.category_id != null) {
         queryParams.append("category_id", String(params.category_id));
+      }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
@@ -430,11 +434,25 @@ export const API_ENDPOINTS = {
       if (params?.ownership) {
         queryParams.append("ownership", params.ownership);
       }
+      if (params?.page != null) {
+        queryParams.append("page", String(params.page));
+      }
+      if (params?.page_size != null) {
+        queryParams.append("page_size", String(params.page_size));
+      }
+      if (params?.search?.trim()) {
+        queryParams.append("search", params.search.trim());
+      }
+      if (params?.new_agent_padding) {
+        queryParams.append("new_agent_padding", "true");
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    importPrecheck: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import`,
     updateStatus: (agentRepositoryId: number) =>

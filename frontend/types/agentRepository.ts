@@ -25,15 +25,25 @@ export interface AgentRepositoryListingItem {
   submitted_by?: string | null;
 }
 
+export interface AgentRepositoryListingPagination {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
 export interface AgentRepositoryListingListResponse {
   items: AgentRepositoryListingItem[];
+  pagination?: AgentRepositoryListingPagination;
 }
 
 export interface AgentRepositoryListingListParams {
   status?: AgentRepositoryListingStatus;
   agent_id?: number;
-  deduplicate_by_agent_id?: boolean;
   category_id?: number;
+  page?: number;
+  page_size?: number;
+  search?: string;
 }
 
 export interface AgentRepositoryCategoryItem {
@@ -78,7 +88,25 @@ export interface MyEditableAgentItem {
   current_version_no?: number | null;
   version_label?: string | null;
   version_create_time?: string | null;
+  /** EDIT: editable, READ_ONLY: read-only (from /agent/list permission logic). */
+  permission?: "EDIT" | "READ_ONLY";
+  /** Total downloads summed across all repository listings for this agent_id. */
+  downloads?: number;
   repository_info: MyAgentRepositoryInfoItem[];
+}
+
+export interface MyEditableAgentPaddingItem {
+  new_agent_padding: true;
+}
+
+export type MyEditableAgentListItem =
+  | MyEditableAgentItem
+  | MyEditableAgentPaddingItem;
+
+export function isNewAgentPaddingItem(
+  item: MyEditableAgentListItem
+): item is MyEditableAgentPaddingItem {
+  return "new_agent_padding" in item && item.new_agent_padding === true;
 }
 
 export type MineOwnershipFilter = "all" | "created" | "others";
@@ -91,11 +119,23 @@ export interface MyEditableAgentOwnershipCounts {
 
 export interface MyEditableAgentListParams {
   ownership?: MineOwnershipFilter;
+  page?: number;
+  page_size?: number;
+  search?: string;
+  new_agent_padding?: boolean;
+}
+
+export interface MyEditableAgentPagination {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
 }
 
 export interface MyEditableAgentListResponse {
-  items: MyEditableAgentItem[];
+  items: MyEditableAgentListItem[];
   counts: MyEditableAgentOwnershipCounts;
+  pagination: MyEditableAgentPagination;
 }
 
 export interface AgentRepositoryListingCreatePayload {
@@ -104,8 +144,28 @@ export interface AgentRepositoryListingCreatePayload {
   tags: string[];
 }
 
-export interface AgentRepositoryListingCreatePayload {
-  icon: string;
-  category_id: number;
-  tags: string[];
+export type RepositoryImportRequirementType =
+  | "model"
+  | "knowledge_base"
+  | "mcp"
+  | "skill"
+  | "tool";
+
+export interface RepositoryImportRequirementItem {
+  type: RepositoryImportRequirementType;
+  key: string;
+  name: string;
+  description?: string | null;
+  available: boolean;
+  reason_code?: string | null;
+}
+
+export interface RepositoryImportPrecheckResponse {
+  agent_repository_id: number;
+  display_name: string;
+  total_count: number;
+  available_count: number;
+  percent: number;
+  has_abnormal: boolean;
+  items: RepositoryImportRequirementItem[];
 }

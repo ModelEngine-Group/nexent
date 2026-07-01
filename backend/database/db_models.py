@@ -65,6 +65,9 @@ class ConversationMessage(TableBase):
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
     opinion_flag = Column(String(
         1), doc="User evaluation of the conversation. Enumeration value \"Y\" represents a positive review, \"N\" represents a negative review")
+    status = Column(
+        String(30), default='completed',
+        doc="Lifecycle status: pending / streaming / completed / failed / stopped")
 
 
 class ConversationMessageUnit(TableBase):
@@ -85,6 +88,9 @@ class ConversationMessageUnit(TableBase):
     unit_type = Column(String(100), doc="Type of the smallest answer unit")
     unit_content = Column(
         String, doc="Complete content of the smallest reply unit")
+    unit_status = Column(
+        String(30), default='completed',
+        doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
 
 
 class ConversationSourceImage(TableBase):
@@ -255,7 +261,7 @@ class ModelRecord(TableBase):
     tokenizer_family = Column(
         String(100), doc="Token-counting strategy or provider/model tokenizer identifier mapped via tokenizer_registry. Nullable.")
     capacity_source = Column(
-        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, unknown.")
+        String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, default, unknown.")
     capability_profile_version = Column(
         String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
 
@@ -419,6 +425,7 @@ class ToolInfo(TableBase):
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
+    labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
@@ -438,10 +445,8 @@ class AgentInfo(TableBase):
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")
-    model_name = Column(
-        String(100), doc="[DEPRECATED] Name of the model used, use model_id instead")
-    model_id = Column(
-        Integer, doc="Model ID, foreign key reference to model_record_t.model_id")
+    model_ids = Column(
+        ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
     max_steps = Column(Integer, doc="Maximum number of steps")
     duty_prompt = Column(Text, doc="Duty prompt content")
     constraint_prompt = Column(Text, doc="Constraint prompt content")

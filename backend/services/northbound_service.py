@@ -326,6 +326,7 @@ async def start_streaming_chat(
     attachments: Optional[List[Any]] = None,
     meta_data: Optional[Dict[str, Any]] = None,
     tool_params: Optional[ToolParamsRequest] = None,
+    model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
     try:
@@ -360,6 +361,7 @@ async def start_streaming_chat(
             minio_files=normalized_attachments,
             is_debug=False,
             tool_params=tool_params,
+            model_id=model_id,
         )
 
         # Synchronously persist the user message before starting the stream to avoid race conditions

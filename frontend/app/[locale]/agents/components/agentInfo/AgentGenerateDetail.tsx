@@ -14,9 +14,10 @@ import {
   Card,
   App,
   Alert,
+  Tooltip,
 } from "antd";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Zap, Maximize2, Settings2, Sparkles } from "lucide-react";
+import { Zap, Maximize2, Settings2, Sparkles, TriangleAlert } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
 import {
@@ -33,6 +34,8 @@ import { useAgentGeneration } from "@/hooks/agent/useAgentGeneration";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
+import { canManageModels } from "@/lib/auth";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupList, useGroupDetails } from "@/hooks/group/useGroupList";
 import { usePromptTemplateList } from "@/hooks/agent/usePromptTemplateList";
@@ -71,6 +74,8 @@ export default function AgentGenerateDetail({}) {
 
   const { defaultLlmModelConfig } = useConfig();
   const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
+  const { bareModelIds: bareCapacityModelIds } = useCapacityCoverage();
+  const userCanManageModels = canManageModels(user?.role, isSpeedMode);
   const {
     templates: promptTemplates,
     isLoading: loadingPromptTemplates,
@@ -155,23 +160,45 @@ export default function AgentGenerateDetail({}) {
   }, [filteredGroups]);
 
   const selectedMainAgentModel = useMemo(() => {
+    const primaryModelId = editedAgent.model_ids?.[0];
     return availableLlmModels.find(
       (model) =>
-        model.id === editedAgent.model_id ||
+        model.id === primaryModelId ||
         model.displayName === editedAgent.model ||
         model.name === editedAgent.model
     );
-  }, [availableLlmModels, editedAgent.model, editedAgent.model_id]);
+  }, [availableLlmModels, editedAgent.model, editedAgent.model_ids]);
 
   // Initialize form values when currentAgentId changes or forceRefreshKey updates
   // Cached generation data is already merged into editedAgent by setCurrentAgent
   useEffect(() => {
+    // Build mainAgentModels array from model_ids (preferred) and resolve display names
+    // against the available LLM list. When model_ids is empty, fall back to deriving
+    // a single model entry from the legacy `model` name (kept for backward compatibility).
+    const modelIds = (editedAgent.model_ids || []).filter((id: unknown) => Number.isFinite(Number(id)));
+    const mainAgentModelIds: number[] = modelIds.map((id: unknown) => Number(id));
+    let mainAgentModels: string[] = mainAgentModelIds
+      .map((id: number) => availableLlmModels.find((m) => m.id === id)?.displayName)
+      .filter(Boolean) as string[];
+
+    // Backward compatibility: if model_ids is empty but a legacy `model` name is present,
+    // try to resolve a matching model to keep the UI populated.
+    if (mainAgentModels.length === 0 && editedAgent.model) {
+      const matched = availableLlmModels.find(
+        (m) => m.name === editedAgent.model || m.displayName === editedAgent.model
+      );
+      if (matched) {
+        mainAgentModels = [matched.displayName];
+        mainAgentModelIds.push(matched.id);
+      }
+    }
+
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
       agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
-      mainAgentModel: editedAgent.model,
-      mainAgentModelId: editedAgent.model_id,
+      mainAgentModels: mainAgentModels,
+      mainAgentModelIds: mainAgentModelIds,
       mainAgentMaxStep: editedAgent.max_step || 15,
       requestedOutputTokens: editedAgent.requested_output_tokens ?? null,
       agentDescription: editedAgent.description || "",
@@ -190,7 +217,7 @@ export default function AgentGenerateDetail({}) {
     };
     form.setFieldsValue(initialAgentInfo);
 
-  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey]);
+  }, [form, currentAgentId, editedAgent, isCreatingMode, defaultLlmModel, accessibleGroupIds, forceRefreshKey, availableLlmModels]);
 
   // Re-validate requested output tokens when the selected model's max changes,
   // so switching to a model with a lower cap surfaces the violation immediately
@@ -537,11 +564,52 @@ export default function AgentGenerateDetail({}) {
   };
 
   // Select options for available models
-  const modelSelectOptions = availableLlmModels.map((model) => ({
-    value: model.displayName || model.name,
-    label: model.displayName || model.name,
-    disabled: model.connect_status !== "available",
-  }));
+  // Bare-capacity rows (`context_window_tokens IS NULL OR max_output_tokens IS
+  // NULL`) stay selectable per W11 spec; the warning is the inline subtitle
+  // and the non-blocking form notice below.
+  const modelSelectOptions = availableLlmModels.map((model) => {
+    const isBare = bareCapacityModelIds.has(model.id);
+    const displayLabel = model.displayName || model.name;
+    return {
+      value: displayLabel,
+      label: isBare ? (
+        <Flex align="center" gap={6}>
+          <span>{displayLabel}</span>
+          <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
+            <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
+          </Tooltip>
+        </Flex>
+      ) : (
+        displayLabel
+      ),
+      disabled: model.connect_status !== "available",
+    };
+  });
+
+  const isSelectedMainModelBare = Boolean(
+    selectedMainAgentModel && bareCapacityModelIds.has(selectedMainAgentModel.id)
+  );
+
+  const selectedBusinessLogicModel = useMemo(() => {
+    const businessName =
+      form.getFieldValue("businessLogicModelName") ||
+      editedAgent.business_logic_model_name ||
+      "";
+    if (!businessName) return undefined;
+    return availableLlmModels.find(
+      (m) => m.displayName === businessName || m.name === businessName
+    );
+  }, [
+    availableLlmModels,
+    editedAgent.business_logic_model_name,
+    form,
+    forceRefreshKey,
+  ]);
+
+  const isSelectedBusinessLogicModelBare = Boolean(
+    selectedBusinessLogicModel &&
+      bareCapacityModelIds.has(selectedBusinessLogicModel.id)
+  );
 
   const promptTemplateSelectOptions = useMemo(() => {
     const options = promptTemplates.map((template) => ({
@@ -688,6 +756,23 @@ export default function AgentGenerateDetail({}) {
                       </span>
                     </Button>
                   </Flex>
+                  {(isSelectedMainModelBare || isSelectedBusinessLogicModelBare) && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={t(
+                        userCanManageModels
+                          ? "agent.modelSelector.bareCapacity.formNotice"
+                          : "agent.modelSelector.bareCapacity.formNoticeNoPermission",
+                        {
+                          modelName:
+                            (isSelectedMainModelBare && selectedMainAgentModel?.displayName) ||
+                            (isSelectedBusinessLogicModelBare && selectedBusinessLogicModel?.displayName) ||
+                            "",
+                        }
+                      )}
+                    />
+                  )}
                 </Flex>
               </Form>
             </Card>
@@ -828,7 +913,7 @@ export default function AgentGenerateDetail({}) {
                       </Can>
 
                       <Row gutter={16}>
-                        <Col span={12}>
+                        <Col span={8}>
                           <Form.Item
                             name="agentAuthor"
                             label={t("agent.author")}
@@ -847,14 +932,19 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={12}>
+                        <Col span={16}>
                           <Form.Item
-                            name="mainAgentModel"
+                            name="mainAgentModels"
                             label={t("businessLogic.config.model")}
                             rules={[
                               {
                                 required: true,
                                 message: t("businessLogic.config.modelPlaceholder"),
+                              },
+                              {
+                                type: "array",
+                                max: 5,
+                                message: t("businessLogic.config.modelMax5"),
                               },
                             ]}
                             help={
@@ -863,38 +953,54 @@ export default function AgentGenerateDetail({}) {
                             }
                           >
                             <Select
+                              mode="multiple"
                               placeholder={t("businessLogic.config.modelPlaceholder")}
-                              value={form.getFieldValue("mainAgentModel") || editedAgent.model || ""}
-                              onChange={(value) => {
-                                const selectedModel = availableLlmModels.find(
-                                  (m) => m.displayName === value
+                              value={form.getFieldValue("mainAgentModels") || []}
+                              onChange={(values: string[]) => {
+                                const selectedModels = availableLlmModels.filter(
+                                  (m) => values.includes(m.displayName)
                                 );
+                                const modelIds = selectedModels.map((m) => m.id);
                                 form.setFieldsValue({
-                                  mainAgentModel: value,
-                                  mainAgentModelId: selectedModel?.id || 0,
+                                  mainAgentModels: values,
+                                  mainAgentModelIds: modelIds,
                                 });
                                 updateAgentConfig({
-                                  model: value,
-                                  model_id: selectedModel?.id || 0,
+                                  model: values[0] || "",
+                                  model_ids: modelIds,
                                 });
                               }}
+                              maxTagCount={3}
+                              maxTagTextLength={12}
                             >
-                              {availableLlmModels.map((model) => (
-                                <Select.Option
-                                  key={model.id}
-                                  value={model.displayName}
-                                  disabled={model.connect_status !== "available"}
-                                >
-                                  {model.displayName}
-                                </Select.Option>
-                              ))}
+                              {availableLlmModels.map((model) => {
+                                const isBare = bareCapacityModelIds.has(model.id);
+                                return (
+                                  <Select.Option
+                                    key={model.id}
+                                    value={model.displayName}
+                                    disabled={model.connect_status !== "available"}
+                                  >
+                                    {isBare ? (
+                                      <Flex align="center" gap={6}>
+                                        <span>{model.displayName}</span>
+                                        <Tooltip title={t("agent.modelSelector.bareCapacity.tooltip")}>
+                                          <TriangleAlert size={14} className="text-yellow-500 shrink-0" />
+                                        </Tooltip>
+                                      </Flex>
+                                    ) : (
+                                      model.displayName
+                                    )}
+                                  </Select.Option>
+                                );
+                              })}
                             </Select>
                           </Form.Item>
                         </Col>
                       </Row>
 
                       <Row gutter={16}>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="mainAgentMaxStep"
                             label={t("businessLogic.config.maxSteps")}
@@ -922,7 +1028,7 @@ export default function AgentGenerateDetail({}) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col span={8}>
+                        <Col span={12}>
                           <Form.Item
                             name="provideRunSummary"
                             label={t("agent.provideRunSummary")}
@@ -940,33 +1046,6 @@ export default function AgentGenerateDetail({}) {
                               ]}
                               onChange={(value) => {
                                 updateAgentConfig({ provide_run_summary: value });
-                              }}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={8}>
-                          <Form.Item
-                            name="verificationEnabled"
-                            label={t("agent.verification")}
-                            rules={[
-                              {
-                                required: true,
-                                message: t("agent.verification.error"),
-                              },
-                            ]}
-                          >
-                            <Select
-                              options={[
-                                { value: true, label: t("common.yes") },
-                                { value: false, label: t("common.no") },
-                              ]}
-                              onChange={(value) => {
-                                updateAgentConfig({
-                                  verification_config: {
-                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
-                                    enabled: value,
-                                  },
-                                });
                               }}
                             />
                           </Form.Item>
@@ -1013,6 +1092,33 @@ export default function AgentGenerateDetail({}) {
                                 updateAgentConfig({
                                   requested_output_tokens:
                                     typeof value === "number" ? value : null,
+                                });
+                              }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            name="verificationEnabled"
+                            label={t("agent.verification")}
+                            rules={[
+                              {
+                                required: true,
+                                message: t("agent.verification.error"),
+                              },
+                            ]}
+                          >
+                            <Select
+                              options={[
+                                { value: true, label: t("common.yes") },
+                                { value: false, label: t("common.no") },
+                              ]}
+                              onChange={(value) => {
+                                updateAgentConfig({
+                                  verification_config: {
+                                    ...(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG),
+                                    enabled: value,
+                                  },
                                 });
                               }}
                             />

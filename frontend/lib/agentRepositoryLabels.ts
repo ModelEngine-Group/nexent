@@ -156,3 +156,54 @@ export function getAgentRepositoryTagSearchText(tag: string, t: TFunction): stri
   const label = getAgentRepositoryTagLabel(tag, t);
   return `${tag} ${label}`.toLowerCase();
 }
+
+const REQUIREMENT_TYPE_I18N: Record<string, string> = {
+  model: "agentRepository.copy.type.model",
+  knowledge_base: "agentRepository.copy.type.knowledgeBase",
+  mcp: "agentRepository.copy.type.mcp",
+  skill: "agentRepository.copy.type.skill",
+  tool: "agentRepository.copy.type.tool",
+};
+
+const REQUIREMENT_ACTIVATE_PATH: Record<string, string> = {
+  model: "/models",
+  knowledge_base: "/knowledges",
+  mcp: "/mcp-space",
+  skill: "/skill-space",
+};
+
+const REQUIREMENT_TYPE_ORDER = [
+  "model",
+  "knowledge_base",
+  "mcp",
+  "skill",
+  "tool",
+] as const;
+
+export function getRepositoryRequirementTypeLabel(
+  type: string,
+  t: TFunction
+): string {
+  const key = REQUIREMENT_TYPE_I18N[type];
+  return key ? t(key) : type;
+}
+
+export function getRepositoryRequirementActivatePath(type: string): string | null {
+  return REQUIREMENT_ACTIVATE_PATH[type] ?? null;
+}
+
+export function getRepositoryRequirementTypeOrder(): readonly string[] {
+  return REQUIREMENT_TYPE_ORDER;
+}
+
+export function getRepositoryRequirementReasonLabel(
+  reasonCode: string | null | undefined,
+  t: TFunction
+): string {
+  if (!reasonCode) {
+    return "";
+  }
+  const key = `agentRepository.copy.reason.${reasonCode}`;
+  const translated = t(key);
+  return translated === key ? reasonCode : translated;
+}

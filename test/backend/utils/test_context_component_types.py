@@ -464,14 +464,14 @@ class TestComponentToMessages:
             formatted_description="test desc",
         )
         messages = comp.to_messages()
-        assert messages == [{"role": "system", "content": "test desc"}]
+        assert messages == [{"role": "system", "content": [{"type": "text", "text": "test desc"}]}]
 
     def test_knowledge_base_component_to_messages(self):
         from nexent.core.agents.agent_model import KnowledgeBaseComponent
 
         comp = KnowledgeBaseComponent(summary="KB summary")
         messages = comp.to_messages()
-        assert messages == [{"role": "user", "content": "KB summary"}]
+        assert messages == [{"role": "user", "content": [{"type": "text", "text": "KB summary"}]}]
 
     def test_knowledge_base_component_empty_summary_no_messages(self):
         from nexent.core.agents.agent_model import KnowledgeBaseComponent
@@ -485,14 +485,14 @@ class TestComponentToMessages:
 
         comp = MemoryComponent(formatted_content="memory text")
         messages = comp.to_messages()
-        assert messages == [{"role": "user", "content": "memory text"}]
+        assert messages == [{"role": "user", "content": [{"type": "text", "text": "memory text"}]}]
 
     def test_tools_component_to_messages(self):
         from nexent.core.agents.agent_model import ToolsComponent
 
         comp = ToolsComponent(formatted_description="tools text")
         messages = comp.to_messages()
-        assert messages == [{"role": "system", "content": "tools text"}]
+        assert messages == [{"role": "system", "content": [{"type": "text", "text": "tools text"}]}]
 
 
 class TestFullPromptAssembly:
@@ -519,7 +519,10 @@ class TestFullPromptAssembly:
         all_messages = []
         for comp in components:
             all_messages.extend(comp.to_messages())
-        combined = "\n".join(msg["content"] for msg in all_messages)
+        combined = "\n".join(
+            msg["content"][0]["text"] if isinstance(msg["content"], list) else msg["content"]
+            for msg in all_messages
+        )
         assert "\u57fa\u672c\u4fe1\u606f" in combined or "Basic Information" in combined
         assert "\u6838\u5fc3\u804c\u8d23" in combined or "Core Responsibilities" in combined
         assert "\u6267\u884c\u6d41\u7a0b" in combined or "Execution Process" in combined
@@ -537,7 +540,10 @@ class TestFullPromptAssembly:
         all_messages = []
         for comp in components:
             all_messages.extend(comp.to_messages())
-        combined = "\n".join(msg["content"] for msg in all_messages)
+        combined = "\n".join(
+            msg["content"][0]["text"] if isinstance(msg["content"], list) else msg["content"]
+            for msg in all_messages
+        )
         assert "Basic Information" in combined
         assert "Core Responsibilities" in combined
         assert "Execution Process" in combined

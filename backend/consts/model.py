@@ -146,6 +146,12 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
+    # the frontend when the operator clicks "Use suggestion" and saves; the
+    # app layer pops them before the dict reaches the service/DB layer and
+    # forwards them to model_capacity_suggestion_accept_total.
+    accepted_suggestion_match_kind: Optional[str] = None
+    accepted_capability_profile_version: Optional[str] = None
 
 
 class CapacitySuggestionFields(BaseModel):
@@ -540,8 +546,7 @@ class AgentInfoRequest(BaseModel):
     description: Optional[str] = None
     business_description: Optional[str] = None
     author: Optional[str] = None
-    model_name: Optional[str] = None
-    model_id: Optional[int] = None
+    model_ids: Optional[List[int]] = None
     max_steps: Optional[int] = Field(default=None, ge=1, le=30)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     provide_run_summary: Optional[bool] = None
@@ -622,6 +627,7 @@ class ToolInfo(BaseModel):
     usage: Optional[str]
     origin_name: Optional[str] = None
     category: Optional[str] = None
+    labels: Optional[List[str]] = None
 
 
 # used in Knowledge Summary request
@@ -652,8 +658,8 @@ class ExportAndImportAgentInfo(BaseModel):
     enabled: bool
     tools: List[ToolConfig]
     managed_agents: List[int]
-    model_id: Optional[int] = None
-    model_name: Optional[str] = None
+    model_ids: Optional[List[int]] = None
+    model_names: Optional[List[str]] = None
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
     skill_names: Optional[List[str]] = None
@@ -678,6 +684,32 @@ class ExportAndImportDataFormat(BaseModel):
 class AgentRepositorySnapshot(ExportAndImportDataFormat):
     """Frozen marketplace snapshot: export format plus optional skill ZIP payloads."""
     skills: Optional[List["SkillZipEntry"]] = None
+
+
+RepositoryImportRequirementType = Literal[
+    "model", "knowledge_base", "mcp", "skill", "tool"
+]
+
+
+class RepositoryImportRequirementItem(BaseModel):
+    """Single dependency item for repository import precheck."""
+    type: RepositoryImportRequirementType
+    key: str
+    name: str
+    description: Optional[str] = None
+    available: bool
+    reason_code: Optional[str] = None
+
+
+class RepositoryImportPrecheckResponse(BaseModel):
+    """Response payload for repository import precheck."""
+    agent_repository_id: int
+    display_name: str
+    total_count: int
+    available_count: int
+    percent: int
+    has_abnormal: bool
+    items: List[RepositoryImportRequirementItem]
 
 
 class AgentRepositoryListingCreateRequest(BaseModel):
@@ -1051,6 +1083,15 @@ class ManageTenantModelCreateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models (e.g., Volcano Engine)")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W11 accept-signal fields. Same audit-only contract as ModelRequest:
+    # the app layer pops them off model_data before the dict reaches the
+    # service/DB layer and forwards them to
+    # model_capacity_suggestion_accept_total. Declared here so Pydantic's
+    # default extra="ignore" does not silently drop the wire signal --
+    # without these declarations the SLO numerator misses every accept
+    # that lands via the SU/asset-owner surface.
+    accepted_suggestion_match_kind: Optional[str] = Field(None, description="Audit-only: catalog match_kind the operator accepted")
+    accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
 class ManageTenantModelUpdateRequest(BaseModel):
@@ -1073,6 +1114,11 @@ class ManageTenantModelUpdateRequest(BaseModel):
     access_token: Optional[str] = Field(None, description="Access token for STT models")
     timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
+    # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
+    # contract. The app layer pops them before calling the service so
+    # update_model_record never sees them.
+    accepted_suggestion_match_kind: Optional[str] = Field(None, description="Audit-only: catalog match_kind the operator accepted")
+    accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):

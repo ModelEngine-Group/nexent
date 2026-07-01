@@ -7,12 +7,15 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../
 if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 
+from unittest import mock
+
 from services.model_capacity_suggestion_service import (
     CapacitySuggestionMatchKind,
     pick_provider,
     pick_provider_from_base_url,
     suggest_capacity,
 )
+import services.model_capacity_suggestion_service as suggestion_module
 
 
 class Profile:
@@ -179,3 +182,108 @@ def test_pick_provider_from_base_url_dashscope_wins_over_aliyuncs():
     # Both substrings present; order in HOST_PROVIDER_PATTERNS makes
     # dashscope win, which is the correct (more-specific) routing.
     assert pick_provider_from_base_url("https://dashscope.aliyuncs.com/v1") == "dashscope"
+
+
+# ---------------------------------------------------------------------------
+# W11 V1.5 - request/latency metrics wiring
+# ---------------------------------------------------------------------------
+
+
+def test_suggest_capacity_records_requests_and_latency_on_catalog_match():
+    """Spec L706-708: every suggest_capacity invocation records one entry in
+    requests_total (labelled by match_kind, model_type, provider) and one
+    sample in latency_ms (labelled by match_kind, provider). A successful
+    catalog match must fire the recorder exactly once with the right labels.
+    """
+    counter = mock.MagicMock()
+    histogram = mock.MagicMock()
+
+    with mock.patch.object(suggestion_module, "_capacity_suggestion_requests_total", counter), \
+            mock.patch.object(suggestion_module, "_capacity_suggestion_latency_ms", histogram):
+        result = suggest_capacity(
+            model_name="gpt-4o",
+            base_url="https://api.openai.com/v1",
+            model_type="llm",
+            catalog=CATALOG,
+        )
+
+    assert result.match_kind == CapacitySuggestionMatchKind.CATALOG_EXACT
+    counter.add.assert_called_once()
+    add_args = counter.add.call_args
+    assert add_args.args[0] == 1
+    assert add_args.args[1] == {
+        "match_kind": "catalog_exact",
+        "model_type": "llm",
+        "provider": "openai",
+    }
+    histogram.record.assert_called_once()
+    record_args = histogram.record.call_args
+    assert record_args.args[0] >= 0  # non-negative duration in ms
+    assert record_args.args[1] == {
+        "match_kind": "catalog_exact",
+        "provider": "openai",
+    }
+
+
+def test_suggest_capacity_records_none_match_with_unknown_provider_label():
+    """When no provider can be inferred the result.suggested_provider is None
+    and the metric labels fall back to provider='unknown'. Cardinality stays
+    bounded -- we never emit raw user input as a label.
+    """
+    counter = mock.MagicMock()
+    histogram = mock.MagicMock()
+
+    with mock.patch.object(suggestion_module, "_capacity_suggestion_requests_total", counter), \
+            mock.patch.object(suggestion_module, "_capacity_suggestion_latency_ms", histogram):
+        result = suggest_capacity(
+            model_name="unknown-local-model",
+            base_url="http://localhost:8000/v1",
+            model_type="llm",
+            catalog=CATALOG,
+        )
+
+    assert result.match_kind == CapacitySuggestionMatchKind.NONE
+    assert counter.add.call_args.args[1] == {
+        "match_kind": "none",
+        "model_type": "llm",
+        "provider": "unknown",
+    }
+    assert histogram.record.call_args.args[1] == {
+        "match_kind": "none",
+        "provider": "unknown",
+    }
+
+
+def test_suggest_capacity_validation_error_does_not_record():
+    """A ValueError (model_name required / too long) is a client-shape error
+    raised before the matcher runs. It must not increment requests_total --
+    that counter is for completed evaluations only, and SLO ratios would
+    otherwise be skewed by client input mistakes.
+    """
+    counter = mock.MagicMock()
+    histogram = mock.MagicMock()
+
+    with mock.patch.object(suggestion_module, "_capacity_suggestion_requests_total", counter), \
+            mock.patch.object(suggestion_module, "_capacity_suggestion_latency_ms", histogram), \
+            pytest.raises(ValueError):
+        suggest_capacity(model_name="", catalog=CATALOG)
+
+    counter.add.assert_not_called()
+    histogram.record.assert_not_called()
+
+
+def test_suggest_capacity_no_op_when_instruments_disabled():
+    """Same OTel-optional guard as the other recorders: if the instruments
+    are None (OTel not installed in this deployment), suggest_capacity still
+    returns the correct result without raising.
+    """
+    with mock.patch.object(suggestion_module, "_capacity_suggestion_requests_total", None), \
+            mock.patch.object(suggestion_module, "_capacity_suggestion_latency_ms", None):
+        result = suggest_capacity(
+            model_name="gpt-4o",
+            base_url="https://api.openai.com/v1",
+            model_type="llm",
+            catalog=CATALOG,
+        )
+
+    assert result.match_kind == CapacitySuggestionMatchKind.CATALOG_EXACT
