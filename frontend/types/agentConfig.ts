@@ -12,8 +12,9 @@ export type AgentConfigUpdate = Partial<Pick<
   | "display_name"
   | "author"
   | "model"
-  | "model_id"
+  | "model_ids"
   | "max_step"
+  | "requested_output_tokens"
   | "provide_run_summary"
   | "description"
   | "duty_prompt"
@@ -51,7 +52,7 @@ export interface AgentVerificationConfig {
 }
 
 export const DEFAULT_AGENT_VERIFICATION_CONFIG: AgentVerificationConfig = {
-  enabled: true,
+  enabled: false,
   step_verification_enabled: true,
   final_verification_enabled: true,
   llm_verification_enabled: true,
@@ -79,8 +80,10 @@ export interface Agent {
   author?: string;
   unavailable_reasons?: string[];
   model: string;
-  model_id?: number;
+  model_ids?: number[];
+  model_names?: string[];  // Model display names resolved from model_ids for list/detail responses
   max_step: number;
+  requested_output_tokens?: number | null;
   provide_run_summary: boolean;
   enable_context_manager?: boolean;
   verification_config?: AgentVerificationConfig;
@@ -126,6 +129,7 @@ export interface Tool {
   usage?: string;
   inputs?: string;
   category?: string;
+  labels?: string[];
   /**
    * Knowledge base display names associated with this tool.
    * This is populated when the tool (e.g., knowledge_base_search) has knowledge bases configured.
@@ -143,6 +147,20 @@ export interface ToolParam {
   description_zh?: string;
   default?: string;
   depends_on?: string;
+}
+
+export interface AidpKnowledgeBaseItem {
+  kds_id: string;
+  kds_name: string;
+  description?: string;
+  document_count?: number;
+  chunk_count?: number;
+}
+
+export interface AidpKnowledgeBaseListResponse {
+  value: AidpKnowledgeBaseItem[];
+  total_count?: number;
+  next_link?: string | null;
 }
 
 export interface SkillParam {

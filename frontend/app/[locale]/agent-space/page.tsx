@@ -1,0 +1,854 @@
+﻿"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  App,
+  Button,
+  ConfigProvider,
+  Empty,
+  Input,
+  Modal,
+  Spin,
+} from "antd";
+import { useTranslation } from "react-i18next";
+import { motion } from "framer-motion";
+import { Bot, ChevronLeft, ChevronRight, Inbox, Search, ShieldCheck, User } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
+import { useSetupFlow } from "@/hooks/useSetupFlow";
+import {
+  useAgentRepositoryListingDetail,
+  useAgentRepositoryListings,
+  useMyEditableAgents,
+  useUpdateAgentRepositoryStatus,
+} from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
+import {
+  mapAgentVersionDetail,
+  mapRepositoryListingDetail,
+  type AgentDetailModalData,
+} from "@/lib/agentRepositoryDetail";
+import { AGENT_REPOSITORY_CATEGORIES } from "@/const/agentRepository";
+import type { AgentRepositoryCategoryItem, AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
+import {
+  getAgentRepositoryCategoryLabel,
+} from "@/lib/agentRepositoryLabels";
+import { cn } from "@/lib/utils";
+import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
+import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
+import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { MineAgentsView } from "./components/MineAgentsView";
+import { ReviewAgentList } from "./components/ReviewAgentList";
+
+enum AgentRepositoryTab {
+  REPOSITORY = "repository",
+  MINE = "mine",
+  REVIEW = "review",
+}
+
+const MINE_PAGE_SIZE = 6;
+const REPOSITORY_PAGE_SIZE = 6;
+const REVIEW_PAGE_SIZE = 10;
+
+type AgentDetailSource =
+  | { kind: "repository"; agentRepositoryId: number }
+  | { kind: "mine"; agentId: number; versionNo: number };
+
+const agentRepositoryTheme = {
+  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
+};
+
+export default function AgentRepositoryPage() {
+  const { t } = useTranslation("common");
+  const { pageVariants, pageTransition } = useSetupFlow();
+  const { user } = useAuthorizationContext();
+  const isAdmin = user?.role === USER_ROLES.ADMIN;
+
+  const [tab, setTab] = useState<AgentRepositoryTab>(AgentRepositoryTab.REPOSITORY);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [repositoryPage, setRepositoryPage] = useState(1);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [mineOwnership, setMineOwnership] = useState<MineOwnershipFilter>("all");
+  const [minePage, setMinePage] = useState(1);
+  const [mineSearch, setMineSearch] = useState("");
+  const [reviewPage, setReviewPage] = useState(1);
+  const [detailSource, setDetailSource] = useState<AgentDetailSource | null>(
+    null
+  );
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyListing, setCopyListing] = useState<AgentRepositoryListingItem | null>(null);
+
+  const isRepositoryTab = tab === AgentRepositoryTab.REPOSITORY;
+  const isReviewTab = tab === AgentRepositoryTab.REVIEW;
+  const isMineTab = tab === AgentRepositoryTab.MINE;
+
+  const categories = AGENT_REPOSITORY_CATEGORIES;
+
+  const categoryNameById = useMemo(
+    () =>
+      new Map(
+        categories.map((item) => [
+          item.id,
+          getAgentRepositoryCategoryLabel(item, t),
+        ])
+      ),
+    [categories, t]
+  );
+
+  const listingParams = useMemo(
+    () => ({
+      status: "shared" as const,
+      page: repositoryPage,
+      page_size: REPOSITORY_PAGE_SIZE,
+      ...(selectedCategoryId == null ? {} : { category_id: selectedCategoryId }),
+      ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+    }),
+    [repositoryPage, selectedCategoryId, searchQuery]
+  );
+
+  const { data, isLoading, isError, refetch, isFetching } =
+    useAgentRepositoryListings(listingParams, isRepositoryTab);
+
+  const { data: repositoryCountData } = useAgentRepositoryListings(
+    { status: "shared", page: 1, page_size: 1 },
+    true
+  );
+
+  const mineListParams = useMemo(
+    () => ({
+      ownership: mineOwnership,
+      page: minePage,
+      page_size: MINE_PAGE_SIZE,
+      ...(mineSearch.trim() ? { search: mineSearch.trim() } : {}),
+      ...(mineOwnership === "all" && !mineSearch.trim()
+        ? { new_agent_padding: true }
+        : {}),
+    }),
+    [mineOwnership, minePage, mineSearch]
+  );
+
+  const {
+    data: mineData,
+    isLoading: isMineLoading,
+    isError: isMineError,
+    isFetching: isMineFetching,
+    refetch: refetchMine,
+  } = useMyEditableAgents(mineListParams, isMineTab);
+
+  const { data: mineCountData } = useMyEditableAgents(
+    { page: 1, page_size: 1, ownership: "all" },
+    true
+  );
+
+  const reviewListParams = useMemo(
+    () => ({
+      status: "pending_review" as const,
+      page: reviewPage,
+      page_size: REVIEW_PAGE_SIZE,
+    }),
+    [reviewPage]
+  );
+
+  const {
+    data: reviewData,
+    isLoading: isReviewLoading,
+    isError: isReviewError,
+    isFetching: isReviewFetching,
+    refetch: refetchReview,
+  } = useAgentRepositoryListings(reviewListParams, isAdmin && isReviewTab);
+
+  const { data: reviewCountData } = useAgentRepositoryListings(
+    { status: "pending_review", page: 1, page_size: 1 },
+    isAdmin
+  );
+
+  const updateStatusMutation = useUpdateAgentRepositoryStatus();
+
+  useEffect(() => {
+    const refreshActiveTab = async () => {
+      if (tab === AgentRepositoryTab.REPOSITORY) {
+        await refetch();
+      } else if (tab === AgentRepositoryTab.MINE) {
+        await refetchMine();
+      } else if (tab === AgentRepositoryTab.REVIEW) {
+        await refetchReview();
+      }
+    };
+
+    refreshActiveTab().catch(() => {});
+  }, [tab, refetch, refetchMine, refetchReview]);
+
+  const detailOpen = detailSource !== null;
+  const selectedRepositoryId =
+    detailSource?.kind === "repository" ? detailSource.agentRepositoryId : null;
+  const mineDetailAgentId =
+    detailSource?.kind === "mine" ? detailSource.agentId : null;
+  const mineDetailVersionNo =
+    detailSource?.kind === "mine" ? detailSource.versionNo : null;
+
+  const {
+    data: repositoryDetail,
+    isLoading: isRepositoryDetailLoading,
+    isError: isRepositoryDetailError,
+    isFetching: isRepositoryDetailFetching,
+    refetch: refetchRepositoryDetail,
+  } = useAgentRepositoryListingDetail(
+    selectedRepositoryId,
+    detailOpen && detailSource?.kind === "repository"
+  );
+
+  const {
+    data: mineVersionDetail,
+    isLoading: isMineVersionDetailLoading,
+    isError: isMineVersionDetailError,
+    isFetching: isMineVersionDetailFetching,
+    refetch: refetchMineVersionDetail,
+  } = useAgentVersionDetail(
+    mineDetailAgentId,
+    mineDetailVersionNo,
+    detailOpen && detailSource?.kind === "mine"
+  );
+
+  const detail: AgentDetailModalData | null | undefined = useMemo(() => {
+    if (detailSource?.kind === "repository" && repositoryDetail) {
+      return mapRepositoryListingDetail(repositoryDetail);
+    }
+    if (detailSource?.kind === "mine" && mineVersionDetail) {
+      return mapAgentVersionDetail(mineVersionDetail);
+    }
+    return detailSource ? undefined : null;
+  }, [detailSource, repositoryDetail, mineVersionDetail]);
+
+  const isDetailLoading =
+    detailSource?.kind === "repository"
+      ? isRepositoryDetailLoading
+      : detailSource?.kind === "mine"
+        ? isMineVersionDetailLoading
+        : false;
+
+  const isDetailError =
+    detailSource?.kind === "repository"
+      ? isRepositoryDetailError
+      : detailSource?.kind === "mine"
+        ? isMineVersionDetailError
+        : false;
+
+  const isDetailFetching =
+    detailSource?.kind === "repository"
+      ? isRepositoryDetailFetching
+      : detailSource?.kind === "mine"
+        ? isMineVersionDetailFetching
+        : false;
+
+  const refetchDetail = () => {
+    if (detailSource?.kind === "repository") {
+      refetchRepositoryDetail().catch(() => {});
+      return;
+    }
+    if (detailSource?.kind === "mine") {
+      refetchMineVersionDetail().catch(() => {});
+    }
+  };
+
+  const handleDetailClick = (listing: AgentRepositoryListingItem) => {
+    setDetailSource({
+      kind: "repository",
+      agentRepositoryId: listing.agent_repository_id,
+    });
+  };
+
+  const handleMineViewDetail = (agentId: number, versionNo: number) => {
+    setDetailSource({ kind: "mine", agentId, versionNo });
+  };
+
+  const handleDetailClose = () => {
+    setDetailSource(null);
+  };
+
+  const handleCopyClick = (listing: AgentRepositoryListingItem) => {
+    setCopyListing(listing);
+    setCopyOpen(true);
+  };
+
+  const handleCopyClose = () => {
+    setCopyOpen(false);
+    setCopyListing(null);
+  };
+
+  const handleRepositoryTakeDown = (listing: AgentRepositoryListingItem) =>
+    updateStatusMutation.mutateAsync({
+      agentRepositoryId: listing.agent_repository_id,
+      status: "not_shared",
+    });
+
+  const updatingRepositoryId =
+    updateStatusMutation.isPending
+      ? updateStatusMutation.variables?.agentRepositoryId ?? null
+      : null;
+
+  const listings = data?.items ?? [];
+  const repositoryPagination = data?.pagination;
+  const repositoryTotal = repositoryPagination?.total ?? 0;
+  const reviewListings = reviewData?.items ?? [];
+  const reviewPagination = reviewData?.pagination;
+  const reviewTotal = reviewPagination?.total ?? 0;
+  const mineAgents = mineData?.items ?? [];
+  const mineCounts = mineData?.counts ?? { all: 0, created: 0, others: 0 };
+  const minePagination = mineData?.pagination;
+  const mineTotal = minePagination?.total ?? 0;
+  const repositoryTabCount = repositoryCountData?.pagination?.total ?? 0;
+  const mineTabCount = mineCountData?.counts?.all ?? 0;
+  const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
+
+  const handleRepositorySearchChange = (value: string) => {
+    setSearchQuery(value);
+    setRepositoryPage(1);
+  };
+
+  const handleRepositoryCategoryChange = (categoryId: number | null) => {
+    setSelectedCategoryId(categoryId);
+    setRepositoryPage(1);
+  };
+
+  return (
+    <ConfigProvider theme={agentRepositoryTheme}>
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+          <motion.div
+            initial="initial"
+            animate="in"
+            exit="out"
+            variants={pageVariants}
+            transition={pageTransition}
+            className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10"
+          >
+            <div className="flex flex-col gap-6">
+              <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                    <Bot className="size-7" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
+                      {t("agentRepository.page.title")}
+                    </h1>
+                    <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                      {t("agentRepository.page.subtitle")}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <Tabs
+                value={tab}
+                onValueChange={(value) => setTab(value as AgentRepositoryTab)}
+                className="w-full"
+              >
+                <TabsList
+                  className={cn(
+                    "mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2",
+                    isAdmin ? "grid-cols-3" : "grid-cols-2"
+                  )}
+                >
+                  <TabsTrigger
+                    value={AgentRepositoryTab.REPOSITORY}
+                    className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                  >
+                    <Inbox className="size-4" aria-hidden />
+                    {t("agentRepository.page.tab.repository")}
+                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
+                      {repositoryTabCount}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value={AgentRepositoryTab.MINE}
+                    className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                  >
+                    <User className="size-4" aria-hidden />
+                    {t("agentRepository.page.tab.mine")}
+                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
+                      {mineTabCount}
+                    </span>
+                  </TabsTrigger>
+                  {isAdmin ? (
+                    <TabsTrigger
+                      value={AgentRepositoryTab.REVIEW}
+                      className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                    >
+                      <ShieldCheck className="size-4" aria-hidden />
+                      {t("agentRepository.page.tab.review")}
+                      {pendingReviewCount > 0 ? (
+                        <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                          {pendingReviewCount}
+                        </span>
+                      ) : null}
+                    </TabsTrigger>
+                  ) : null}
+                </TabsList>
+              </Tabs>
+
+              {isRepositoryTab ? (
+                <RepositoryView
+                  searchQuery={searchQuery}
+                  onSearchChange={handleRepositorySearchChange}
+                  categories={categories}
+                  categoryNameById={categoryNameById}
+                  selectedCategoryId={selectedCategoryId}
+                  onCategoryChange={handleRepositoryCategoryChange}
+                  isLoading={isLoading}
+                  isError={isError}
+                  isFetching={isFetching}
+                  onRetry={() => refetch()}
+                  listings={listings}
+                  page={repositoryPage}
+                  pageSize={REPOSITORY_PAGE_SIZE}
+                  total={repositoryTotal}
+                  onPageChange={setRepositoryPage}
+                  onCopyClick={handleCopyClick}
+                  onDetailClick={handleDetailClick}
+                  showAdminMenu={isAdmin}
+                  updatingRepositoryId={updatingRepositoryId}
+                  onTakeDown={handleRepositoryTakeDown}
+                />
+              ) : isReviewTab ? (
+                <ReviewCenterView
+                  listings={reviewListings}
+                  currentUserEmail={user?.email}
+                  isLoading={isReviewLoading}
+                  isError={isReviewError}
+                  isFetching={isReviewFetching}
+                  onRetry={() => refetchReview()}
+                  page={reviewPage}
+                  pageSize={REVIEW_PAGE_SIZE}
+                  total={reviewTotal}
+                  onPageChange={setReviewPage}
+                  updatingRepositoryId={updatingRepositoryId}
+                  onDetailClick={handleDetailClick}
+                  onApprove={(listing) =>
+                    updateStatusMutation.mutateAsync({
+                      agentRepositoryId: listing.agent_repository_id,
+                      status: "shared",
+                    })
+                  }
+                  onReject={(listing) =>
+                    updateStatusMutation.mutateAsync({
+                      agentRepositoryId: listing.agent_repository_id,
+                      status: "rejected",
+                    })
+                  }
+                />
+              ) : isMineTab ? (
+                <MineAgentsView
+                  agents={mineAgents}
+                  counts={mineCounts}
+                  ownership={mineOwnership}
+                  onOwnershipChange={(ownership) => {
+                    setMineOwnership(ownership);
+                    setMinePage(1);
+                  }}
+                  searchQuery={mineSearch}
+                  onSearchChange={(value) => {
+                    setMineSearch(value);
+                    setMinePage(1);
+                  }}
+                  page={minePage}
+                  pageSize={MINE_PAGE_SIZE}
+                  total={mineTotal}
+                  onPageChange={setMinePage}
+                  isLoading={isMineLoading}
+                  isError={isMineError}
+                  isFetching={isMineFetching}
+                  onRetry={() => refetchMine()}
+                  onViewDetail={handleMineViewDetail}
+                />
+              ) : null}
+            </div>
+          </motion.div>
+        </div>
+      </div>
+      <AgentRepositoryDetailModal
+        open={detailOpen}
+        onClose={handleDetailClose}
+        detail={detail}
+        isLoading={isDetailLoading}
+        isError={isDetailError}
+        isFetching={isDetailFetching}
+        onRetry={() => refetchDetail()}
+      />
+      <AgentRepositoryCopyDialog
+        listing={copyListing}
+        open={copyOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCopyClose();
+          } else {
+            setCopyOpen(true);
+          }
+        }}
+      />
+    </ConfigProvider>
+  );
+}
+
+function RepositoryView({
+  searchQuery,
+  onSearchChange,
+  categories,
+  categoryNameById,
+  selectedCategoryId,
+  onCategoryChange,
+  isLoading,
+  isError,
+  isFetching,
+  onRetry,
+  listings,
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onCopyClick,
+  onDetailClick,
+  showAdminMenu,
+  updatingRepositoryId,
+  onTakeDown,
+}: {
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  categories: AgentRepositoryCategoryItem[];
+  categoryNameById: Map<number, string>;
+  selectedCategoryId: number | null;
+  onCategoryChange: (categoryId: number | null) => void;
+  isLoading: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  onRetry: () => void;
+  listings: AgentRepositoryListingItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  onCopyClick: (listing: AgentRepositoryListingItem) => void;
+  onDetailClick: (listing: AgentRepositoryListingItem) => void;
+  showAdminMenu: boolean;
+  updatingRepositoryId: number | null;
+  onTakeDown: (listing: AgentRepositoryListingItem) => Promise<unknown>;
+}) {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+
+  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+  const showPagination = !isLoading && !isError && totalPages > 1;
+
+  const getListingTitle = (listing: AgentRepositoryListingItem) =>
+    listing.display_name?.trim() ||
+    listing.name?.trim() ||
+    t("agentRepository.card.untitled");
+
+  const confirmTakeDown = (listing: AgentRepositoryListingItem) => {
+    const title = getListingTitle(listing);
+
+    Modal.confirm({
+      title: t("agentRepository.mine.reviewModal.confirmTakeDownTitle"),
+      content: t("agentRepository.mine.reviewModal.confirmTakeDownContent", {
+        name: title,
+      }),
+      okText: t("agentRepository.mine.reviewModal.takeDown"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await onTakeDown(listing);
+          message.success(t("agentRepository.mine.takeDownSuccess"));
+        } catch {
+          message.error(t("agentRepository.mine.takeDownError"));
+          throw new Error("Take down failed");
+        }
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="relative">
+        <Input
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder={t("agentRepository.page.searchPlaceholder")}
+          prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+          className="h-11 rounded-xl"
+          allowClear
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => onCategoryChange(null)}
+          className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+            selectedCategoryId == null
+              ? "bg-primary text-white"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          }`}
+        >
+          {t("agentRepository.page.categoryAll")}
+        </button>
+        {categories.map((category) => (
+          <button
+            key={category.id}
+            type="button"
+            onClick={() => onCategoryChange(category.id)}
+            className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              selectedCategoryId === category.id
+                ? "bg-primary text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            }`}
+          >
+            {categoryNameById.get(category.id) ??
+              getAgentRepositoryCategoryLabel(category, t)}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        {t("agentRepository.page.repositoryHint")}
+      </p>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Spin size="large" />
+        </div>
+      ) : isError ? (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {t("agentRepository.page.loadError")}
+          </p>
+          <Button type="primary" onClick={onRetry} loading={isFetching}>
+            {t("agentRepository.page.retry")}
+          </Button>
+        </div>
+      ) : listings.length === 0 ? (
+        <Empty
+          className="py-16"
+          description={t("agentRepository.page.empty")}
+        />
+      ) : (
+        <>
+          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {listings.map((listing) => (
+              <div key={listing.agent_repository_id} className="h-full">
+                <AgentRepositoryCard
+                  listing={listing}
+                  categoryName={
+                    listing.category_id != null
+                      ? categoryNameById.get(listing.category_id)
+                      : undefined
+                  }
+                  showAdminMenu={showAdminMenu}
+                  isTakingDown={updatingRepositoryId === listing.agent_repository_id}
+                  onCopyClick={onCopyClick}
+                  onDetailClick={onDetailClick}
+                  onTakeDown={() => confirmTakeDown(listing)}
+                />
+              </div>
+            ))}
+          </div>
+
+          {showPagination ? (
+            <div className="flex items-center justify-center gap-1.5 pt-2">
+              <Button
+                type="default"
+                className="flex size-9 items-center justify-center rounded-lg p-0"
+                disabled={page <= 1}
+                onClick={() => onPageChange(Math.max(1, page - 1))}
+                aria-label={t("agentRepository.mine.pagination.prev")}
+              >
+                <ChevronLeft className="size-4" aria-hidden />
+              </Button>
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                (pageNumber) => (
+                  <Button
+                    key={pageNumber}
+                    type={pageNumber === page ? "primary" : "default"}
+                    className="flex size-9 items-center justify-center rounded-lg p-0"
+                    onClick={() => onPageChange(pageNumber)}
+                    aria-label={t("agentRepository.mine.pagination.page", {
+                      page: pageNumber,
+                    })}
+                    aria-current={pageNumber === page ? "page" : undefined}
+                  >
+                    {pageNumber}
+                  </Button>
+                )
+              )}
+              <Button
+                type="default"
+                className="flex size-9 items-center justify-center rounded-lg p-0"
+                disabled={page >= totalPages}
+                onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                aria-label={t("agentRepository.mine.pagination.next")}
+              >
+                <ChevronRight className="size-4" aria-hidden />
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReviewCenterView({
+  listings,
+  currentUserEmail,
+  isLoading,
+  isError,
+  isFetching,
+  onRetry,
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  updatingRepositoryId,
+  onDetailClick,
+  onApprove,
+  onReject,
+}: {
+  listings: AgentRepositoryListingItem[];
+  currentUserEmail?: string | null;
+  isLoading: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  onRetry: () => void;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  updatingRepositoryId: number | null;
+  onDetailClick: (listing: AgentRepositoryListingItem) => void;
+  onApprove: (listing: AgentRepositoryListingItem) => Promise<unknown>;
+  onReject: (listing: AgentRepositoryListingItem) => Promise<unknown>;
+}) {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+
+  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+  const showPagination = !isLoading && !isError && totalPages > 1;
+
+  const getListingTitle = (listing: AgentRepositoryListingItem) =>
+    listing.display_name?.trim() ||
+    listing.name?.trim() ||
+    t("agentRepository.card.untitled");
+
+  const confirmReviewAction = (
+    listing: AgentRepositoryListingItem,
+    action: "approve" | "reject"
+  ) => {
+    const title = getListingTitle(listing);
+    const isApprove = action === "approve";
+
+    Modal.confirm({
+      title: isApprove
+        ? t("agentRepository.review.confirmApproveTitle")
+        : t("agentRepository.review.confirmRejectTitle"),
+      content: isApprove
+        ? t("agentRepository.review.confirmApproveContent", { name: title })
+        : t("agentRepository.review.confirmRejectContent", { name: title }),
+      okText: isApprove
+        ? t("agentRepository.review.approve")
+        : t("agentRepository.review.reject"),
+      cancelText: t("common.cancel"),
+      okButtonProps: isApprove
+        ? undefined
+        : { danger: true },
+      onOk: async () => {
+        try {
+          await (isApprove ? onApprove(listing) : onReject(listing));
+          message.success(
+            isApprove
+              ? t("agentRepository.review.approveSuccess", { name: title })
+              : t("agentRepository.review.rejectSuccess", { name: title })
+          );
+        } catch {
+          message.error(
+            isApprove
+              ? t("agentRepository.review.approveError")
+              : t("agentRepository.review.rejectError")
+          );
+          throw new Error("Review action failed");
+        }
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Spin size="large" />
+        </div>
+      ) : isError ? (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {t("agentRepository.review.loadError")}
+          </p>
+          <Button type="primary" onClick={onRetry} loading={isFetching}>
+            {t("agentRepository.page.retry")}
+          </Button>
+        </div>
+      ) : listings.length === 0 ? (
+        <Empty className="py-16" description={t("agentRepository.review.empty")} />
+      ) : (
+        <>
+          <ReviewAgentList
+            listings={listings}
+            currentUserEmail={currentUserEmail}
+            updatingRepositoryId={updatingRepositoryId}
+            onDetailClick={onDetailClick}
+            onApprove={(listing) => confirmReviewAction(listing, "approve")}
+            onReject={(listing) => confirmReviewAction(listing, "reject")}
+          />
+
+          {showPagination ? (
+            <div className="flex items-center justify-center gap-1.5 pt-2">
+              <Button
+                type="default"
+                className="flex size-9 items-center justify-center rounded-lg p-0"
+                disabled={page <= 1}
+                onClick={() => onPageChange(Math.max(1, page - 1))}
+                aria-label={t("agentRepository.mine.pagination.prev")}
+              >
+                <ChevronLeft className="size-4" aria-hidden />
+              </Button>
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                (pageNumber) => (
+                  <Button
+                    key={pageNumber}
+                    type={pageNumber === page ? "primary" : "default"}
+                    className="flex size-9 items-center justify-center rounded-lg p-0"
+                    onClick={() => onPageChange(pageNumber)}
+                    aria-label={t("agentRepository.mine.pagination.page", {
+                      page: pageNumber,
+                    })}
+                    aria-current={pageNumber === page ? "page" : undefined}
+                  >
+                    {pageNumber}
+                  </Button>
+                )
+              )}
+              <Button
+                type="default"
+                className="flex size-9 items-center justify-center rounded-lg p-0"
+                disabled={page >= totalPages}
+                onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                aria-label={t("agentRepository.mine.pagination.next")}
+              >
+                <ChevronRight className="size-4" aria-hidden />
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}

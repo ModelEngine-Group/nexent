@@ -23,8 +23,9 @@ export interface Agent {
   display_name?: string;
   description: string;
   author?: string;
+  model_ids?: number[];
+  model_names?: string[];
   model_name?: string;
-  model_id?: number;
   max_steps: number;
   duty_prompt?: string;
   constraint_prompt?: string;

@@ -17,7 +17,6 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
-sys.modules['supabase'] = MagicMock()
 
 # Stub nexent.storage modules to avoid importing the real SDK package (which has optional deps).
 nexent_module = types.ModuleType("nexent")

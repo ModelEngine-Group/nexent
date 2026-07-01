@@ -32,6 +32,8 @@ nexent_mock = types.ModuleType('nexent')
 nexent_core_mock = types.ModuleType('nexent.core')
 nexent_core_agents_mock = types.ModuleType('nexent.core.agents')
 nexent_core_agents_agent_model_mock = types.ModuleType('nexent.core.agents.agent_model')
+nexent_core_models_mock = types.ModuleType('nexent.core.models')
+nexent_core_models_prompt_cache_mock = types.ModuleType('nexent.core.models.prompt_cache')
 nexent_skills_mock = types.ModuleType('nexent.skills')
 nexent_skills_mock.__path__ = []  # Required for submodule lookups
 nexent_skills_skill_manager_mock = types.ModuleType('nexent.skills.skill_manager')
@@ -43,6 +45,8 @@ sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 sys.modules['nexent.core.agents'] = nexent_core_agents_mock
 sys.modules['nexent.core.agents.agent_model'] = nexent_core_agents_agent_model_mock
+sys.modules['nexent.core.models'] = nexent_core_models_mock
+sys.modules['nexent.core.models.prompt_cache'] = nexent_core_models_prompt_cache_mock
 sys.modules['nexent.skills'] = nexent_skills_mock
 sys.modules['nexent.skills.skill_manager'] = nexent_skills_skill_manager_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
@@ -51,6 +55,9 @@ sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
 
 # Set attributes on nexent_mock for proper submodule resolution
 setattr(nexent_mock, 'skills', nexent_skills_mock)
+nexent_core_models_prompt_cache_mock.resolve_prompt_cache_profile = (
+    lambda provider: {"mode": "openai_automatic"} if provider == "openai" else None
+)
 
 # Mock ToolConfig from agent_model
 nexent_core_agents_agent_model_mock.ToolConfig = type('ToolConfig', (), {})
@@ -77,6 +84,7 @@ class MockModelConfig:
         self.top_p = top_p
         self.ssl_verify = ssl_verify
         self.model_factory = model_factory
+        self.prompt_cache = kwargs.get("prompt_cache")
 
 nexent_core_agents_agent_model_mock.ModelConfig = MockModelConfig
 
@@ -2666,6 +2674,7 @@ class TestBuildModelConfigFromTenant:
                 assert config.top_p == 0.95
                 assert config.ssl_verify == True
                 assert config.model_factory == "openai"
+                assert config.prompt_cache["mode"] == "openai_automatic"
 
     def test_build_model_config_missing_quick_config(self, mocker):
         """Test error when tenant has no LLM model configured."""

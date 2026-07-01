@@ -1,10 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Database, X, Server } from "lucide-react";
 
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { formatDate, formatUrl } from "@/lib/utils";
-import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
+import {
+  convertImageUrlToApiUrl,
+  extractObjectNameFromUrl,
+  storageService,
+} from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
@@ -26,9 +30,97 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
   const published_date = result.published_date || "";
   const source_type = result.source_type || "url";
   const filename = result.filename || result.title || "";
-  const datamateDatasetId = result.score_details?.datamate_dataset_id;
-  const datamateFileId = result.score_details?.datamate_file_id;
-  const datamateBaseUrl = result.score_details?.datamate_base_url;
+  const searchType = result.search_type || "";
+  const isKnowledgeResult =
+    source_type === "file" ||
+    source_type === "datamate" ||
+    source_type === "aidp" ||
+    searchType === "aidp_search";
+  const datamateDatasetId =
+    result.score_details?.datamate_dataset_id ||
+    result.score_details?.dataset_id;
+  const datamateFileId =
+    result.score_details?.datamate_file_id || result.score_details?.file_id;
+  const datamateBaseUrl =
+    result.score_details?.datamate_base_url ||
+    result.score_details?.datamate_baseUrl ||
+    result.score_details?.base_url;
+
+  const resolveSourceLabel = (): string => {
+    if (source_type === "datamate") {
+      return t("chatRightPanel.source.datamate", "Source: Datamate");
+    }
+    if (source_type === "aidp" || searchType === "aidp_search") {
+      return t("chatRightPanel.source.aidp", "Source: AIDP");
+    }
+    if (source_type === "file") {
+      return t("chatRightPanel.source.nexent", "Source: Nexent");
+    }
+    return "";
+  };
+
+  const downloadDatamateFile = async () => {
+    if (!appConfig?.modelEngineEnabled) {
+      message.error(
+        "DataMate download not available: ModelEngine is not enabled"
+      );
+      return;
+    }
+    if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
+      if (!url || url === "#") {
+        message.error(
+          t(
+            "chatRightPanel.fileDownloadError",
+            "Missing Datamate dataset or file information"
+          )
+        );
+        return;
+      }
+    }
+    await storageService.downloadDatamateFile({
+      url: url !== "#" ? url : undefined,
+      baseUrl: datamateBaseUrl,
+      datasetId: datamateDatasetId,
+      fileId: datamateFileId,
+      filename: filename || undefined,
+    });
+    message.success(
+      t("chatRightPanel.fileDownloadSuccess", "File download started")
+    );
+  };
+
+  const downloadObjectFile = async () => {
+    if (result.download_url) {
+      const link = document.createElement("a");
+      link.href = result.download_url;
+      link.download = filename || "download";
+      link.click();
+      message.success(
+        t("chatRightPanel.fileDownloadSuccess", "File download started")
+      );
+      return;
+    }
+
+    let objectName: string | undefined;
+    if (result.object_name) {
+      objectName = result.object_name;
+    } else if (url && url !== "#") {
+      objectName = extractObjectNameFromUrl(url) || undefined;
+    }
+    if (!objectName) {
+      message.error(
+        t(
+          "chatRightPanel.fileDownloadError",
+          "Cannot determine file object name"
+        )
+      );
+      return;
+    }
+    await storageService.downloadFile(objectName, filename || "download");
+    message.success(
+      t("chatRightPanel.fileDownloadSuccess", "File download started")
+    );
+  };
 
   // Handle file download
   const handleFileDownload = async (e: React.MouseEvent) => {
@@ -36,114 +128,88 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     e.stopPropagation();
 
     if (!filename && !url) {
-      message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
+      message.error(
+        t("chatRightPanel.fileDownloadError", "File name or URL is missing")
+      );
       return;
     }
 
     setIsDownloading(true);
     try {
       if (source_type === "datamate") {
-        if (!appConfig?.modelEngineEnabled) {
-          message.error("DataMate download not available: ModelEngine is not enabled");
-          return;
-        }
-        if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
-          if (!url || url === "#") {
-            message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
-            return;
-          }
-        }
-        await storageService.downloadDatamateFile({
-          url: url !== "#" ? url : undefined,
-          baseUrl: datamateBaseUrl,
-          datasetId: datamateDatasetId,
-          fileId: datamateFileId,
-          filename: filename || undefined,
-        });
-        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+        await downloadDatamateFile();
         return;
       }
-
-      let objectName: string | undefined = undefined;
-
-      if (url && url !== "#") {
-        objectName = extractObjectNameFromUrl(url) || undefined;
-      }
-
-      if (!objectName) {
-        message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
-        return;
-      }
-
-      await storageService.downloadFile(objectName, filename || "download");
-      message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+      await downloadObjectFile();
     } catch (error) {
       log.error("Failed to download file:", error);
-      message.error(t("chatRightPanel.fileDownloadError", "Failed to download file. Please try again."));
+      message.error(
+        t(
+          "chatRightPanel.fileDownloadError",
+          "Failed to download file. Please try again."
+        )
+      );
     } finally {
       setIsDownloading(false);
     }
   };
 
+  const titleStyle = {
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical" as const,
+    overflow: "hidden" as const,
+    wordBreak: "break-word" as const,
+  };
+
+  const titleContent = isDownloading ? (
+    <span className="inline-flex items-center gap-1">
+      <span className="animate-spin">⏳</span>
+      {t("chatRightPanel.downloading", "Downloading...")}
+    </span>
+  ) : (
+    title
+  );
+
+  let titleNode: React.ReactNode;
+  if (source_type === "url") {
+    titleNode = (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-blue-600 hover:underline block text-base"
+        style={titleStyle}
+        title={title}
+      >
+        {title}
+      </a>
+    );
+  } else if (isKnowledgeResult) {
+    titleNode = (
+      <a
+        href="#"
+        onClick={handleFileDownload}
+        className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
+        style={titleStyle}
+        title={title}
+      >
+        {titleContent}
+      </a>
+    );
+  } else {
+    titleNode = (
+      <div className="font-medium text-base" style={titleStyle} title={title}>
+        {title}
+      </div>
+    );
+  }
+
   return (
     <div className="p-3 rounded-lg border border-gray-200 text-xs hover:bg-gray-50 transition-colors overflow-hidden">
       <div className="flex flex-col">
         <div>
-          {source_type === "url" ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-blue-600 hover:underline block text-base"
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-word",
-              }}
-              title={title}
-            >
-              {title}
-            </a>
-          ) : source_type === "file" || source_type === "datamate" ? (
-            <a
-              href="#"
-              onClick={handleFileDownload}
-              className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-word",
-              }}
-              title={title}
-            >
-              {isDownloading ? (
-                <span className="inline-flex items-center gap-1">
-                  <span className="animate-spin">⏳</span>
-                  {t("chatRightPanel.downloading", "Downloading...")}
-                </span>
-              ) : (
-                title
-              )}
-            </a>
-          ) : (
-            <div
-              className="font-medium text-base"
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-word",
-              }}
-              title={title}
-            >
-              {title}
-            </div>
-          )}
+          {titleNode}
 
           {published_date && (
             <div className="text-gray-500 mt-1 text-sm">
@@ -167,7 +233,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
             className="flex flex-col overflow-hidden"
             style={{ flex: 1, minWidth: 0 }}
           >
-            {source_type === "file" || source_type === "datamate" ? (
+            {isKnowledgeResult ? (
               <>
                 <div className="flex items-center min-w-0">
                   <div className="w-3 h-3 flex-shrink-0 mr-1">
@@ -191,11 +257,7 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
                     <Server className="w-full h-full" />
                   </div>
                   <div className="text-xs text-gray-500">
-                    {source_type === "datamate"
-                      ? t("chatRightPanel.source.datamate", "Source: Datamate")
-                      : source_type === "file"
-                      ? t("chatRightPanel.source.nexent", "Source: Nexent")
-                      : ""}
+                    {resolveSourceLabel()}
                   </div>
                 </div>
               </>
@@ -233,7 +295,6 @@ function SearchResultItem({ result, t, appConfig }: SearchResultItemProps) {
     </div>
   );
 }
-
 
 export function ChatRightPanel({
   messages,
@@ -280,90 +341,100 @@ export function ChatRightPanel({
     [onImageError]
   );
 
-  // Load image
-  const loadImage = async (imageUrl: string) => {
-    // If it is already in the cache and is not loading, return directly
-    if (imageData[imageUrl] && !imageData[imageUrl].isLoading) {
-      return Promise.resolve();
-    }
+  // Load image - wrapped in useCallback to ensure fresh state references
+  // NOTE: does NOT depend on imageData to avoid stale-closure issues
+  const loadImage = useCallback(
+    async (imageUrl: string) => {
+      // Read current state inside the async function to avoid stale closure
+      const currentState = imageData;
 
-    // If it is loading, prevent duplicate requests
-    if (loadingImages.current.has(imageUrl)) {
-      return Promise.resolve();
-    }
-
-    // Mark as loading
-    loadingImages.current.add(imageUrl);
-
-    // Get the current load attempts
-    const currentAttempts = imageData[imageUrl]?.loadAttempts || 0;
-
-    // If the number of attempts is too high, do not continue to try
-    if (currentAttempts >= 3) {
-      handleImageLoadFail(imageUrl);
-      loadingImages.current.delete(imageUrl);
-      return Promise.resolve();
-    }
-
-    // Mark as loading
-    setImageData((prev) => ({
-      ...prev,
-      [imageUrl]: {
-        base64Data: "",
-        contentType: "image/jpeg",
-        isLoading: true,
-        loadAttempts: currentAttempts + 1,
-      },
-    }));
-
-    try {
-      // Convert image URL to backend API URL
-      const apiUrl = convertImageUrlToApiUrl(imageUrl);
-
-      // Use backend API to get the image
-      const response = await fetch(apiUrl);
-
-      if (!response.ok) {
-        throw new Error(`Failed to load image: ${response.statusText}`);
+      // If it is already loaded with data, return directly
+      if (
+        currentState[imageUrl]?.base64Data &&
+        !currentState[imageUrl]?.isLoading
+      ) {
+        return Promise.resolve();
       }
 
-      // Get image as blob and convert to base64
-      const blob = await response.blob();
-      const reader = new FileReader();
+      // If it is loading, prevent duplicate requests
+      if (loadingImages.current.has(imageUrl)) {
+        return Promise.resolve();
+      }
 
-      reader.onloadend = () => {
-        const base64Data = reader.result as string;
-        // Remove data URL prefix (e.g., "data:image/png;base64,")
-        const base64 = base64Data.split(',')[1] || base64Data;
+      // Mark as loading
+      loadingImages.current.add(imageUrl);
 
-        setImageData((prev) => ({
-          ...prev,
-          [imageUrl]: {
-            base64Data: base64,
-            contentType: blob.type || "image/jpeg",
-            isLoading: false,
-            loadAttempts: currentAttempts + 1,
-          },
-        }));
-        loadingImages.current.delete(imageUrl);
-      };
+      // Get the current load attempts (from captured state)
+      const currentAttempts = currentState[imageUrl]?.loadAttempts || 0;
 
-      reader.onerror = () => {
-        log.error("Failed to read image blob");
+      // If the number of attempts is too high, do not continue to try
+      if (currentAttempts >= 3) {
         handleImageLoadFail(imageUrl);
         loadingImages.current.delete(imageUrl);
-      };
+        return Promise.resolve();
+      }
 
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      log.error(t("chatRightPanel.imageProxyError"), error);
-      // If loading fails, remove it directly from the list
-      handleImageLoadFail(imageUrl);
-      loadingImages.current.delete(imageUrl);
-    }
+      // Mark as loading
+      setImageData((prev) => ({
+        ...prev,
+        [imageUrl]: {
+          base64Data: "",
+          contentType: "image/jpeg",
+          isLoading: true,
+          loadAttempts: currentAttempts + 1,
+        },
+      }));
 
-    return Promise.resolve();
-  };
+      try {
+        // Convert image URL to backend API URL
+        const apiUrl = convertImageUrlToApiUrl(imageUrl);
+
+        // Use backend API to get the image
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+          throw new Error(`Failed to load image: ${response.statusText}`);
+        }
+
+        // Get image as blob and convert to base64
+        const blob = await response.blob();
+        const reader = new FileReader();
+
+        reader.onloadend = () => {
+          const base64Data = reader.result as string;
+          // Remove data URL prefix (e.g., "data:image/png;base64,")
+          const base64 = base64Data.split(",")[1] || base64Data;
+
+          setImageData((prev) => ({
+            ...prev,
+            [imageUrl]: {
+              base64Data: base64,
+              contentType: blob.type || "image/jpeg",
+              isLoading: false,
+              loadAttempts: (prev[imageUrl]?.loadAttempts || 0) + 1,
+            },
+          }));
+          loadingImages.current.delete(imageUrl);
+        };
+
+        reader.onerror = () => {
+          log.error("Failed to read image blob");
+          handleImageLoadFail(imageUrl);
+          loadingImages.current.delete(imageUrl);
+        };
+
+        reader.readAsDataURL(blob);
+      } catch (error) {
+        log.error(t("chatRightPanel.imageProxyError"), error);
+        // If loading fails, remove it directly from the list
+        handleImageLoadFail(imageUrl);
+        loadingImages.current.delete(imageUrl);
+      }
+
+      return Promise.resolve();
+    },
+    [handleImageLoadFail]
+  );
 
   // Listen for message changes, update search results and images
   useEffect(() => {
@@ -398,33 +469,37 @@ export function ChatRightPanel({
       setSearchResults([]);
     }
 
-    // Process images
+    // Process images from the current message
     if (currentMessage?.images && Array.isArray(currentMessage.images)) {
-      // Get and remove duplicates
+      // Get unique images from the message
       const allImages = currentMessage.images;
 
-      // Filter out images that have been marked as failed to load
+      // Filter out images that have been marked as permanently failed
       const validImages = allImages.filter((imageUrl) => {
-        return !(imageData[imageUrl] && imageData[imageUrl].error);
+        const imgState = imageData[imageUrl];
+        // Keep image if: never tried, still loading, or has data (not in error state)
+        // Remove image if: has error AND loadAttempts >= 3
+        if (imgState?.error && (imgState?.loadAttempts || 0) >= 3) {
+          return false;
+        }
+        return true;
       });
 
       setProcessedImages(validImages);
 
-      // Preload images, but only load images that are not loaded yet
-      const loadPromises = validImages.map((imageUrl) => {
-        if (
-          !imageData[imageUrl] ||
-          (imageData[imageUrl].error === undefined &&
-            !imageData[imageUrl].isLoading)
-        ) {
-          return loadImage(imageUrl);
-        }
-        return Promise.resolve();
-      });
+      // Preload images - only load if not already loaded and not currently loading
+      validImages.forEach((imageUrl) => {
+        const imgState = imageData[imageUrl];
+        // Load if: no state, or has error but not yet reached max attempts
+        const shouldLoad =
+          !imgState ||
+          (imgState.error &&
+            (imgState.loadAttempts || 0) < 3 &&
+            !imgState.isLoading);
 
-      // Load all images in parallel
-      Promise.all(loadPromises).catch((error) => {
-        log.error(t("chatRightPanel.parallelLoadImagesError"), error);
+        if (shouldLoad) {
+          loadImage(imageUrl);
+        }
       });
     } else {
       setProcessedImages([]);
@@ -433,6 +508,11 @@ export function ChatRightPanel({
     currentMessage?.searchResults,
     currentMessage?.images,
     selectedMessageId,
+    // Include imageData to re-render when image loading state changes
+    imageData,
+    // Include loadImage and handleImageLoadFail to avoid stale closures
+    loadImage,
+    handleImageLoadFail,
   ]);
 
   // Handle image click
@@ -539,7 +619,10 @@ export function ChatRightPanel({
         )}
       </div>
 
-      <div className="flex-1 flex flex-col" style={{ maxWidth: "400px", height: "100%" }}>
+      <div
+        className="flex-1 flex flex-col"
+        style={{ maxWidth: "400px", height: "100%" }}
+      >
         {/* Tab Headers */}
         <div className="flex border-b bg-gray-50">
           <Button

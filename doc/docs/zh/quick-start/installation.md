@@ -18,17 +18,17 @@
 
 ```bash
 git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/docker
+cd nexent
 ```
 
-> **💡 提示**: `deploy.sh` 会在 `docker/.env` 不存在时自动从 `.env.example` 复制一份。若无特殊需求，可直接部署；若需要配置语音模型（STT/TTS），请部署前或部署后修改 `docker/.env` 中的相关参数。
+> **💡 提示**: `deploy.sh` 使用 `deploy/env/.env` 作为运行配置。已有 `deploy/env/.env` 会原样保留；如果不存在，会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
 
 ### 2. 部署选项
 
 运行以下命令开始部署：
 
 ```bash
-bash deploy.sh
+bash deploy.sh docker
 ```
 
 执行此命令后，系统会通过 Bash TUI 选择部署参数。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
@@ -36,8 +36,8 @@ bash deploy.sh
 **组件组合:**
 - **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
 - **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
-- **data-process（可选）**: 数据处理服务
-- **supabase（可选）**: 启用用户、租户和认证能力
+- **data-process（默认选中，可选）**: 数据处理服务
+- **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
@@ -54,19 +54,19 @@ bash deploy.sh
 
 ```bash
 # 默认组件组合，development 端口策略，标准镜像源
-bash deploy.sh --components infrastructure,application --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-bash deploy.sh --components infrastructure,application,supabase,data-process,terminal
+bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
 
 # 使用中国大陆镜像源
-bash deploy.sh --image-source mainland
+bash deploy.sh docker --image-source mainland
 
 # 使用本地 latest 镜像
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
-部署成功后，非敏感部署选项会保存到 `docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 
 #### ⚠️ 重要提示
@@ -146,9 +146,51 @@ Nexent 使用 Docker volumes 进行数据持久化：
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
 | Supabase DB（选择 supabase 时）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
-默认 `dataDir` 为 `./volumes`（可在 `.env` 中配置 `ROOT_DIR`）。
+默认 `dataDir` 为 `./volumes`（可在 `deploy/env/.env` 中配置 `ROOT_DIR`）。
 
-卸载由 `docker/uninstall.sh` 负责。默认交互询问是否删除持久化数据；也可使用 `--delete-volumes true|false`、`--remove-volumes`、`--keep-volumes`，或使用 `bash uninstall.sh delete-all` 删除容器和持久化数据。
+### 卸载 Docker 部署
+
+请在仓库根目录使用统一卸载入口：
+
+```bash
+# 停止并删除容器；是否删除持久化数据由交互确认
+bash uninstall.sh docker
+
+# 非交互卸载并保留数据
+bash uninstall.sh docker --keep-volumes
+
+# 删除 Docker volumes 和 ROOT_DIR 下的 Nexent 数据
+bash uninstall.sh docker --delete-volumes true
+
+# 完整清理：容器和持久化数据都会删除
+bash uninstall.sh docker delete-all
+```
+
+Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compose 资源。删除数据时会移除 `postgresql`、`elasticsearch`、`redis`、`minio`、`volumes`、`openssh-server`、`scripts`、`skills` 等服务目录；如果后续要复用已有数据，请选择保留 volumes。
+
+### 离线镜像包
+
+需要把镜像和部署脚本搬到离线机器时，可使用 `deploy/offline/build_offline_package.sh`：
+
+```bash
+bash deploy/offline/build_offline_package.sh \
+  --target docker \
+  --version v2.2.1 \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source general \
+  --compress true \
+  --output-dir offline-package
+```
+
+包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+
+在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
+
+```bash
+cd offline-package
+bash deploy.sh --load-images docker
+```
 
 ## 🔌 端口映射
 
@@ -171,14 +213,14 @@ Nexent 使用 Docker volumes 进行数据持久化：
 
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `docker/.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `docker/docker-compose-monitoring.yml` 中对应的观测组件。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `deploy/env/.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
 
 ```bash
-cd nexent/docker
-bash deploy.sh
+cd nexent
+bash deploy.sh docker
 ```
 
-如果本地已有 `docker/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
+如果本地已有 `deploy/docker/deploy.options`，脚本会询问是否复用本地配置。请选择重新配置/覆盖本地配置，然后在组件选择界面勾选 `monitoring`，再在 provider 选择界面手动选择 `grafana`、`phoenix`、`langfuse`、`langsmith`、`zipkin` 或 `otlp`。
 
 支持的 provider：
 
@@ -194,7 +236,7 @@ bash deploy.sh
 如需调整端口、镜像版本或 Langfuse 初始账号，请先复制并编辑监控环境变量：
 
 ```bash
-cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
+cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
 ```
 
 常用变量：
@@ -207,7 +249,7 @@ cp docker/monitoring/monitoring.env.example docker/monitoring/monitoring.env
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | 本地 Langfuse 初始管理员账号 |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | 本地 Grafana 管理员账号 |
 
-选择 `langsmith` provider 前，请先在 `docker/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `docker/.env` 中调整 OTLP 目标地址：
+选择 `langsmith` provider 前，请先在 `deploy/docker/assets/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/.env` 中调整 OTLP 目标地址：
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -224,10 +266,10 @@ MONITORING_DASHBOARD_URL=
 OAuth 登录依赖 `supabase` 组件。启用第三方登录时，请同时部署 `supabase`，并将 `OAUTH_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址。
 
 ```bash
-bash deploy.sh --components infrastructure,application,supabase
+bash deploy.sh docker --components infrastructure,application,supabase
 ```
 
-Docker 部署在 `docker/.env` 中配置 OAuth：
+Docker 部署在 `deploy/env/.env` 中配置 OAuth：
 
 ```bash
 # Web 入口地址。回调完整路径会自动拼接为：
@@ -273,7 +315,7 @@ Provider 启用规则：
 
 CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `CAS_CALLBACK_BASE_URL` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`CAS_SERVER_URL` 是 CAS Server 根地址，也不要带结尾 `/`。
 
-Docker 部署在 `docker/.env` 中配置 CAS：
+Docker 部署在 `deploy/env/.env` 中配置 CAS：
 
 ```bash
 CAS_ENABLED=true
@@ -383,7 +425,7 @@ kubectl exec -i -n model-engine $(kubectl get pods -n model-engine -l app=oms --
 
 **配置方法：**
 
-在 `.env` 文件中设置公网可访问的 URL：
+在 `deploy/env/.env` 文件中设置公网可访问的 URL：
 
 ```bash
 # 格式：协议://主机:端口/api

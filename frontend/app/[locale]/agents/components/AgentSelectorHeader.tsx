@@ -262,15 +262,26 @@ export default function AgentSelectorHeader({
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
+      // Ensure model_ids always has a value - fall back to single-element array
+      // using the agent's first available legacy model_id (single-select) when
+      // model_ids is empty in the response.
+      const modelIdsForCopy = (() => {
+        if (detail.model_ids && detail.model_ids.length > 0) return detail.model_ids;
+        // Legacy payload may only carry model_id (single-select); preserve it
+        const legacySingleId = (detail as { model_id?: number }).model_id;
+        if (legacySingleId) return [legacySingleId];
+        return undefined;
+      })();
+
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined, // create
         name: copyName,
         display_name: copyDisplayName,
         description: detail.description,
         author: detail.author,
-        model_name: detail.model,
-        model_id: detail.model_id ?? undefined,
+        model_ids: modelIdsForCopy,
         max_steps: detail.max_step,
+        requested_output_tokens: detail.requested_output_tokens ?? null,
         provide_run_summary: detail.provide_run_summary,
         enabled: detail.enabled,
         business_description: detail.business_description,

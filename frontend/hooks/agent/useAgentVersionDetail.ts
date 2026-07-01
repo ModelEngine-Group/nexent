@@ -7,11 +7,19 @@ import { AgentVersionDetail, fetchAgentVersionDetail, type AgentVersion } from "
  * @param options - Configuration options including agentId, versionNo and query settings
  * @returns Query result containing version data and utilities
  */
-export function useAgentVersionDetail(agentId: number | null, versionNo: number | null) {
-
+export function useAgentVersionDetail(
+  agentId: number | null,
+  versionNo: number | null,
+  enabled = true
+) {
   const queryClient = useQueryClient();
 
-  const isEnabled = agentId !== undefined && agentId !== null && versionNo !== undefined && versionNo !== null;
+  const isEnabled =
+    enabled &&
+    agentId !== undefined &&
+    agentId !== null &&
+    versionNo !== undefined &&
+    versionNo !== null;
 
   const query = useQuery({
     queryKey: ["agentVersionDetail", agentId, versionNo],

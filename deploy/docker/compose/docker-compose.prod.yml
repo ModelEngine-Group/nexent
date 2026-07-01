@@ -1,0 +1,322 @@
+x-es-vars: &es-vars
+  ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+x-minio-vars: &minio-vars
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+  MINIO_REGION: ${MINIO_REGION}
+  MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET}
+x-proxy-vars: &proxy-vars
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-}
+
+services:
+  nexent-elasticsearch:
+    image: ${ELASTICSEARCH_IMAGE}
+    container_name: nexent-elasticsearch
+    environment:
+      <<: *es-vars
+      # Single node mode
+      discovery.type: single-node
+      # Security settings
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      # JVM memory settings
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS}
+      # Node name
+      node.name: es01
+      # Memory lock setting
+      bootstrap.memory_lock: "false"
+      # Disk watermark settings
+      cluster.routing.allocation.disk.watermark.low: "${ES_DISK_WATERMARK_LOW}"
+      cluster.routing.allocation.disk.watermark.high: "${ES_DISK_WATERMARK_HIGH}"
+      cluster.routing.allocation.disk.watermark.flood_stage: "${ES_DISK_WATERMARK_FLOOD_STAGE}"
+    volumes:
+      - ${ROOT_DIR}/elasticsearch:/usr/share/elasticsearch/data
+    networks:
+      - nexent
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTIC_PASSWORD} -k http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"  # Maximum size of a single log file
+        max-file: "3"     # Maximum number of log files to keep
+
+  nexent-postgresql:
+    image: ${POSTGRESQL_IMAGE}
+    container_name: nexent-postgresql
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${NEXENT_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ${ROOT_DIR}/postgresql/data:/var/lib/postgresql/data
+      - ../../sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"  # Maximum size of a single log file
+        max-file: "3"     # Maximum number of log files to keep
+    networks:
+      - nexent
+
+  nexent-config:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-config
+    restart: always
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+      - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
+    environment:
+      <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: migrate
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - ../../env/.env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/config_service.py"]
+
+  nexent-runtime:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-runtime
+    restart: always
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+    environment:
+      <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - ../../env/.env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/runtime_service.py"]
+
+  nexent-mcp:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-mcp
+    restart: always
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+    environment:
+      <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - ../../env/.env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/mcp_service.py"]
+
+  nexent-northbound:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-northbound
+    restart: always
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+    environment:
+      <<: [*minio-vars, *es-vars]
+      NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - ../../env/.env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    ports:
+      - "5013:5013"  # Northbound API port exposed for external A2A access
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/northbound_service.py"]
+
+  nexent-web:
+    image: ${NEXENT_WEB_IMAGE}
+    container_name: nexent-web
+    restart: always
+    networks:
+      - nexent
+    ports:
+      - "3000:3000"
+    environment:
+      - HTTP_BACKEND=http://nexent-config:5010
+      - WS_BACKEND=ws://nexent-runtime:5014
+      - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
+      - MINIO_ENDPOINT=http://nexent-minio:9000
+      - MARKET_BACKEND=http://60.204.251.153:8010
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+
+  nexent-data-process:
+    image: ${NEXENT_DATA_PROCESS_IMAGE}
+    container_name: nexent-data-process
+    restart: always
+    privileged: true
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ../../sql:/opt/nexent/sql:ro
+    environment:
+      <<: [*proxy-vars, *es-vars, *minio-vars]
+      NEXENT_SQL_STARTUP_MODE: off
+      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      DOCKER_ENVIRONMENT: "true"
+      DISABLE_RAY_DASHBOARD: ${DISABLE_RAY_DASHBOARD:-false}
+      DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}
+      PYTHONPATH: "/opt/backend"
+      skip_proxy: "true"
+    env_file:
+      - ../../env/.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: >
+      /bin/sh -c "
+        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py || (cd /opt/backend && OPENBLAS_NUM_THREADS=1 UVICORN_LOOP=asyncio uvicorn data_process_service:app --host 0.0.0.0 --port 5012)'
+      "
+
+  redis:
+    image: ${REDIS_IMAGE}
+    container_name: nexent-redis
+    command: redis-server --appendonly yes --appendfsync everysec --save "900 1" --save "300 10" --save "60 10000" --dir /data --maxmemory-policy allkeys-lru
+    volumes:
+      - ${ROOT_DIR}/redis:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - nexent
+
+  nexent-minio:
+    image: ${MINIO_IMAGE}
+    container_name: nexent-minio
+    command: server /data
+    environment:
+      <<: [*minio-vars, *proxy-vars]
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ${ROOT_DIR}/minio/data:/etc/minio/data
+    networks:
+      - nexent
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"  # Maximum size of a single log file
+        max-file: "3"     # Maximum number of log files to keep
+    entrypoint: >
+      /bin/sh -c "
+        minio server /etc/minio/data --address ':9000' --console-address ':9001' &
+        MINIO_PID=$$!
+        sleep 3
+        mc alias set myadmin http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
+        mc admin user add myadmin $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
+        mc admin policy attach myadmin readwrite --user=$MINIO_ACCESS_KEY
+        mc mb myadmin/$MINIO_DEFAULT_BUCKET
+        mc anonymous set download myadmin/$MINIO_DEFAULT_BUCKET
+        mc ilm rule add myadmin/$MINIO_DEFAULT_BUCKET --prefix 'preview/' --expiry-days 7 --id expire-converted-pdfs
+        wait $$MINIO_PID
+      "
+
+  nexent-openssh-server:
+    image: ${OPENSSH_SERVER_IMAGE}
+    container_name: nexent-openssh-server
+    hostname: nexent-openssh-server
+    environment:
+      - DEV_USER=${SSH_USERNAME:-linuxserver.io}
+      - DEV_PASSWORD=${SSH_PASSWORD:-nexent123}
+    volumes:
+      - ${TERMINAL_MOUNT_DIR:-./workspace}:/opt/terminal
+    networks:
+      - nexent
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    profiles:
+      - terminal
+
+networks:
+  nexent:
+    name: nexent_network
+    driver: bridge
+
+volumes:
+  redis_data:

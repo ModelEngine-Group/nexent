@@ -16,7 +16,6 @@ boto3_module.client = MagicMock()
 boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
-sys.modules['supabase'] = MagicMock()
 sys.modules['psycopg2'] = MagicMock()
 
 # Minimal stub to satisfy 'from nexent.memory.memory_service import clear_memory'

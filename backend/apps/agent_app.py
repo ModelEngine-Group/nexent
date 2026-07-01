@@ -35,6 +35,7 @@ from services.agent_version_service import (
     get_version_list_impl,
     get_version_impl,
     get_version_detail_impl,
+    _get_version_detail_or_draft,
     rollback_version_impl,
     update_version_status_impl,
     update_version_impl,
@@ -52,15 +53,22 @@ logger = logging.getLogger("agent_app")
 
 # Define API route
 @agent_runtime_router.post("/run")
-async def agent_run_api(agent_request: AgentRequest, http_request: Request, authorization: str = Header(None)):
+async def agent_run_api(
+    agent_request: AgentRequest,
+    http_request: Request,
+    authorization: str = Header(None),
+    resume: bool = Query(False, description="Resume an existing streaming conversation"),
+):
     """
-    Agent execution API endpoint
+    Agent execution API endpoint.
+    If resume=true, attempts to continue streaming from where it left off after a tab switch.
     """
     try:
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
-            authorization=authorization
+            authorization=authorization,
+            resume=resume,
         )
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
@@ -447,7 +455,7 @@ async def get_version_detail_api(
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        result = get_version_detail_impl(
+        result = _get_version_detail_or_draft(
             agent_id=agent_id,
             tenant_id=tenant_id,
             version_no=version_no,
