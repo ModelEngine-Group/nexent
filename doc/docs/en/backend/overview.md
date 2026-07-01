@@ -5,7 +5,7 @@ Nexent's backend is built with FastAPI and Python, providing a robust and scalab
 ## Technology Stack
 
 - **Framework**: FastAPI
-- **Language**: Python 3.11+
+- **Language**: Python 3.10+
 - **Database**: PostgreSQL + Redis + Elasticsearch
 - **File Storage**: MinIO
 - **Task Queue**: Celery + Ray
