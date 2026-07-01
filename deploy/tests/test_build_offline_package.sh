@@ -153,6 +153,11 @@ latest_package_dir="$OUT_DIR/latest"
 latest_pull_log="$TMP_DIR/latest-docker.log"
 : > "$latest_pull_log"
 
+output="$(bash "$PROJECT_ROOT/build.sh" --package --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
+echo "$output" | grep -q "=== DRY RUN MODE ===" || fail "build.sh --package should forward to offline package builder"
+echo "$output" | grep -q "Target: docker" || fail "build.sh --package should forward package arguments"
+echo "$output" | grep -q "nexent/nexent:v2.2.0" || fail "build.sh --package should render package image plan"
+
 PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
     --version latest \

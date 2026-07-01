@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_SCRIPT="$PROJECT_ROOT/deploy/images/build.sh"
+ROOT_BUILD_SCRIPT="$PROJECT_ROOT/build.sh"
 
 fail() {
   echo "FAIL: $*"
@@ -46,6 +47,10 @@ assert_not_contains "$output" "--platform" "default build should use local archi
 output="$(bash "$BUILD_SCRIPT" --main --version latest --platform linux/amd64 --dry-run)"
 assert_contains "$output" "--platform linux/amd64" "explicit platform should be forwarded"
 assert_contains "$output" "nexent/nexent:latest" "explicit platform build should still build selected image"
+
+output="$(bash "$ROOT_BUILD_SCRIPT" --web --version latest --dry-run)"
+assert_contains "$output" "nexent/nexent-web:latest" "root image build entrypoint should forward to deploy/images/build.sh"
+assert_not_contains "$output" "nexent/nexent:latest" "root image build entrypoint should preserve selected image arguments"
 
 output="$(bash "$BUILD_SCRIPT" --main --version latest --no-cache --dry-run)"
 assert_contains "$output" "--no-cache" "explicit no-cache option should be forwarded"
