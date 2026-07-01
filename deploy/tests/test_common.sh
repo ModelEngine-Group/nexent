@@ -342,10 +342,73 @@ assert_contains "$(sed -n '1,260p' "$HELM_VALUES")" "enabled: true" "selected ch
 DOCKER_ENV="$TMP_DIR/.env.generated"
 deployment_render_docker_env "$DOCKER_ENV"
 assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "NEXENT_IMAGE=" "docker generated env should contain image variables"
+assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "ENABLE_TELEMETRY=" "docker generated env should contain monitoring enablement"
+assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "MONITORING_PROVIDER=" "docker generated env should contain monitoring provider"
+assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "MONITORING_DASHBOARD_URL=" "docker generated env should contain monitoring dashboard URL"
 if grep -Eq '^DEPLOYMENT_(SCHEMA_VERSION|COMPONENTS|PORT_POLICY|IMAGE_SOURCE|REGISTRY_PROFILE|APP_VERSION|MONITORING_PROVIDER|SELECTED_DOCKER_SERVICES|DOCKER_PORTS)=' "$DOCKER_ENV"; then
   echo "FAIL: docker generated env should not contain persisted deployment decisions"
   exit 1
 fi
+
+DOCKER_MONITORING_CONFIG_BLOCK="$(awk '/docker_monitoring_collector_config_file\(\)/,/^pull_mcp_image\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$OTEL_EXPORTER_OTLP_ENDPOINT"' "docker deploy should persist backend OTLP endpoint for monitoring"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"' "docker deploy should point backend telemetry at Docker collector service"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'MONITORING_ENV_EXAMPLE' "docker deploy should use monitoring.env.example defaults"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'source "$MONITORING_ENV_FILE"' "docker deploy should source generated monitoring.env"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"' "docker deploy should persist monitoring collector config in monitoring.env"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-phoenix-config.yml' "docker deploy should map phoenix to its collector config"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-langfuse-config.yml' "docker deploy should map langfuse to its collector config"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-langsmith-config.yml' "docker deploy should map langsmith to its collector config"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-grafana-config.yml' "docker deploy should map grafana to its collector config"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-zipkin-config.yml' "docker deploy should map zipkin to its collector config"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'LANGFUSE_OTLP_AUTH_HEADER="Basic $(' "docker deploy should derive Langfuse OTLP auth header"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$LANGFUSE_OTLP_AUTH_HEADER"' "docker deploy should persist Langfuse OTLP auth header in monitoring.env"
+
+DOCKER_DEPLOY_MONITORING_BLOCK="$(awk '/deploy_monitoring\(\)/,/^configure_root_dir_from_env\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_DEPLOY_MONITORING_BLOCK" 'LANGSMITH_API_KEY is required' "docker deploy should fail fast when LangSmith API key is missing"
+assert_contains "$DOCKER_DEPLOY_MONITORING_BLOCK" 'profile_args+=(--profile "$DEPLOYMENT_MONITORING_PROVIDER")' "docker deploy should keep provider-specific compose profiles"
+assert_contains "$DOCKER_DEPLOY_MONITORING_BLOCK" '--env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE"' "docker deploy should load generated monitoring.env for monitoring compose"
+
+MONITORING_EXAMPLE_FILE="$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example"
+MONITORING_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml"
+MONITORING_COMPOSE_DEFAULTS="$TMP_DIR/docker-compose-monitoring-defaults.txt"
+awk '
+  {
+    line = $0
+    while (match(line, /\$\{[A-Za-z_][A-Za-z0-9_]*:-[^}]*\}/)) {
+      expr = substr(line, RSTART + 2, RLENGTH - 3)
+      key = expr
+      sub(/:-.*/, "", key)
+      value = expr
+      sub(/^[^:]*:-/, "", value)
+      print key "=" value
+      line = substr(line, RSTART + RLENGTH)
+    }
+  }
+' "$MONITORING_COMPOSE_FILE" | sort -u > "$MONITORING_COMPOSE_DEFAULTS"
+while IFS='=' read -r key compose_default; do
+  [ -n "$key" ] || continue
+  case "$key" in
+    OTEL_COLLECTOR_CONFIG_FILE)
+      continue
+      ;;
+  esac
+  if example_default="$(deployment_get_env_var_file "$MONITORING_EXAMPLE_FILE" "$key" 2>/dev/null)"; then
+    assert_eq "$example_default" "$compose_default" "docker compose fallback for $key should match monitoring.env.example"
+  fi
+done < "$MONITORING_COMPOSE_DEFAULTS"
+
+assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "GRAFANA_ADMIN_PASSWORD=nexent@4321" "docker monitoring defaults should define Grafana admin password"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexent@4321}' "docker compose Grafana password fallback should match monitoring.env.example"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "adminPassword: nexent@4321" "k8s monitoring Grafana password should match docker monitoring default"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "LANGFUSE_POSTGRES_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse postgres password"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_POSTGRES_PASSWORD:-nexent@4321' "docker compose Langfuse postgres password fallback should match monitoring.env.example"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "password: nexent@4321" "k8s monitoring Langfuse postgres password should match docker monitoring default"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "LANGFUSE_INIT_USER_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse init user password"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-nexent@4321}' "docker compose Langfuse init user password fallback should match monitoring.env.example"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
 deployment_persist_local_config "$LOCAL_CONFIG"

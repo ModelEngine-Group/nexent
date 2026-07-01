@@ -83,6 +83,10 @@ assert_common_package_files() {
   [ ! -f "$package_dir/deploy/env/.env" ] || fail "deploy/env/.env should not be packaged"
   [ ! -f "$package_dir/deploy/docker/.env" ] || fail "deploy/docker/.env should not be packaged"
   [ ! -f "$package_dir/deploy/docker/.env.generated" ] || fail "deploy/docker/.env.generated should not be packaged"
+  if [ -d "$package_dir/deploy/docker" ]; then
+    [ ! -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env" ] || fail "generated monitoring.env should not be packaged"
+    [ -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env.example" ] || fail "monitoring.env.example should be packaged"
+  fi
   [ ! -f "$package_dir/deploy/docker/deploy.options" ] || fail "deploy/docker/deploy.options should not be packaged"
 }
 

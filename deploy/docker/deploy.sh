@@ -20,6 +20,8 @@ ORIGINAL_ARGS=("$@")
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
+MONITORING_ENV_EXAMPLE="$DOCKER_ASSETS_DIR/monitoring/monitoring.env.example"
+MONITORING_ENV_FILE="$DOCKER_ASSETS_DIR/monitoring/monitoring.env"
 SQL_DIR="$DEPLOY_ROOT/sql"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then
@@ -656,10 +658,140 @@ disable_dashboard() {
   update_env_var "DISABLE_CELERY_FLOWER" "true"
 }
 
+docker_monitoring_collector_config_file() {
+  case "$DEPLOYMENT_MONITORING_PROVIDER" in
+    phoenix)
+      printf '../assets/monitoring/otel-collector-phoenix-config.yml'
+      ;;
+    langfuse)
+      printf '../assets/monitoring/otel-collector-langfuse-config.yml'
+      ;;
+    langsmith)
+      printf '../assets/monitoring/otel-collector-langsmith-config.yml'
+      ;;
+    grafana)
+      printf '../assets/monitoring/otel-collector-grafana-config.yml'
+      ;;
+    zipkin)
+      printf '../assets/monitoring/otel-collector-zipkin-config.yml'
+      ;;
+    otlp|*)
+      printf '../assets/monitoring/otel-collector-config.yml'
+      ;;
+  esac
+}
+
+update_monitoring_env_var() {
+  local key="$1"
+  local value="$2"
+  deployment_update_env_var_file "$MONITORING_ENV_FILE" "$key" "$value"
+  if [ "${DEPLOYMENT_LAST_ENV_WRITE_CHANGED:-false}" = "true" ]; then
+    echo "   📝 monitoring.env updated: $key"
+  else
+    echo "   ↺ monitoring.env unchanged: $key"
+  fi
+}
+
+sync_monitoring_env_defaults() {
+  local line key value env_value
+
+  if [ ! -f "$MONITORING_ENV_EXAMPLE" ]; then
+    echo "   ❌ ERROR Monitoring env example not found: $MONITORING_ENV_EXAMPLE"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$MONITORING_ENV_FILE")"
+  touch "$MONITORING_ENV_FILE"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="$(deployment_trim "$line")"
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+    key="${line%%=*}"
+    if grep -q "^${key}=" "$MONITORING_ENV_FILE"; then
+      continue
+    fi
+
+    value="${line#*=}"
+    env_value="$(printenv "$key" 2>/dev/null || true)"
+    if [ -n "$env_value" ]; then
+      value="$env_value"
+    fi
+    deployment_update_env_var_file "$MONITORING_ENV_FILE" "$key" "$value"
+  done < "$MONITORING_ENV_EXAMPLE"
+}
+
+source_monitoring_env_file() {
+  set -a
+  # shellcheck source=/dev/null
+  source "$MONITORING_ENV_FILE"
+  set +a
+}
+
 sync_monitoring_env_vars() {
-  update_env_var "ENABLE_TELEMETRY" "$(deployment_monitoring_enabled)"
+  local telemetry_enabled
+  local dashboard_url
+  local collector_config_file
+  local langsmith_api_key
+
+  sync_monitoring_env_defaults || return 1
+  source_monitoring_env_file
+
+  telemetry_enabled="$(deployment_monitoring_enabled)"
+  dashboard_url="$(deployment_monitoring_dashboard_url docker)"
+
+  export ENABLE_TELEMETRY="$telemetry_enabled"
+  export MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER"
+  export MONITORING_DASHBOARD_URL="$dashboard_url"
+
+  update_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
   update_env_var "MONITORING_PROVIDER" "$DEPLOYMENT_MONITORING_PROVIDER"
-  update_env_var "MONITORING_DASHBOARD_URL" "$(deployment_monitoring_dashboard_url docker)"
+  update_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+  update_monitoring_env_var "MONITORING_PROVIDER" "$DEPLOYMENT_MONITORING_PROVIDER"
+
+  if [ "$telemetry_enabled" != "true" ]; then
+    source_monitoring_env_file
+    return 0
+  fi
+
+  export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"
+  export OTEL_EXPORTER_OTLP_PROTOCOL="http"
+  update_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$OTEL_EXPORTER_OTLP_ENDPOINT"
+  update_env_var "OTEL_EXPORTER_OTLP_PROTOCOL" "$OTEL_EXPORTER_OTLP_PROTOCOL"
+
+  collector_config_file="$(docker_monitoring_collector_config_file)"
+  export OTEL_COLLECTOR_CONFIG_FILE="$collector_config_file"
+  update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"
+
+  if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "langfuse" ]; then
+    export LANGFUSE_INIT_PROJECT_PUBLIC_KEY="${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-nexent-local}"
+    export LANGFUSE_INIT_PROJECT_SECRET_KEY="${LANGFUSE_INIT_PROJECT_SECRET_KEY:-sk-lf-nexent-local}"
+    if [ -z "${LANGFUSE_OTLP_AUTH_HEADER:-}" ]; then
+      LANGFUSE_OTLP_AUTH_HEADER="Basic $(printf "%s:%s" "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "$LANGFUSE_INIT_PROJECT_SECRET_KEY" | base64 | tr -d '\n')"
+    fi
+    export LANGFUSE_OTLP_AUTH_HEADER
+    update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$LANGFUSE_OTLP_AUTH_HEADER"
+  fi
+
+  if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "langsmith" ]; then
+    langsmith_api_key="$(deployment_get_env_var_file "$ROOT_ENV_FILE" "LANGSMITH_API_KEY" 2>/dev/null || true)"
+    if [ -z "${LANGSMITH_API_KEY:-}" ] && [ -n "$langsmith_api_key" ]; then
+      export LANGSMITH_API_KEY="$langsmith_api_key"
+    fi
+    export LANGSMITH_PROJECT="${LANGSMITH_PROJECT:-nexent}"
+    export LANGSMITH_OTLP_TRACES_ENDPOINT="${LANGSMITH_OTLP_TRACES_ENDPOINT:-https://api.smith.langchain.com/otel/v1/traces}"
+    update_monitoring_env_var "LANGSMITH_API_KEY" "${LANGSMITH_API_KEY:-}"
+    update_monitoring_env_var "LANGSMITH_PROJECT" "$LANGSMITH_PROJECT"
+    update_monitoring_env_var "LANGSMITH_OTLP_TRACES_ENDPOINT" "$LANGSMITH_OTLP_TRACES_ENDPOINT"
+  fi
+
+  source_monitoring_env_file
 }
 
 pull_mcp_image() {
@@ -983,6 +1115,11 @@ deploy_monitoring() {
     return 1
   fi
 
+  if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "langsmith" ] && [ -z "${LANGSMITH_API_KEY:-}" ]; then
+    echo "   ❌ ERROR LANGSMITH_API_KEY is required when --monitoring-provider langsmith is selected"
+    return 1
+  fi
+
   local profile_args=()
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
     phoenix|grafana|zipkin|langfuse)
@@ -991,7 +1128,7 @@ deploy_monitoring() {
   esac
 
   echo "🔭 Starting monitoring services..."
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
     echo "   ❌ ERROR Failed to start monitoring services"
     return 1
   fi

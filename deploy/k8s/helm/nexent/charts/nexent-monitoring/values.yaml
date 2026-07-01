@@ -87,7 +87,7 @@ phoenix:
 grafana:
   enabled: false
   adminUser: admin
-  adminPassword: nexent-grafana-admin
+  adminPassword: nexent@4321
   defaultLanguage: zh-Hans
   service:
     type: NodePort
@@ -137,7 +137,7 @@ langfuse:
     nodePort: 30001
   postgres:
     user: postgres
-    password: postgres
+    password: nexent@4321
     database: postgres
     storage:
       size: 10Gi
