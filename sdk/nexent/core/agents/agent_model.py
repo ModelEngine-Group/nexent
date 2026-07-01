@@ -132,6 +132,7 @@ class ToolConfig(BaseModel):
     source: str = Field(description="Tool source, can be local or mcp")
     usage: Optional[str] = Field(description="MCP server name", default=None)
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
+    labels: Optional[List[str]] = Field(description="Tool labels for filtering", default=None)
 
 
 VerificationEvent = Literal[
