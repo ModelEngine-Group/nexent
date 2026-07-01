@@ -107,15 +107,16 @@ async def download_agent_evaluation_report_api(
 ):
     try:
         _, tenant_id = get_current_user_id(authorization)
-        data = generate_agent_evaluation_report_impl(
+        data, fail_count = generate_agent_evaluation_report_impl(
             agent_evaluation_id=agent_evaluation_id,
             tenant_id=tenant_id,
         )
+        suffix = "_failed.xlsx" if fail_count > 0 else "_all.xlsx"
         return StreamingResponse(
             iter([data]),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
-                "Content-Disposition": f"attachment; filename=evaluation_report_{agent_evaluation_id}_failed.xlsx"
+                "Content-Disposition": f"attachment; filename=evaluation_report_{agent_evaluation_id}{suffix}"
             },
         )
     except ValueError as ve:

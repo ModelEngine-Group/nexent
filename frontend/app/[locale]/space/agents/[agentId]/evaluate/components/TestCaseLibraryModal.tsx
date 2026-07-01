@@ -3,19 +3,18 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  App,
   Button,
   Empty,
   Flex,
   Modal,
   Table,
-  Tag,
   Typography,
   Upload,
   Input,
-  message,
 } from "antd";
 const { TextArea } = Input;
-import { Trash2, CheckCircle } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 import { evaluationService } from "@/services/evaluationService";
 import { useEvaluationSets } from "@/hooks/evaluation/useEvaluationSets";
@@ -27,7 +26,7 @@ interface TestCaseLibraryModalProps {
   open: boolean;
   onClose: () => void;
   selectedSetId: number | null;
-  onSelect: (set: EvaluationSet) => void;
+  onSelect: (set: EvaluationSet | null) => void;
   uploadOpen?: boolean;
   onUploadOpenChange?: (open: boolean) => void;
 }
@@ -41,6 +40,7 @@ export default function TestCaseLibraryModal({
   onUploadOpenChange,
 }: TestCaseLibraryModalProps) {
   const { t } = useTranslation("common");
+  const { message: messageApi } = App.useApp();
   const { sets, loading, deletingId, loadSets, deleteSet } = useEvaluationSets();
 
   const [uploadOpenInternal, setUploadOpenInternal] = useState(false);
@@ -50,21 +50,42 @@ export default function TestCaseLibraryModal({
   const [uploadDesc, setUploadDesc] = useState("");
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [localSelectedId, setLocalSelectedId] = useState<number | null>(null);
+  const [changed, setChanged] = useState(false);
 
   useEffect(() => {
     if (open) {
+      setLocalSelectedId(selectedSetId);
+      setChanged(false);
       loadSets();
     }
-  }, [open, loadSets]);
+  }, [open, selectedSetId, loadSets]);
+
+  const handleClose = () => {
+    if (changed) {
+      const next =
+        localSelectedId !== null
+          ? sets.find((s) => s.evaluation_set_id === localSelectedId) ?? null
+          : null;
+      onSelect(next);
+    }
+    onClose();
+  };
+
+  const handleToggle = (record: EvaluationSet) => {
+    const isCurrent = record.evaluation_set_id === localSelectedId;
+    setLocalSelectedId(isCurrent ? null : record.evaluation_set_id);
+    setChanged(true);
+  };
 
   const handleUpload = async () => {
     const name = uploadName.trim();
     if (!name) {
-      message.error(t("agentEvaluation.createSetModal.nameRequired"));
+      messageApi.error(t("agentEvaluation.createSetModal.nameRequired"));
       return;
     }
     if (!uploadFiles.length) {
-      message.error(t("agentEvaluation.createSetModal.fileRequired"));
+      messageApi.error(t("agentEvaluation.createSetModal.fileRequired"));
       return;
     }
     setUploading(true);
@@ -74,14 +95,14 @@ export default function TestCaseLibraryModal({
         description: uploadDesc || undefined,
         files: uploadFiles,
       });
-      message.success(t("agentEvaluation.message.createSetSuccess"));
+      messageApi.success(t("agentEvaluation.message.createSetSuccess"));
       setUploadOpen(false);
       setUploadName("");
       setUploadDesc("");
       setUploadFiles([]);
       loadSets();
     } catch (err: any) {
-      message.error(err?.message || t("agentEvaluation.message.createSetFailed"));
+      messageApi.error(err?.message || t("agentEvaluation.message.createSetFailed"));
     } finally {
       setUploading(false);
     }
@@ -103,23 +124,14 @@ export default function TestCaseLibraryModal({
       title: t("common.name"),
       dataIndex: "name",
       key: "name",
-      render: (name, record) => (
-        <Flex align="center" gap={8}>
-          <Text>{name}</Text>
-          {record.evaluation_set_id === selectedSetId && (
-            <Tag color="blue" icon={<CheckCircle className="w-3 h-3" />}>
-              {t("agentEvaluation.lib.used")}
-            </Tag>
-          )}
-        </Flex>
-      ),
+      render: (name) => <Text>{name}</Text>,
     },
     {
-      title: t("agentEvaluation.lib.caseCount", { n: 0 }).replace("0", ""),
+      title: t("agentEvaluation.lib.caseCount"),
       key: "case_count",
       width: 100,
       render: (_, record) => (
-        <Text type="secondary">{t("agentEvaluation.lib.caseCount", { n: record.case_count ?? 0 })}</Text>
+        <Text type="secondary">{record.case_count ?? 0}</Text>
       ),
     },
     {
@@ -132,24 +144,29 @@ export default function TestCaseLibraryModal({
     {
       title: t("common.actions"),
       key: "actions",
-      width: 160,
-      render: (_, record) => (
-        <Flex gap={8}>
-          {record.evaluation_set_id !== selectedSetId && (
-            <Button size="small" type="primary" onClick={() => onSelect(record)}>
-              {t("agentEvaluation.lib.use")}
+      width: 120,
+      render: (_, record) => {
+        const isCurrent = record.evaluation_set_id === localSelectedId;
+        return (
+          <Flex gap={8}>
+            <Button
+              size="small"
+              type={isCurrent ? "default" : "primary"}
+              onClick={() => handleToggle(record)}
+            >
+              {isCurrent ? t("agentEvaluation.lib.used") : t("agentEvaluation.lib.use")}
             </Button>
-          )}
-          <Button
-            size="small"
-            danger
-            type="text"
-            icon={<Trash2 className="w-4 h-4" />}
-            loading={deletingId === record.evaluation_set_id}
-            onClick={() => handleDelete(record.evaluation_set_id, record.name)}
-          />
-        </Flex>
-      ),
+            <Button
+              size="small"
+              danger
+              type="text"
+              icon={<Trash2 className="w-4 h-4" />}
+              loading={deletingId === record.evaluation_set_id}
+              onClick={() => handleDelete(record.evaluation_set_id, record.name)}
+            />
+          </Flex>
+        );
+      },
     },
   ];
 
@@ -158,10 +175,10 @@ export default function TestCaseLibraryModal({
       <Modal
         title={t("agentEvaluation.lib.title")}
         open={open}
-        onCancel={onClose}
+        onCancel={handleClose}
         footer={null}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Flex vertical gap={12}>
           <Text type="secondary" className="text-sm">
@@ -195,7 +212,7 @@ export default function TestCaseLibraryModal({
         onOk={handleUpload}
         okText={t("agentEvaluation.createSetModal.create")}
         confirmLoading={uploading}
-        destroyOnClose
+        destroyOnHidden
       >
         <Flex vertical gap={12}>
           <Flex vertical gap={4}>

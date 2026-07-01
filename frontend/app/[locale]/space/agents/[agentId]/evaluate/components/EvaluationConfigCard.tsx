@@ -6,18 +6,17 @@ import { Button, Flex, Select, Typography, message } from "antd";
 import { BookOpen, PlayCircle, Download, FileSpreadsheet, Upload } from "lucide-react";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useStartEvaluation } from "@/hooks/evaluation/useStartEvaluation";
-import type { EvaluationSet } from "@/types/agentEvaluation";
+import { evaluationService } from "@/services/evaluationService";
+import type { AgentEvaluationRun, EvaluationSet } from "@/types/agentEvaluation";
 
 const { Text } = Typography;
-
-const TEMPLATE_HEADERS = ["序号", "测试输入", "预期输出", "备注"];
 
 interface EvaluationConfigCardProps {
   agentId: number;
   selectedSet: EvaluationSet | null;
   onOpenLibrary: () => void;
   onOpenUpload: () => void;
-  onEvaluationStarted: () => void;
+  onEvaluationStarted: (run: AgentEvaluationRun) => void;
   runningProgress?: { done: number; total: number };
 }
 
@@ -83,24 +82,24 @@ export default function EvaluationConfigCard({
       judgeModelId,
     });
     if (result) {
-      onEvaluationStarted();
+      onEvaluationStarted(result);
     }
   };
 
-  const handleDownloadTemplate = () => {
-    const sample = [
-      ["1", "帮我做一份本月销售统计表", "包含日期、金额、销售员的统计表格", "可选"],
-      ["2", "查询上季度华东区的营收数据", "返回华东区营收汇总数字", ""],
-    ];
-    const rows = [TEMPLATE_HEADERS, ...sample];
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "agent_evaluation_template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleDownloadTemplate = async () => {
+    try {
+      const blob = await evaluationService.downloadEvaluationSetTemplate();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "agent_evaluation_template.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      message.error(err?.message || t("agentEvaluation.downloadTemplateFailed"));
+    }
   };
 
   const isRunning = runningProgress != null;

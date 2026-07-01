@@ -589,14 +589,14 @@ class JiuwenSDKAdapter:
         Notes:
             openjiuwen 0.1.13 implements LLMAsJudgeMetric as a binary metric
             (1.0 pass / 0.0 fail) by parsing a JSON result from the judge model.
+            ``metric.compute()`` only returns the numeric score; the actual judge
+            verdict (with ``result`` and ``reason``) lives in the LLM response.
+            We invoke the model directly here so we can extract **both** the score
+            and the human-readable reason from the same response.
         """
         self._ensure_available()
 
         try:
-            # Import directly instead of via _lazy_import_jiuwen() to avoid
-            # triggering circular import chain in openjiuwen 0.1.13:
-            # agent_evolving -> model.py -> runner -> resource_manager
-            #   -> multi_agent/__init__ -> agent_team -> single_agent (cycle)
             from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import (
                 LLMAsJudgeMetric,
             )
@@ -611,18 +611,43 @@ class JiuwenSDKAdapter:
             user_metrics=user_metrics or "",
         )
 
-        try:
-            score = float(
-                metric.compute(
-                    prediction=model_answer,
-                    label=expected_answer,
-                    question=question,
-                )
-            )
-        except Exception as exc:
-            raise JiuwenSDKError(f"LLMAsJudgeMetric compute failed: {exc}") from exc
+        # Build the same prompt that ``metric.compute()`` uses.
+        messages = metric._template.format({
+            "question": str(question or ""),
+            "expected_answer": str(expected_answer),
+            "model_answer": str(model_answer),
+        }).to_messages()
 
-        reason = "pass" if score >= 1.0 else "fail"
+        try:
+            response = asyncio.run(metric._model.invoke(messages)).content
+        except Exception as exc:
+            raise JiuwenSDKError(f"Judge LLM invoke failed: {exc}") from exc
+
+        try:
+            from openjiuwen.agent_evolving.utils import TuneUtils
+            data = TuneUtils.parse_json_from_llm_response(response)
+        except Exception as exc:
+            raise JiuwenSDKError(f"Failed to parse judge response: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise JiuwenSDKError(f"Judge response is not a JSON object: {response!r}")
+
+        result = data.get("result")
+        if result is True or (isinstance(result, str) and result.strip().lower() == "true"):
+            score = 1.0
+        else:
+            score = 0.0
+
+        raw_reason = data.get("reason")
+        if isinstance(raw_reason, str):
+            reason = raw_reason.strip()
+        elif isinstance(raw_reason, dict):
+            reason = raw_reason.get("reason") or ""
+        else:
+            reason = ""
+        if not reason:
+            reason = "pass" if score >= 1.0 else "fail"
+
         return score, reason
 
     def generate(self, **kwargs) -> dict:

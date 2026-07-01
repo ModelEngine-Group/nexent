@@ -308,6 +308,10 @@ export default function AgentGenerateDetail({}) {
     if (!editable || isGenerating || !modelId) {
       return;
     }
+    // Sync watched values before opening modal to ensure they're available on render
+    setWatchedDutyPrompt(form.getFieldValue("dutyPrompt") || "");
+    setWatchedConstraintPrompt(form.getFieldValue("constraintPrompt") || "");
+    setWatchedFewShotsPrompt(form.getFieldValue("fewShotsPrompt") || "");
     setOptimizeModalType(type);
     setOptimizeModalOpen(true);
   };

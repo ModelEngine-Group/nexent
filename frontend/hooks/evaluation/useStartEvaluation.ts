@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { message } from "antd";
+import { App } from "antd";
 import { evaluationService } from "@/services/evaluationService";
 import { useTranslation } from "react-i18next";
 import type { AgentEvaluationRun } from "@/types/agentEvaluation";
 
 export function useStartEvaluation() {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const [starting, setStarting] = useState(false);
 
   const startEvaluation = useCallback(
@@ -32,7 +33,7 @@ export function useStartEvaluation() {
         setStarting(false);
       }
     },
-    [t]
+    [t, message]
   );
 
   return { startEvaluation, starting };

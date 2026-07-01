@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { message } from "antd";
+import { App } from "antd";
 import { evaluationService } from "@/services/evaluationService";
 import { useTranslation } from "react-i18next";
 import type { EvaluationHistoryItem, AgentEvaluationRun } from "@/types/agentEvaluation";
@@ -10,12 +10,20 @@ const POLL_INTERVAL_MS = 2000;
 
 export function useEvaluationHistory(agentId: number, onCompleted?: (item: EvaluationHistoryItem) => void) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const [history, setHistory] = useState<EvaluationHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const historyRef = useRef(history);
   historyRef.current = history;
+  // ``prevSnapshotRef`` holds the previous (pre-fetch) snapshot so the
+  // PENDING/RUNNING -> terminal transition detector can compare a stable
+  // "before" view against the freshly fetched "after" view. Using
+  // ``historyRef.current`` after ``setHistory(updated)`` is too late: it now
+  // points at the same array, so the transition (RUNNING -> COMPLETED) is
+  // never observed and ``onCompleted`` is never invoked.
+  const prevSnapshotRef = useRef<EvaluationHistoryItem[]>([]);
   const onCompletedRef = useRef(onCompleted);
   onCompletedRef.current = onCompleted;
 
@@ -26,6 +34,7 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
     judge_model_name: run.judge_model_name,
     status: run.status,
     score_overall: run.score_overall,
+    case_count: run.case_count,
     pass_count: run.pass_count,
     fail_count: run.fail_count,
     progress_total: run.progress_total,
@@ -47,7 +56,12 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
   useEffect(() => {
     setLoading(true);
     fetchRuns()
-      .then((runs) => setHistory(runs.map(toHistoryItem)))
+      .then((runs) => {
+        setHistory(runs.map(toHistoryItem));
+        // Seed the snapshot for the next poll cycle so the first transition
+        // detection has a meaningful "previous" view to compare against.
+        prevSnapshotRef.current = runs.map(toHistoryItem);
+      })
       .catch(() => message.error(t("agentEvaluation.message.loadRunsFailed")))
       .finally(() => setLoading(false));
     return () => stopPolling();
@@ -64,14 +78,22 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
           const runs = await fetchRuns();
           const updated = runs.map(toHistoryItem);
           setHistory(updated);
+
+          // Use the snapshot captured BEFORE this tick as the "previous"
+          // state. ``prevSnapshotRef`` is refreshed below so the next tick
+          // sees the just-fetched ``updated`` as its own "previous".
+          const previous = prevSnapshotRef.current;
+          prevSnapshotRef.current = updated;
+
           const stillRunning = updated.some(
             (r) => r.status === "PENDING" || r.status === "RUNNING"
           );
           if (!stillRunning) stopPolling();
+
           if (onCompletedRef.current) {
             for (const item of updated) {
               if (item.status === "COMPLETED" || item.status === "FAILED") {
-                const prev = historyRef.current.find(
+                const prev = previous.find(
                   (r) => r.agent_evaluation_id === item.agent_evaluation_id
                 );
                 if (prev && (prev.status === "PENDING" || prev.status === "RUNNING")) {
@@ -103,8 +125,8 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
         setDeletingId(null);
       }
     },
-    [t]
+    [t, message]
   );
 
-  return { history, loading, deletingId, loadHistory: fetchRuns, deleteRun };
+  return { history, loading, deletingId, loadHistory: fetchRuns, deleteRun, setHistory };
 }

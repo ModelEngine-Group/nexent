@@ -37,6 +37,7 @@ export type AgentEvaluationRun = {
   progress_total?: number;
   progress_done?: number;
   score_overall?: number | null;
+  case_count?: number | null;
   pass_count?: number | null;
   fail_count?: number | null;
   error_message?: string | null;
@@ -50,6 +51,7 @@ export type EvaluationHistoryItem = {
   judge_model_name?: string;
   status: AgentEvaluationRun["status"];
   score_overall?: number | null;
+  case_count?: number | null;
   pass_count?: number | null;
   fail_count?: number | null;
   progress_total?: number;

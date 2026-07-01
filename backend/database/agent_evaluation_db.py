@@ -1,9 +1,9 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, Integer
+from sqlalchemy import case as sql_case, func
 from database.client import as_dict, get_db_session
-from database.db_models import AgentEvaluation, AgentEvaluationCase, EvaluationSet
+from database.db_models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
 
 logger = logging.getLogger("agent_evaluation_db")
 
@@ -14,6 +14,7 @@ def create_agent_evaluation(
     agent_version_no: int,
     evaluation_set_id: int,
     total: int,
+    judge_model_id: Optional[int],
     created_by: Optional[str],
 ) -> Dict[str, Any]:
     with get_db_session() as session:
@@ -25,6 +26,7 @@ def create_agent_evaluation(
             status="PENDING",
             progress_total=total,
             progress_done=0,
+            judge_model_id=judge_model_id,
             created_by=created_by,
             updated_by=created_by,
             delete_flag="N",
@@ -32,7 +34,6 @@ def create_agent_evaluation(
         session.add(rec)
         session.flush()
 
-        # Also fetch evaluation set name for the response
         es_row = (
             session.query(EvaluationSet.name)
             .filter(
@@ -42,8 +43,20 @@ def create_agent_evaluation(
             .scalar()
         )
 
+        judge_model_name = None
+        if judge_model_id is not None:
+            judge_model_name = (
+                session.query(ModelRecord.display_name)
+                .filter(
+                    ModelRecord.model_id == judge_model_id,
+                    ModelRecord.tenant_id == tenant_id,
+                )
+                .scalar()
+            )
+
         result = as_dict(rec)
         result["evaluation_set_name"] = es_row
+        result["judge_model_name"] = judge_model_name
         return result
 
 
@@ -81,7 +94,48 @@ def get_agent_evaluation(agent_evaluation_id: int, tenant_id: str) -> Dict[str, 
         ).first()
         if not rec:
             raise ValueError("agent evaluation not found")
-        return as_dict(rec)
+        result = as_dict(rec)
+
+        evaluation_set_name = (
+            session.query(EvaluationSet.name)
+            .filter(
+                EvaluationSet.evaluation_set_id == rec.evaluation_set_id,
+                EvaluationSet.tenant_id == tenant_id,
+            )
+            .scalar()
+        )
+        result["evaluation_set_name"] = evaluation_set_name
+
+        agent_name = (
+            session.query(AgentInfo.display_name, AgentInfo.name)
+            .filter(
+                AgentInfo.agent_id == rec.agent_id,
+                AgentInfo.tenant_id == tenant_id,
+            )
+            .order_by(AgentInfo.version_no.desc())
+            .first()
+        )
+        if agent_name is not None:
+            display_name, programmatic_name = agent_name
+            result["agent_name"] = display_name or programmatic_name or ""
+        else:
+            result["agent_name"] = ""
+
+        judge_model_name = None
+        if rec.judge_model_id is not None:
+            judge_model_name = (
+                session.query(ModelRecord.display_name, ModelRecord.model_name)
+                .filter(
+                    ModelRecord.model_id == rec.judge_model_id,
+                    ModelRecord.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if judge_model_name is not None:
+                judge_display, judge_repo = judge_model_name
+                judge_model_name = judge_display or judge_repo
+        result["judge_model_name"] = judge_model_name
+        return result
 
 
 def list_agent_evaluations_by_agent(
@@ -91,10 +145,15 @@ def list_agent_evaluations_by_agent(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     with get_db_session() as session:
+        # ``case((<bool_expr>, 1), else_=0)`` translates to SQL
+        # ``CASE WHEN <bool_expr> THEN 1 ELSE 0 END``, which is summed per row.
+        # The previous ``func.cast(<bool_expr>, Integer)`` produced a single
+        # constant (the Python-side truthiness of the whole comparison), making
+        # every pass_count return 0. See CRITICAL-1 in the audit report.
         pass_count_expr = func.sum(
-            func.cast(
-                AgentEvaluationCase.pass_status == "pass",
-                Integer,
+            sql_case(
+                (AgentEvaluationCase.pass_status == "pass", 1),
+                else_=0,
             )
         ).label("pass_count")
 
@@ -102,6 +161,7 @@ def list_agent_evaluations_by_agent(
             session.query(
                 AgentEvaluation,
                 EvaluationSet.name.label("evaluation_set_name"),
+                ModelRecord.display_name.label("judge_model_name"),
                 func.count(AgentEvaluationCase.agent_evaluation_case_id).label("case_count"),
                 pass_count_expr,
             )
@@ -109,6 +169,11 @@ def list_agent_evaluations_by_agent(
                 EvaluationSet,
                 (AgentEvaluation.evaluation_set_id == EvaluationSet.evaluation_set_id)
                 & (AgentEvaluation.tenant_id == EvaluationSet.tenant_id),
+            )
+            .outerjoin(
+                ModelRecord,
+                (AgentEvaluation.judge_model_id == ModelRecord.model_id)
+                & (AgentEvaluation.tenant_id == ModelRecord.tenant_id),
             )
             .outerjoin(
                 AgentEvaluationCase,
@@ -119,16 +184,21 @@ def list_agent_evaluations_by_agent(
                 AgentEvaluation.agent_id == agent_id,
                 AgentEvaluation.delete_flag == "N",
             )
-            .group_by(AgentEvaluation.agent_evaluation_id, EvaluationSet.name)
+            .group_by(
+                AgentEvaluation.agent_evaluation_id,
+                EvaluationSet.name,
+                ModelRecord.display_name,
+            )
             .order_by(AgentEvaluation.create_time.desc())
             .offset(offset)
             .limit(limit)
         )
         rows = q.all()
         results = []
-        for eval_row, evaluation_set_name, case_count, pass_count in rows:
+        for eval_row, evaluation_set_name, judge_model_name, case_count, pass_count in rows:
             rec = as_dict(eval_row)
             rec["evaluation_set_name"] = evaluation_set_name
+            rec["judge_model_name"] = judge_model_name
             rec["case_count"] = case_count or 0
             rec["pass_count"] = pass_count or 0
             rec["fail_count"] = (case_count or 0) - (pass_count or 0)

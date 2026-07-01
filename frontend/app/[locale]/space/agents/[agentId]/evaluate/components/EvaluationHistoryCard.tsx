@@ -108,7 +108,7 @@ export default function EvaluationHistoryCard({
                 <Flex
                   key={item.agent_evaluation_id}
                   vertical
-                  gap={2}
+                  gap={4}
                   className={`p-3 rounded-lg border cursor-pointer transition-all ${
                     selectedId === item.agent_evaluation_id
                       ? "border-blue-400 bg-blue-50 dark:bg-blue-900/20"
@@ -116,37 +116,49 @@ export default function EvaluationHistoryCard({
                   }`}
                   onClick={() => onSelect(item)}
                 >
-                  {/* Top row: version tag + set name */}
-                  <Flex justify="space-between" align="center">
-                    <Flex gap={6} align="center">
-                      <Text className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-medium font-mono">
+                  {/* Row 1: version tag + set name + status badge */}
+                  <Flex justify="space-between" align="center" gap={6}>
+                    <Flex gap={4} align="center" className="min-w-0 flex-1">
+                      <Text className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-medium font-mono shrink-0">
                         v{item.agent_version_no}
                       </Text>
                       <Text
-                        className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate max-w-[120px]"
+                        className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate"
                         title={item.evaluation_set_name}
                       >
                         {item.evaluation_set_name || t("agentEvaluation.history.noSet")}
                       </Text>
                     </Flex>
-                    <Text className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400">
+                    <Text className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400">
                       {STATUS_LABELS[item.status] || item.status}
                     </Text>
                   </Flex>
 
-                  {/* Middle row: pass rate + case count spread across */}
-                  <Flex gap={8} align="center">
-                    <Text className="text-2xl font-bold text-slate-800 dark:text-slate-100 leading-none">
-                      {rate}
-                    </Text>
-                    <Text className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
-                      {total} {t("agentEvaluation.history.pieces")}
-                    </Text>
+                  {/* Row 2: judge model name + pass rate (right) */}
+                  <Flex justify="space-between" align="center" gap={6}>
+                    {item.judge_model_name ? (
+                      <Text
+                        className="text-xs text-slate-500 dark:text-slate-400 truncate"
+                        title={item.judge_model_name}
+                      >
+                        {item.judge_model_name}
+                      </Text>
+                    ) : (
+                      <Text className="text-xs text-slate-400">-</Text>
+                    )}
+                    <Flex gap={6} align="baseline" className="shrink-0">
+                      <Text className="text-xs text-slate-500 dark:text-slate-400">
+                        通过率
+                      </Text>
+                      <Text className="text-2xl font-bold text-slate-800 dark:text-slate-100 leading-none">
+                        {rate}
+                      </Text>
+                    </Flex>
                   </Flex>
 
-                  {/* Bottom row: time + delete */}
-                  <Flex justify="space-between" align="center">
-                    <Text className="text-xs text-slate-400">
+                  {/* Row 3: time + delete */}
+                  <Flex justify="space-between" align="center" gap={4}>
+                    <Text className="text-xs text-slate-400 truncate">
                       {item.create_time ? formatDateTime(item.create_time) : "-"}
                     </Text>
                     <Button
@@ -155,7 +167,7 @@ export default function EvaluationHistoryCard({
                       danger
                       icon={<Trash2 className="w-3.5 h-3.5" />}
                       loading={deletingId === item.agent_evaluation_id}
-                      className="opacity-60 hover:opacity-100"
+                      className="opacity-60 hover:opacity-100 shrink-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         Modal.confirm({

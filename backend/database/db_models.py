@@ -1462,6 +1462,14 @@ class AgentEvaluation(TableBase):
     progress_total = Column(Integer, default=0, doc="Total cases")
     progress_done = Column(Integer, default=0, doc="Completed cases")
 
+    judge_model_id = Column(
+        Integer,
+        doc=(
+            "Model id used by the judge. Persisted so the background worker can "
+            "recover it after restart and the frontend can resolve judge_model_name."
+        ),
+    )
+
     score_overall = Column(Float, doc="Overall score (0-1)")
 
     error_message = Column(Text, doc="Failure reason")
@@ -1470,6 +1478,7 @@ class AgentEvaluation(TableBase):
         Index("ix_agent_eval_tenant_id", "tenant_id"),
         Index("ix_agent_eval_agent_id", "tenant_id", "agent_id"),
         Index("ix_agent_eval_set_id", "tenant_id", "evaluation_set_id"),
+        Index("ix_agent_eval_judge_model_id", "tenant_id", "judge_model_id"),
         {"schema": SCHEMA},
     )
 

@@ -7,7 +7,7 @@ from openpyxl.styles import Font, PatternFill
 
 
 REQUIRED_HEADERS = ["query", "answer"]
-OPTIONAL_HEADERS = ["context", "case_id"]
+OPTIONAL_HEADERS = ["case_id"]
 ALL_HEADERS = REQUIRED_HEADERS + OPTIONAL_HEADERS
 
 
@@ -27,10 +27,9 @@ def build_evaluation_set_excel_template_bytes() -> bytes:
     ws.title = "evaluation_cases"
 
     headers = [
-        "query*",
-        "answer*",
-        "context",
-        "case_id",
+        "序号",
+        "问题*",
+        "答案*",
     ]
 
     ws.append(headers)
@@ -47,23 +46,20 @@ def build_evaluation_set_excel_template_bytes() -> bytes:
             cell.fill = required_fill
 
     # Column widths
-    ws.column_dimensions["A"].width = 50  # query
-    ws.column_dimensions["B"].width = 50  # answer
-    ws.column_dimensions["C"].width = 60  # context
-    ws.column_dimensions["D"].width = 24  # case_id
+    ws.column_dimensions["A"].width = 12  # 序号 (case_id)
+    ws.column_dimensions["B"].width = 50  # 问题 (query)
+    ws.column_dimensions["C"].width = 50  # 答案 (answer)
 
     # Example rows
     ws.append([
+        "c1",
         "1+1等于几？",
         "2",
-        "",
-        "c1",
     ])
     ws.append([
-        "根据上下文回答：小明今年10岁，明年几岁？",
-        "11岁",
-        "小明今年10岁。",
         "c2",
+        "中国首都是哪里？",
+        "北京",
     ])
 
     out = io.BytesIO()
@@ -74,11 +70,32 @@ def build_evaluation_set_excel_template_bytes() -> bytes:
 def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[str, Any]]:
     """Parse evaluation cases from .xlsx or .xls.
 
-    Expected headers: query, answer, context, case_id (case-insensitive).
+    Expected headers (case-insensitive): query, answer, case_id (or aliases).
     A trailing '*' in header is allowed (e.g. query*).
+    Chinese aliases are also recognized so the template round-trip works:
+        序号 / case_id / case_id -> case_id
+        问题 / query / query -> query
+        答案 / answer / answer -> answer
 
     Returns normalized case dicts compatible with insert_evaluation_set_cases.
     """
+
+    HEADER_ALIASES = {
+        "query": "query",
+        "问题": "query",
+        "answer": "answer",
+        "答案": "answer",
+        "case_id": "case_id",
+        "序号": "case_id",
+        "caseid": "case_id",
+        "id": "case_id",
+    }
+
+    def _canonical_header(v: Any) -> Optional[str]:
+        key = _normalize_header(v).rstrip("*")
+        if not key:
+            return None
+        return HEADER_ALIASES.get(key)
 
     lower_name = (filename or "").lower()
     if lower_name.endswith(".xlsx"):
@@ -91,9 +108,9 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
 
         header_map: Dict[str, int] = {}
         for idx, v in enumerate(header_row):
-            key = _normalize_header(v).rstrip("*")
-            if key:
-                header_map[key] = idx
+            canon = _canonical_header(v)
+            if canon:
+                header_map[canon] = idx
 
         for h in REQUIRED_HEADERS:
             if h not in header_map:
@@ -115,21 +132,20 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
 
             query = get_col("query")
             answer = get_col("answer")
-            context = get_col("context")
             case_id = get_col("case_id")
 
             # Skip fully empty rows
-            if not any([query, answer, context, case_id]):
+            if not any([query, answer, case_id]):
                 continue
 
             if not query:
-                raise ValueError(f"Row {excel_row_idx}: query is required")
+                raise ValueError(f"Row {excel_row_idx}: 问题 is required")
             if not answer:
-                raise ValueError(f"Row {excel_row_idx}: answer is required")
+                raise ValueError(f"Row {excel_row_idx}: 答案 is required")
 
             normalized: Dict[str, Any] = {
                 "case_id": case_id,
-                "inputs": {"query": query, **({"context": context} if context is not None else {})},
+                "inputs": {"query": query},
                 "label": {"answer": answer},
                 "order_no": len(cases),
             }
@@ -149,9 +165,9 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
         header_row = sheet.row_values(0)
         header_map: Dict[str, int] = {}
         for idx, v in enumerate(header_row):
-            key = _normalize_header(v).rstrip("*")
-            if key:
-                header_map[key] = idx
+            canon = _canonical_header(v)
+            if canon:
+                header_map[canon] = idx
 
         for h in REQUIRED_HEADERS:
             if h not in header_map:
@@ -172,20 +188,19 @@ def parse_evaluation_cases_from_excel(filename: str, raw: bytes) -> List[Dict[st
 
             query = get_cell("query")
             answer = get_cell("answer")
-            context = get_cell("context")
             case_id = get_cell("case_id")
 
-            if not any([query, answer, context, case_id]):
+            if not any([query, answer, case_id]):
                 continue
 
             if not query:
-                raise ValueError(f"Row {excel_row_idx}: query is required")
+                raise ValueError(f"Row {excel_row_idx}: 问题 is required")
             if not answer:
-                raise ValueError(f"Row {excel_row_idx}: answer is required")
+                raise ValueError(f"Row {excel_row_idx}: 答案 is required")
 
             normalized: Dict[str, Any] = {
                 "case_id": case_id,
-                "inputs": {"query": query, **({"context": context} if context is not None else {})},
+                "inputs": {"query": query},
                 "label": {"answer": answer},
                 "order_no": len(cases),
             }
