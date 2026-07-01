@@ -682,6 +682,105 @@ docker_monitoring_collector_config_file() {
   esac
 }
 
+docker_monitoring_active_services() {
+  printf '%s\n' otel-collector
+
+  case "$DEPLOYMENT_MONITORING_PROVIDER" in
+    phoenix)
+      printf '%s\n' phoenix
+      ;;
+    grafana)
+      printf '%s\n' tempo grafana
+      ;;
+    zipkin)
+      printf '%s\n' zipkin
+      ;;
+    langfuse)
+      printf '%s\n' langfuse-worker langfuse-web langfuse-clickhouse langfuse-minio langfuse-redis langfuse-postgres
+      ;;
+  esac
+}
+
+docker_monitoring_profile_services() {
+  printf '%s\n' \
+    phoenix \
+    tempo \
+    grafana \
+    zipkin \
+    langfuse-worker \
+    langfuse-web \
+    langfuse-clickhouse \
+    langfuse-minio \
+    langfuse-redis \
+    langfuse-postgres
+}
+
+docker_monitoring_container_names() {
+  printf '%s\n' \
+    nexent-otel-collector \
+    nexent-phoenix \
+    nexent-tempo \
+    nexent-grafana \
+    nexent-zipkin \
+    nexent-langfuse-worker \
+    nexent-langfuse-web \
+    nexent-langfuse-clickhouse \
+    nexent-langfuse-minio \
+    nexent-langfuse-redis \
+    nexent-langfuse-postgres
+}
+
+docker_monitoring_containers_exist() {
+  command -v docker >/dev/null 2>&1 || return 1
+
+  local container
+  while IFS= read -r container; do
+    [ -n "$container" ] || continue
+    if docker container inspect "$container" >/dev/null 2>&1; then
+      return 0
+    fi
+  done < <(docker_monitoring_container_names)
+
+  return 1
+}
+
+stop_monitoring_services() {
+  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+
+  [ -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ] || return 0
+  docker_monitoring_containers_exist || return 0
+
+  echo "🔭 Stopping monitoring services..."
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" down --remove-orphans; then
+    echo "   ❌ ERROR Failed to stop monitoring services"
+    return 1
+  fi
+}
+
+cleanup_stale_monitoring_services() {
+  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local active_services
+  local service
+  local stale_services=()
+
+  active_services="$(docker_monitoring_active_services)"
+  while IFS= read -r service; do
+    [ -n "$service" ] || continue
+    if ! printf '%s\n' "$active_services" | grep -Fxq "$service"; then
+      stale_services+=("$service")
+    fi
+  done < <(docker_monitoring_profile_services)
+
+  [ "${#stale_services[@]}" -gt 0 ] || return 0
+
+  echo "   🧹 Removing stale monitoring provider services..."
+  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" stop "${stale_services[@]}" >/dev/null 2>&1 || true
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" rm -f "${stale_services[@]}"; then
+    echo "   ❌ ERROR Failed to remove stale monitoring services"
+    return 1
+  fi
+}
+
 update_monitoring_env_var() {
   local key="$1"
   local value="$2"
@@ -1109,7 +1208,10 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || return 0
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    stop_monitoring_services || return 1
+    return 0
+  fi
 
   if [ ! -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ]; then
     echo "   ❌ ERROR Monitoring compose file not found: $COMPOSE_DIR/docker-compose-monitoring.yml"
@@ -1129,6 +1231,7 @@ deploy_monitoring() {
   esac
 
   echo "🔭 Starting monitoring services..."
+  cleanup_stale_monitoring_services || return 1
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
     echo "   ❌ ERROR Failed to start monitoring services"
     return 1
