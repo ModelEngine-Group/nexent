@@ -55,7 +55,7 @@ Nexent is a zero-code platform for auto-generating AI agents. Monorepo with:
 
 ## Developer Commands
 
-### Backend (Python 3.11)
+### Backend (Python 3.10)
 
 ```bash
 # Setup

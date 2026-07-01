@@ -27,7 +27,7 @@ nexent/
 
 ### Backend Tech Stack
 - **Framework**: FastAPI
-- **Language**: Python 3.11+
+- **Language**: Python 3.10+
 - **Database**: PostgreSQL + Redis + Elasticsearch
 - **File Storage**: MinIO
 - **Task Queue**: Celery + Ray
@@ -58,7 +58,7 @@ Review that guide first, then return here for module-specific details.
 - **Details**: See [Frontend Overview](../frontend/overview.md)
 
 ### 🔧 Backend Development
-- **Tech Stack**: FastAPI + Python 3.11+ + PostgreSQL + Redis + Elasticsearch
+- **Tech Stack**: FastAPI + Python 3.10+ + PostgreSQL + Redis + Elasticsearch
 - **Core Features**: API services, agent management, data processing, vector search
 - **Details**: See [Backend Overview](../backend/overview.md)
 
