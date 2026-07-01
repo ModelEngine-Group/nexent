@@ -1412,7 +1412,9 @@ class TestGetLlmModel:
             api_key="test_api_key",
             max_context_tokens=4096,
             ssl_verify=True,
-            timeout_seconds=None
+            timeout_seconds=None,
+            model_factory=None,
+            display_name=None,
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})
@@ -1492,45 +1494,6 @@ class TestGetLlmModel:
         assert mock_tenant_config.get_model_config.call_count == 2
         assert mock_tenant_config.get_model_config.call_args_list[0][1]["tenant_id"] == "tenant1"
         assert mock_tenant_config.get_model_config.call_args_list[1][1]["tenant_id"] == "tenant2"
-
-
-class TestBuildLlmModel:
-    """Test cases for build_llm_model function"""
-
-    @patch('backend.services.file_management_service.MessageObserver')
-    @patch('backend.services.file_management_service.OpenAILongContextModel')
-    @patch('backend.services.file_management_service.get_model_name_from_config')
-    def test_build_llm_model_from_config(self, mock_get_model_name, mock_openai_model, mock_message_observer):
-        """build_llm_model builds an OpenAILongContextModel from an explicit config dict."""
-        from backend.services.file_management_service import build_llm_model
-
-        mock_config = {
-            "base_url": "http://agent.example.com",
-            "api_key": "agent_api_key",
-            "max_tokens": 8192,
-            "ssl_verify": False,
-            "timeout_seconds": 30,
-        }
-        mock_get_model_name.return_value = "agent-model"
-        mock_observer_instance = Mock()
-        mock_message_observer.return_value = mock_observer_instance
-        mock_model_instance = Mock()
-        mock_openai_model.return_value = mock_model_instance
-
-        result = build_llm_model(mock_config)
-
-        assert result == mock_model_instance
-        mock_get_model_name.assert_called_once_with(mock_config)
-        mock_openai_model.assert_called_once_with(
-            observer=mock_observer_instance,
-            model_id="agent-model",
-            api_base="http://agent.example.com",
-            api_key="agent_api_key",
-            max_context_tokens=8192,
-            ssl_verify=False,
-            timeout_seconds=30,
-        )
-
 
 class TestResolvePreviewFile:
     """Test cases for resolve_preview_file function"""

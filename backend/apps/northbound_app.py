@@ -206,6 +206,13 @@ async def run_chat(
                     "or a list of attachment objects with full metadata.",
         examples=[["s3://nexent/attachments/user123/20260609_report.pdf"]],
     ),
+    model_id: Optional[int] = Body(
+        None,
+        embed=True,
+        description="Optional model ID to use for this run. Overrides the agent's default "
+                    "model so different models can be used for Q&A on the same agent.",
+        examples=[123],
+    ),
     meta_data: Optional[Dict[str, Any]] = Body(
         None,
         embed=True,
@@ -255,6 +262,7 @@ async def run_chat(
             attachments=attachments,
             meta_data=meta_data,
             tool_params=tool_params,
+            model_id=model_id,
             idempotency_key=idempotency_key,
         )
     except LimitExceededError as e:

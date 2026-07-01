@@ -4,7 +4,7 @@ Provides tiktoken-accurate estimation when available, with a CJK-aware
 heuristic fallback. Extracted from agent_context for reuse across core.
 """
 
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep
 from smolagents.models import ChatMessage
@@ -61,7 +61,7 @@ def estimate_tokens_text(text: str) -> int:
     return max(1, int((non_cjk_count // 4.0) + (cjk_count // 1.1)))
 
 
-def _extract_text_from_chat_message(msg: ChatMessage) -> Optional[str]:
+def _extract_text_from_chat_message(msg: Union[ChatMessage, dict, Any]) -> Optional[str]:
     """Extract plain text from a single ChatMessage.
 
     Compatible with content as str or list[{"type": "text", "text": "..."}].
@@ -69,12 +69,13 @@ def _extract_text_from_chat_message(msg: ChatMessage) -> Optional[str]:
     """
     if msg is None:
         return None
-    if isinstance(msg.content, str):
-        return msg.content
-    if isinstance(msg.content, list):
+    content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
         parts = [
             block.get("text", "")
-            for block in msg.content
+            for block in content
             if isinstance(block, dict) and block.get("type") == "text"
         ]
         return "".join(parts) if parts else None

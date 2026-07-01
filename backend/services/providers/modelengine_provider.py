@@ -4,11 +4,19 @@ from typing import Dict, List
 import aiohttp
 
 from consts.const import DEFAULT_LLM_MAX_TOKENS
-from services.providers.base import AbstractModelProvider, _classify_provider_error
+from services.providers.base import (
+    AbstractModelProvider,
+    _classify_provider_error,
+    _extract_capacity_hints_from_raw,
+)
 
 logger = logging.getLogger("model_provider")
 
 MODEL_ENGINE_NORTH_PREFIX = "open/router/v1"
+
+
+def _extract_capacity_hints(raw: Dict) -> Dict:
+    return _extract_capacity_hints_from_raw(raw)
 
 
 def get_model_engine_raw_url(model_engine_url: str) -> str:
@@ -96,14 +104,16 @@ class ModelEngineProvider(AbstractModelProvider):
                     continue
 
                 if internal_type:
-                    filtered_models.append({
+                    cleaned_model = {
                         "id": model.get("id", ""),
                         "model_type": internal_type,
                         "model_tag": me_type,
                         "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
                         "base_url": host,
                         "api_key": api_key,
-                    })
+                    }
+                    cleaned_model.update(_extract_capacity_hints(model))
+                    filtered_models.append(cleaned_model)
 
             return filtered_models
         except Exception as e:

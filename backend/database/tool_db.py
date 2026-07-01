@@ -5,6 +5,7 @@ from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
 from consts.model import ToolSourceEnum
+from consts.tool_labels import BUILTIN_LABEL_MAP
 from utils.tool_utils import get_local_tools_description_zh
 
 
@@ -47,6 +48,13 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
     tool_info_dict = tool_info.__dict__ | {
         "tenant_id": tenant_id, "user_id": user_id, "version_no": version_no}
 
+    # Filter out null values from params to avoid saving nulls to database
+    if 'params' in tool_info_dict and tool_info_dict['params'] is not None:
+        tool_info_dict['params'] = {
+            k: v for k, v in tool_info_dict['params'].items()
+            if v is not None
+        }
+
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
         # Note: Do not filter by user_id to avoid creating duplicate instances
@@ -71,7 +79,7 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
             session.add(new_tool_instance)
             session.flush()  # Flush to get the ID
             tool_instance = new_tool_instance
-        return tool_instance
+        return as_dict(tool_instance)
 
 
 def query_all_tools(tenant_id: str):
@@ -127,6 +135,54 @@ def query_tools_by_ids(tool_id_list: List[int]):
         tools = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(
             tool_id_list)).filter(ToolInfo.delete_flag != 'Y').all()
         return [as_dict(tool) for tool in tools]
+
+
+def query_tools_by_labels(tenant_id: str, labels: List[str]):
+    """
+    Query ToolInfo by labels using OR match (tool has ANY of the requested labels).
+
+    Args:
+        tenant_id: Tenant ID for filtering
+        labels: List of label strings to filter by
+
+    Returns:
+        List of ToolInfo dicts matching any of the given labels
+    """
+    with get_db_session() as session:
+        query = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id,
+            ToolInfo.labels.op('?|')(labels)
+        )
+        tools = query.all()
+        return [as_dict(tool) for tool in tools]
+
+
+def update_tool_labels(tool_id: int, tenant_id: str, labels: List[str], user_id: str) -> bool:
+    """
+    Update labels for a specific tool. Replaces all existing labels.
+
+    Args:
+        tool_id: Tool ID to update
+        tenant_id: Tenant ID for access control
+        labels: New list of label strings
+        user_id: User performing the update
+
+    Returns:
+        True if updated, False if tool not found or access denied
+    """
+    with get_db_session() as session:
+        tool = session.query(ToolInfo).filter(
+            ToolInfo.tool_id == tool_id,
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y'
+        ).first()
+        if not tool:
+            return False
+        tool.labels = labels
+        tool.updated_by = user_id
+        session.flush()
+        return True
 
 
 def query_all_enabled_tool_instances(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -236,11 +292,17 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 # by tool name and source to update the existing tool
                 existing_tool = existing_tool_dict[key]
                 for key, value in filtered_tool_data.items():
+                    # Preserve user-set labels; only overwrite if new labels are explicitly provided
+                    if key == "labels" and not value:
+                        continue
                     setattr(existing_tool, key, value)
                 existing_tool.updated_by = user_id
                 existing_tool.is_available = is_available
             else:
-                # create new tool
+                # create new tool — apply built-in labels for fresh installs
+                builtin_labels = BUILTIN_LABEL_MAP.get(tool.name, [])
+                if builtin_labels:
+                    filtered_tool_data["labels"] = builtin_labels
                 filtered_tool_data.update(
                     {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                 new_tool = ToolInfo(**filtered_tool_data)
@@ -258,7 +320,11 @@ def add_tool_field(tool_info):
         tool_params = tool.params
         for ele in tool_params:
             param_name = ele["name"]
-            ele["default"] = tool_info["params"].get(param_name)
+            instance_value = tool_info["params"].get(param_name)
+            # Only set default if instance value is not None
+            # This prevents null values from being saved to database and returned as defaults
+            if instance_value is not None:
+                ele["default"] = instance_value
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
         

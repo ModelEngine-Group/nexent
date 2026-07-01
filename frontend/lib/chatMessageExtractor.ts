@@ -3,7 +3,9 @@ import {
   ApiMessage,
   SearchResult,
   AgentStep,
+  StepContent,
   ApiMessageItem,
+  ApiConversationDetail,
   ChatMessageType,
   MinioFileItem,
 } from "@/types/chat";
@@ -79,6 +81,10 @@ export function extractAssistantMsgFromResponse(
       score_details: item.score_details || {},
       tool_sign: item.tool_sign || "",
       cite_index: typeof item.cite_index === "number" ? item.cite_index : -1,
+      asset_id: item.asset_id,
+      preview_url: item.preview_url,
+      download_url: item.download_url,
+      object_name: item.object_name,
     }));
   }
 
@@ -96,6 +102,45 @@ export function extractAssistantMsgFromResponse(
   let finalAnswer = "";
   let steps: AgentStep[] = [];
   if (dialog_msg.message && Array.isArray(dialog_msg.message)) {
+    let lastModelOutputIndex = -1;
+
+    const appendModelOutputContent = (
+      step: AgentStep,
+      content: string,
+      subType?: StepContent["subType"]
+    ) => {
+      if (!content || !content.trim()) {
+        return;
+      }
+
+      if (
+        lastModelOutputIndex >= 0 &&
+        step.contents[lastModelOutputIndex] &&
+        step.contents[lastModelOutputIndex].type ===
+          chatConfig.messageTypes.MODEL_OUTPUT &&
+        step.contents[lastModelOutputIndex].subType === subType
+      ) {
+        step.contents[lastModelOutputIndex].content += content;
+        return;
+      }
+
+      step.contents.push({
+        id: `model-${Date.now()}-${Math.random()
+          .toString(36)
+          .substring(2, 7)}`,
+        type: chatConfig.messageTypes.MODEL_OUTPUT,
+        subType,
+        content,
+        expanded: true,
+        timestamp: Date.now(),
+      });
+      lastModelOutputIndex = step.contents.length - 1;
+    };
+
+    const resetModelOutputTracking = () => {
+      lastModelOutputIndex = -1;
+    };
+
     dialog_msg.message.forEach((msg: ApiMessageItem) => {
       switch (msg.type) {
         case chatConfig.messageTypes.FINAL_ANSWER: {
@@ -107,91 +152,95 @@ export function extractAssistantMsgFromResponse(
           steps.push(
             createAgentStep(`step-${steps.length + 1}`, msg.content.trim())
           );
+          resetModelOutputTracking();
+          break;
+        }
+
+        case chatConfig.messageTypes.AGENT_NEW_RUN: {
+          resetModelOutputTracking();
+          break;
+        }
+
+        case chatConfig.messageTypes.MODEL_OUTPUT: {
+          const currentStep = getOrCreateCurrentStep(steps, "AI Thinking");
+          appendModelOutputContent(currentStep, msg.content);
           break;
         }
 
         case chatConfig.messageTypes.MODEL_OUTPUT_THINKING: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `model-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "model_output",
-              subType: "thinking",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "AI Thinking");
+          appendModelOutputContent(currentStep, msg.content, "thinking");
+          break;
+        }
+
+        case chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING: {
+          const currentStep = getOrCreateCurrentStep(steps, "AI Deep Thinking");
+          appendModelOutputContent(currentStep, msg.content, "deep_thinking");
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.EXECUTION_LOGS: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `execution-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "execution",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Execution");
+          const contentId = `execution-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "execution",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.ERROR: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `error-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "error",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Error");
+          const contentId = `error-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "error",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            try {
-              const placeholderData = JSON.parse(msg.content);
-              const unitId = placeholderData.unit_id;
+          const currentStep = getOrCreateCurrentStep(steps, "Search Results");
+          try {
+            const placeholderData = JSON.parse(msg.content);
+            const unitId = placeholderData.unit_id;
 
-              if (
-                unitId &&
-                dialog_msg.search_unit_id &&
-                dialog_msg.search_unit_id[unitId.toString()]
-              ) {
-                const unitSearchResults =
-                  dialog_msg.search_unit_id[unitId.toString()];
-                const searchContent = JSON.stringify(unitSearchResults);
+            if (
+              unitId &&
+              dialog_msg.search_unit_id &&
+              dialog_msg.search_unit_id[unitId.toString()]
+            ) {
+              const unitSearchResults =
+                dialog_msg.search_unit_id[unitId.toString()];
+              const searchContent = JSON.stringify(unitSearchResults);
 
-                const contentId = `search-content-${Date.now()}-${Math.random()
-                  .toString(36)
-                  .substring(2, 7)}`;
-                currentStep.contents.push({
-                  id: contentId,
-                  type: "search_content",
-                  content: searchContent,
-                  expanded: true,
-                  timestamp: Date.now(),
-                });
-              }
-            } catch (e) {
-              log.error(t("extractMsg.cannotParseSearchPlaceholder"), e);
+              const contentId = `search-content-${Date.now()}-${Math.random()
+                .toString(36)
+                .substring(2, 7)}`;
+              currentStep.contents.push({
+                id: contentId,
+                type: "search_content",
+                content: searchContent,
+                expanded: true,
+                timestamp: Date.now(),
+              });
+              resetModelOutputTracking();
             }
+          } catch (e) {
+            log.error(t("extractMsg.cannotParseSearchPlaceholder"), e);
           }
           break;
         }
@@ -209,36 +258,34 @@ export function extractAssistantMsgFromResponse(
         }
 
         case chatConfig.messageTypes.CARD: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `card-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "card",
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Card");
+          const contentId = `card-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "card",
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
         case chatConfig.messageTypes.TOOL: {
-          const currentStep = steps[steps.length - 1];
-          if (currentStep) {
-            const contentId = `tool-${Date.now()}-${Math.random()
-              .toString(36)
-              .substring(2, 7)}`;
-            currentStep.contents.push({
-              id: contentId,
-              type: "executing", // use the existing executing type to represent the tool call
-              content: msg.content,
-              expanded: true,
-              timestamp: Date.now(),
-            });
-          }
+          const currentStep = getOrCreateCurrentStep(steps, "Tool Call");
+          const contentId = `tool-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`;
+          currentStep.contents.push({
+            id: contentId,
+            type: "executing", // use the existing executing type to represent the tool call
+            content: msg.content,
+            expanded: true,
+            timestamp: Date.now(),
+          });
+          resetModelOutputTracking();
           break;
         }
 
@@ -255,6 +302,7 @@ export function extractAssistantMsgFromResponse(
             expanded: true,
             timestamp: Date.now(),
           });
+          resetModelOutputTracking();
           break;
         }
 
@@ -279,6 +327,7 @@ export function extractAssistantMsgFromResponse(
                 expanded: true,
                 timestamp: Date.now(),
               });
+              resetModelOutputTracking();
             }
           } catch (e) {
             log.error(t("extractMsg.cannotParseMaxStepsData"), e);
@@ -306,6 +355,9 @@ export function extractAssistantMsgFromResponse(
         object_name: item.object_name,
         url: item.url,
         description: item.description,
+        preview_url: item.preview_url,
+        download_url: item.download_url,
+        asset_id: item.asset_id,
       };
     });
   }
@@ -324,7 +376,8 @@ export function extractAssistantMsgFromResponse(
     showRawContent: false,
     searchResults: searchResultsContent,
     images: imagesContent,
-    attachments: assistantAttachments.length > 0 ? assistantAttachments : undefined,
+    attachments:
+      assistantAttachments.length > 0 ? assistantAttachments : undefined,
   };
   return formattedAssistantMsg;
 }
@@ -362,6 +415,9 @@ export function extractUserMsgFromResponse(
         url: item.url,
         presigned_url: item.presigned_url, // Preserve presigned_url for MCP tool access
         description: item.description,
+        preview_url: item.preview_url,
+        download_url: item.download_url,
+        asset_id: item.asset_id,
       };
     });
   }
@@ -378,4 +434,26 @@ export function extractUserMsgFromResponse(
     attachments: userAttachments.length > 0 ? userAttachments : undefined,
   };
   return formattedUserMsg;
+}
+
+export function formatConversationMessagesFromResponse(
+  conversationData: ApiConversationDetail,
+  t: any
+): ChatMessageType[] {
+  const dialogMessages = conversationData.message || [];
+  const createTime = Number(conversationData.create_time || Date.now());
+
+  return dialogMessages
+    .map((dialogMsg, index) => {
+      if (dialogMsg.role === MESSAGE_ROLES.USER) {
+        return extractUserMsgFromResponse(dialogMsg, index, createTime);
+      }
+
+      if (dialogMsg.role === MESSAGE_ROLES.ASSISTANT) {
+        return extractAssistantMsgFromResponse(dialogMsg, index, createTime, t);
+      }
+
+      return null;
+    })
+    .filter(Boolean) as ChatMessageType[];
 }

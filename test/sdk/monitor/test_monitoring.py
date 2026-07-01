@@ -26,6 +26,8 @@ from sdk.nexent.monitor.monitoring import (
     get_monitoring_buffer,
     set_monitoring_context,
     get_monitoring_context,
+    set_monitoring_capacity_snapshot,
+    set_monitoring_safe_input_budget_snapshot,
     get_agent_monitoring_context,
     agent_monitoring_context,
     _monitoring_buffer,
@@ -1388,6 +1390,43 @@ class TestWriteBatchIsolation:
 
         assert mock_session.add.call_count == 3
 
+    def test_capacity_snapshot_fields_pass_to_model_monitoring_record(self):
+        """Capacity snapshot fields are persisted through the ORM row payload."""
+        mock_session_fn, mock_model_monitoring_record = self._setup_db_mocks()
+        mock_session = MagicMock()
+        mock_session_fn.return_value.__enter__ = Mock(return_value=mock_session)
+        mock_session_fn.return_value.__exit__ = Mock(return_value=None)
+
+        buf = self._make_buffer()
+        record = {
+            "model_name": "m1",
+            "tenant_id": "t1",
+            "context_window_tokens": 128000,
+            "default_output_reserve_tokens": 1024,
+            "capability_profile_version": "openai/gpt-4o@1",
+            "capacity_source": "profile",
+            "requested_output_tokens": 1024,
+            "provider_input_limit_tokens": 126976,
+            "tokenizer_family": "o200k_base",
+            "counting_mode": "exact",
+            "unknown_capabilities": ["prompt_cache"],
+            "capacity_fingerprint": "abc123",
+            "budget_fingerprint": "w2abc",
+            "budget_w1_fingerprint": "abc123",
+            "budget_requested_output_tokens": 1024,
+            "budget_output_reserve_source": "model_default",
+            "budget_provider_input_limit_tokens": 126976,
+            "budget_uncertainty_reserve_tokens": 0,
+            "budget_uncertainty_reserve_basis": "none",
+            "budget_soft_limit_ratio": 0.8,
+            "budget_soft_input_budget_tokens": 101580,
+            "budget_hard_input_budget_tokens": 126976,
+            "budget_warnings": [],
+        }
+        buf._write_batch([record])
+
+        mock_model_monitoring_record.assert_called_once_with(**record)
+
     def test_all_invalid_records(self):
         """When every record fails, _write_batch still does not raise."""
         mock_session_fn, _ = self._setup_db_mocks()
@@ -1415,6 +1454,8 @@ class TestEnqueueMonitoringRecord:
         _mod._monitoring_user_id.set(None)
         _mod._monitoring_agent_id.set(None)
         _mod._monitoring_conversation_id.set(None)
+        _mod._monitoring_capacity_snapshot.set(None)
+        _mod._monitoring_safe_input_budget_snapshot.set(None)
 
     def test_enqueue_with_tenant_id(self):
         """Record is added to buffer when tenant_id is present."""
@@ -1496,6 +1537,128 @@ class TestEnqueueMonitoringRecord:
         mock_buffer.add_record.assert_called_once()
         record = mock_buffer.add_record.call_args[0][0]
         assert record["tenant_id"] == "from-snapshot"
+
+    def test_capacity_snapshot_fields_are_enqueued(self):
+        """Resolved capacity snapshot fields are copied to LLM monitoring rows."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 12
+        tracker.output_tokens = 5
+        tracker.token_count = 5
+        tracker._context_snapshot = {"tenant_id": "t-1"}
+        tracker._display_name = None
+
+        set_monitoring_capacity_snapshot({
+            "context_window_tokens": 128000,
+            "default_output_reserve_tokens": 1024,
+            "capability_profile_version": "openai/gpt-4o@1",
+            "field_sources": {
+                "context_window_tokens": "profile",
+                "max_output_tokens": "operator",
+            },
+            "requested_output_tokens": 1024,
+            "provider_input_limit_tokens": 127000,
+            "tokenizer_family": "o200k_base",
+            "counting_mode": "exact",
+            "unknown_capabilities": ["prompt_cache"],
+            "fingerprint": "abc123",
+        })
+
+        with patch(
+            "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+            return_value=mock_buffer,
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["context_window_tokens"] == 128000
+        assert record["default_output_reserve_tokens"] == 1024
+        assert record["capability_profile_version"] == "openai/gpt-4o@1"
+        assert record["capacity_source"] == "operator"
+        assert record["requested_output_tokens"] == 1024
+        assert record["provider_input_limit_tokens"] == 127000
+        assert record["tokenizer_family"] == "o200k_base"
+        assert record["counting_mode"] == "exact"
+        assert record["unknown_capabilities"] == ["prompt_cache"]
+        assert record["capacity_fingerprint"] == "abc123"
+
+    def test_safe_input_budget_snapshot_fields_are_enqueued(self):
+        """Resolved W2 budget snapshot fields are copied to LLM monitoring rows."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 12
+        tracker.output_tokens = 5
+        tracker.token_count = 5
+        tracker._context_snapshot = {"tenant_id": "t-1"}
+        tracker._display_name = None
+
+        set_monitoring_safe_input_budget_snapshot({
+            "fingerprint": "w2abc",
+            "w1_fingerprint": "w1abc",
+            "requested_output_tokens": 1024,
+            "output_reserve_source": "model_default",
+            "provider_input_limit_tokens": 127000,
+            "uncertainty_reserve_tokens": 12800,
+            "uncertainty_reserve_basis": "context_window_10pct",
+            "soft_limit_ratio": 0.8,
+            "soft_input_budget_tokens": 91360,
+            "hard_input_budget_tokens": 114200,
+            "warnings": ["uncertainty_reserve_active"],
+        })
+
+        with patch(
+            "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+            return_value=mock_buffer,
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["budget_fingerprint"] == "w2abc"
+        assert record["budget_w1_fingerprint"] == "w1abc"
+        assert record["budget_requested_output_tokens"] == 1024
+        assert record["budget_output_reserve_source"] == "model_default"
+        assert record["budget_provider_input_limit_tokens"] == 127000
+        assert record["budget_uncertainty_reserve_tokens"] == 12800
+        assert record["budget_uncertainty_reserve_basis"] == "context_window_10pct"
+        assert record["budget_soft_limit_ratio"] == 0.8
+        assert record["budget_soft_input_budget_tokens"] == 91360
+        assert record["budget_hard_input_budget_tokens"] == 114200
+        assert record["budget_warnings"] == ["uncertainty_reserve_active"]
+
+    def test_absent_capacity_snapshot_does_not_add_fields(self):
+        """Records remain valid when no capacity snapshot is bound."""
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        tracker = MagicMock()
+        tracker.start_time = time.time()
+        tracker.first_token_time = None
+        tracker.input_tokens = 0
+        tracker.output_tokens = 0
+        tracker.token_count = 0
+        tracker._context_snapshot = {"tenant_id": "t-1"}
+        tracker._display_name = None
+
+        set_monitoring_capacity_snapshot(None)
+
+        with patch(
+            "sdk.nexent.monitor.monitoring.get_monitoring_buffer",
+            return_value=mock_buffer,
+        ):
+            _enqueue_monitoring_record(tracker, "model-a", "op", {})
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert "capacity_fingerprint" not in record
+        assert "provider_input_limit_tokens" not in record
+        assert "budget_fingerprint" not in record
 
 
 # =========================================================================
@@ -1681,6 +1844,8 @@ class TestMonitoredClientWrapper:
         _mod._monitoring_conversation_id.set(None)
         _mod._monitoring_operation.set("unknown")
         _mod._monitoring_display_name.set("TestModel")
+        _mod._monitoring_capacity_snapshot.set(None)
+        _mod._monitoring_safe_input_budget_snapshot.set(None)
 
     def _make_monitored_client(self):
         mock_original = MagicMock()
@@ -1817,6 +1982,7 @@ class TestEnqueueClientMonitoringRecord:
         _mod._monitoring_conversation_id.set(99)
         _mod._monitoring_operation.set("title_generation")
         _mod._monitoring_display_name.set("MyModel")
+        _mod._monitoring_capacity_snapshot.set(None)
 
     def test_full_record_fields(self):
         mock_buffer = MagicMock()
@@ -1852,6 +2018,74 @@ class TestEnqueueClientMonitoringRecord:
         assert record["agent_id"] == 42
         assert record["conversation_id"] == 99
         assert record["display_name"] == "MyModel"
+
+    def test_client_record_includes_capacity_snapshot_fields(self):
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+        set_monitoring_capacity_snapshot({
+            "capacity_source": "profile",
+            "requested_output_tokens": 2048,
+            "provider_input_limit_tokens": 30000,
+            "counting_mode": "estimated",
+            "capacity_fingerprint": "def456",
+        })
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            _enqueue_client_monitoring_record(
+                model_name="test-model",
+                model_type="llm",
+                request_duration_ms=500,
+                ttft_ms=0,
+                input_tokens=10,
+                output_tokens=20,
+                total_tokens=30,
+                generation_rate=0.0,
+                is_streaming=False,
+            )
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["capacity_source"] == "profile"
+        assert record["requested_output_tokens"] == 2048
+        assert record["provider_input_limit_tokens"] == 30000
+        assert record["counting_mode"] == "estimated"
+        assert record["capacity_fingerprint"] == "def456"
+
+    def test_client_record_includes_safe_input_budget_snapshot_fields(self):
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+        set_monitoring_safe_input_budget_snapshot({
+            "fingerprint": "w2def",
+            "w1_fingerprint": "def456",
+            "requested_output_tokens": 2048,
+            "output_reserve_source": "agent",
+            "provider_input_limit_tokens": 30000,
+            "uncertainty_reserve_tokens": 0,
+            "uncertainty_reserve_basis": "none",
+            "soft_limit_ratio": 0.75,
+            "soft_input_budget_tokens": 22500,
+            "hard_input_budget_tokens": 30000,
+        })
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            _enqueue_client_monitoring_record(
+                model_name="test-model",
+                model_type="llm",
+                request_duration_ms=500,
+                ttft_ms=0,
+                input_tokens=10,
+                output_tokens=20,
+                total_tokens=30,
+                generation_rate=0.0,
+                is_streaming=False,
+            )
+
+        record = mock_buffer.add_record.call_args[0][0]
+        assert record["budget_fingerprint"] == "w2def"
+        assert record["budget_w1_fingerprint"] == "def456"
+        assert record["budget_requested_output_tokens"] == 2048
+        assert record["budget_output_reserve_source"] == "agent"
+        assert record["budget_soft_input_budget_tokens"] == 22500
+        assert record["budget_hard_input_budget_tokens"] == 30000
 
     def test_error_record(self):
         mock_buffer = MagicMock()

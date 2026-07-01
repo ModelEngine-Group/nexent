@@ -30,6 +30,7 @@ from database.tool_db import (
     check_tool_list_initialized,
     create_or_update_tool_by_tool_info,
     query_all_tools,
+    query_tools_by_labels,
     query_tool_instances_by_id,
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
@@ -200,6 +201,7 @@ def get_local_tools() -> List[ToolInfo]:
             inputs=json.dumps(processed_inputs, ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
+            labels=getattr(tool_class, 'labels', None),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -245,7 +247,8 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         class_name=tool_name,
         usage=None,
         origin_name=tool_name,
-        category=None
+        category=None,
+        labels=None
     )
     return tool_info
 
@@ -415,8 +418,9 @@ async def get_tool_from_remote_mcp_server(
                         input_schema["properties"][k]["type"] = "string"
 
                 sanitized_tool_name = _sanitize_function_name(tool.name)
+                tool_description = tool.description or ""
                 tool_info = ToolInfo(name=sanitized_tool_name,
-                                     description=tool.description,
+                                     description=tool_description,
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
@@ -485,11 +489,14 @@ async def update_tool_list(tenant_id: str, user_id: str):
                                           tool_list=local_tools+mcp_tools+langchain_tools)
 
 
-async def list_all_tools(tenant_id: str):
+async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     """
-    List all tools for a given tenant
+    List all tools for a given tenant, optionally filtered by labels (OR match).
     """
-    tools_info = query_all_tools(tenant_id)
+    if labels:
+        tools_info = query_tools_by_labels(tenant_id, labels)
+    else:
+        tools_info = query_all_tools(tenant_id)
 
     # Get description_zh from SDK for local tools (not persisted to DB)
     local_tool_descriptions = get_local_tools_description_zh()
@@ -499,9 +506,11 @@ async def list_all_tools(tenant_id: str):
     for tool in tools_info:
         tool_name = tool.get("name")
 
-        # Merge description_zh from SDK for local tools
-        if tool.get("source") == "local" and tool_name in local_tool_descriptions:
-            sdk_info = local_tool_descriptions[tool_name]
+        # Always use SDK inputs for local tools to stay in sync with current tool code
+        is_local = tool.get("source") == "local"
+        sdk_info = local_tool_descriptions.get(tool_name) if is_local else None
+
+        if is_local and sdk_info:
             description_zh = sdk_info.get("description_zh")
 
             # Merge params description_zh from SDK (independent of tool-level description_zh)
@@ -509,24 +518,30 @@ async def list_all_tools(tenant_id: str):
             if params:
                 for param in params:
                     if not param.get("description_zh"):
-                        # Find matching param in SDK
                         for sdk_param in sdk_info.get("params", []):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
 
-            # Use SDK full input schema for local tools to keep runtime inputs
-            # aligned with current tool code (instead of stale DB snapshots).
+            # Merge SDK inputs: use DB as base, merge description_zh for existing keys,
+            # add new keys from SDK. This ensures new inputs like kds_list appear even
+            # if the DB record was created before the field was added to the SDK.
             inputs_str = tool.get("inputs", "{}")
             try:
-                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else (inputs_str or {})
+                sdk_inputs = sdk_info.get("inputs", {})
+
                 if isinstance(inputs, dict):
                     for key, value in inputs.items():
-                        if isinstance(value, dict) and not value.get("description_zh"):
-                            # Find matching input in SDK
-                            sdk_inputs = sdk_info.get("inputs", {})
-                            if key in sdk_inputs:
-                                value["description_zh"] = sdk_inputs[key].get("description_zh")
+                        if isinstance(value, dict) and key in sdk_inputs:
+                            sdk_desc_zh = sdk_inputs[key].get("description_zh")
+                            if sdk_desc_zh:
+                                value["description_zh"] = sdk_desc_zh
+
+                    for key, sdk_value in sdk_inputs.items():
+                        if key not in inputs:
+                            inputs[key] = sdk_value
+
                     inputs_str = json.dumps(inputs, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -546,7 +561,9 @@ async def list_all_tools(tenant_id: str):
             "usage": tool.get("usage"),
             "params": tool.get("params", []),
             "inputs": inputs_str,
-            "category": tool.get("category")
+            "category": tool.get("category"),
+            "labels": tool.get("labels", []),
+            "updated_by": tool.get("updated_by", "")
         }
         formatted_tools.append(formatted_tool)
     return formatted_tools
@@ -799,10 +816,12 @@ def _validate_local_tool(
                 'rerank_model': rerank_model,
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "haotian_search":
-            # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
-            # Must explicitly pass observer=None: if omitted, Python applies the FieldInfo default
-            # (not None), causing 'FieldInfo has no attr lang' errors in forward()
+        elif tool_name in ("haotian_search", "aidp_search"):
+            # Haotian and AIDP share the same instantiation shape: drop the
+            # backend-only rerank keys and explicitly set observer=None
+            # (otherwise Python falls back to the FieldInfo default, which
+            # later triggers "'FieldInfo' has no attribute 'lang'" in
+            # forward()).
             filtered_params = {k: v for k, v in instantiation_params.items()
                               if k not in ["observer", "rerank_model", "rerank"]}
             filtered_params["observer"] = None
@@ -812,7 +831,8 @@ def _validate_local_tool(
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
             # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-            image_to_text_model = get_vlm_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            image_to_text_model = get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id)
             vlm_display_name = getattr(
                 image_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -829,7 +849,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            video_understanding_model = get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id)
             model_display_name = getattr(
                 video_understanding_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)
@@ -846,7 +867,8 @@ def _validate_local_tool(
             if not tenant_id or not user_id:
                 raise ToolExecutionException(
                     f"Tenant ID and User ID are required for {tool_name} validation")
-            long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            selected_model_id = instantiation_params.get("selected_model_id")
+            long_text_to_text_model = get_llm_model(tenant_id=tenant_id, model_id=selected_model_id)
             llm_display_name = getattr(
                 long_text_to_text_model, 'display_name', None)
             set_monitoring_context(tenant_id=tenant_id)

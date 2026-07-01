@@ -13,6 +13,10 @@ import {
   KnowledgeBasesWithDataMateStatus,
   DataMateSyncError,
 } from "@/types/knowledgeBase";
+import type {
+  AidpKnowledgeBaseItem,
+  AidpKnowledgeBaseListResponse,
+} from "@/types/agentConfig";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
 
@@ -436,6 +440,110 @@ class KnowledgeBaseService {
           error instanceof Error ? error.message : "Connection test failed",
       };
     }
+  }
+
+  async getAidpKnowledgeBasesAll(
+    serverUrl: string,
+    apiKey: string
+  ): Promise<AidpKnowledgeBaseListResponse> {
+    try {
+      const url = new URL(API_ENDPOINTS.aidp.knowledgeBasesAll, globalThis.location.origin);
+      url.searchParams.set("server_url", serverUrl);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch all AIDP knowledge bases";
+        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      return {
+        value: Array.isArray(result.value) ? result.value : [],
+        total_count:
+          typeof result.total_count === "number" ? result.total_count : undefined,
+        next_link: typeof result.next_link === "string" ? result.next_link : null,
+      };
+    } catch (error) {
+      log.error("Failed to fetch all AIDP knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  async getAidpKnowledgeBases(
+    serverUrl: string,
+    apiKey: string,
+    page: number = 1,
+    pageSize: number = 20
+  ): Promise<AidpKnowledgeBaseListResponse> {
+    try {
+      const url = new URL(API_ENDPOINTS.aidp.knowledgeBases, globalThis.location.origin);
+      url.searchParams.set("server_url", serverUrl);
+      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("page_size", String(pageSize));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage =
+          result.message || "Failed to fetch AIDP knowledge bases";
+        log.error("AIDP API error:", { code: errorCode, message: errorMessage });
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      return {
+        value: Array.isArray(result.value) ? result.value : [],
+        total_count:
+          typeof result.total_count === "number" ? result.total_count : undefined,
+        next_link: typeof result.next_link === "string" ? result.next_link : null,
+      };
+    } catch (error) {
+      log.error("Failed to fetch AIDP knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  mapAidpKnowledgeBasesToKnowledgeBases(
+    items: AidpKnowledgeBaseItem[]
+  ): KnowledgeBase[] {
+    return items.map((item) => ({
+      id: String(item.kds_id),
+      name: item.kds_name || String(item.kds_id),
+      display_name: item.kds_name || String(item.kds_id),
+      description: item.description || "AIDP knowledge base",
+      documentCount: item.document_count || 0,
+      chunkCount: item.chunk_count || 0,
+      createdAt: null,
+      updatedAt: null,
+      embeddingModel: "unknown",
+      knowledge_sources: "aidp",
+      ingroup_permission: "",
+      group_ids: [],
+      store_size: "",
+      process_source: "AIDP",
+      avatar: "",
+      chunkNum: 0,
+      language: "",
+      nickname: "",
+      parserId: "",
+      permission: "",
+      tokenNum: 0,
+      source: "aidp",
+      tenant_id: "",
+    }));
   }
 
   // Sync Dify knowledge bases

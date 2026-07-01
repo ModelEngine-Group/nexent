@@ -63,6 +63,10 @@ consts_model_module.HistoryItem = HistoryItem
 consts_model_module.AgentToolParamsRequest = MockAgentToolParamsRequest
 consts_model_module.ToolParamsRequest = MockToolParamsRequest
 sys.modules["consts.model"] = consts_model_module
+sys.modules["consts.capability_profiles"] = types.ModuleType(
+    "consts.capability_profiles"
+)
+sys.modules["consts.capability_profiles"].CATALOG = {}
 
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
@@ -77,6 +81,11 @@ consts_module = sys.modules.get("consts")
 if consts_module:
     setattr(consts_module, "model", consts_model_module)
     setattr(consts_module, "exceptions", consts_exceptions_module)
+    setattr(
+        consts_module,
+        "capability_profiles",
+        sys.modules["consts.capability_profiles"],
+    )
 
 # Also add model to consts module attributes (with AgentToolParamsRequest and ToolParamsRequest)
 consts_module = sys.modules.get("consts")
@@ -195,6 +204,17 @@ sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
 )
+sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
+    "nexent.core.agents.summary_config",
+    ContextManagerConfig=MagicMock(),
+)
+sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
+    "nexent.core.models.prompt_cache",
+    resolve_prompt_cache_profile=lambda provider: (
+        {"mode": "openai_automatic", "enabled": True}
+        if (provider or "").lower() == "openai" else None
+    ),
+)
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
@@ -233,7 +253,6 @@ sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
     get_llm_model=MagicMock(return_value="stub_llm_model"),
-    build_llm_model=MagicMock(return_value="stub_llm_model_from_config"),
     validate_urls_access=MagicMock(),
 )
 sys.modules['services.tool_configuration_service'] = _create_stub_module(
@@ -250,6 +269,93 @@ sys.modules['nexent'] = nexent_module
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
 sys.modules['nexent.core.agents'] = _create_stub_module("nexent.core.agents")
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")
+sys.modules['nexent.core.models'] = _create_stub_module("nexent.core.models")
+
+
+class MockProviderCapabilityUnknown(Exception):
+    pass
+
+
+class MockResolverError(Exception):
+    pass
+
+
+class MockModelCapacitySnapshot:
+    def __init__(self, **kwargs):
+        self.provider = kwargs.get("provider", "test")
+        self.model_name = kwargs.get("model_name", "test-model")
+        self.context_window_tokens = kwargs.get("context_window_tokens", 32768)
+        self.default_output_reserve_tokens = kwargs.get(
+            "default_output_reserve_tokens",
+            4096,
+        )
+        self.capability_profile_version = kwargs.get("capability_profile_version")
+        self.field_sources = kwargs.get("field_sources", {})
+        self.requested_output_tokens = kwargs.get("requested_output_tokens")
+        self.provider_input_limit_tokens = kwargs.get(
+            "provider_input_limit_tokens",
+            28672,
+        )
+        self.tokenizer_family = kwargs.get("tokenizer_family")
+        self.counting_mode = kwargs.get("counting_mode", "estimated")
+        self.unknown_capabilities = kwargs.get("unknown_capabilities", [])
+        self.fingerprint = kwargs.get("fingerprint", "test-fingerprint")
+
+    def model_dump(self):
+        return self.__dict__.copy()
+
+
+class MockRequestBudgetOverrides:
+    def __init__(self, requested_output_tokens=None):
+        self.requested_output_tokens = requested_output_tokens
+
+
+class MockSafeInputBudgetSnapshot:
+    def __init__(self, capacity_snapshot, requested_output_tokens=None):
+        self.model_name = capacity_snapshot.model_name
+        self.requested_output_tokens = requested_output_tokens or 4096
+        self.soft_input_budget_tokens = 24576
+        self.hard_input_budget_tokens = 28672
+        self.fingerprint = "safe-budget-fingerprint"
+        self.warnings = []
+
+    def model_dump(self):
+        return self.__dict__.copy()
+
+
+class MockSafeInputBudgetCalculator:
+    def calculate_safe_input_budget(
+        self,
+        capacity_snapshot,
+        reserve_policy=None,
+        request_overrides=None,
+        requested_output_tokens=None,
+        output_reserve_source="model_default",
+    ):
+        override_tokens = getattr(request_overrides, "requested_output_tokens", None)
+        return MockSafeInputBudgetSnapshot(
+            capacity_snapshot,
+            requested_output_tokens=override_tokens or requested_output_tokens,
+        )
+
+
+class MockUncertaintyReserveBasisUnknown(Exception):
+    """Mock W2 exception raised when context_window_tokens is missing."""
+
+
+sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
+    "nexent.core.models.capacity_resolver",
+    ModelCapacitySnapshot=MockModelCapacitySnapshot,
+    ProviderCapabilityUnknown=MockProviderCapabilityUnknown,
+    ResolverError=MockResolverError,
+    resolve_capacity=MagicMock(return_value=MockModelCapacitySnapshot()),
+)
+sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
+    "nexent.core.models.capacity_budget",
+    RequestBudgetOverrides=MockRequestBudgetOverrides,
+    SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
+    UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
+)
 
 # Create mock classes that might be imported
 mock_agent_config = MagicMock()
@@ -319,6 +425,8 @@ from backend.agents.create_agent_info import (
     _normalize_tool_params_request,
     _get_agent_tool_overrides,
     _merge_tool_params,
+    _resolve_input_budget,
+    _resolve_safe_input_budget,
 )
 
 # Import HistoryItem for testing (from mocked consts.model)
@@ -332,6 +440,33 @@ ToolParamsRequest = sys.modules["consts.model"].ToolParamsRequest
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
+
+
+class TestResolveInputBudget:
+    """Tests for W1/W2 budget resolver hand-off."""
+
+    def test_resolve_input_budget_returns_monitoring_dict_then_resolver_snapshot(self):
+        """The caller needs monitoring fields for AgentConfig and the raw snapshot for W2."""
+        model_info = {
+            "model_factory": "openai",
+            "model_name": "gpt-4o",
+            "context_window_tokens": 32768,
+            "max_output_tokens": 4096,
+        }
+
+        input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
+        safe_budget_snapshot = _resolve_safe_input_budget(
+            capacity_snapshot=resolved_capacity_snapshot,
+            tenant_id="tenant_1",
+            agent_requested_output_tokens=None,
+            request_requested_output_tokens=None,
+        )
+
+        assert input_budget == resolved_capacity_snapshot.provider_input_limit_tokens
+        assert isinstance(capacity_snapshot, dict)
+        assert capacity_snapshot["capacity_fingerprint"] == resolved_capacity_snapshot.fingerprint
+        assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
+        assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
 
 
 class TestGetSkillsForTemplate:
@@ -418,8 +553,8 @@ class TestGetSkillsForTemplate:
                 )
 
                 assert result == []
-                mock_logger.warning.assert_called_once()
-                assert "Failed to get skills for template: Service unavailable" in mock_logger.warning.call_args[0][0]
+                mock_logger.error.assert_called_once()
+                assert "Failed to get skills for agent" in mock_logger.error.call_args[0][0]
 
     def test_get_skills_for_template_with_version_no(self):
         """Test case with specific version number"""
@@ -838,7 +973,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_vlm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
             # Verify metadata includes validate_url_access lambda
             assert "vlm_model" in mock_tool_instance.metadata
             assert "storage_client" in mock_tool_instance.metadata
@@ -882,7 +1017,7 @@ class TestCreateToolConfigList:
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_video_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
             assert mock_tool_instance.metadata["vlm_model"] == "mock_video_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert callable(mock_tool_instance.metadata["validate_url_access"])
@@ -897,8 +1032,6 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_llm_model') as mock_build_llm_model, \
                 patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
@@ -915,26 +1048,13 @@ class TestCreateToolConfigList:
                 }
             ]
             mock_search_agent.return_value = {"name": "agent", "model_id": 42}
-            agent_model_config = {
-                "model_repo": "openai",
-                "model_name": "agent-llm",
-                "base_url": "https://agent.example.com/v1",
-                "api_key": "agent-key",
-                "max_tokens": 8192,
-                "ssl_verify": True,
-                "timeout_seconds": 30,
-            }
-            mock_get_model_by_id.return_value = agent_model_config
-            mock_build_llm_model.return_value = "agent_llm_model"
+            mock_get_llm_model.return_value = "agent_llm_model"
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            # Agent model is resolved and built; tenant default is not used.
-            mock_get_model_by_id.assert_called_once_with(42, tenant_id="tenant_1")
-            mock_build_llm_model.assert_called_once_with(agent_model_config)
-            mock_get_llm_model.assert_not_called()
+            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=42)
             assert mock_tool_instance.metadata["llm_model"] == "agent_llm_model"
             assert "storage_client" in mock_tool_instance.metadata
             assert "data_process_service_url" in mock_tool_instance.metadata
@@ -950,8 +1070,6 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_llm_model') as mock_build_llm_model, \
                 patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
@@ -973,9 +1091,7 @@ class TestCreateToolConfigList:
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
             assert len(result) == 1
-            mock_get_model_by_id.assert_not_called()
-            mock_build_llm_model.assert_not_called()
-            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=None)
             assert mock_tool_instance.metadata["llm_model"] == "tenant_llm_model"
 
     @pytest.mark.asyncio
@@ -988,8 +1104,6 @@ class TestCreateToolConfigList:
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
                 patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_llm_model') as mock_build_llm_model, \
                 patch('backend.agents.create_agent_info.get_llm_model') as mock_get_llm_model, \
                 patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
 
@@ -1006,26 +1120,14 @@ class TestCreateToolConfigList:
                 }
             ]
             mock_search_agent.return_value = {"name": "agent", "model_id": 42}
-            override_model_config = {
-                "model_repo": "openai",
-                "model_name": "override-llm",
-                "base_url": "https://override.example.com/v1",
-                "api_key": "override-key",
-                "max_tokens": 16384,
-                "ssl_verify": False,
-                "timeout_seconds": 45,
-            }
-            mock_get_model_by_id.return_value = override_model_config
-            mock_build_llm_model.return_value = "override_llm_model"
+            mock_get_llm_model.return_value = "override_llm_model"
 
             result = await create_tool_config_list(
                 "agent_1", "tenant_1", "user_1", override_model_id=99)
 
             assert len(result) == 1
             # Override id (99) takes precedence over the persisted agent model_id (42).
-            mock_get_model_by_id.assert_called_once_with(99, tenant_id="tenant_1")
-            mock_build_llm_model.assert_called_once_with(override_model_config)
-            mock_get_llm_model.assert_not_called()
+            mock_get_llm_model.assert_called_once_with(tenant_id="tenant_1", model_id=99)
             assert mock_tool_instance.metadata["llm_model"] == "override_llm_model"
 
     @pytest.mark.asyncio
@@ -1730,6 +1832,92 @@ class TestCreateToolConfigList:
 class TestCreateAgentConfig:
     """Tests for the create_agent_config function"""
 
+    async def _run_context_manager_case(
+        self,
+        *,
+        enable_context_manager: bool,
+        template: str,
+        prepared_prompt: str,
+        components: Optional[List[Mock]] = None,
+    ):
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
+                patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.build_context_components') as mock_build_components, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+                patch(
+                    'backend.agents.create_agent_info.ContextManagerConfig',
+                    side_effect=lambda **kwargs: Mock(**kwargs),
+                ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": False,
+                "enable_context_manager": enable_context_manager,
+            }
+            mock_get_template.return_value = {"system_prompt": template}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": prepared_prompt}
+            mock_get_model_by_id.return_value = {"display_name": "test_model", "max_tokens": 1000}
+            mock_build_components.return_value = components or []
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            return {
+                "build_components": mock_build_components,
+                "prepare_templates": mock_prepare_templates,
+                "agent_config": mock_agent_config,
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_managed_path_uses_raw_components_not_legacy_prompt(self):
+        """Managed path should build components and avoid rendering legacy system prompt."""
+        components = [Mock(component_type="system_prompt")]
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=True,
+            template="legacy {{duty}}",
+            prepared_prompt="",
+            components=components,
+        )
+
+        mocks["build_components"].assert_called_once()
+        mocks["prepare_templates"].assert_awaited_once()
+        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == ""
+        assert mocks["agent_config"].call_args.kwargs["context_components"] is components
+        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is True
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_legacy_path_renders_prompt_and_skips_components(self):
+        """Legacy path should render the Jinja prompt and not build managed components."""
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=False,
+            template="{{duty}} | {{constraint}}",
+            prepared_prompt="rendered",
+        )
+
+        mocks["build_components"].assert_not_called()
+        assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
+        assert mocks["agent_config"].call_args.kwargs["context_components"] == []
+        assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
         """Test case for basic agent configuration creation"""
@@ -1796,12 +1984,15 @@ class TestCreateAgentConfig:
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
                 max_steps=5,
+                requested_output_tokens=None,
                 model_name="test_model",
                 provide_run_summary=True,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_components=ANY,
+                capacity_snapshot=ANY,
+                safe_input_budget_snapshot=ANY,
                 verification_config=ANY
             )
 
@@ -1868,12 +2059,15 @@ class TestCreateAgentConfig:
                         "system_prompt": "populated_system_prompt"},
                     tools=ANY,
                     max_steps=5,
+                    requested_output_tokens=None,
                     model_name="test_model",
                     provide_run_summary=True,
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
                     context_components=ANY,
+                    capacity_snapshot=ANY,
+                    safe_input_budget_snapshot=ANY,
                     verification_config=ANY
                 )
 
@@ -2127,12 +2321,15 @@ class TestCreateAgentConfig:
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
                 max_steps=5,
+                requested_output_tokens=None,
                 model_name="main_model",
                 provide_run_summary=True,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_components=ANY,
+                capacity_snapshot=None,
+                safe_input_budget_snapshot=None,
                 verification_config=ANY
             )
 
@@ -2951,7 +3148,7 @@ class TestCreateAgentConfig:
             await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
             # Verify that error was logged
-            mock_logger.error.assert_called_with("Failed to build knowledge base summary: Test Error")
+            mock_logger.error.assert_any_call("Failed to build knowledge base summary: Test Error")
 
 
 class TestCreateModelConfigList:
@@ -3020,6 +3217,7 @@ class TestCreateModelConfigList:
             assert calls[0][1]['api_key'] == "gpt4_key"
             assert calls[0][1]['model_name'] == "openai/gpt-4"
             assert calls[0][1]['url'] == "https://api.openai.com"
+            assert calls[0][1]['prompt_cache'] is None
 
             # Second call: Claude model from database
             assert calls[1][1]['cite_name'] == "Claude"
@@ -3264,7 +3462,9 @@ class TestCreateAgentRunInfo:
                     "transport": "streamable-http"
                 }],
                 history=[],
-                stop_event="stop_event"
+                stop_event="stop_event",
+                capacity_snapshot=None,
+                safe_input_budget_snapshot=None
             )
 
             # Verify that other functions were called correctly
@@ -5696,3 +5896,74 @@ class TestMergeToolParams:
         tool_record = {"params": [{"name": "param1", "default": "default1"}]}
         result = _merge_tool_params(tool_record, {})
         assert result == {"param1": "default1"}
+
+
+# ---------------------------------------------------------------------------
+# W11 V1.5 - dispatch_profile_hit_total metric wiring
+# ---------------------------------------------------------------------------
+
+
+class TestDispatchProfileHitMetric:
+    """Spec L710: every successful capacity resolve where the resolved snapshot
+    carries a non-null capability_profile_version increments the dispatch
+    profile-hit counter. Combined with accept_total at save time, this gives
+    the 95% SLO 'accepted catalog suggestions produce expected runtime
+    profile' (W11 spec L1162-1163).
+    """
+
+    def test_profile_hit_recorded_when_snapshot_carries_profile_version(self):
+        counter = MagicMock()
+        snapshot = MockModelCapacitySnapshot(
+            model_name="gpt-4o",
+            capability_profile_version="openai/gpt-4o@1",
+        )
+        with patch.object(
+            create_agent_info_module,
+            "_capacity_dispatch_profile_hit_total",
+            counter,
+        ), patch.object(
+            create_agent_info_module,
+            "resolve_capacity",
+            return_value=snapshot,
+        ):
+            create_agent_info_module._resolve_input_budget(
+                {"model_factory": "openai", "model_name": "gpt-4o"}
+            )
+
+        counter.add.assert_called_once_with(1, {"provider": "openai"})
+
+    def test_profile_hit_not_recorded_without_profile_version(self):
+        """An operator-configured row (no catalog match) resolves successfully
+        but `capability_profile_version` stays None. Counter must not fire --
+        otherwise the SLO ratio is inflated by non-catalog dispatches.
+        """
+        counter = MagicMock()
+        snapshot = MockModelCapacitySnapshot(
+            model_name="custom-local",
+            capability_profile_version=None,
+        )
+        with patch.object(
+            create_agent_info_module,
+            "_capacity_dispatch_profile_hit_total",
+            counter,
+        ), patch.object(
+            create_agent_info_module,
+            "resolve_capacity",
+            return_value=snapshot,
+        ):
+            create_agent_info_module._resolve_input_budget(
+                {"model_factory": "custom", "model_name": "custom-local"}
+            )
+
+        counter.add.assert_not_called()
+
+    def test_recorder_no_op_when_counter_disabled(self):
+        """OTel-optional guard: the helper must not raise when the counter
+        is None so agent dispatch works in deployments without OpenTelemetry.
+        """
+        with patch.object(
+            create_agent_info_module,
+            "_capacity_dispatch_profile_hit_total",
+            None,
+        ):
+            create_agent_info_module._record_dispatch_profile_hit("openai")

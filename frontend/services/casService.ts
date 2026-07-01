@@ -9,6 +9,10 @@ export interface CasConfig {
   display_name: string;
 }
 
+interface GetCasConfigOptions {
+  forceRefresh?: boolean;
+}
+
 const disabledConfig: CasConfig = {
   enabled: false,
   login_mode: "disabled",
@@ -17,21 +21,56 @@ const disabledConfig: CasConfig = {
   display_name: "CAS",
 };
 
+const SUCCESS_CACHE_TTL_MS = 5 * 60 * 1000;
+const FAILURE_CACHE_TTL_MS = 30 * 1000;
+
+let cachedConfig: CasConfig | null = null;
+let cacheExpiresAt = 0;
+let inFlightConfigPromise: Promise<CasConfig> | null = null;
+
+const cacheConfig = (config: CasConfig, ttlMs: number) => {
+  cachedConfig = config;
+  cacheExpiresAt = Date.now() + ttlMs;
+};
+
 export const casService = {
-  getConfig: async (): Promise<CasConfig> => {
-    try {
-      const response = await fetch(API_ENDPOINTS.cas.config);
-      if (!response.ok) return disabledConfig;
-      const data = await response.json();
-      return { ...disabledConfig, ...(data.data || {}) };
-    } catch (error) {
-      log.warn("Failed to fetch CAS config:", error);
-      return disabledConfig;
+  getConfig: async (options: GetCasConfigOptions = {}): Promise<CasConfig> => {
+    const now = Date.now();
+    if (!options.forceRefresh && cachedConfig && cacheExpiresAt > now) {
+      return cachedConfig;
     }
+
+    if (inFlightConfigPromise) {
+      return inFlightConfigPromise;
+    }
+
+    inFlightConfigPromise = (async () => {
+      try {
+        const response = await fetch(API_ENDPOINTS.cas.config);
+        if (!response.ok) {
+          cacheConfig(disabledConfig, FAILURE_CACHE_TTL_MS);
+          return disabledConfig;
+        }
+
+        const data = await response.json();
+        const config = { ...disabledConfig, ...(data.data || {}) };
+        cacheConfig(config, SUCCESS_CACHE_TTL_MS);
+        return config;
+      } catch (error) {
+        log.warn("Failed to fetch CAS config:", error);
+        cacheConfig(disabledConfig, FAILURE_CACHE_TTL_MS);
+        return disabledConfig;
+      } finally {
+        inFlightConfigPromise = null;
+      }
+    })();
+
+    return inFlightConfigPromise;
   },
 
   startLogin: (redirect?: string): void => {
-    const target = redirect || window.location.pathname + window.location.search;
+    const target =
+      redirect || window.location.pathname + window.location.search;
     window.location.href = `${API_ENDPOINTS.cas.login}?redirect=${encodeURIComponent(target)}`;
   },
 
@@ -63,7 +102,10 @@ export const casService = {
 
       window.addEventListener("message", onMessage);
       document.body.appendChild(iframe);
-      window.setTimeout(() => finish(false), Math.max(1, timeoutSeconds) * 1000);
+      window.setTimeout(
+        () => finish(false),
+        Math.max(1, timeoutSeconds) * 1000
+      );
     });
   },
 };

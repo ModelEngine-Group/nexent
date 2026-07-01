@@ -51,6 +51,7 @@ interface FinalMessageProps {
   onImageClick?: (imageUrl: string) => void;
   onOpinionChange?: (messageId: number, opinion: Opinion) => void;
   hideButtons?: boolean;
+  readOnly?: boolean;
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
@@ -69,6 +70,7 @@ function ChatStreamFinalMessageInner({
   onImageClick,
   onOpinionChange,
   hideButtons = false,
+  readOnly = false,
   index,
   currentConversationId,
   onCitationHover,
@@ -209,7 +211,7 @@ function ChatStreamFinalMessageInner({
           api_key: modelConfig?.tts?.apiConfig?.apiKey,
           model_appid: modelConfig?.tts?.modelAppid,
           access_token: modelConfig?.tts?.accessToken,
-          base_url: modelConfig?.tts?.apiConfig?.modelUrl
+          base_url: modelConfig?.tts?.apiConfig?.modelUrl,
         }
       );
     } catch (error) {
@@ -426,66 +428,70 @@ function ChatStreamFinalMessageInner({
                         </Button>
                       </Tooltip>
 
-                      {/* Thumbs up button */}
-                      <Tooltip
-                        title={
-                          localOpinion === chatConfig.opinion.POSITIVE
-                            ? t("chatStreamMessage.cancelLike")
-                            : t("chatStreamMessage.like")
-                        }
-                      >
-                        <Button
-                          className={`h-8 w-8 rounded-full ${
-                            localOpinion === chatConfig.opinion.POSITIVE
-                              ? "bg-green-100 text-green-600 border-green-200"
-                              : "bg-white hover:bg-gray-100"
-                          } transition-all duration-200 shadow-sm`}
-                          onClick={handleThumbsUp}
-                          shape="circle"
-                          size="small"
-                        >
-                          <ThumbsUp className="h-4 w-4" />
-                        </Button>
-                      </Tooltip>
+                      {!readOnly && (
+                        <>
+                          {/* Thumbs up button */}
+                          <Tooltip
+                            title={
+                              localOpinion === chatConfig.opinion.POSITIVE
+                                ? t("chatStreamMessage.cancelLike")
+                                : t("chatStreamMessage.like")
+                            }
+                          >
+                            <Button
+                              className={`h-8 w-8 rounded-full ${
+                                localOpinion === chatConfig.opinion.POSITIVE
+                                  ? "bg-green-100 text-green-600 border-green-200"
+                                  : "bg-white hover:bg-gray-100"
+                              } transition-all duration-200 shadow-sm`}
+                              onClick={handleThumbsUp}
+                              shape="circle"
+                              size="small"
+                            >
+                              <ThumbsUp className="h-4 w-4" />
+                            </Button>
+                          </Tooltip>
 
-                      {/* Thumbs down button */}
-                      <Tooltip
-                        title={
-                          localOpinion === chatConfig.opinion.NEGATIVE
-                            ? t("chatStreamMessage.cancelDislike")
-                            : t("chatStreamMessage.dislike")
-                        }
-                      >
-                        <Button
-                          className={`h-8 w-8 rounded-full ${
-                            localOpinion === chatConfig.opinion.NEGATIVE
-                              ? "bg-red-100 text-red-600 border-red-200"
-                              : "bg-white hover:bg-gray-100"
-                          } transition-all duration-200 shadow-sm`}
-                          onClick={handleThumbsDown}
-                          shape="circle"
-                          size="small"
-                        >
-                          <ThumbsDown className="h-4 w-4" />
-                        </Button>
-                      </Tooltip>
+                          {/* Thumbs down button */}
+                          <Tooltip
+                            title={
+                              localOpinion === chatConfig.opinion.NEGATIVE
+                                ? t("chatStreamMessage.cancelDislike")
+                                : t("chatStreamMessage.dislike")
+                            }
+                          >
+                            <Button
+                              className={`h-8 w-8 rounded-full ${
+                                localOpinion === chatConfig.opinion.NEGATIVE
+                                  ? "bg-red-100 text-red-600 border-red-200"
+                                  : "bg-white hover:bg-gray-100"
+                              } transition-all duration-200 shadow-sm`}
+                              onClick={handleThumbsDown}
+                              shape="circle"
+                              size="small"
+                            >
+                              <ThumbsDown className="h-4 w-4" />
+                            </Button>
+                          </Tooltip>
 
-                      {/* Voice playback button */}
-                      <Tooltip title={ttsButtonContent.tooltip}>
-                        <Button
-                          className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
-                          onClick={handleTTSPlay}
-                          disabled={
-                            ttsStatus === "generating" ||
-                            (message.finalAnswer === undefined &&
-                              message.content === undefined)
-                          }
-                          shape="circle"
-                          size="small"
-                        >
-                          {ttsButtonContent.icon}
-                        </Button>
-                      </Tooltip>
+                          {/* Voice playback button */}
+                          <Tooltip title={ttsButtonContent.tooltip}>
+                            <Button
+                              className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
+                              onClick={handleTTSPlay}
+                              disabled={
+                                ttsStatus === "generating" ||
+                                (message.finalAnswer === undefined &&
+                                  message.content === undefined)
+                              }
+                              shape="circle"
+                              size="small"
+                            >
+                              {ttsButtonContent.icon}
+                            </Button>
+                          </Tooltip>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -508,6 +514,7 @@ function areEqualFinalMessage(
     prev.searchResultsCount === next.searchResultsCount &&
     prev.imagesCount === next.imagesCount &&
     prev.hideButtons === next.hideButtons &&
+    prev.readOnly === next.readOnly &&
     prev.index === next.index &&
     prev.currentConversationId === next.currentConversationId
     // Callbacks (onSelectMessage, onOpinionChange, onCitationHover, onImageClick) are intentionally

@@ -9,10 +9,24 @@ import {
   InputNumber,
   Tag,
   Form,
-  message,
   Select,
   Skeleton,
+  App,
 } from "antd";
+import type { FormInstance } from "antd";
+
+// Delay setFieldValue to the next microtask so the form is guaranteed to be mounted.
+// Otherwise React Strict Mode or modal close cycles can call it before the Form
+// element is re-inserted into the DOM, triggering the "not connected" warning.
+function safeSetFieldValue(
+  form: FormInstance,
+  field: string,
+  value: unknown
+) {
+  queueMicrotask(() => {
+    form.setFieldValue(field, value);
+  });
+}
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
@@ -26,6 +40,7 @@ import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSe
 import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
+import AidpKnowledgeSelectorModal from "@/components/tool-config/AidpKnowledgeSelectorModal";
 import { useConfig } from "@/hooks/useConfig";
 import { useKnowledgeBasesForToolConfig, knowledgeBaseKeys } from "@/hooks/useKnowledgeBaseSelector";
 import {
@@ -34,12 +49,15 @@ import {
 } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { modelService } from "@/services/modelService";
 import log from "@/lib/logger";
+import { MODEL_TYPES } from "@/const/modelConfig";
 import {
   isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
   isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
 } from "@/lib/knowledgeBaseCompatibility";
 import { isZhLocale, getLocalizedDescription, getKbDisplayName, mapKbIdsToDisplayNames, parseKbIds } from "@/lib/utils";
+import { ModelOption, ModelType } from "@/types/modelConfig";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -59,6 +77,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "datamate_search",
   "idata_search",
   "haotian_search",
+  "aidp_search",
 ];
 
 const TOOLS_SUPPORTING_RERANK = [
@@ -66,6 +85,24 @@ const TOOLS_SUPPORTING_RERANK = [
   "dify_search",
   "datamate_search",
 ];
+
+const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
+  analyze_text_file: MODEL_TYPES.LLM,
+  analyze_image: MODEL_TYPES.VLM,
+  analyze_audio: MODEL_TYPES.VLM3,
+  analyze_video: MODEL_TYPES.VLM3,
+};
+
+const ANALYZE_TOOL_MODEL_DESCRIPTIONS: Record<string, string> = {
+  analyze_text_file:
+    "Optional Nexent LLM model ID to use for text file analysis. If omitted, the default LLM model is used.",
+  analyze_image:
+    "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
+  analyze_audio:
+    "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+  analyze_video:
+    "Optional Nexent video understanding model ID to use for video analysis. If omitted, the default video understanding model is used.",
+};
 
 function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
   if (!toolName || !TOOLS_SUPPORTING_RERANK.includes(toolName)) return params;
@@ -99,6 +136,38 @@ function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
   return next;
 }
 
+function withAnalyzeToolModelParam(params: ToolParam[], toolName?: string): ToolParam[] {
+  if (!toolName || !ANALYZE_TOOL_MODEL_TYPES[toolName]) return params;
+
+  const normalizedParams = params.map((param) => {
+    if (param.name !== "selected_model_id") return param;
+    const value =
+      param.value === "" || param.value === undefined || param.value === null
+        ? undefined
+        : Number(param.value);
+    return { ...param, value };
+  });
+
+  if (normalizedParams.some((param) => param.name === "selected_model_id")) {
+    return normalizedParams;
+  }
+
+  return [
+    ...normalizedParams,
+    {
+      name: "selected_model_id",
+      type: "number",
+      required: false,
+      value: undefined,
+      description: ANALYZE_TOOL_MODEL_DESCRIPTIONS[toolName],
+    },
+  ];
+}
+
+function withExtraToolParams(params: ToolParam[], toolName?: string): ToolParam[] {
+  return withAnalyzeToolModelParam(withRerankParams(params, toolName), toolName);
+}
+
 export default function ToolConfigModal({
   isOpen,
   onCancel,
@@ -115,6 +184,7 @@ export default function ToolConfigModal({
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
   const updateTools = useAgentConfigStore((state) => state.updateTools);
+  const { message } = App.useApp();
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
@@ -128,9 +198,37 @@ export default function ToolConfigModal({
 
   // Use React Query for config data
   const { data: configData } = useConfig();
+  const analyzeToolModelType = tool?.name
+    ? ANALYZE_TOOL_MODEL_TYPES[tool.name]
+    : undefined;
+  const isAnalyzeToolWithModelSelection = Boolean(analyzeToolModelType);
+  const {
+    data: registeredModels = [],
+    isFetching: registeredModelsLoading,
+  } = useQuery<ModelOption[]>({
+    queryKey: ["models", "registered", "toolConfig", analyzeToolModelType],
+    queryFn: () => modelService.getAllModels(),
+    enabled: isOpen && isAnalyzeToolWithModelSelection,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
+  const analyzeToolModelOptions = useMemo(() => {
+    if (!analyzeToolModelType) return [];
+    return registeredModels
+      .filter((model) => model.type === analyzeToolModelType)
+      .map((model) => ({
+        value: model.id,
+        label: model.displayName || model.name,
+      }));
+  }, [registeredModels, analyzeToolModelType]);
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
+
+  // Independent KB selection state for test panel (separate from config's selectedKbIds)
+  const [testPanelKbIds, setTestPanelKbIds] = useState<string[]>([]);
+  const [testPanelKbDisplayNames, setTestPanelKbDisplayNames] = useState<string[]>([]);
+
   // Track if user has attempted to submit the form
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
@@ -191,6 +289,7 @@ export default function ToolConfigModal({
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "aidp_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
     const name = tool?.name;
@@ -198,8 +297,40 @@ export default function ToolConfigModal({
     if (name === "datamate_search") return "datamate_search";
     if (name === "idata_search") return "idata_search";
     if (name === "haotian_search") return "haotian_search";
+    if (name === "aidp_search") return "aidp_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
+
+  const isKnowledgeBaseSearchTool = toolKbType === "knowledge_base_search";
+
+  // Ref to track when modal opens so we can restore testPanelKbIds after selectedKbIds is loaded from config.
+  // Using a ref avoids the stale-closure problem and ensures the restore always runs
+  // after selectedKbIds has been updated from config.
+  const prevIsOpenRef = useRef<boolean>(false);
+  // Track if KB IDs came from user confirmation (not config load)
+  const isUserConfirmedKbRef = useRef<boolean>(false);
+  // Track if we have restored test panel KB from config (only restore once per modal open)
+  const hasRestoredFromConfigRef = useRef<boolean>(false);
+  // Ref to always have the latest selectedKbIds value (avoid stale closure)
+  const selectedKbIdsRef = useRef<string[]>([]);
+
+  // Keep selectedKbIdsRef in sync with selectedKbIds
+  useEffect(() => {
+    selectedKbIdsRef.current = selectedKbIds;
+  }, [selectedKbIds]);
+
+  // Reset testPanelKbIds to [] on modal open (before config KB IDs are loaded).
+  // This prevents stale test panel KB when switching between tools with different KBs.
+  useEffect(() => {
+    const wasClosed = !prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+    isUserConfirmedKbRef.current = false;
+    hasRestoredFromConfigRef.current = false;
+    if (isOpen && (toolKbType === "aidp_search" || isKnowledgeBaseSearchTool)) {
+      setTestPanelKbIds([]);
+      setTestPanelKbDisplayNames([]);
+    }
+  }, [isOpen, toolKbType]);
 
   // Haotian configuration state
   const [haotianConfig, setHaotianConfig] = useState<{
@@ -215,6 +346,14 @@ export default function ToolConfigModal({
     HaotianKnowledgeSet[]
   >([]);
 
+  const [aidpConfig, setAidpConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
   // Initialize Haotian config from params
   useEffect(() => {
     if (toolKbType !== "haotian_search") return;
@@ -228,6 +367,17 @@ export default function ToolConfigModal({
       currentParams.find((p) => p.name === "authorization")?.value || ""
     );
     setHaotianConfig({ listUrl, retrieveUrl, authorization: extAuth });
+  }, [toolKbType, currentParams]);
+
+  useEffect(() => {
+    if (toolKbType !== "aidp_search") return;
+    const serverUrl = String(
+      currentParams.find((p) => p.name === "server_url")?.value || ""
+    );
+    const apiKey = String(
+      currentParams.find((p) => p.name === "api_key")?.value || ""
+    );
+    setAidpConfig({ serverUrl, apiKey });
   }, [toolKbType, currentParams]);
 
   const {
@@ -363,31 +513,65 @@ export default function ToolConfigModal({
     idataConfig.userId,
   ]);
 
+  // Resolve which config payload the shared "knowledge bases" hook needs for
+  // the current tool. Returns ``undefined`` when required fields are missing
+  // (the hook uses this to short-circuit refetching).
+  const resolveKbConfig = () => {
+    if (toolKbType === "dify_search") {
+      return difyConfig;
+    }
+    if (toolKbType === "datamate_search") {
+      return { serverUrl: datamateServerUrl };
+    }
+    if (toolKbType === "idata_search") {
+      if (
+        !idataConfig.serverUrl ||
+        !idataConfig.apiKey ||
+        !idataConfig.userId ||
+        !idataConfig.knowledgeSpaceId
+      ) {
+        return undefined;
+      }
+      return {
+        serverUrl: idataConfig.serverUrl,
+        apiKey: idataConfig.apiKey,
+        userId: idataConfig.userId,
+        knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+      };
+    }
+    if (toolKbType === "aidp_search") {
+      return {
+        serverUrl: aidpConfig.serverUrl,
+        apiKey: aidpConfig.apiKey,
+      };
+    }
+    return undefined;
+  };
+
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
     refetch: refetchKnowledgeBases,
     clearKnowledgeBases,
-  } = useKnowledgeBasesForToolConfig(
-    toolKbType,
-    toolKbType === "dify_search"
-      ? difyConfig
-      : toolKbType === "datamate_search"
-        ? { serverUrl: datamateServerUrl }
-        : toolKbType === "idata_search"
-          ? idataConfig.serverUrl &&
-            idataConfig.apiKey &&
-            idataConfig.userId &&
-            idataConfig.knowledgeSpaceId
-            ? {
-                serverUrl: idataConfig.serverUrl,
-                apiKey: idataConfig.apiKey,
-                userId: idataConfig.userId,
-                knowledgeSpaceId: idataConfig.knowledgeSpaceId,
-              }
-            : undefined
-          : undefined
-  );
+  } = useKnowledgeBasesForToolConfig(toolKbType, resolveKbConfig());
+
+  // Restore testPanelKbIds from selectedKbIds after modal opens and config KBs are loaded.
+  // Only runs when: (1) modal is open, (2) NOT from user confirmation, (3) knowledgeBases has been loaded.
+  // We depend on selectedKbIds to catch the case where KBs are loaded before selectedKbIds is initialized.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (toolKbType !== "aidp_search" && !isKnowledgeBaseSearchTool) return;
+    if (isUserConfirmedKbRef.current) return;
+    if (hasRestoredFromConfigRef.current) return;
+    if (selectedKbIds.length === 0 || knowledgeBases.length === 0) return;
+    hasRestoredFromConfigRef.current = true;
+    const displayNames = selectedKbIds.map((id) => {
+      const kb = knowledgeBases.find((k) => String(k.id).trim() === String(id).trim());
+      return kb?.display_name || kb?.name || id;
+    });
+    setTestPanelKbIds(selectedKbIds);
+    setTestPanelKbDisplayNames(displayNames);
+  }, [isOpen, selectedKbIds, knowledgeBases]);
 
   // Handle config change: clear knowledge base selection and refetch
   // Uses shared hook for both Dify and DataMate tools
@@ -401,7 +585,10 @@ export default function ToolConfigModal({
 
     // Clear form value for knowledge base field (index_names or dataset_ids)
     const kbFieldIndex = currentParams.findIndex(
-      (p) => p.name === "index_names" || p.name === "dataset_ids"
+      (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
     );
     if (kbFieldIndex >= 0) {
       form.setFieldValue(`param_${kbFieldIndex}`, []);
@@ -434,7 +621,12 @@ export default function ToolConfigModal({
                 apiKey: idataConfig.apiKey,
                 userId: idataConfig.userId,
               }
-            : undefined,
+            : toolKbType === "aidp_search"
+              ? {
+                  serverUrl: aidpConfig.serverUrl,
+                  apiKey: aidpConfig.apiKey,
+                }
+              : undefined,
     onConfigChange: handleKbConfigChange,
   });
 
@@ -587,7 +779,7 @@ export default function ToolConfigModal({
     setCurrentParams(updatedParams);
 
     const fieldName = `param_${index}`;
-    form.setFieldValue(fieldName, forcedMultimodalValue);
+    safeSetFieldValue(form, fieldName, forcedMultimodalValue);
   }, [tool?.name, forcedMultimodalValue, currentParams, form]);
 
   const isMultimodalConstraintMismatch = useCallback(
@@ -672,7 +864,7 @@ export default function ToolConfigModal({
     // If server_url already has a saved value, use it
     if (serverUrlParam?.value) {
       // Initialize form with saved values (including server_url)
-      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      const paramsWithRerank = withExtraToolParams(initialParams, tool.name);
       setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
       paramsWithRerank.forEach((param, index) => {
@@ -682,7 +874,10 @@ export default function ToolConfigModal({
 
       // Parse initial index_names/dataset_ids value for knowledge base selection
       const kbParam = paramsWithRerank.find(
-        (p) => p.name === "index_names" || p.name === "dataset_ids"
+        (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
       );
       if (kbParam?.value) {
         let ids: string[] = [];
@@ -716,7 +911,7 @@ export default function ToolConfigModal({
         return param;
       });
 
-      const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+      const paramsWithRerank = withExtraToolParams(updatedParams, tool.name);
       setCurrentParams(paramsWithRerank);
 
       const formValues: Record<string, any> = {};
@@ -726,7 +921,7 @@ export default function ToolConfigModal({
       form.setFieldsValue(formValues);
     } else {
       // Either no default available OR user has modified the URL, initialize with initialParams
-      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      const paramsWithRerank = withExtraToolParams(initialParams, tool.name);
       setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
       paramsWithRerank.forEach((param, index) => {
@@ -737,7 +932,10 @@ export default function ToolConfigModal({
 
     // Parse initial index_names/dataset_ids value for knowledge base selection
     const kbParam = initialParams.find(
-      (p) => p.name === "index_names" || p.name === "dataset_ids"
+      (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
     );
     if (kbParam?.value) {
       let ids: string[] = [];
@@ -804,7 +1002,7 @@ export default function ToolConfigModal({
       return param;
     });
 
-    const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+    const paramsWithRerank = withExtraToolParams(updatedParams, tool.name);
     setCurrentParams(paramsWithRerank);
 
     const formValues: Record<string, any> = {};
@@ -835,6 +1033,17 @@ export default function ToolConfigModal({
     });
   }, []);
 
+  // Migrate legacy AIDP param names so the UI and persisted config stay in sync
+  // with the new SDK signature (base_url -> server_url).
+  const migrateAidpParamNames = useCallback((params: ToolParam[]): ToolParam[] => {
+    if (tool?.name !== "aidp_search") return params;
+    const hasServerUrl = params.some((p) => p.name === "server_url");
+    if (hasServerUrl) return params;
+    return params.map((p) =>
+      p.name === "base_url" ? { ...p, name: "server_url" } : p
+    );
+  }, [tool?.name]);
+
   // Initialize form values for non-datamate tools
   useEffect(() => {
     // Skip if it's datamate_search tool (handled by other useEffects above)
@@ -844,7 +1053,8 @@ export default function ToolConfigModal({
 
     // Initialize form values
     const paramsWithDefaults = applyInitParamDefaults(initialParams);
-    const paramsWithRerank = withRerankParams(paramsWithDefaults, tool?.name);
+    const paramsMigrated = migrateAidpParamNames(paramsWithDefaults);
+    const paramsWithRerank = withExtraToolParams(paramsMigrated, tool?.name);
     setCurrentParams(paramsWithRerank);
     const formValues: Record<string, any> = {};
     paramsWithRerank.forEach((param, index) => {
@@ -856,7 +1066,10 @@ export default function ToolConfigModal({
     if (toolRequiresKbSelection) {
       // Support both index_names and dataset_ids
       const kbParam = initialParams.find(
-        (p) => p.name === "index_names" || p.name === "dataset_ids"
+        (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
       );
       if (kbParam?.value) {
         let ids: string[] = [];
@@ -887,7 +1100,7 @@ export default function ToolConfigModal({
         }
       }
     }
-  }, [initialParams, toolRequiresKbSelection, tool?.name, form, applyInitParamDefaults]);
+  }, [initialParams, toolRequiresKbSelection, tool?.name, form, applyInitParamDefaults, migrateAidpParamNames]);
 
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
@@ -940,7 +1153,10 @@ export default function ToolConfigModal({
       // Parse initial index_names/dataset_ids value for knowledge base selection
       if (toolRequiresKbSelection) {
         const kbParam = initialParams.find(
-          (p) => p.name === "index_names" || p.name === "dataset_ids"
+          (p) =>
+        p.name === "index_names" ||
+        p.name === "dataset_ids" ||
+        p.name === "kds_list"
         );
         if (kbParam?.value) {
           let ids: string[] = [];
@@ -997,6 +1213,34 @@ export default function ToolConfigModal({
     }
   }, [currentAgentId, toolKbType, queryClient]);
 
+  // Pick which knowledge-base list endpoint the current tool should hit
+  // during the initial refetch. Returns ``true`` when a refetch was issued.
+  const refetchForCurrentTool = (): boolean => {
+    if (toolKbType === "dify_search") {
+      if (difyConfig.serverUrl && difyConfig.apiKey) {
+        refetchKnowledgeBases();
+        return true;
+      }
+      return false;
+    }
+    if (toolKbType === "haotian_search") {
+      if (haotianConfig.listUrl && haotianConfig.authorization) {
+        refetchHaotianSets();
+        return true;
+      }
+      return false;
+    }
+    if (toolKbType === "aidp_search") {
+      if (aidpConfig.serverUrl && aidpConfig.apiKey) {
+        refetchKnowledgeBases();
+        return true;
+      }
+      return false;
+    }
+    refetchKnowledgeBases();
+    return true;
+  };
+
   useEffect(() => {
     if (
       toolRequiresKbSelection &&
@@ -1004,18 +1248,7 @@ export default function ToolConfigModal({
       !hasTriggeredInitialRefetch.current
     ) {
       hasTriggeredInitialRefetch.current = true;
-      // For Dify, only refetch if we have valid config
-      if (toolKbType === "dify_search") {
-        if (difyConfig.serverUrl && difyConfig.apiKey) {
-          refetchKnowledgeBases();
-        }
-      } else if (toolKbType === "haotian_search") {
-        if (haotianConfig.listUrl && haotianConfig.authorization) {
-          refetchHaotianSets();
-        }
-      } else {
-        refetchKnowledgeBases();
-      }
+      refetchForCurrentTool();
     }
   }, [
     toolRequiresKbSelection,
@@ -1025,6 +1258,7 @@ export default function ToolConfigModal({
     toolKbType,
     difyConfig,
     haotianConfig,
+    aidpConfig,
   ]);
 
   // Show sync message when knowledge base selector modal opens
@@ -1032,6 +1266,11 @@ export default function ToolConfigModal({
   useEffect(() => {
     // Only trigger when KB selector opens and tool requires KB selection
     if (kbSelectorVisible && toolRequiresKbSelection && !hasShownSyncMessageRef.current) {
+      // For AIDP, only sync if credentials are configured to avoid premature "success" message
+      if (toolKbType === "aidp_search" && (!aidpConfig.serverUrl || !aidpConfig.apiKey)) {
+        return;
+      }
+
       // Mark as shown to avoid duplicate messages
       hasShownSyncMessageRef.current = true;
 
@@ -1087,7 +1326,8 @@ export default function ToolConfigModal({
           // Skip knowledge base selector field (controlled by handleHaotianKbConfirm)
           if (
             paramName === "index_names" ||
-            paramName === "dataset_ids"
+            paramName === "dataset_ids" ||
+            paramName === "kds_list"
           ) {
             return;
           }
@@ -1123,7 +1363,10 @@ export default function ToolConfigModal({
       if (toolRequiresKbSelection && selectedKbIds.length === 0) {
         const kbParam = currentParams.find(
           (p) =>
-            p.required && (p.name === "index_names" || p.name === "dataset_ids")
+            p.required &&
+            (p.name === "index_names" ||
+              p.name === "dataset_ids" ||
+              p.name === "kds_list")
         );
         if (kbParam) {
           message.error(t("toolConfig.validation.selectKb"));
@@ -1138,8 +1381,18 @@ export default function ToolConfigModal({
         return;
       }
 
-      // Convert params to backend format (use the synced params)
-      const paramsObj = currentParams.reduce(
+      // Convert params to backend format - use latestFormValues directly to avoid async state issues
+      // This ensures we capture the most recent form values without relying on async setState
+      const syncedParams = [...currentParams];
+      if (latestFormValues) {
+        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
+          const index = parseInt(fieldName.replace("param_", ""));
+          if (!isNaN(index) && syncedParams[index]) {
+            syncedParams[index] = { ...syncedParams[index], value };
+          }
+        });
+      }
+      const paramsObj = syncedParams.reduce(
         (acc, param) => {
           acc[param.name] = param.value;
           return acc;
@@ -1151,7 +1404,7 @@ export default function ToolConfigModal({
       // Include display_names for knowledge base tools to pass to prompt generation
       const updatedTool: typeof toolToSave = {
         ...toolToSave,
-        initParams: currentParams,
+        initParams: syncedParams,
         // Store knowledge base display names for prompt generation
         ...(toolRequiresKbSelection && selectedKbDisplayNames.length > 0
           ? { display_names: selectedKbDisplayNames }
@@ -1176,6 +1429,7 @@ export default function ToolConfigModal({
 
       // Update local state only - actual save will happen when user clicks "Save Agent"
       updateTools(newSelectedTools);
+
       message.success(t("toolConfig.message.saveSuccess"));
       handleClose(); // Close modal
 
@@ -1215,33 +1469,80 @@ export default function ToolConfigModal({
   };
 
   // Open knowledge base selector
-  const openKbSelector = (paramIndex: number) => {
+  // fromTestPanel: true if called from test panel (for aidp_search and knowledge_base_search)
+  const openKbSelector = (paramIndex: number, fromTestPanel?: boolean) => {
+    // For aidp_search and knowledge_base_search, track whether opening from test panel
+    if (toolKbType === "aidp_search" || isKnowledgeBaseSearchTool) {
+      setIsTestPanelKbSelection(fromTestPanel === true);
+    }
     setCurrentKbParamIndex(paramIndex);
     setKbSelectorVisible(true);
   };
 
-  // Handle knowledge base selection confirm
-  const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
-    const ids = selectedKnowledgeBases.map((kb) => kb.id);
-    const displayNames = selectedKnowledgeBases.map((kb) => getKbDisplayName(kb));
+  // Track if KB selection is from test panel (for aidp_search)
+  const [isTestPanelKbSelection, setIsTestPanelKbSelection] = useState(false);
 
+  // Handle test panel KB selection for aidp_search (only updates test panel state, not config's selectedKbIds)
+  const handleTestPanelKbSelect = (ids: string[], displayNames: string[]) => {
+    setTestPanelKbIds(ids);
+    setTestPanelKbDisplayNames(displayNames);
+  };
+
+  // Handle test panel KB removal for aidp_search (only updates test panel state, not config's selectedKbIds/currentParams)
+  const handleTestPanelKbRemove = (index: number) => {
+    const newIds = testPanelKbIds.filter((_, i) => i !== index);
+    const newDisplayNames = testPanelKbDisplayNames.filter((_, i) => i !== index);
+    setTestPanelKbIds(newIds);
+    setTestPanelKbDisplayNames(newDisplayNames);
+    // Note: do NOT update currentParams here - test panel kds_list is independent from config
+  };
+
+  // Sync kds_list from manual JSON back to testPanelKbIds when switching mode.
+  const handleTestPanelKbIdsChange = (ids: string[], _displayNames: string[]) => {
+    // Resolve display names from knowledgeBases by ID
+    const resolvedDisplayNames = ids.map((id) => {
+      const kb = knowledgeBases.find(
+        (k) => String(k.id).trim() === String(id).trim()
+      );
+      return kb?.display_name || kb?.name || id;
+    });
+    setTestPanelKbIds(ids);
+    setTestPanelKbDisplayNames(resolvedDisplayNames);
+  };
+
+  // Apply the user's KB selection (shared by Dify / Haotian flows).
+  // Each tool's selector passes a slightly different payload shape; we
+  // normalize here so the rest of the state update stays identical.
+  const applyKbConfirm = (ids: string[], displayNames: string[]) => {
+    // Mark that KBs came from user confirmation, so restore effect won't override
+    isUserConfirmedKbRef.current = true;
     setSelectedKbIds(ids);
     setSelectedKbDisplayNames(displayNames);
-    // Reset submit state when user makes a selection
     setHasSubmitted(false);
 
-    // Update form value
-    if (currentKbParamIndex !== null) {
-      const param = currentParams[currentKbParamIndex];
+    // Sync to testPanelKbIds for aidp_search and knowledge_base_search
+    if (toolKbType === "aidp_search" || isKnowledgeBaseSearchTool) {
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+    }
+
+    // Update currentParams - find the KB param index by name if currentKbParamIndex is null
+    const kbParamIndex = currentKbParamIndex !== null
+      ? currentKbParamIndex
+      : currentParams.findIndex(
+          (p) => p.name === "index_names" || p.name === "dataset_ids" || p.name === "kds_list"
+        );
+    if (kbParamIndex >= 0) {
+      const param = currentParams[kbParamIndex];
       if (param) {
-        // Store as array
-        const formFieldName = `param_${currentKbParamIndex}`;
+        const formFieldName = `param_${kbParamIndex}`;
+        // Update form field synchronously to ensure renderKbSelectorInput sees the new value
         form.setFieldValue(formFieldName, ids);
 
         // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
         const updatedParams = [...currentParams];
-        updatedParams[currentKbParamIndex] = {
-          ...updatedParams[currentKbParamIndex],
+        updatedParams[kbParamIndex] = {
+          ...updatedParams[kbParamIndex],
           value: ids,
         };
         setCurrentParams(updatedParams);
@@ -1250,36 +1551,79 @@ export default function ToolConfigModal({
 
     setKbSelectorVisible(false);
     setCurrentKbParamIndex(null);
+  };
+
+  // Handle knowledge base selection confirm (Dify)
+  const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
+    const ids = selectedKnowledgeBases.map((kb) => kb.id);
+    const displayNames = selectedKnowledgeBases.map((kb) => getKbDisplayName(kb));
+
+    if (isTestPanelKbSelection) {
+      // From test panel: only update test panel state
+      // Note: do NOT update currentParams - test panel KB is independent from config
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setIsTestPanelKbSelection(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+    } else {
+      // From config panel: update selectedKbIds and sync to testPanelKbIds
+      applyKbConfirm(ids, displayNames);
+    }
   };
 
   const handleHaotianKbConfirm = (payload: {
     datasetIds: string[];
     displayNames: string[];
   }) => {
+    applyKbConfirm(payload.datasetIds || [], payload.displayNames || []);
+  };
+
+  const handleAidpKbConfirm = (payload: {
+    datasetIds: string[];
+    displayNames: string[];
+  }) => {
     const ids = payload.datasetIds || [];
     const displayNames = payload.displayNames || [];
 
-    setSelectedKbIds(ids);
-    setSelectedKbDisplayNames(displayNames);
-    setHasSubmitted(false);
+    if (isTestPanelKbSelection) {
+      // From test panel: only update test panel state
+      // Note: do NOT update currentParams - test panel kds_list is independent from config
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setIsTestPanelKbSelection(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
+    } else {
+      // From config panel: update selectedKbIds and sync to testPanelKbIds
+      // Mark that KBs came from user confirmation, so restore effect won't override
+      isUserConfirmedKbRef.current = true;
+      setSelectedKbIds(ids);
+      setSelectedKbDisplayNames(displayNames);
+      setTestPanelKbIds(ids);
+      setTestPanelKbDisplayNames(displayNames);
+      setHasSubmitted(false);
+      setKbSelectorVisible(false);
+      setCurrentKbParamIndex(null);
 
-    if (currentKbParamIndex !== null) {
-      const param = currentParams[currentKbParamIndex];
-      if (param) {
-        const formFieldName = `param_${currentKbParamIndex}`;
-        form.setFieldValue(formFieldName, ids);
-
-        const updatedParams = [...currentParams];
-        updatedParams[currentKbParamIndex] = {
-          ...updatedParams[currentKbParamIndex],
+      // Update currentParams for kds_list using functional update to avoid stale closure
+      setCurrentParams((prevParams) => {
+        const kdsListFieldIndex = prevParams.findIndex(p => p.name === "kds_list");
+        if (kdsListFieldIndex === -1) return prevParams;
+        const updatedParams = [...prevParams];
+        updatedParams[kdsListFieldIndex] = {
+          ...updatedParams[kdsListFieldIndex],
           value: ids,
         };
-        setCurrentParams(updatedParams);
+        return updatedParams;
+      });
+
+      // Update form field synchronously to ensure renderKbSelectorInput sees the new value
+      const kdsListFieldIndex = currentParams.findIndex(p => p.name === "kds_list");
+      if (kdsListFieldIndex !== -1) {
+        form.setFieldValue(`param_${kdsListFieldIndex}`, ids);
       }
     }
-
-    setKbSelectorVisible(false);
-    setCurrentKbParamIndex(null);
   };
 
   // Remove a single knowledge base from selection
@@ -1294,17 +1638,16 @@ export default function ToolConfigModal({
     // Reset submit state when user modifies selection
     setHasSubmitted(false);
 
-    // Update form value
-    const formFieldName = `param_${paramIndex}`;
-    form.setFieldValue(formFieldName, newIds);
-
-    // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
-    const updatedParams = [...currentParams];
-    updatedParams[paramIndex] = {
-      ...updatedParams[paramIndex],
-      value: newIds,
-    };
-    setCurrentParams(updatedParams);
+    // Update form value synchronously to ensure renderKbSelectorInput sees the new value
+    form.setFieldValue(`param_${paramIndex}`, newIds);
+    setCurrentParams((prevParams) => {
+      const updatedParams = [...prevParams];
+      updatedParams[paramIndex] = {
+        ...updatedParams[paramIndex],
+        value: newIds,
+      };
+      return updatedParams;
+    });
   };
 
   // Get tool type for knowledge base selector
@@ -1453,6 +1796,22 @@ export default function ToolConfigModal({
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
 
+    if (param.name === "selected_model_id" && isAnalyzeToolWithModelSelection) {
+      return (
+        <Select
+          placeholder="未选择时使用默认模型"
+          options={analyzeToolModelOptions}
+          loading={registeredModelsLoading}
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          notFoundContent={
+            registeredModelsLoading ? undefined : "暂无可选模型"
+          }
+        />
+      );
+    }
+
     // Special handling for rerank_model_name parameter - show model selector
     if (param.name === "rerank_model_name") {
       // First try to get the list of available rerank models from config
@@ -1509,7 +1868,7 @@ export default function ToolConfigModal({
                 knowledgeSpaceId: value || "",
               }));
               // Also update form value
-              form.setFieldValue(fieldName, value);
+              safeSetFieldValue(form, fieldName, value);
             }}
           />
         );
@@ -1597,6 +1956,26 @@ export default function ToolConfigModal({
 
   if (!tool) return null;
 
+  // Resolve which Dify-style config payload the KB selection modal needs for
+  // the current tool.
+  const resolveDifyModalConfig = () => {
+    if (toolKbType === "dify_search") {
+      return difyConfig;
+    }
+    if (toolKbType === "datamate_search") {
+      return { serverUrl: datamateServerUrl };
+    }
+    if (toolKbType === "idata_search") {
+      return {
+        serverUrl: idataConfig.serverUrl,
+        apiKey: idataConfig.apiKey,
+        userId: idataConfig.userId,
+        knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+      };
+    }
+    return undefined;
+  };
+
   return (
     <>
       <Modal
@@ -1633,18 +2012,18 @@ export default function ToolConfigModal({
         className="tool-config-modal-content"
         wrapProps={{ style: { pointerEvents: "auto" } }}
         footer={
-          <div className="flex justify-end items-center">
-            {
+        <div className="flex items-center w-full">
+            <div className="flex-1 flex justify-start">
               <button
                 onClick={handleTestTool}
                 disabled={!tool}
-                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8 mr-auto"
+                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
               >
                 {testPanelVisible
                   ? t("toolConfig.button.closeTest")
                   : t("toolConfig.button.testTool")}
               </button>
-            }
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={handleClose}
@@ -1767,7 +2146,8 @@ export default function ToolConfigModal({
                   if (
                     toolRequiresKbSelection &&
                     (param.name === "index_names" ||
-                      param.name === "dataset_ids")
+                      param.name === "dataset_ids" ||
+                      param.name === "kds_list")
                   ) {
                     rules.push({
                       validator: async () => {
@@ -1850,7 +2230,8 @@ export default function ToolConfigModal({
                       name={
                         toolRequiresKbSelection &&
                         (param.name === "index_names" ||
-                          param.name === "dataset_ids")
+                          param.name === "dataset_ids" ||
+                          param.name === "kds_list")
                           ? undefined
                           : fieldName
                       }
@@ -1864,7 +2245,8 @@ export default function ToolConfigModal({
                       {/* For KB selector, use custom display (Form.Item doesn't control value) */}
                       {toolRequiresKbSelection &&
                       (param.name === "index_names" ||
-                        param.name === "dataset_ids")
+                        param.name === "dataset_ids" ||
+                        param.name === "kds_list")
                         ? renderKbSelectorInput(param, index)
                         : renderParamInput(param, index)}
                     </Form.Item>
@@ -1885,23 +2267,54 @@ export default function ToolConfigModal({
                 kbLoading={kbLoading}
                 selectedKbIds={selectedKbIds}
                 selectedKbDisplayNames={selectedKbDisplayNames}
-                onOpenKbSelector={(paramIndex) => openKbSelector(paramIndex === -1 ? 0 : paramIndex)}
+                onOpenKbSelector={(paramIndex) => {
+                  // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
+                  if (toolKbType === "aidp_search" || isKnowledgeBaseSearchTool) {
+                    setIsTestPanelKbSelection(true);
+                  }
+                  // paramIndex === -1 means the call originates from the test
+                  // panel's KbSelectorDisplay, which doesn't know which slot in
+                  // currentParams holds the KB parameter. Resolve the real
+                  // index here so the KB selection updates the correct param
+                  // (and only the KB param) instead of overwriting param_0
+                  // (top_k for knowledge_base_search).
+                  const kbParamIndex =
+                    paramIndex === -1
+                      ? currentParams.findIndex(
+                          (p) =>
+                            p.name === "index_names" ||
+                            p.name === "dataset_ids" ||
+                            p.name === "kds_list"
+                        )
+                      : paramIndex;
+                  openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
+                }}
                 onKbSelectionChange={(ids, displayNames) => {
-                  setSelectedKbIds(ids);
-                  setSelectedKbDisplayNames(displayNames);
+                  // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+                  if (toolKbType !== "aidp_search" && !isKnowledgeBaseSearchTool) {
+                    setSelectedKbIds(ids);
+                    setSelectedKbDisplayNames(displayNames);
+                  }
                 }}
                 onRemoveKb={(index, paramIndex) => {
                   if (paramIndex === -1) {
-                    // Called from test panel - remove from selectedKbIds
-                    const newIds = selectedKbIds.filter((_, i) => i !== index);
-                    const newDisplayNames = selectedKbDisplayNames.filter((_, i) => i !== index);
-                    setSelectedKbIds(newIds);
-                    setSelectedKbDisplayNames(newDisplayNames);
+                    // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
+                    if (toolKbType !== "aidp_search" && !isKnowledgeBaseSearchTool) {
+                      const newIds = selectedKbIds.filter((_, i) => i !== index);
+                      const newDisplayNames = selectedKbDisplayNames.filter((_, i) => i !== index);
+                      setSelectedKbIds(newIds);
+                      setSelectedKbDisplayNames(newDisplayNames);
+                    }
                   } else {
                     // Called from config panel
                     removeKbFromSelection(index, paramIndex);
                   }
                 }}
+                onTestPanelKbSelect={handleTestPanelKbSelect}
+                onTestPanelKbRemove={handleTestPanelKbRemove}
+                onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
+                testPanelKbIds={testPanelKbIds}
+                testPanelKbDisplayNames={testPanelKbDisplayNames}
                 toolKbType={toolKbType}
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />
@@ -1921,12 +2334,21 @@ export default function ToolConfigModal({
           isLoading={haotianSetsLoading}
           title="Haotian knowledge sets"
         />
+      ) : toolKbType === "aidp_search" ? (
+        <AidpKnowledgeSelectorModal
+          isOpen={kbSelectorVisible}
+          onClose={() => setKbSelectorVisible(false)}
+          onConfirm={handleAidpKbConfirm}
+          selectedDatasetIds={isTestPanelKbSelection ? testPanelKbIds : selectedKbIds}
+          serverUrl={aidpConfig.serverUrl}
+          apiKey={aidpConfig.apiKey}
+        />
       ) : (
         <KnowledgeBaseSelectorModal
           isOpen={kbSelectorVisible}
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleKbConfirm}
-          selectedIds={selectedKbIds}
+          selectedIds={isTestPanelKbSelection ? testPanelKbIds : selectedKbIds}
           toolType={getToolType()}
           knowledgeBases={knowledgeBases}
           isLoading={kbLoading}
@@ -1952,20 +2374,7 @@ export default function ToolConfigModal({
           currentEmbeddingModel={currentEmbeddingModel}
           currentMultiEmbeddingModel={currentMultiEmbeddingModel}
           toolMultimodal={toolMultimodal}
-          difyConfig={
-            toolKbType === "dify_search"
-              ? difyConfig
-              : toolKbType === "datamate_search"
-                ? { serverUrl: datamateServerUrl }
-                : toolKbType === "idata_search"
-                  ? {
-                      serverUrl: idataConfig.serverUrl,
-                      apiKey: idataConfig.apiKey,
-                      userId: idataConfig.userId,
-                      knowledgeSpaceId: idataConfig.knowledgeSpaceId,
-                    }
-                  : undefined
-          }
+          difyConfig={resolveDifyModalConfig()}
         />
       )}
     </>

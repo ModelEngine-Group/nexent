@@ -172,7 +172,7 @@ def parse_service_validate_response(xml_text: str, fallback_session_index: str =
 
     if not email:
         safe_user = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in cas_user_id)
-        email = f"{safe_user}@{CAS_SYNTHETIC_EMAIL_DOMAIN}"
+        email = f"{safe_user}{CAS_SYNTHETIC_EMAIL_DOMAIN}"
 
     return CasPrincipal(
         cas_user_id=str(cas_user_id),
