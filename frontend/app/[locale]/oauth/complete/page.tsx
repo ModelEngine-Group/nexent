@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Spin } from "antd";
@@ -10,8 +10,7 @@ import { oauthService } from "@/services/oauthService";
 
 export default function OAuthCompletePage() {
   const params = useParams<{ locale: string }>();
-  const resolvedParams = React.use(params);
-  const locale = resolvedParams?.locale === "en" ? "en" : "zh";
+  const locale = params?.locale === "en" ? "en" : "zh";
   const { t } = useTranslation("common");
   const { openRegisterModal } = useAuthenticationContext();
   const [status, setStatus] = useState<"loading" | "ready" | "expired">(
