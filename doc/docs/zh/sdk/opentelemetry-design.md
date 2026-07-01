@@ -362,11 +362,11 @@ Zipkin 当前本地形态只转发 traces；metrics 进入 Collector debug pipel
 
 ## 本地化部署设计
 
-本地化部署通过 `docker/start-monitoring.sh` 选择形态。所有形态都保留 OpenTelemetry Collector 作为入口，Nexent 后端统一上报到 `http://otel-collector:4318` 或宿主机的 `http://localhost:4318`，平台差异只体现在 Collector exporter 和本地服务组合上。
+本地化部署通过 Docker 部署脚本的 `--monitoring-provider` 选择形态。所有形态都保留 OpenTelemetry Collector 作为入口，Nexent 后端统一上报到 `http://otel-collector:4318` 或宿主机的 `http://localhost:4318`，平台差异只体现在 Collector exporter 和本地服务组合上。
 
 | 形态 | Collector 配置 | 本地服务 | 数据去向 | 说明 |
 |------|----------------|----------|----------|------|
-| `otlp` | `otel-collector-config.yml` | Collector | debug exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台；`collector` 仅作为启动脚本兼容别名 |
+| `otlp` | `otel-collector-config.yml` | Collector | debug exporter | 最小形态，用于验证 span/metric 是否产生，或手动改配置转发到云端平台 |
 | `phoenix` | `otel-collector-phoenix-config.yml` | Collector + Phoenix | `http://phoenix:6006/v1/traces` | Phoenix 容器同时提供 UI 和 OTLP HTTP/gRPC trace collector，适合本地 trace debug |
 | `langfuse` | `otel-collector-langfuse-config.yml` | Collector + Langfuse Web/Worker + Postgres + ClickHouse + MinIO + Redis | `http://langfuse-web:3000/api/public/otel/v1/traces` | Langfuse v3 依赖多组件，适合完整 LLMOps 能力验证 |
 | `langsmith` | `otel-collector-langsmith-config.yml` | Collector | `https://api.smith.langchain.com/otel/v1/traces` | 在线 LangSmith trace 分析；API Key 只配置在 Collector 环境 |
@@ -376,13 +376,13 @@ Zipkin 当前本地形态只转发 traces；metrics 进入 Collector debug pipel
 启动命令：
 
 ```bash
-cd deploy/docker
-./start-monitoring.sh --stack otlp
-./start-monitoring.sh --stack phoenix
-./start-monitoring.sh --stack langfuse
-./start-monitoring.sh --stack langsmith
-./start-monitoring.sh --stack grafana
-./start-monitoring.sh --stack zipkin
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider phoenix
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langfuse
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider zipkin
 ```
 
 部署脚本职责：

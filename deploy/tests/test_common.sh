@@ -361,19 +361,18 @@ assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-langfuse-confi
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-langsmith-config.yml' "docker deploy should map langsmith to its collector config"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-grafana-config.yml' "docker deploy should map grafana to its collector config"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-zipkin-config.yml' "docker deploy should map zipkin to its collector config"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'LANGFUSE_OTLP_AUTH_HEADER="$LANGFUSE_OLTP_AUTH_HEADER"' "docker deploy should accept the legacy Langfuse OLTP auth header alias"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'LANGFUSE_OTLP_AUTH_HEADER="Basic $(' "docker deploy should derive Langfuse OTLP auth header"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'LANGFUSE_OLTP_AUTH_HEADER="$LANGFUSE_OTLP_AUTH_HEADER"' "docker deploy should mirror the Langfuse OTLP header into the compatibility alias"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$LANGFUSE_OTLP_AUTH_HEADER"' "docker deploy should persist Langfuse OTLP auth header in monitoring.env"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_monitoring_env_var "LANGFUSE_OLTP_AUTH_HEADER" "$LANGFUSE_OLTP_AUTH_HEADER"' "docker deploy should persist the Langfuse auth header compatibility alias in monitoring.env"
+assert_not_contains "$DOCKER_MONITORING_CONFIG_BLOCK" "LANGFUSE_OLTP_AUTH_HEADER" "docker deploy should not use the misspelled Langfuse OLTP auth header alias"
 
-START_MONITORING_CONTENT="$(cat "$SCRIPT_DIR/../docker/start-monitoring.sh")"
-assert_contains "$START_MONITORING_CONTENT" 'LANGFUSE_OTLP_AUTH_HEADER="$LANGFUSE_OLTP_AUTH_HEADER"' "standalone monitoring start should accept the Langfuse OLTP auth header alias"
-assert_contains "$START_MONITORING_CONTENT" 'LANGFUSE_OLTP_AUTH_HEADER="$LANGFUSE_OTLP_AUTH_HEADER"' "standalone monitoring start should mirror the Langfuse OTLP header into the compatibility alias"
+if [ -e "$SCRIPT_DIR/../docker/start-monitoring.sh" ]; then
+  echo "FAIL: standalone monitoring script should be removed"
+  exit 1
+fi
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}' "docker monitoring compose should pass Langfuse OTLP auth header to the collector"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OLTP_AUTH_HEADER: ${LANGFUSE_OLTP_AUTH_HEADER:-}' "docker monitoring compose should pass the Langfuse auth header compatibility alias to the collector"
+assert_not_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" "LANGFUSE_OLTP_AUTH_HEADER" "docker monitoring compose should not pass the misspelled Langfuse auth header alias"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/templates/otel-collector.yaml")" "LANGFUSE_OTLP_AUTH_HEADER" "k8s collector should pass Langfuse OTLP auth header"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/templates/otel-collector.yaml")" "LANGFUSE_OLTP_AUTH_HEADER" "k8s collector should pass the Langfuse auth header compatibility alias"
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/templates/otel-collector.yaml")" "LANGFUSE_OLTP_AUTH_HEADER" "k8s collector should not pass the misspelled Langfuse auth header alias"
 
 DOCKER_DEPLOY_MONITORING_BLOCK="$(awk '/deploy_monitoring\(\)/,/^configure_root_dir_from_env\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
 assert_contains "$DOCKER_DEPLOY_MONITORING_BLOCK" 'LANGSMITH_API_KEY is required' "docker deploy should fail fast when LangSmith API key is missing"

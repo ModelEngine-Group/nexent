@@ -3,8 +3,8 @@ enabled: true
 global:
   namespace: nexent
 
-# Matches docker/start-monitoring.sh stack names:
-# otlp, collector, phoenix, langfuse, langsmith, grafana, zipkin.
+# Matches deployment monitoring provider names:
+# otlp, phoenix, langfuse, langsmith, grafana, zipkin.
 provider: otlp
 
 images:

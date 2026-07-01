@@ -72,6 +72,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --components LIST"
       echo "  --port-policy development|production"
       echo "  --image-source general|mainland|local-latest"
+      echo "  --monitoring-provider otlp|phoenix|langfuse|langsmith|grafana|zipkin"
       echo "  --version VERSION"
       echo "  --use-local-config"
       echo "  --reconfigure"
@@ -772,16 +773,11 @@ sync_monitoring_env_vars() {
   if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "langfuse" ]; then
     export LANGFUSE_INIT_PROJECT_PUBLIC_KEY="${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-nexent-local}"
     export LANGFUSE_INIT_PROJECT_SECRET_KEY="${LANGFUSE_INIT_PROJECT_SECRET_KEY:-sk-lf-nexent-local}"
-    if [ -z "${LANGFUSE_OTLP_AUTH_HEADER:-}" ] && [ -n "${LANGFUSE_OLTP_AUTH_HEADER:-}" ]; then
-      LANGFUSE_OTLP_AUTH_HEADER="$LANGFUSE_OLTP_AUTH_HEADER"
-    fi
     if [ -z "${LANGFUSE_OTLP_AUTH_HEADER:-}" ]; then
       LANGFUSE_OTLP_AUTH_HEADER="Basic $(printf "%s:%s" "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "$LANGFUSE_INIT_PROJECT_SECRET_KEY" | base64 | tr -d '\n')"
     fi
-    LANGFUSE_OLTP_AUTH_HEADER="$LANGFUSE_OTLP_AUTH_HEADER"
-    export LANGFUSE_OTLP_AUTH_HEADER LANGFUSE_OLTP_AUTH_HEADER
+    export LANGFUSE_OTLP_AUTH_HEADER
     update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$LANGFUSE_OTLP_AUTH_HEADER"
-    update_monitoring_env_var "LANGFUSE_OLTP_AUTH_HEADER" "$LANGFUSE_OLTP_AUTH_HEADER"
   fi
 
   if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "langsmith" ]; then

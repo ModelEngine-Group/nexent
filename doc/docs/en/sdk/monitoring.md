@@ -15,20 +15,8 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ## Quick Start
 
 ```bash
-cd deploy/docker
-[ -f ../../.env ] || cp ../../.env.example ../../.env
-cp assets/monitoring/monitoring.env.example assets/monitoring/monitoring.env
-
-vim ../../.env
-ENABLE_TELEMETRY=true
-MONITORING_PROVIDER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-
-vim assets/monitoring/monitoring.env
-MONITORING_PROVIDER=otlp
-
-./start-monitoring.sh --stack collector
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp
 ```
 
 ## AI Observability Platforms
@@ -89,15 +77,16 @@ LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoin
 **Collector forwarding:**
 
 ```bash
-cd deploy/docker
-vim assets/monitoring/monitoring.env
+cd deploy
+[ -f docker/assets/monitoring/monitoring.env ] || cp docker/assets/monitoring/monitoring.env.example docker/assets/monitoring/monitoring.env
+vim docker/assets/monitoring/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx
 LANGSMITH_PROJECT=nexent
 LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
 
-./start-monitoring.sh --stack langsmith
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith
 ```
 
 Nexent backend configuration when it sends OTLP to the Collector:
