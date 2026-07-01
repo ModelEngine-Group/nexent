@@ -10,6 +10,16 @@ from nexent.core.agents.agent_model import (
 from nexent.core.agents.summary_config import ContextManagerConfig
 
 
+def _message_text(message):
+    """Extract text from list-format or string-format message content."""
+    content = message["content"] if isinstance(message, dict) else message.content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") for part in content if isinstance(part, dict)
+        )
+    return content
+
+
 class _Memory:
     def __init__(self):
         self.system_prompt = None
@@ -22,7 +32,7 @@ class _Step:
         self.content = content
 
     def to_messages(self):
-        return [{"role": self.role, "content": self.content}]
+        return [{"role": self.role, "content": [{"type": "text", "text": self.content}]}]
 
 
 def test_context_manager_assembles_stable_dynamic_and_history_messages():
@@ -41,7 +51,7 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
         tools=[{"name": "z"}, {"name": "a"}],
     )
 
-    assert [message["content"] for message in final.messages] == [
+    assert [_message_text(message) for message in final.messages] == [
         "stable policy",
         "memory fact",
         "kb fact",
@@ -82,7 +92,7 @@ def test_context_manager_owns_final_answer_assembly():
         "user",
         "assistant",
     ]
-    assert [message["content"] for message in final.messages[:4]] == [
+    assert [_message_text(message) for message in final.messages[:4]] == [
         "stable policy",
         "final instruction",
         "memory fact",

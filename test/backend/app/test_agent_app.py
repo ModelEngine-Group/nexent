@@ -738,6 +738,48 @@ def test_export_agent_api_success_with_zip(mocker, mock_auth_header):
     """Test export_agent_api success case returning ZIP file."""
     mock_export_agent = mocker.patch(
         "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+    mock_export_agent.return_value = {
+        "_zip": True,
+        "data": b"PK\x03\x04test zip content",
+        "filename": "agent_export.zip"
+    }
+
+    response = config_client.post(
+        "/agent/export",
+        json={"agent_id": 123},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
+    assert response.content == b"PK\x03\x04test zip content"
+
+
+def test_export_agent_api_success_with_zip_default_filename(mocker, mock_auth_header):
+    """Test export_agent_api ZIP response with default filename."""
+    mock_export_agent = mocker.patch(
+        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+    mock_export_agent.return_value = {
+        "_zip": True,
+        "data": b"PK\x03\x04minimal zip",
+    }
+
+    response = config_client.post(
+        "/agent/export",
+        json={"agent_id": 456},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
+
+
+def test_export_agent_api_exception(mocker, mock_auth_header):
+    """Test export_agent_api exception handling."""
+    mock_export_agent = mocker.patch(
+        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.side_effect = Exception("Test error")
 
     response = config_client.post(

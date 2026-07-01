@@ -160,7 +160,7 @@ The deployment script uses Bash TUI menus when running interactively. It first s
 | Policy | Kubernetes behavior |
 |--------|---------------------|
 | `development` | Uses NodePort for Web and selected debug/internal services |
-| `production` | Keeps internal services as ClusterIP and exposes the Web entrypoint |
+| `production` | Keeps internal services as ClusterIP and exposes the Web and northbound entrypoints |
 
 ## Deployment Workflow
 

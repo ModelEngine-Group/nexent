@@ -1212,10 +1212,9 @@ deployment_render_image_values() {
 }
 
 deployment_render_k8s_port_values() {
-  local northbound_type="ClusterIP"
+  local northbound_type="NodePort"
   local internal_type="ClusterIP"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
-    northbound_type="NodePort"
     internal_type="NodePort"
   fi
 
@@ -1258,11 +1257,10 @@ deployment_chart_enabled() {
 
 deployment_render_helm_chart_values() {
   local local_pull_policy="IfNotPresent"
-  local northbound_type="ClusterIP"
+  local northbound_type="NodePort"
   local internal_type="ClusterIP"
   [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
-    northbound_type="NodePort"
     internal_type="NodePort"
   fi
 

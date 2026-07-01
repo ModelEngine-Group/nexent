@@ -76,6 +76,14 @@ if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
   exit 1
 fi
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
+assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5013" "production should expose northbound"
+
+deployment_apply_image_source
+PRODUCTION_HELM_VALUES="$TMP_DIR/production-generated-values.yaml"
+deployment_render_helm_values "$PRODUCTION_HELM_VALUES"
+PRODUCTION_HELM_CONTENT="$(cat "$PRODUCTION_HELM_VALUES")"
+assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    northbound:\n      type: "NodePort"\n      nodePort: 30013' "production k8s should expose northbound as NodePort"
+assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "production k8s should expose web as NodePort"
 
 deployment_prepare_config --components supabase --port-policy development --app-version latest
 assert_eq "infrastructure,supabase" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"

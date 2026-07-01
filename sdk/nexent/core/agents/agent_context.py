@@ -1377,7 +1377,7 @@ class ContextManager:
         ]
 
         stable_text = "\n\n".join(
-            str(message.get("content", "")) for message in stable_messages
+            self._extract_message_text(message) for message in stable_messages
         )
         memory.system_prompt = SystemPromptStep(
             system_prompt=stable_text or fallback_system_prompt
@@ -1497,8 +1497,8 @@ class ContextManager:
             undefined=StrictUndefined,
         ).render(task=task or "")
         return (
-            [{"role": "system", "content": pre_messages}],
-            [{"role": "user", "content": post_messages}],
+            [{"role": "system", "content": [{"type": "text", "text": pre_messages}]}],
+            [{"role": "user", "content": [{"type": "text", "text": post_messages}]}],
         )
 
     @staticmethod
@@ -1543,6 +1543,22 @@ class ContextManager:
         return self._estimate_text_tokens(
             json.dumps(self._normalize_for_fingerprint(tools), ensure_ascii=False, sort_keys=True, default=str)
         )
+
+    @staticmethod
+    def _extract_message_text(message: Any) -> str:
+        """Extract plain text from a message dict or ChatMessage."""
+        content = (
+            message.get("content", "")
+            if isinstance(message, dict)
+            else getattr(message, "content", "")
+        )
+        if isinstance(content, list):
+            return "".join(
+                str(part.get("text", ""))
+                for part in content
+                if isinstance(part, dict)
+            )
+        return "" if content is None else str(content)
 
     @staticmethod
     def _message_role(message: Any) -> Optional[str]:
