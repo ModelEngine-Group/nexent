@@ -1592,3 +1592,193 @@ def test_update_message_minio_files_not_found(monkeypatch, mock_session_ctx):
     result = update_message_minio_files(999, [{"name": "file.pdf"}])
 
     assert result is False
+
+
+def test_create_conversation_with_tenant_id(monkeypatch, mock_session_ctx):
+    """create_conversation persists tenant_id when supplied."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.conversation_id = 3
+    mock_record.conversation_title = "Tenant Chat"
+    mock_record.create_time = 1000.0
+    mock_record.update_time = 1000.0
+    session.execute.return_value.fetchone.return_value = mock_record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = create_conversation("Tenant Chat", user_id="user-1", tenant_id="tenant-1")
+
+    assert result["conversation_id"] == 3
+    assert _captured_insert_values["tenant_id"] == "tenant-1"
+
+
+def test_get_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_conversation applies both user and tenant owner filters."""
+    session, ctx = mock_session_ctx
+    record = MagicMock()
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda item: {"conversation_id": 9})
+
+    result = get_conversation(9, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == {"conversation_id": 9}
+    session.scalars.assert_called_once()
+
+
+def test_get_conversation_list_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_conversation_list applies user and tenant filters."""
+    session, ctx = mock_session_ctx
+    record = MagicMock(conversation_id=1, conversation_title="Chat", create_time=1000.0, update_time=1000.0)
+    session.execute.return_value = [record]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr(
+        "backend.database.conversation_db.as_dict",
+        lambda item: {
+            "conversation_id": item.conversation_id,
+            "conversation_title": item.conversation_title,
+            "create_time": item.create_time,
+            "update_time": item.update_time,
+        },
+    )
+
+    result = get_conversation_list(user_id="user-1", tenant_id="tenant-1")
+
+    assert result[0]["conversation_id"] == 1
+    session.execute.assert_called_once()
+
+
+def test_rename_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """rename_conversation applies user and tenant filters."""
+    session, ctx = mock_session_ctx
+    result_mock = MagicMock(rowcount=1)
+    session.execute.return_value = result_mock
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = rename_conversation(4, "Renamed", user_id="user-1", tenant_id="tenant-1")
+
+    assert result is True
+    session.execute.assert_called_once()
+
+
+def test_delete_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """delete_conversation applies user and tenant filters before deleting children."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value = MagicMock(rowcount=1)
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = delete_conversation(4, user_id="user-1", tenant_id="tenant-1")
+
+    assert result is True
+    assert session.execute.call_count == 5
+
+
+def test_get_conversation_history_filters_by_user_and_tenant_when_missing(monkeypatch, mock_session_ctx):
+    """get_conversation_history returns None after applying user and tenant filters."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value.first.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_conversation_history(4, user_id="user-1", tenant_id="tenant-1")
+
+    assert result is None
+    session.execute.assert_called_once()
+
+
+def test_get_source_images_by_message_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_source_images_by_message applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [MagicMock()]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda item: {"image_id": 1})
+
+    result = get_source_images_by_message(7, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == [{"image_id": 1}]
+    session.scalars.assert_called_once()
+
+
+def test_get_source_searches_by_message_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_source_searches_by_message applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [MagicMock()]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda item: {"search_id": 1})
+
+    result = get_source_searches_by_message(7, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == [{"search_id": 1}]
+    session.scalars.assert_called_once()
+
+
+def test_soft_delete_all_conversations_by_user_filters_by_tenant(monkeypatch, mock_session_ctx):
+    """soft_delete_all_conversations_by_user applies tenant filtering to conversation update."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [101, 102]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    count = soft_delete_all_conversations_by_user("user-1", tenant_id="tenant-1")
+
+    assert count == 2
+    assert session.execute.call_count == 5
+
+
+def test_get_source_images_by_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_source_images_by_conversation applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [MagicMock()]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda item: {"image_id": 1})
+
+    result = get_source_images_by_conversation(7, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == [{"image_id": 1}]
+    session.scalars.assert_called_once()
+
+
+def test_get_source_searches_by_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_source_searches_by_conversation applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [MagicMock()]
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda item: {"search_id": 1})
+
+    result = get_source_searches_by_conversation(7, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == [{"search_id": 1}]
+    session.scalars.assert_called_once()
+
+
+def test_get_message_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_message applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.first.return_value = MagicMock()
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda item: {"message_id": 1})
+
+    result = get_message(7, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == {"message_id": 1}
+    session.scalars.assert_called_once()
+
+
+def test_get_message_id_by_index_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_message_id_by_index applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value.scalar.return_value = 42
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_message_id_by_index(7, 2, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == 42
+    session.execute.assert_called_once()
+
+def test_get_latest_assistant_message_id_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
+    """get_latest_assistant_message_id applies parent conversation owner filters."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value.scalar.return_value = 42
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_latest_assistant_message_id(7, user_id="user-1", tenant_id="tenant-1")
+
+    assert result == 42
+    session.execute.assert_called_once()
