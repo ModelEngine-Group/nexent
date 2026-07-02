@@ -254,8 +254,8 @@ export const ModelEditDialog = ({
   // or url -- only the populate transition should kick off auto-suggest.
   const isBareCapacityModel = Boolean(
     model &&
-      supportsCapacityFields &&
-      (!model.contextWindowTokens || !model.maxOutputTokens)
+    supportsCapacityFields &&
+    (!model.contextWindowTokens || !model.maxOutputTokens)
   );
   useEffect(() => {
     if (autoSuggestFiredRef.current) return;
@@ -917,6 +917,7 @@ interface ProviderConfigEditDialogProps {
   showApiKeyField?: boolean; // Whether to show API Key field (default: true)
   modelName?: string;
   baseUrl?: string;
+  providerHint?: string;
   onClose: () => void;
   onSave: (config: {
     apiKey?: string;
@@ -946,6 +947,7 @@ export const ProviderConfigEditDialog = ({
   showApiKeyField = true,
   modelName,
   baseUrl,
+  providerHint,
   onClose,
   onSave,
 }: ProviderConfigEditDialogProps) => {
@@ -995,6 +997,7 @@ export const ProviderConfigEditDialog = ({
     initialCapacity,
     modelName,
     baseUrl,
+    providerHint,
   ]);
 
   const isEmbeddingModel =
@@ -1035,7 +1038,10 @@ export const ProviderConfigEditDialog = ({
   };
 
   const handleSuggestCapacity = async () => {
-    if (!modelName?.trim() || !baseUrl?.trim()) {
+    const cleanModelName = modelName?.trim();
+    const cleanBaseUrl = baseUrl?.trim();
+    const cleanProviderHint = providerHint?.trim();
+    if (!cleanModelName || (!cleanBaseUrl && !cleanProviderHint)) {
       message.warning(t("model.dialog.capacity.suggestion.missingInput"));
       return;
     }
@@ -1043,8 +1049,9 @@ export const ProviderConfigEditDialog = ({
     setCheckingCapacitySuggestion(true);
     try {
       const suggestion = await modelService.suggestCapacity({
-        modelName: modelName.trim(),
-        baseUrl: baseUrl.trim(),
+        modelName: cleanModelName,
+        baseUrl: cleanBaseUrl || undefined,
+        providerHint: cleanProviderHint || undefined,
         modelType: modelType || undefined,
       });
       if (myToken !== suggestionRequestRef.current) return;
@@ -1137,8 +1144,7 @@ export const ProviderConfigEditDialog = ({
             : {}),
         ...(supportsCapacityFields && acceptedCapacitySuggestion
           ? {
-              acceptedSuggestionMatchKind:
-                acceptedCapacitySuggestion.matchKind,
+              acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
               ...(acceptedCapacitySuggestion.capabilityProfileVersion
                 ? {
                     acceptedCapabilityProfileVersion:
@@ -1190,7 +1196,11 @@ export const ProviderConfigEditDialog = ({
                 size="small"
                 onClick={handleSuggestCapacity}
                 loading={checkingCapacitySuggestion}
-                disabled={!capacitySuggestionEnabled || !modelName?.trim() || !baseUrl?.trim()}
+                disabled={
+                  !capacitySuggestionEnabled ||
+                  !modelName?.trim() ||
+                  (!baseUrl?.trim() && !providerHint?.trim())
+                }
               >
                 {t("model.dialog.capacity.suggestion.check")}
               </Button>
@@ -1206,7 +1216,8 @@ export const ProviderConfigEditDialog = ({
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
             // context_window/max_output optional; DEFAULT_* substitute at save.
             legacyMaxTokensCandidate={
-              initialCapacity?.contextWindowTokens && initialCapacity?.maxOutputTokens
+              initialCapacity?.contextWindowTokens &&
+              initialCapacity?.maxOutputTokens
                 ? undefined
                 : initialCapacity?.maxTokens
             }

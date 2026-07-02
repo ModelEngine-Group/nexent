@@ -1890,6 +1890,9 @@ export const ModelDeleteDialog = ({
           ""
         }
         baseUrl={getProviderBaseUrlByType(deletingModelType) || ""}
+        providerHint={
+          selectedSingleModel?.model_factory || selectedSource || ""
+        }
         onSave={async (config) => {
           if (!selectedSingleModel) return;
           try {
