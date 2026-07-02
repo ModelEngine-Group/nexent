@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Agent evaluation (offline) - evaluation set & evaluation runs
 -- =============================================================================
--- Version: v2.3.1
+-- Version: v2.3.0
 -- Date: 2026-06-30
 -- Description: Add evaluation_set_t / evaluation_set_case_t / agent_evaluation_t / agent_evaluation_case_t
 -- =============================================================================

@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Add judge_model_id to agent_evaluation_t
--- Version: v2.3.1
+-- Version: v2.3.0
 -- Date: 2026-06-30
 -- Description:
 --   Persist the judge model id on the evaluation run so that:

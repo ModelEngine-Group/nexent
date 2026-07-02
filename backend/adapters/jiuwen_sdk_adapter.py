@@ -618,6 +618,26 @@ class JiuwenSDKAdapter:
             "model_answer": str(model_answer),
         }).to_messages()
 
+        # Append a directive requiring Chinese output for the evaluation reason.
+        # This ensures consistent Chinese language in the report regardless of
+        # the judge model's default language.
+        chinese_directive = (
+            "\n\nIMPORTANT: You MUST respond in Chinese for the 'reason' field. "
+            "The reason must be a clear explanation in Simplified Chinese. "
+            "重要提示：'reason' 字段必须使用中文撰写，用简洁的中文解释评判结果。"
+        )
+
+        if messages:
+            last = messages[-1]
+            last_role = getattr(last, "role", None)
+            # Default template returns a single UserMessage with role="user"
+            if last_role == "user":
+                last.content = (last.content or "") + chinese_directive
+            else:
+                # Append a new user message with the directive
+                from openjiuwen.core.foundation.llm import UserMessage
+                messages.append(UserMessage(content=chinese_directive.lstrip("\n")))
+
         try:
             response = asyncio.run(metric._model.invoke(messages)).content
         except Exception as exc:
@@ -646,7 +666,7 @@ class JiuwenSDKAdapter:
         else:
             reason = ""
         if not reason:
-            reason = "pass" if score >= 1.0 else "fail"
+            reason = "通过" if score >= 1.0 else "失败"
 
         return score, reason
 

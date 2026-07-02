@@ -149,6 +149,13 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         ]:
             sys.modules.pop(mod, None)
 
+        # Reset every mock so a previous test's ``side_effect`` /
+        # ``return_value`` does not leak into this one. The first two mocks
+        # (``delete_*_impl``) are also kept as module globals below for the
+        # existing delete tests; reset them here too.
+        for m in self.mocks:
+            m.reset_mock(side_effect=True)
+            m.side_effect = None
         _DELETE_EVAL_MOCK.reset_mock(side_effect=True)
         _DELETE_EVAL_MOCK.side_effect = None
         _DELETE_SET_MOCK.reset_mock(side_effect=True)
@@ -191,6 +198,154 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         resp = self.client.delete("/evaluation-sets/9")
         self.assertEqual(resp.status_code, 400)
         self.assertIn("referenced by 3", resp.json()["detail"])
+
+    # ------------------------------------------------------------------
+    # ``POST /agent-evaluations`` — create a new evaluation run
+    # ------------------------------------------------------------------
+    def test_create_agent_evaluation_success(self):
+        create_mock = self.mocks[3]  # create_agent_evaluation_run_impl
+        create_mock.return_value = {"agent_evaluation_id": 1}
+        resp = self.client.post(
+            "/agent-evaluations",
+            json={"agent_id": 7, "evaluation_set_id": 9, "judge_model_id": 3},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"], {"agent_evaluation_id": 1})
+        create_mock.assert_called_once_with(
+            tenant_id="t1",
+            user_id="u1",
+            agent_id=7,
+            evaluation_set_id=9,
+            judge_model_id=3,
+        )
+
+    def test_create_agent_evaluation_value_error_returns_400(self):
+        self.mocks[3].side_effect = ValueError("evaluation set has no cases")
+        resp = self.client.post(
+            "/agent-evaluations",
+            json={"agent_id": 7, "evaluation_set_id": 9, "judge_model_id": 3},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("no cases", resp.json()["detail"])
+
+    def test_create_agent_evaluation_unexpected_error_returns_500(self):
+        self.mocks[3].side_effect = RuntimeError("db boom")
+        resp = self.client.post(
+            "/agent-evaluations",
+            json={"agent_id": 7, "evaluation_set_id": 9, "judge_model_id": 3},
+        )
+        self.assertEqual(resp.status_code, 500)
+
+    # ------------------------------------------------------------------
+    # ``GET /agent-evaluations?agent_id=...`` — list runs for an agent
+    # ------------------------------------------------------------------
+    def test_list_agent_evaluations_forwards_query(self):
+        list_mock = self.mocks[7]  # list_agent_evaluations_by_agent_impl
+        list_mock.return_value = [{"agent_evaluation_id": 1}]
+        resp = self.client.get(
+            "/agent-evaluations", params={"agent_id": 7, "limit": 10, "offset": 5},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"], [{"agent_evaluation_id": 1}])
+        list_mock.assert_called_once_with(
+            agent_id=7, tenant_id="t1", limit=10, offset=5,
+        )
+
+    def test_list_agent_evaluations_default_pagination(self):
+        list_mock = self.mocks[7]
+        list_mock.return_value = []
+        resp = self.client.get("/agent-evaluations", params={"agent_id": 7})
+        self.assertEqual(resp.status_code, 200)
+        list_mock.assert_called_once_with(
+            agent_id=7, tenant_id="t1", limit=50, offset=0,
+        )
+
+    def test_list_agent_evaluations_invalid_pagination_returns_422(self):
+        resp = self.client.get(
+            "/agent-evaluations", params={"agent_id": 7, "limit": 0},
+        )
+        self.assertEqual(resp.status_code, 422)
+
+    # ------------------------------------------------------------------
+    # ``GET /agent-evaluations/{id}`` — fetch a single run
+    # ------------------------------------------------------------------
+    def test_get_agent_evaluation_success(self):
+        get_mock = self.mocks[5]  # get_agent_evaluation_run_impl
+        get_mock.return_value = {"agent_evaluation_id": 1, "status": "RUNNING"}
+        resp = self.client.get("/agent-evaluations/1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.json()["data"],
+            {"agent_evaluation_id": 1, "status": "RUNNING"},
+        )
+        get_mock.assert_called_once_with(
+            agent_evaluation_id=1, tenant_id="t1",
+        )
+
+    def test_get_agent_evaluation_internal_error_returns_500(self):
+        self.mocks[5].side_effect = RuntimeError("db boom")
+        resp = self.client.get("/agent-evaluations/1")
+        self.assertEqual(resp.status_code, 500)
+
+    # ------------------------------------------------------------------
+    # ``GET /agent-evaluations/{id}/cases`` — list cases for a run
+    # ------------------------------------------------------------------
+    def test_list_agent_evaluation_cases_success(self):
+        cases_mock = self.mocks[6]  # list_agent_evaluation_cases_impl
+        cases_mock.return_value = [{"agent_evaluation_case_id": 1}]
+        resp = self.client.get(
+            "/agent-evaluations/1/cases", params={"limit": 5, "offset": 2},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.json()["data"], [{"agent_evaluation_case_id": 1}],
+        )
+        cases_mock.assert_called_once_with(
+            agent_evaluation_id=1, tenant_id="t1", limit=5, offset=2,
+        )
+
+    def test_list_agent_evaluation_cases_invalid_pagination_returns_422(self):
+        resp = self.client.get(
+            "/agent-evaluations/1/cases", params={"limit": 0},
+        )
+        self.assertEqual(resp.status_code, 422)
+
+    # ------------------------------------------------------------------
+    # ``GET /agent-evaluations/{id}/report`` — download Excel
+    # ------------------------------------------------------------------
+    def test_download_report_failed_cases_uses_failed_suffix(self):
+        report_mock = self.mocks[4]  # generate_agent_evaluation_report_impl
+        report_mock.return_value = (b"xlsx-bytes", 4)
+        resp = self.client.get("/agent-evaluations/1/report")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, b"xlsx-bytes")
+        self.assertIn(
+            "evaluation_report_1_failed.xlsx",
+            resp.headers["Content-Disposition"],
+        )
+        report_mock.assert_called_once_with(
+            agent_evaluation_id=1, tenant_id="t1",
+        )
+
+    def test_download_report_clean_run_uses_all_suffix(self):
+        self.mocks[4].return_value = (b"xlsx-bytes", 0)
+        resp = self.client.get("/agent-evaluations/1/report")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "evaluation_report_1_all.xlsx",
+            resp.headers["Content-Disposition"],
+        )
+
+    def test_download_report_value_error_returns_404(self):
+        self.mocks[4].side_effect = ValueError("agent evaluation not found")
+        resp = self.client.get("/agent-evaluations/1/report")
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("not found", resp.json()["detail"])
+
+    def test_download_report_internal_error_returns_500(self):
+        self.mocks[4].side_effect = RuntimeError("disk full")
+        resp = self.client.get("/agent-evaluations/1/report")
+        self.assertEqual(resp.status_code, 500)
 
 
 if __name__ == "__main__":
