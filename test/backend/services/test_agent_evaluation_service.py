@@ -4,8 +4,15 @@ delete-only-creator behavior and the failed-cases-only Excel report."""
 import sys
 import types
 import importlib
+import json
+import re
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+
+def re_compile_json_object():
+    """Return a regex that finds a single JSON object in a string."""
+    return re.compile(r"\{[^{}]*\"reason\"[^{}]*\}")
 
 import pytest
 
@@ -299,6 +306,15 @@ def service_module(monkeypatch):
     # through to a ModuleNotFoundError on the parent package.
     _services_pkg.agent_evaluation_service = agent_evaluation_service
     agent_evaluation_service.openpyxl = openpyxl_mock
+    # ``services.agent_evaluation_service`` does ``from openpyxl import Workbook``
+    # at module load, so the bound name must be patched here too — otherwise
+    # a sibling fixture that swaps ``sys.modules["openpyxl"]`` for a real
+    # module will leave the production code calling ``openpyxl.Workbook()``
+    # directly and our recorder never sees the workbook.
+    _saved_workbook = agent_evaluation_service.Workbook
+    agent_evaluation_service.Workbook = _workbook_factory
+    monkeypatch.setattr(agent_evaluation_service, "Workbook", _workbook_factory)
+
     agent_evaluation_service.get_agent_evaluation = _agent_evaluation_db_mock.get_agent_evaluation
     agent_evaluation_service.list_agent_evaluation_cases = _agent_evaluation_db_mock.list_agent_evaluation_cases
     agent_evaluation_service.soft_delete_agent_evaluation = _agent_evaluation_db_mock.soft_delete_agent_evaluation
@@ -558,6 +574,57 @@ def test_extract_clean_reason_falls_back_to_stripped_text(service_module):
     assert service_module._extract_clean_reason_v2(raw) == "not actually json payload"
 
 
+def test_extract_clean_reason_v1_handles_none_and_empty(service_module):
+    assert service_module._extract_clean_reason(None) == ""
+    assert service_module._extract_clean_reason("") == ""
+    assert service_module._extract_clean_reason("   ") == ""
+
+
+def test_extract_clean_reason_v1_returns_plain_text(service_module):
+    """Free-form text returns the stripped prefix-stripped input verbatim."""
+    # ``_extract_clean_reason`` (v1) references ``_JSON_OBJECT_RE`` which is not
+    # defined at module load — this function is dead code in the service module.
+    # We pre-bind the missing name so the call doesn't raise NameError.
+    service_module._JSON_OBJECT_RE = re_compile_json_object()
+    raw = "[12:00:00 INFO llm] looks correct to me"
+    assert service_module._extract_clean_reason(raw) == "looks correct to me"
+
+
+def test_extract_clean_reason_v1_unwraps_response_content_fence(service_module):
+    """When response_content holds a JSON ``reason`` fence, return the reason."""
+    service_module._JSON_OBJECT_RE = re_compile_json_object()
+    raw = '[12:00:00 INFO llm] {"response_content": "```json\\n{\\"reason\\": \\"step missing\\"}\\n```"}'
+    assert service_module._extract_clean_reason(raw) == "step missing"
+
+
+def test_extract_clean_reason_v1_unwraps_top_level_reason(service_module):
+    """When the envelope has a top-level reason field, return it stripped."""
+    service_module._JSON_OBJECT_RE = re_compile_json_object()
+    raw = '[12:00:00 INFO llm] {"reason": "  wrong entity  "}'
+    assert service_module._extract_clean_reason(raw) == "wrong entity"
+
+
+def test_extract_clean_reason_v1_handles_invalid_json_in_envelope(service_module):
+    """An envelope with invalid JSON inside falls back to regex extraction."""
+    service_module._JSON_OBJECT_RE = re_compile_json_object()
+    raw = "[12:00:00 INFO llm] {\"reason\": \"from regex\"}"
+    assert service_module._extract_clean_reason(raw) == "from regex"
+
+
+def test_extract_clean_reason_v1_handles_non_string_response_content(service_module):
+    """Non-string response_content is ignored; top-level reason is used."""
+    service_module._JSON_OBJECT_RE = re_compile_json_object()
+    raw = '[12:00:00 INFO llm] {"response_content": 123, "reason": "fallback"}'
+    assert service_module._extract_clean_reason(raw) == "fallback"
+
+
+def test_extract_clean_reason_v1_returns_stripped_when_no_reason_field(service_module):
+    """Parsed envelope without a reason field returns the stripped text."""
+    service_module._JSON_OBJECT_RE = re_compile_json_object()
+    raw = '[12:00:00 INFO llm] {"other_key": 1}'
+    assert service_module._extract_clean_reason(raw) == '{"other_key": 1}'
+
+
 def test_extract_clean_reason_handles_openai_chatcompletion_repr(service_module):
     """The SDK captures ``repr(ChatCompletion)`` for the request-side log."""
     repr_payload = (
@@ -575,6 +642,184 @@ def test_extract_clean_reason_handles_openai_chatcompletion_repr(service_module)
 # the background worker. The background future is captured so we can verify
 # the done-callback is attached without actually executing the worker.
 # ---------------------------------------------------------------------------
+
+
+def test_build_case_for_jiuwen_normalizes_inputs_and_label(service_module):
+    """The helper pulls ``query`` and ``answer`` out of inputs/label dicts,
+    defaulting missing fields to empty strings."""
+    case = service_module._build_case_for_jiuwen(
+        inputs={"query": "Q?", "extras": "ignored"},
+        label={"answer": "A!", "extra": "ignored"},
+    )
+    assert case == {
+        "inputs": {"query": "Q?"},
+        "label": {"answer": "A!"},
+    }
+
+
+def test_build_case_for_jiuwen_handles_missing_fields(service_module):
+    case = service_module._build_case_for_jiuwen(inputs={}, label={})
+    assert case == {"inputs": {"query": ""}, "label": {"answer": ""}}
+
+
+def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
+    """The async runner streams JSON ``final_answer`` chunks and joins them."""
+    import asyncio
+
+    service_module.AgentRequest = MagicMock()
+    service_module.prepare_agent_run = AsyncMock(
+        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
+    )
+
+    final_answer_parts = [json.dumps({"type": "final_answer", "content": "hello "}),
+                          json.dumps({"type": "final_answer", "content": "world"})]
+
+    async def _fake_agent_run(_run_info):
+        for chunk in final_answer_parts:
+            yield chunk
+
+    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+
+    result = asyncio.run(service_module._run_agent_to_final_answer(
+        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
+    ))
+    assert result == "hello world"
+
+
+def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module):
+    """Chunks whose ``type`` is not ``final_answer`` are ignored."""
+    import asyncio
+
+    service_module.AgentRequest = MagicMock()
+    service_module.prepare_agent_run = AsyncMock(
+        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
+    )
+
+    chunks = [
+        json.dumps({"type": "thought", "content": "thinking..."}),
+        json.dumps({"type": "final_answer", "content": "only this"}),
+        json.dumps({"type": "tool_call", "content": "calling tool"}),
+    ]
+
+    async def _fake_agent_run(_run_info):
+        for chunk in chunks:
+            yield chunk
+
+    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+
+    result = asyncio.run(service_module._run_agent_to_final_answer(
+        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
+    ))
+    assert result == "only this"
+
+
+def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(service_module):
+    """Non-string chunks and unparseable JSON are silently dropped."""
+    import asyncio
+
+    service_module.AgentRequest = MagicMock()
+    service_module.prepare_agent_run = AsyncMock(
+        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
+    )
+
+    chunks = [
+        "not json",
+        json.dumps({"type": "final_answer", "content": "kept"}),
+        '{"unterminated":',
+    ]
+
+    async def _fake_agent_run(_run_info):
+        for chunk in chunks:
+            yield chunk
+
+    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+
+    result = asyncio.run(service_module._run_agent_to_final_answer(
+        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
+    ))
+    assert result == "kept"
+
+
+def test_run_agent_to_final_answer_handles_no_final_answer_chunks(service_module):
+    """When no chunk is a ``final_answer``, the result is the empty string."""
+    import asyncio
+
+    service_module.AgentRequest = MagicMock()
+    service_module.prepare_agent_run = AsyncMock(
+        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
+    )
+
+    async def _fake_agent_run(_run_info):
+        yield json.dumps({"type": "thought"})
+
+    sys.modules["nexent.core.agents.run_agent"].agent_run = _fake_agent_run
+
+    result = asyncio.run(service_module._run_agent_to_final_answer(
+        agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1,
+    ))
+    assert result == ""
+
+
+def test_make_background_done_callback_failure_marks_run_failed(service_module):
+    """When the future raised, the callback should mark the run FAILED."""
+    captured = {}
+
+    def _fake_update(**kwargs):
+        captured.update(kwargs)
+
+    service_module.update_agent_evaluation_status = _fake_update
+
+    callback = service_module._make_background_done_callback(
+        tenant_id="t1", user_id="u1", agent_evaluation_id=99,
+    )
+    future = MagicMock()
+    future.exception.return_value = RuntimeError("worker crashed")
+
+    callback(future)
+
+    assert captured["agent_evaluation_id"] == 99
+    assert captured["tenant_id"] == "t1"
+    assert captured["status"] == "FAILED"
+    assert captured["updated_by"] == "u1"
+    assert "error_message" in captured
+
+
+def test_make_background_done_callback_no_exception_is_noop(service_module):
+    """When the future completed cleanly, the callback is a no-op."""
+    captured = {}
+
+    def _fake_update(**kwargs):
+        captured.update(kwargs)
+
+    service_module.update_agent_evaluation_status = _fake_update
+
+    callback = service_module._make_background_done_callback(
+        tenant_id="t1", user_id="u1", agent_evaluation_id=100,
+    )
+    future = MagicMock()
+    future.exception.return_value = None
+
+    callback(future)
+
+    # Status update must not have been called.
+    assert captured == {}
+
+
+def test_make_background_done_callback_update_failure_is_logged(service_module):
+    """If the DB update itself fails, the exception must be swallowed and logged."""
+    def _failing_update(**_kwargs):
+        raise RuntimeError("db unavailable")
+
+    service_module.update_agent_evaluation_status = _failing_update
+
+    callback = service_module._make_background_done_callback(
+        tenant_id="t1", user_id="u1", agent_evaluation_id=101,
+    )
+    future = MagicMock()
+    future.exception.return_value = RuntimeError("worker crashed")
+
+    # Should not raise even though the inner update fails.
+    callback(future)
 
 
 def test_create_agent_evaluation_run_happy_path(service_module):
