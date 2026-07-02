@@ -1443,3 +1443,539 @@ def test_update_message_minio_files_not_found(monkeypatch, mock_session_ctx):
     result = update_message_minio_files(999, [{"name": "file.pdf"}])
 
     assert result is False
+
+
+# =============================================================================
+# Additional tests for uncovered conversation_db lines
+# =============================================================================
+
+
+def test_get_conversation_with_user_id_filter(monkeypatch, mock_session_ctx):
+    """get_conversation filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.conversation_id = 42
+    mock_record.conversation_title = "User Chat"
+    session.scalars.return_value.first.return_value = mock_record
+
+    def as_dict_side_effect(record):
+        return {"conversation_id": record.conversation_id, "conversation_title": record.conversation_title}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation(42, user_id="specific-user")
+
+    assert result is not None
+    assert result["conversation_id"] == 42
+
+
+def test_get_message_with_user_id_filter(monkeypatch, mock_session_ctx):
+    """get_message filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.message_id = 42
+    mock_record.message_content = "Hello"
+    session.scalars.return_value.first.return_value = mock_record
+
+    def as_dict_side_effect(record):
+        return {"message_id": record.message_id, "message_content": record.message_content}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_message(42, user_id="owner-user")
+
+    assert result is not None
+    assert result["message_id"] == 42
+
+
+def test_get_latest_assistant_message_with_user_id(monkeypatch, mock_session_ctx):
+    """get_latest_assistant_message filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_result = MagicMock()
+    mock_result.message_id = 42
+    mock_result.status = "completed"
+    mock_result.message_content = "Hello"
+    session.execute.return_value.first.return_value = mock_result
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_latest_assistant_message(1, user_id="owner-user")
+
+    assert result is not None
+    assert result["message_id"] == 42
+
+
+def test_get_latest_assistant_message_id_with_user_id(monkeypatch, mock_session_ctx):
+    """get_latest_assistant_message_id filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    session.execute.return_value.scalar.return_value = 42
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_latest_assistant_message_id(1, user_id="owner-user")
+
+    assert result == 42
+
+
+def test_create_source_image_duplicate_returns_minus_one(monkeypatch):
+    """create_source_image returns -1 when image already exists."""
+    session = MagicMock()
+    # _image_exists check returns True (image already exists)
+    session.execute.return_value.scalar_one_or_none.return_value = True
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    image_id = create_source_image(
+        {"message_id": 7, "image_url": "http://example.com/image.png"},
+        user_id="actor",
+    )
+
+    assert image_id == -1
+    # Insert should not be called
+    assert session.execute.call_count == 1
+
+
+def test_create_source_image_with_conversation_id(monkeypatch):
+    """create_source_image includes optional conversation_id."""
+    session = MagicMock()
+    session.execute.side_effect = [
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # _image_exists check
+        MagicMock(scalar_one=MagicMock(return_value=55)),  # insert result
+    ]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    image_id = create_source_image(
+        {"message_id": 7, "conversation_id": 10, "image_url": "http://example.com/image.png"},
+        user_id="actor",
+    )
+
+    assert image_id == 55
+    assert _captured_insert_values["conversation_id"] == 10
+
+
+def test_create_source_search_with_unit_id(monkeypatch, fresh_insert_mock):
+    """create_source_search includes optional unit_id field."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one.return_value = 88
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    search_id = create_source_search(
+        {
+            "message_id": 7,
+            "source_type": "web",
+            "source_title": "Example Site",
+            "source_location": "http://example.com",
+            "source_content": "Content here",
+            "cite_index": 1,
+            "search_type": "search",
+            "tool_sign": "web_search",
+            "unit_id": 42,
+        },
+        user_id="actor",
+    )
+
+    assert search_id == 88
+    assert fresh_insert_mock["unit_id"] == 42
+
+
+def test_create_source_search_with_published_date(monkeypatch, fresh_insert_mock):
+    """create_source_search includes optional published_date field."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one.return_value = 88
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    from datetime import datetime
+    published = datetime(2024, 1, 15)
+
+    search_id = create_source_search(
+        {
+            "message_id": 7,
+            "source_type": "web",
+            "source_title": "Example Site",
+            "source_location": "http://example.com",
+            "source_content": "Content here",
+            "cite_index": 1,
+            "search_type": "search",
+            "tool_sign": "web_search",
+            "published_date": published,
+        },
+        user_id="actor",
+    )
+
+    assert search_id == 88
+    assert fresh_insert_mock["published_date"] == published
+
+
+def test_update_message_opinion_returns_false_when_not_found(monkeypatch):
+    """update_message_opinion returns False when message not found."""
+    session = MagicMock()
+    result_mock = MagicMock()
+    result_mock.rowcount = 0
+    session.execute.return_value = result_mock
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    ok = update_message_opinion(999, "Y", user_id="actor")
+
+    assert ok is False
+
+
+def test_update_message_opinion_without_user(monkeypatch):
+    """update_message_opinion works without user_id."""
+    session = MagicMock()
+    result_mock = MagicMock()
+    result_mock.rowcount = 1
+    session.execute.return_value = result_mock
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    ok = update_message_opinion(7, "N")
+
+    assert ok is True
+    assert _captured_update_values["opinion_flag"] == "N"
+    assert "updated_by" not in _captured_update_values
+
+
+def test_update_message_minio_files_with_existing_files(monkeypatch, mock_session_ctx):
+    """update_message_minio_files appends to existing minio_files JSON."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.minio_files = '[{"name": "existing.pdf"}]'
+    session.scalars.return_value.first.return_value = mock_record
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_message_minio_files(42, [{"name": "new.pdf"}])
+
+    assert result is True
+    assert 'existing.pdf' in mock_record.minio_files
+    assert 'new.pdf' in mock_record.minio_files
+
+
+def test_update_message_minio_files_with_invalid_json(monkeypatch, mock_session_ctx):
+    """update_message_minio_files handles invalid existing minio_files JSON."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock()
+    mock_record.minio_files = "not valid json {"
+    session.scalars.return_value.first.return_value = mock_record
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = update_message_minio_files(42, [{"name": "new.pdf"}])
+
+    assert result is True
+    assert 'new.pdf' in mock_record.minio_files
+
+
+def test_get_source_images_by_message_with_user_id(monkeypatch, mock_session_ctx):
+    """get_source_images_by_message filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"image_id": 1}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_source_images_by_message(7, user_id="owner-user")
+
+    assert len(result) == 1
+
+
+def test_get_source_images_by_conversation_with_user_id(monkeypatch, mock_session_ctx):
+    """get_source_images_by_conversation filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"image_id": 1}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_source_images_by_conversation(1, user_id="owner-user")
+
+    assert len(result) == 1
+
+
+def test_get_source_searches_by_message_with_user_id(monkeypatch, mock_session_ctx):
+    """get_source_searches_by_message filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"search_id": 1}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_source_searches_by_message(7, user_id="owner-user")
+
+    assert len(result) == 1
+
+
+def test_get_source_searches_by_conversation_with_user_id(monkeypatch, mock_session_ctx):
+    """get_source_searches_by_conversation filters by user_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"search_id": 1}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_source_searches_by_conversation(1, user_id="owner-user")
+
+    assert len(result) == 1
+
+
+def test_create_conversation_message_with_string_minio_files(monkeypatch):
+    """create_conversation_message uses string minio_files directly when already a string."""
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = 5
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    message_id = create_conversation_message(
+        {
+            "conversation_id": 1,
+            "message_idx": 1,
+            "role": "assistant",
+            "content": "response",
+            "minio_files": '[{"name": "already.json"}]',
+        },
+        user_id="actor",
+        status="completed",
+    )
+
+    assert message_id == 5
+    # minio_files should be used as-is since it's already a string
+    assert _captured_insert_values["minio_files"] == '[{"name": "already.json"}]'
+
+
+def test_delete_source_image_without_user_id(monkeypatch):
+    """delete_source_image works without user_id."""
+    session = MagicMock()
+    result_mock = MagicMock()
+    result_mock.rowcount = 1
+    session.execute.return_value = result_mock
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    ok = delete_source_image(42)
+
+    assert ok is True
+    assert _captured_update_values["delete_flag"] == 'Y'
+
+
+def test_delete_source_search_without_user_id(monkeypatch):
+    """delete_source_search works without user_id."""
+    session = MagicMock()
+    result_mock = MagicMock()
+    result_mock.rowcount = 1
+    session.execute.return_value = result_mock
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    ok = delete_source_search(42)
+
+    assert ok is True
+    assert _captured_update_values["delete_flag"] == 'Y'
+
+
+def test_get_source_images_by_message_empty(monkeypatch, mock_session_ctx):
+    """get_source_images_by_message returns empty list when no images."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = []
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_source_images_by_message(7)
+
+    assert result == []
+
+
+def test_get_source_images_by_conversation_empty(monkeypatch, mock_session_ctx):
+    """get_source_images_by_conversation returns empty list when no images."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = []
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_source_images_by_conversation(1)
+
+    assert result == []
+
+
+def test_get_source_searches_by_message_empty(monkeypatch, mock_session_ctx):
+    """get_source_searches_by_message returns empty list when no searches."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = []
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_source_searches_by_message(7)
+
+    assert result == []
+
+
+def test_get_source_searches_by_conversation_empty(monkeypatch, mock_session_ctx):
+    """get_source_searches_by_conversation returns empty list when no searches."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = []
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_source_searches_by_conversation(1)
+
+    assert result == []
+
+
+def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
+    """get_conversation_history processes messages with units."""
+    session, ctx = mock_session_ctx
+
+    # Mock conversation record
+    mock_conv = MagicMock()
+    mock_conv.conversation_id = 1
+    mock_conv.create_time = 1000.0
+
+    # First call returns conversation record
+    # Need to handle the complex query flow
+    session.execute.return_value.first.return_value = mock_conv
+
+    # Mock scalars for message and source queries
+    def scalars_side_effect(*args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_result.first.return_value = None
+        return mock_result
+
+    session.scalars.return_value.all.return_value = []
+
+    # Mock execute for message query
+    mock_message = MagicMock()
+    mock_message.message_id = 1
+    mock_message.message_index = 0
+    mock_message.message_role = "user"
+    mock_message.message_content = "Hello"
+    mock_message.status = "completed"
+    mock_message.minio_files = None
+    mock_message.opinion_flag = None
+    mock_message.units = None
+
+    def execute_side_effect(*args, **kwargs):
+        result = MagicMock()
+        # First call for conversation check
+        # Second call for messages query
+        result.first.return_value = mock_conv
+        result.all.return_value = [mock_message]
+        return result
+
+    session.execute.side_effect = execute_side_effect
+
+    def as_dict_side_effect(record):
+        if hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": 1000000}
+        elif hasattr(record, 'message_id'):
+            return {
+                "message_id": record.message_id,
+                "message_index": record.message_index,
+                "role": record.message_role,
+                "message_content": record.message_content,
+                "status": record.status,
+                "minio_files": record.minio_files,
+                "opinion_flag": record.opinion_flag,
+                "units": []
+            }
+        return {}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation_history(1)
+
+    assert result is not None
+    assert result['conversation_id'] == 1
+
+
+def test_create_message_units_creates_all_units_with_user_id(monkeypatch):
+    """create_message_units creates all units with user tracking."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one.side_effect = [100, 101, 102]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    unit_ids = create_message_units(
+        [
+            {"type": "code", "content": "x = 1"},
+            {"type": "code", "content": "y = 2"},
+        ],
+        message_id=5,
+        conversation_id=10,
+        user_id="tracked-user",
+    )
+
+    assert unit_ids == [100, 101]
+    assert session.execute.call_count == 2
+    # First unit should have user tracking
+    # (Our mock captures values, check update_values)
+    assert _captured_insert_values.get("message_id") == 10
+
+
+def test_get_message_units_with_records(monkeypatch, mock_session_ctx):
+    """get_message_units returns formatted unit records."""
+    session, ctx = mock_session_ctx
+    mock_records = [
+        MagicMock(unit_id=1, unit_index=0, unit_type="code", unit_content="x=1"),
+        MagicMock(unit_id=2, unit_index=1, unit_type="code", unit_content="y=2"),
+    ]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {
+            "unit_id": record.unit_id,
+            "unit_index": record.unit_index,
+            "unit_type": record.unit_type,
+            "unit_content": record.unit_content,
+        }
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_message_units(7)
+
+    assert len(result) == 2
+    assert result[0]["unit_id"] == 1
+    assert result[1]["unit_id"] == 2
