@@ -1014,3 +1014,283 @@ def test_execute_agent_evaluation_run_missing_judge_model_raises(service_module)
         if c.kwargs.get("status") == "FAILED"
     ]
     assert failed, "outer except branch should mark run FAILED"
+
+
+# ---------------------------------------------------------------------------
+# ``_iter_log_envelopes`` — tokenises the SDK's multi-line log output.
+# ---------------------------------------------------------------------------
+
+
+class TestIterLogEnvelopes:
+    def test_single_envelope(self, service_module):
+        text = '[12:00:00 INFO llm] {"reason": "ok"}'
+        envelopes = list(service_module._iter_log_envelopes(text))
+        assert len(envelopes) == 1
+        prefix, payload = envelopes[0]
+        assert prefix.startswith("[12:00:00 INFO llm]")
+        assert json.loads(payload) == {"reason": "ok"}
+
+    def test_multiple_envelopes_with_whitespace(self, service_module):
+        text = (
+            '\n[12:00:00 INFO llm] {"a": 1}\n'
+            '  \n'
+            '[12:00:01 INFO llm] {"b": 2}\n'
+        )
+        envelopes = list(service_module._iter_log_envelopes(text))
+        assert len(envelopes) == 2
+        assert json.loads(envelopes[0][1]) == {"a": 1}
+        assert json.loads(envelopes[1][1]) == {"b": 2}
+
+    def test_envelope_with_nested_object(self, service_module):
+        text = '[12:00:00 INFO llm] {"outer": {"inner": "v"}}'
+        envelopes = list(service_module._iter_log_envelopes(text))
+        assert len(envelopes) == 1
+        assert json.loads(envelopes[0][1]) == {"outer": {"inner": "v"}}
+
+    def test_envelope_with_string_containing_braces(self, service_module):
+        text = r'[12:00:00 INFO llm] {"a": "x {y} z"}'
+        envelopes = list(service_module._iter_log_envelopes(text))
+        assert len(envelopes) == 1
+        assert json.loads(envelopes[0][1]) == {"a": "x {y} z"}
+
+    def test_unparseable_payload_advances_past_prefix(self, service_module):
+        """A prefix without a balanced JSON payload must be skipped, not break the loop."""
+        text = '[12:00:00 INFO llm] not-json-here\n[12:00:01 INFO llm] {"good": 1}'
+        envelopes = list(service_module._iter_log_envelopes(text))
+        assert len(envelopes) == 1
+        assert json.loads(envelopes[0][1]) == {"good": 1}
+
+    def test_empty_text_yields_nothing(self, service_module):
+        assert list(service_module._iter_log_envelopes("")) == []
+
+    def test_whitespace_only_text(self, service_module):
+        assert list(service_module._iter_log_envelopes("  \n\t  ")) == []
+
+    def test_text_without_envelopes(self, service_module):
+        # No ``[HH:MM:SS LEVEL logger] `` prefix → loop exits early.
+        assert list(service_module._iter_log_envelopes("just some text")) == []
+
+    def test_envelope_with_escaped_quotes_in_string(self, service_module):
+        text = r'[12:00:00 INFO llm] {"key": "value with \"quoted\" stuff"}'
+        envelopes = list(service_module._iter_log_envelopes(text))
+        assert len(envelopes) == 1
+        assert "quoted" in envelopes[0][1]
+
+
+# ---------------------------------------------------------------------------
+# ``_reason_from_json_envelope`` — extracts the judge reason from a single
+# envelope payload, exercising every documented shape.
+# ---------------------------------------------------------------------------
+
+
+class TestReasonFromJsonEnvelope:
+    def test_returns_none_for_invalid_json(self, service_module):
+        assert service_module._reason_from_json_envelope("not json") is None
+
+    def test_returns_none_for_non_dict(self, service_module):
+        assert service_module._reason_from_json_envelope("[1, 2]") is None
+
+    def test_response_content_with_markdown_fence(self, service_module):
+        payload = '{"response_content": "```json\\n{\\"reason\\": \\"judged ok\\"}\\n```"}'
+        assert service_module._reason_from_json_envelope(payload) == "judged ok"
+
+    def test_response_content_with_plain_fence(self, service_module):
+        payload = '{"response_content": "```\\n{\\"reason\\": \\"plain fence\\"}\\n```"}'
+        assert service_module._reason_from_json_envelope(payload) == "plain fence"
+
+    def test_response_content_as_plain_json_string(self, service_module):
+        payload = '{"response_content": "{\\"reason\\": \\"plain json\\"}"}'
+        assert service_module._reason_from_json_envelope(payload) == "plain json"
+
+    def test_response_content_unparseable_json(self, service_module):
+        payload = '{"response_content": "garbage not json"}'
+        # Falls through to OpenAI-shape checks, then top-level reason.
+        assert service_module._reason_from_json_envelope(payload) is None
+
+    def test_top_level_reason(self, service_module):
+        payload = '{"reason": "  top reason  "}'
+        assert service_module._reason_from_json_envelope(payload) == "top reason"
+
+    def test_top_level_reason_when_response_content_missing(self, service_module):
+        payload = '{"other": 1, "reason": "fallback"}'
+        assert service_module._reason_from_json_envelope(payload) == "fallback"
+
+    def test_response_chatcompletion_repr_with_metadata_wrapping(self, service_module):
+        repr_text = (
+            "ChatCompletion(id='x', choices=[Choice(finish_reason='stop', "
+            "message=ChatCompletionMessage(content='```json\\n{\\\"reason\\\": \\\"via repr\\\"}\\n```', "
+            "refusal=None))])"
+        )
+        payload = json.dumps({"metadata": {"response": repr_text}})
+        assert service_module._reason_from_json_envelope(payload) == "via repr"
+
+    def test_response_chatcompletion_repr_at_top_level(self, service_module):
+        repr_text = r"""ChatCompletionMessage(content='{"reason": "top repr"}', refusal=None)"""
+        payload = json.dumps({"response": repr_text})
+        assert service_module._reason_from_json_envelope(payload) == "top repr"
+
+    def test_response_chatcompletion_repr_plain_json(self, service_module):
+        """``content`` may be a plain JSON string without a markdown fence."""
+        repr_text = r"""ChatCompletionMessage(content='{"reason": "plain via repr"}', refusal=None)"""
+        payload = json.dumps({"response": repr_text})
+        assert service_module._reason_from_json_envelope(payload) == "plain via repr"
+
+    def test_response_as_plain_json_choices(self, service_module):
+        response = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": '```json\n{"reason": "via choices"}\n```',
+                },
+            }],
+        })
+        payload = json.dumps({"response": response})
+        assert service_module._reason_from_json_envelope(payload) == "via choices"
+
+    def test_response_as_plain_json_choices_invalid_json(self, service_module):
+        """Invalid choices JSON falls through to top-level reason."""
+        payload = json.dumps({
+            "response": "not valid json",
+            "reason": "top level wins",
+        })
+        assert service_module._reason_from_json_envelope(payload) == "top level wins"
+
+    def test_response_missing_when_no_chatcompletion(self, service_module):
+        """Plain string without ``ChatCompletion`` token doesn't enter the repr branch."""
+        payload = json.dumps({"response": "just plain text", "reason": "fallback"})
+        assert service_module._reason_from_json_envelope(payload) == "fallback"
+
+    def test_response_content_fence_inner_json_invalid(self, service_module):
+        payload = '{"response_content": "```json\\nnot valid json\\n```"}'
+        # First fence-attempt fails; second tries to json.loads the entire
+        # response_content — also fails; then we fall through to top-level
+        # reason which is also missing here.
+        assert service_module._reason_from_json_envelope(payload) is None
+
+    def test_chatcompletion_repr_with_unicode_escape_error(self, service_module):
+        """``bytes.decode('unicode_escape')`` may raise on malformed repr; the
+        outer code should fall back to the raw captured group."""
+        # Construct a repr that triggers a UnicodeDecodeError on
+        # ``unicode_escape``: a lone ``\\u`` (without four hex digits).
+        # The fallback path should still succeed in finding a reason via
+        # top-level reason when the content can't be decoded cleanly.
+        payload = '{"response": "ChatCompletionMessage(content=\'\\\\u\', refusal=None)", "reason": "top"}'
+        assert service_module._reason_from_json_envelope(payload) == "top"
+
+
+# ---------------------------------------------------------------------------
+# ``_is_llm_related_error`` and ``_generate_friendly_error_message``
+# ---------------------------------------------------------------------------
+
+
+class TestIsLlmRelatedError:
+    def test_returns_true_for_known_keywords(self, service_module):
+        assert service_module._is_llm_related_error(RuntimeError("openai timeout"))
+        assert service_module._is_llm_related_error(Exception("jiuwen sdk error"))
+        assert service_module._is_llm_related_error(Exception("model not responding"))
+        assert service_module._is_llm_related_error(Exception("rate limit exceeded"))
+        assert service_module._is_llm_related_error(Exception("schedule new futures"))
+
+    def test_returns_false_for_unrelated_error(self, service_module):
+        assert not service_module._is_llm_related_error(ValueError("bad input"))
+        assert not service_module._is_llm_related_error(KeyError("missing"))
+
+    def test_case_insensitive(self, service_module):
+        assert service_module._is_llm_related_error(RuntimeError("OPENAI failure"))
+
+
+class TestGenerateFriendlyErrorMessage:
+    def test_returns_default_for_unrelated_error(self, service_module):
+        result = service_module._generate_friendly_error_message(
+            ValueError("not an LLM error"), "fallback message",
+        )
+        assert result == "fallback message"
+
+    def test_returns_default_when_openai_call_fails(self, service_module, monkeypatch):
+        """LLM call failure inside the helper must not bubble — we return default."""
+        import builtins as _bi
+        real_import = _bi.__import__
+
+        def _failing_import(name, *args, **kwargs):
+            if name == "openai" or name.startswith("openai."):
+                raise ImportError("openai not available")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(_bi, "__import__", _failing_import)
+        # Even with an LLM-related error, the openai import failure is caught
+        # inside the helper and we get the default message back.
+        result = service_module._generate_friendly_error_message(
+            RuntimeError("openai API timed out"), "default",
+        )
+        assert result == "default"
+
+    def test_returns_llm_response_when_openai_succeeds(self, service_module, monkeypatch):
+        """When the openai client + asyncio.run both work, return its content."""
+
+        class _FakeMessage:
+            content = "Friendly error from LLM"
+
+        class _FakeChoice:
+            message = _FakeMessage()
+
+        class _FakeResponse:
+            choices = [_FakeChoice()]
+
+        class _FakeCompletions:
+            def create(self, *args, **kwargs):
+                return _FakeResponse()
+
+        class _FakeChat:
+            completions = _FakeCompletions()
+
+        class _FakeAsyncOpenAI:
+            def __init__(self, *args, **kwargs):
+                self.chat = _FakeChat()
+
+        import sys as _sys
+        fake_openai = types.ModuleType("openai")
+        fake_openai.AsyncOpenAI = _FakeAsyncOpenAI
+        monkeypatch.setitem(_sys.modules, "openai", fake_openai)
+
+        # ``asyncio.run`` expects a coroutine; bypass that for testing by
+        # having it just invoke and return our pre-built synchronous object.
+        monkeypatch.setattr(
+            service_module.asyncio, "run",
+            lambda coro: _FakeResponse(),
+        )
+
+        result = service_module._generate_friendly_error_message(
+            RuntimeError("openai timeout"), "default",
+        )
+        assert result == "Friendly error from LLM"
+
+
+# ---------------------------------------------------------------------------
+# ``_extract_clean_reason_v2`` — additional edge cases on top of what is
+# already covered.
+# ---------------------------------------------------------------------------
+
+
+class TestExtractCleanReasonV2Additional:
+    def test_handles_payload_with_unicode_escape_in_content(self, service_module):
+        """Content with a ``\\n`` literal in a markdown fence round-trips."""
+        raw = (
+            '[12:00:00 INFO llm] '
+            '{"response_content": "```json\\n{\\"reason\\": \\"with\\\\nnewline\\"}\\n```"}'
+        )
+        # The exact ``\n`` form depends on how the regex captures it; the
+        # important property is that we get the ``reason`` text without
+        # the fence.
+        result = service_module._extract_clean_reason_v2(raw)
+        assert "newline" in result
+
+    def test_returns_stripped_when_no_envelope(self, service_module):
+        """Plain text with no log envelope and no JSON returns the input."""
+        raw = "judge says: looks fine"
+        assert service_module._extract_clean_reason_v2(raw) == "judge says: looks fine"
+
+    def test_strips_multiple_log_prefixes(self, service_module):
+        raw = (
+            '[12:00:00 INFO llm] [12:00:01 INFO llm] free form text'
+        )
+        result = service_module._extract_clean_reason_v2(raw)
+        assert result == "free form text"

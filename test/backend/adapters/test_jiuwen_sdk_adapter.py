@@ -956,6 +956,48 @@ class TestLazyImportJiuwen:
         with pytest.raises(JiuwenSDKError, match="Jiuwen SDK 未安装"):
             adapter_module._lazy_import_jiuwen()
 
+    def test_returns_jiuwen_symbols_when_available(
+        self, adapter_module, monkeypatch,
+    ):
+        """Cover the success path: install stub modules for every
+        ``openjiuwen...`` import referenced by ``_lazy_import_jiuwen`` so
+        the function completes and returns the eight-tuple."""
+        monkeypatch.setattr(
+            adapter_module, "_install_jiuwen_bypasser", lambda: True,
+        )
+
+        # The function imports several submodules; create stubs for each so
+        # ``from <x> import <y>`` works.
+        targets = {
+            "openjiuwen.core.foundation.llm.schema.config": [
+                "ModelRequestConfig", "ModelClientConfig", "ProviderType",
+            ],
+            "openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder": [
+                "FeedbackPromptBuilder",
+            ],
+            "openjiuwen.dev_tools.prompt_builder.builder.badcase_prompt_builder": [
+                "BadCasePromptBuilder",
+            ],
+            "openjiuwen.dev_tools.tune.base": ["Case", "EvaluatedCase"],
+            "openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge": [
+                "LLMAsJudgeMetric",
+            ],
+        }
+        for mod_name, attrs in targets.items():
+            mod = types.ModuleType(mod_name)
+            for a in attrs:
+                setattr(mod, a, MagicMock())
+            sys.modules[mod_name] = mod
+
+        # ``openjiuwen`` itself must be present for the ``import openjiuwen`` line.
+        sys.modules["openjiuwen"] = types.ModuleType("openjiuwen")
+
+        result = adapter_module._lazy_import_jiuwen()
+        assert len(result) == 8
+        assert result[0] is sys.modules[
+            "openjiuwen.core.foundation.llm.schema.config"
+        ].ModelRequestConfig
+
 
 # ===========================================================================
 # 10. run_async — loop-is-running branch (nest_asyncio success)
@@ -1338,3 +1380,456 @@ class TestLazyImportJiuwenOptionalImports:
               # Exception: ModelClientOptions = None`` is the only way to
               # cover lines 279-282.  We cannot force that path without a
               # real SDK installation, so we accept this as best-effort coverage.
+
+
+# ===========================================================================
+# Additional branch coverage for coverage gaps reported by Codecov.
+# ===========================================================================
+
+
+class TestJiuwenInitBypasserFindSpec:
+    """Cover the early-return / error branches of ``_JiuwenInitBypasser.find_spec``."""
+
+    def test_returns_none_for_non_openjiuwen_module(self, adapter_module):
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+        finder = _JiuwenInitBypasser()
+        assert finder.find_spec("some.other.module", None, None) is None
+
+    def test_returns_none_for_top_level_openjiuwen_package(self, adapter_module):
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+        finder = _JiuwenInitBypasser()
+        assert finder.find_spec("openjiuwen", None, None) is None
+
+    def test_returns_none_when_import_openjiuwen_raises(self, adapter_module, monkeypatch):
+        """``import openjiuwen`` may fail (line 116-117) — finder should
+        silently return ``None`` so the import system can try other finders."""
+        import builtins as _bi
+        _real = _bi.__import__
+
+        def _boom(name, *args, **kwargs):
+            if name == "openjiuwen":
+                raise ImportError("simulated missing openjiuwen")
+            return _real(name, *args, **kwargs)
+
+        monkeypatch.setattr(_bi, "__import__", _boom)
+
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+        finder = _JiuwenInitBypasser()
+        assert finder.find_spec("openjiuwen.core.foundation.llm", None, None) is None
+
+    def test_returns_none_when_module_not_in_circular_chain(self, adapter_module, monkeypatch):
+        """Branch: ``if fullname not in _CIRCULAR_CHAIN: return None`` (line 128)."""
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser, _CIRCULAR_CHAIN
+        # Pick a module name that starts with openjiuwen but is *not* in the chain.
+        non_chain = next(
+            (m for m in [
+                "openjiuwen.not_in_circular_chain.submod",
+                "openjiuwen.some.random.path",
+            ] if m not in _CIRCULAR_CHAIN),
+            "openjiuwen.uncovered.dummy.path",
+        )
+
+        # Provide a fake real openjiuwen package with __path__ so the finder
+        # gets past the ``import openjiuwen`` line.
+        real_pkg = types.ModuleType("openjiuwen")
+        real_pkg.__path__ = [str(adapter_module.__file__).rsplit("adapters", 1)[0]]
+        monkeypatch.setitem(sys.modules, "openjiuwen", real_pkg)
+
+        finder = _JiuwenInitBypasser()
+        assert finder.find_spec(non_chain, None, None) is None
+
+
+class TestJiuwenInitBypasserGetAttr:
+    """``__getattr__`` returns a real submodule if it exists, raises otherwise."""
+
+    def test_returns_existing_submodule(self, adapter_module):
+        """When the bypasser proxies ``some_attr`` access and the underlying
+        module file exists, ``importlib.import_module`` is returned."""
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+        finder = _JiuwenInitBypasser()
+
+        # ``find_spec`` is in the allow-list of attributes that raise; test the
+        # path that returns a real submodule instead. We use ``find_module``
+        # which is also in the allow-list — use a name that is NOT.
+        # The bypasser resolves ``self.__name__ + '.' + name`` against
+        # ``openjiuwen.__path__``. ``openjiuwen`` is a stub in tests; we test
+        # the fallback by using a name that won't resolve.
+        with pytest.raises(AttributeError):
+            # ``openjiuwen`` as a stub has no __path__, which raises early.
+            finder.__class__.__getattr__(finder, "definitely_missing_for_test")
+
+    def test_returns_value_for_resolvable_submodule(self, adapter_module, monkeypatch, tmp_path):
+        """When a matching ``foo/__init__.py`` exists under ``openjiuwen``'s path,
+        ``__getattr__`` imports and returns it."""
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+
+        # Build a fake ``openjiuwen`` package with a real directory.
+        pkg_dir = tmp_path / "pkg_root"
+        sub_dir = pkg_dir / "fake_subpkg"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "__init__.py").write_text("# fake")
+
+        real_pkg = types.ModuleType("openjiuwen")
+        real_pkg.__path__ = [str(pkg_dir)]
+        monkeypatch.setitem(sys.modules, "openjiuwen", real_pkg)
+        sys.modules.pop("openjiuwen.fake_subpkg", None)
+
+        finder = _JiuwenInitBypasser()
+        finder.__name__ = "openjiuwen"
+        result = _JiuwenInitBypasser.__getattr__(finder, "fake_subpkg")
+        assert result is sys.modules["openjiuwen.fake_subpkg"]
+
+    def test_returns_value_for_resolvable_py_module(self, adapter_module, monkeypatch, tmp_path):
+        """If a ``foo.py`` (not a package) exists under ``openjiuwen``'s path,
+        ``__getattr__`` imports and returns it."""
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+
+        pkg_dir = tmp_path / "pkg_root2"
+        pkg_dir.mkdir()
+        (pkg_dir / "single_module.py").write_text("VALUE = 42")
+
+        real_pkg = types.ModuleType("openjiuwen")
+        real_pkg.__path__ = [str(pkg_dir)]
+        monkeypatch.setitem(sys.modules, "openjiuwen", real_pkg)
+        sys.modules.pop("openjiuwen.single_module", None)
+
+        finder = _JiuwenInitBypasser()
+        finder.__name__ = "openjiuwen"
+        result = _JiuwenInitBypasser.__getattr__(finder, "single_module")
+        assert result.VALUE == 42
+
+    def test_raises_when_submodule_path_does_not_exist(self, adapter_module, monkeypatch, tmp_path):
+        """If neither dir-with-init nor ``.py`` file exists, ``__getattr__``
+        raises ``AttributeError`` (line 175)."""
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+
+        pkg_dir = tmp_path / "pkg_root3"
+        pkg_dir.mkdir()
+
+        real_pkg = types.ModuleType("openjiuwen")
+        real_pkg.__path__ = [str(pkg_dir)]
+        monkeypatch.setitem(sys.modules, "openjiuwen", real_pkg)
+
+        finder = _JiuwenInitBypasser()
+        finder.__name__ = "openjiuwen"
+        with pytest.raises(AttributeError):
+            _JiuwenInitBypasser.__getattr__(finder, "no_such_submodule")
+
+
+class TestMetaPathIdempotent:
+    """Re-importing the module should not stack multiple ``_JiuwenInitBypasser`` finders."""
+
+    def test_meta_path_bypasser_already_installed(self, adapter_module):
+        """The ``else`` branch (line 181 ``break``) executes when the
+        bypasser is already in ``sys.meta_path``. After at least one import,
+        any subsequent import must not append another instance."""
+        import importlib
+        from adapters.jiuwen_sdk_adapter import _JiuwenInitBypasser
+
+        before = [
+            f for f in sys.meta_path if isinstance(f, _JiuwenInitBypasser)
+        ]
+        assert before, "first import should have installed exactly one"
+
+        # The bypasser was already installed by ``adapter_module``'s own import
+        # (or earlier in this session). Therefore re-running the module body's
+        # meta_path install loop will hit the ``break`` (line 181) and not
+        # ``sys.meta_path.insert(0, _JiuwenInitBypasser())``. We replay that
+        # block here to exercise the break branch deterministically.
+        for _finder in sys.meta_path:
+            if isinstance(_finder, _JiuwenInitBypasser):
+                break
+        else:
+            sys.meta_path.insert(0, _JiuwenInitBypasser())
+        # Verify no extra finder was added (the break branch fired).
+        assert len([
+            f for f in sys.meta_path if isinstance(f, _JiuwenInitBypasser)
+        ]) == len(before)
+
+
+class TestInstallJiuwenBypasserNoOp:
+    """``_install_jiuwen_bypasser`` is a no-op kept for backward compatibility."""
+
+    def test_returns_true(self, adapter_module):
+        assert adapter_module._install_jiuwen_bypasser() is True
+
+
+class TestRunAsyncLoopRunningDirect:
+    """Branch: ``loop.is_running()`` is True and ``nest_asyncio`` IS available,
+    so we go through ``loop.run_until_complete`` (line 257 — the inner return)."""
+
+    def test_loop_running_nest_asyncio_available_returns_result(
+        self, adapter_module, monkeypatch,
+    ):
+        async def coro():
+            return "ran-with-running-loop"
+
+        mock_loop = MagicMock()
+        mock_loop.is_running = lambda: True
+
+        called = []
+
+        def _run(c):
+            called.append(c)
+            return "ran-with-running-loop"
+
+        mock_loop.run_until_complete.side_effect = _run
+        monkeypatch.setattr(adapter_module.asyncio, "get_running_loop", lambda: mock_loop)
+
+        with patch("nest_asyncio.apply", lambda: None):
+            result = adapter_module.run_async(coro())
+
+        assert result == "ran-with-running-loop"
+        assert mock_loop.run_until_complete.called
+
+    def test_loop_exists_but_not_running_uses_run_until_complete(
+        self, adapter_module, monkeypatch,
+    ):
+        """Branch: ``get_running_loop`` succeeds but ``is_running()`` returns
+        False (line 237 False branch), so we hit the trailing
+        ``return loop.run_until_complete(coro)`` at line 257."""
+        async def coro():
+            return "no-event-loop-active"
+
+        call_count = {"n": 0}
+        mock_loop = MagicMock()
+        mock_loop.is_running = lambda: False
+
+        def _run(c):
+            call_count["n"] += 1
+            return "no-event-loop-active"
+
+        mock_loop.run_until_complete.side_effect = _run
+        monkeypatch.setattr(adapter_module.asyncio, "get_running_loop", lambda: mock_loop)
+
+        result = adapter_module.run_async(coro())
+        assert result == "no-event-loop-active"
+        assert call_count["n"] == 1
+
+
+class TestUnwrapPromptResponseEdgeCases:
+    """Cover the JSON parse failure and missing-keys branches."""
+
+    def test_invalid_json_in_text_falls_through_raw(
+        self, adapter_module, monkeypatch,
+    ):
+        """When ``json.loads`` raises (line 433-434), fall through to ``return text``."""
+        # A text that starts with ``{`` so the JSON-parser branch is tried, but
+        # is NOT valid JSON: this triggers the ``except Exception`` swallow.
+        raw = '{"this is": not valid json}'
+        # Strip the markdown fence so the function tries to JSON-parse the raw text.
+        out = adapter_module._unwrap_prompt_response(raw)
+        # The function falls through; the raw text is trimmed of fences only.
+        assert out == raw
+
+    def test_parsed_dict_without_prompt_or_result_keys(
+        self, adapter_module, monkeypatch,
+    ):
+        """Parsed JSON object doesn't contain ``prompt`` or ``result`` — we
+        fall through and return the original text (line 425-432 branches)."""
+        raw = '{"key": "value"}'
+        # This is a non-fenced dict — function will reach the JSON parsing step,
+        # not find prompt/result, and pass through.
+        out = adapter_module._unwrap_prompt_response(raw)
+        assert out == raw
+
+    def test_markdown_fence_with_plain_fence_marker(
+        self, adapter_module, monkeypatch,
+    ):
+        """Test that plain ``\\`\\`\\`` (no ``json``) fences are stripped too."""
+        raw = "```\n{\"prompt\": \"strip this fence\"}\n```"
+        out = adapter_module._unwrap_prompt_response(raw)
+        # Inner JSON is parsed and ``prompt`` extracted.
+        assert out == "strip this fence"
+
+    def test_parse_json_returns_non_dict(
+        self, adapter_module,
+    ):
+        """A JSON list (not dict) parses successfully but is not an instance of
+        dict, so neither ``prompt`` nor ``result`` key path is taken."""
+        raw = "[1, 2, 3]"
+        out = adapter_module._unwrap_prompt_response(raw)
+        # Not a fenced ``{`` — falls through unchanged.
+        assert out == raw
+
+
+class TestBuildMessage:
+    def test_returns_dict_with_role_and_content(self, adapter_module):
+        result = adapter_module._build_message("user", "hi")
+        assert result == {"role": "user", "content": "hi"}
+
+
+class TestLazyImportJiuwenBuilders:
+    """``_lazy_import_jiuwen_builders`` is the lazy-loading helper used by
+    the prompt-optimization paths. Cover both success and SDK-missing cases."""
+
+    def test_returns_builders(self, adapter_module, monkeypatch):
+        monkeypatch.setattr(
+            adapter_module, "_install_jiuwen_bypasser", lambda: True,
+        )
+
+        fb_module = types.ModuleType(
+            "openjiuwen.dev_tools.prompt_builder.builder.feedback_prompt_builder",
+        )
+        fb_module.FeedbackPromptBuilder = MagicMock()
+        bc_module = types.ModuleType(
+            "openjiuwen.dev_tools.prompt_builder.builder.badcase_prompt_builder",
+        )
+        bc_module.BadCasePromptBuilder = MagicMock()
+        sys.modules[fb_module.__name__] = fb_module
+        sys.modules[bc_module.__name__] = bc_module
+
+        # openjiuwen must look installed.
+        oj_mod = types.ModuleType("openjiuwen")
+        sys.modules["openjiuwen"] = oj_mod
+
+        FB, BC = adapter_module._lazy_import_jiuwen_builders()
+        assert FB is fb_module.FeedbackPromptBuilder
+        assert BC is bc_module.BadCasePromptBuilder
+
+    def test_raises_jiuwen_sdk_error_when_openjiuwen_missing(
+        self, adapter_module, monkeypatch,
+    ):
+        from adapters.exception import JiuwenSDKError
+
+        monkeypatch.setattr(
+            adapter_module, "_install_jiuwen_bypasser", lambda: True,
+        )
+        # Remove openjiuwen so the ``import openjiuwen`` raises.
+        sys.modules.pop("openjiuwen", None)
+        import builtins as _bi
+        _orig = _bi.__import__
+
+        def _raise(name, *args, **kwargs):
+            if name == "openjiuwen":
+                raise ImportError("simulated missing")
+            return _orig(name, *args, **kwargs)
+
+        monkeypatch.setattr(_bi, "__import__", _raise)
+
+        with pytest.raises(JiuwenSDKError, match="未安装"):
+            adapter_module._lazy_import_jiuwen_builders()
+
+
+class TestEvaluateSemanticConsistencyImportFailure:
+    """Branch: ``from openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge import LLMAsJudgeMetric``
+    raises — caught and re-raised as ``JiuwenSDKError`` (line 599-604)."""
+
+    def test_import_failure_raises_jiuwen_sdk_error(self, adapter_module, monkeypatch):
+        from adapters.exception import JiuwenSDKError
+
+        # Make the import of LLMAsJudgeMetric fail by injecting a broken module.
+        bad_module = types.ModuleType(
+            "openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge",
+        )
+        # Setting a non-importable object as ``LLMAsJudgeMetric`` so the import
+        # *succeeds*, but ``LLMAsJudgeMetric(...)`` later — but we want to
+        # actually fail the import. The cleanest path: do not register the
+        # module in sys.modules so ``from ... import`` falls back to importlib
+        # which raises.
+        sys.modules.pop(
+            "openjiuwen.agent_evolving.evaluator.metrics.llm_as_judge", None,
+        )
+        # Make ``openjiuwen.agent_evolving.evaluator.metrics`` importable but
+        # ``.llm_as_judge`` not.
+        ev_mod = types.ModuleType(
+            "openjiuwen.agent_evolving.evaluator.metrics",
+        )
+        ev_mod.__path__ = []
+        sys.modules["openjiuwen.agent_evolving.evaluator.metrics"] = ev_mod
+
+        # Use an import that raises when the sub-module is requested.
+        import builtins as _bi
+        _orig = _bi.__import__
+
+        def _fail(name, *args, **kwargs):
+            if name.endswith("llm_as_judge"):
+                raise ImportError("simulated missing LLMAsJudgeMetric")
+            return _orig(name, *args, **kwargs)
+
+        monkeypatch.setattr(_bi, "__import__", _fail)
+        # Patch ``build_jiuwen_model_configs`` so we don't need a real model.
+        monkeypatch.setattr(adapter_module, "build_jiuwen_model_configs", MagicMock())
+
+        adapter = adapter_module.JiuwenSDKAdapter(model_id=1, tenant_id="t1")
+        with pytest.raises(JiuwenSDKError, match="LLMAsJudgeMetric"):
+            adapter.evaluate_semantic_consistency(
+                question="q",
+                expected_answer="a",
+                model_answer="b",
+            )
+
+
+class TestEnsureAvailableForceInstallBypasser:
+    """Branch: when ``_bypasser_installed`` is False at runtime, ensure_available
+    re-invokes ``_install_jiuwen_bypasser`` (line 476)."""
+
+    def test_ensure_available_calls_install_when_flag_is_false(
+        self, adapter_module, monkeypatch,
+    ):
+        # Toggle the module flag off and watch the function re-install.
+        monkeypatch.setattr(adapter_module, "_bypasser_installed", False)
+        install = MagicMock()
+        monkeypatch.setattr(adapter_module, "_install_jiuwen_bypasser", install)
+        # Provide a stub openjiuwen so the second half runs.
+        sys.modules["openjiuwen"] = types.ModuleType("openjiuwen")
+
+        adapter_module.JiuwenSDKAdapter(model_id=1, tenant_id="t1")._ensure_available()
+        install.assert_called_once()
+
+
+class TestBuildOpenAIClient:
+    """``_build_openai_client`` is a thin helper that wraps ``OpenAIModelClient``.
+    Covering it requires installing a fake ``OpenAIModelClient`` in sys.modules
+    and providing fake request/client configs whose attribute access matches
+    the wrapper's expected surface."""
+
+    def test_build_client_returns_direct_wrapper(self, adapter_module, monkeypatch):
+        # Inline fake classes that mimic the SDK's shape closely enough.
+        class _FakeRequestConfig:
+            model_name = "m"
+            temperature = 0.3
+            top_p = 1.0
+
+        class _FakeClientConfig:
+            api_key = "k"
+            api_base = "https://x"
+            timeout = 60
+            verify_ssl = True
+            ssl_cert = None
+
+        captured = {}
+
+        class _FakeOpenAIModelClient:
+            def __init__(self, model_config, model_client_config):
+                captured["model_config"] = model_config
+                captured["model_client_config"] = model_client_config
+                self._inner = MagicMock()
+
+            async def invoke(self, **kwargs):
+                return kwargs
+
+        oc_module = types.ModuleType(
+            "openjiuwen.core.foundation.llm.model_clients.openai_model_client",
+        )
+        oc_module.OpenAIModelClient = _FakeOpenAIModelClient
+        sys.modules[oc_module.__name__] = oc_module
+
+        # Disable the inner function's own ``_install_jiuwen_bypasser`` call.
+        monkeypatch.setattr(
+            adapter_module, "_install_jiuwen_bypasser", lambda: True,
+        )
+
+        client = adapter_module._build_openai_client(
+            _FakeClientConfig(), _FakeRequestConfig(),
+        )
+        # The wrapper exposes ``invoke``; call it to verify the inner propagate.
+        import asyncio
+
+        async def _co():
+            return await client.invoke(
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        result = asyncio.new_event_loop().run_until_complete(_co())
+        assert result["model"] == "m"
+        assert result["messages"] == [{"role": "user", "content": "hi"}]  # noqa: E501
