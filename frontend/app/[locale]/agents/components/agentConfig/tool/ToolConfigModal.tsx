@@ -574,13 +574,22 @@ export default function ToolConfigModal({
         knowledgeSpaceId: idataConfig.knowledgeSpaceId,
       };
     }
-    if (toolKbType === "aidp_search") {
-      return {
-        serverUrl: aidpConfig.serverUrl,
-        apiKey: aidpConfig.apiKey,
-      };
-    }
-    return undefined;
+	    if (toolKbType === "aidp_search") {
+	      return {
+	        serverUrl: aidpConfig.serverUrl,
+	        apiKey: aidpConfig.apiKey,
+	      };
+	    }
+	    if (toolKbType === "ragflow_search") {
+	      if (!ragflowConfig.serverUrl || !ragflowConfig.apiKey) {
+	        return undefined;
+	      }
+	      return {
+	        serverUrl: ragflowConfig.serverUrl,
+	        apiKey: ragflowConfig.apiKey,
+	      };
+	    }
+	    return undefined;
   };
 
   const {

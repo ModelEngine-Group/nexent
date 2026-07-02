@@ -48,7 +48,19 @@ class RAGFlowSearchTool(Tool):
             "type": "string",
             "description": "The search query to perform.",
             "description_zh": "要执行的搜索查询词",
-        }
+        },
+        "doc_id": {
+            "type": "string",
+            "description": "Optional. Restrict search to a specific document ID. Pass a single document ID string, or a JSON array of document IDs. Leave empty to search across all documents in the selected datasets.",
+            "description_zh": "可选。限定搜索到特定文档 ID。可传入单个文档 ID 字符串，或 JSON 数组格式的多个文档 ID。留空则在整个选定知识库中搜索。",
+            "nullable": True,
+        },
+        "dataset_ids": {
+            "type": "string",
+            "description": "Optional. JSON string array of RAGFlow dataset IDs to override the configured datasets for this search. When provided, only these datasets are searched instead of the configured ones.",
+            "description_zh": "可选。用于覆盖本次搜索配置的 RAGFlow 知识库 ID 列表（JSON 字符串数组）。传入时，只搜索此处指定的知识库，替换配置中的知识库列表。",
+            "nullable": True,
+        },
     }
 
     init_param_descriptions = {
@@ -161,17 +173,46 @@ class RAGFlowSearchTool(Tool):
         self.running_prompt_zh = "RAGFlow知识库检索中..."
         self.running_prompt_en = "Searching RAGFlow knowledge base..."
 
-    def forward(self, query: str) -> str:
+    def forward(self, query: str, doc_id: str = "", dataset_ids: str = "") -> str:
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
+        # Resolve dataset_ids: runtime override takes precedence over config-level value
+        effective_dataset_ids: List[str]
+        if dataset_ids:
+            dataset_ids = dataset_ids.strip()
+            try:
+                if dataset_ids.startswith("["):
+                    effective_dataset_ids = [str(d) for d in json.loads(dataset_ids)]
+                else:
+                    effective_dataset_ids = [dataset_ids]
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse runtime dataset_ids as JSON array: {e}, falling back to configured datasets")
+                effective_dataset_ids = self.dataset_ids
+        else:
+            effective_dataset_ids = self.dataset_ids
+
         logger.info(
             f"RAGFlowSearchTool called with query: '{query}', top_k: {self.top_k}, "
-            f"datasets: {self.dataset_ids}"
+            f"datasets: {effective_dataset_ids}, doc_id: '{doc_id}'"
         )
+
+        # Parse doc_id into a list of document IDs for the API payload
+        doc_ids_list: List[str] = []
+        if doc_id:
+            doc_id = doc_id.strip()
+            if doc_id.startswith("["):
+                # JSON array of document IDs
+                try:
+                    doc_ids_list = [str(d) for d in json.loads(doc_id)]
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse doc_id as JSON array: {e}")
+            else:
+                # Single document ID
+                doc_ids_list = [doc_id]
 
         all_chunks: List[dict] = []
         search_results_json = []
@@ -179,7 +220,7 @@ class RAGFlowSearchTool(Tool):
 
         try:
             # Single API call — RAGFlow handles multi-dataset and reranking internally
-            search_results_data = self._search_ragflow(query)
+            search_results_data = self._search_ragflow(query, effective_dataset_ids, doc_ids_list)
             chunks = search_results_data.get("chunks", [])
             all_chunks.extend(chunks)
 
@@ -234,11 +275,16 @@ class RAGFlowSearchTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-    def _search_ragflow(self, query: str) -> Dict[str, Any]:
+    def _search_ragflow(self, query: str, dataset_ids: List[str], doc_ids: List[str] = None) -> Dict[str, Any]:
         """Send a single multi-dataset search request to RAGFlow API.
 
         RAGFlow supports passing multiple dataset_ids in one request
         and handles reranking internally.
+
+        Args:
+            query: The search query string.
+            dataset_ids: List of dataset IDs to search.
+            doc_ids: Optional list of document IDs to restrict the search to.
         """
         url = f"{self.server_url}/api/v1/datasets/search"
 
@@ -257,8 +303,10 @@ class RAGFlowSearchTool(Tool):
             "highlight": self.highlight,
         }
 
-        if len(self.dataset_ids) >= 1:
-            payload["dataset_ids"] = self.dataset_ids
+        if len(dataset_ids) >= 1:
+            payload["dataset_ids"] = dataset_ids
+        if doc_ids:
+            payload["doc_ids"] = doc_ids
         logger.info(f"RAGFlow search payload: {payload}")
 
         try:
@@ -275,7 +323,7 @@ class RAGFlowSearchTool(Tool):
 
             data = result.get("data", {})
             total = data.get("total", 0)
-            logger.info(f"RAGFlow search returned {total} chunks from {len(self.dataset_ids)} dataset(s)")
+            logger.info(f"RAGFlow search returned {total} chunks from {len(dataset_ids)} dataset(s)")
             return data
 
         except httpx.RequestError as e:

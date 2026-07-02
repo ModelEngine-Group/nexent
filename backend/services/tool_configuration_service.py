@@ -482,7 +482,10 @@ async def update_tool_list(tenant_id: str, user_id: str):
         mcp_tools = await get_all_mcp_tools(tenant_id)
     except Exception as e:
         logger.error(f"failed to get all mcp tools, detail: {e}")
-        raise MCPConnectionError(f"failed to get all mcp tools, detail: {e}")
+        # Don't block local/langchain tool update when MCP is unavailable.
+        # MCP tools will be marked as is_available=False in the DB, which
+        # is the correct state when the MCP server is unreachable.
+        mcp_tools = []
 
     update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
                                           user_id=user_id,

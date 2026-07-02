@@ -11,11 +11,8 @@ export type ToolKbType =
   | "datamate_search"
   | "idata_search"
   | "haotian_search"
-<<<<<<< HEAD
-  | "ragflow_search";
-=======
+  | "ragflow_search"
   | "aidp_search";
->>>>>>> origin/main
 
 /**
  * Configuration for Dify tool
@@ -62,11 +59,7 @@ export interface AidpConfig {
  */
 export interface UseKnowledgeBaseConfigChangeHandlerOptions {
   toolKbType: ToolKbType | null;
-<<<<<<< HEAD
-  config: DifyConfig | DatamateConfig | IdataConfig | RagflowConfig | undefined;
-=======
-  config: DifyConfig | DatamateConfig | IdataConfig | AidpConfig | undefined;
->>>>>>> origin/main
+  config: DifyConfig | DatamateConfig | IdataConfig | AidpConfig | RagflowConfig | undefined;
   onConfigChange: () => void;
 }
 
@@ -274,6 +267,7 @@ export function useKnowledgeBaseConfigChangeHandler({
   // Reset handler - useful when modal closes to reset the tracking state
   const resetTracker = useCallback(() => {
     prevDifyConfig.current = { serverUrl: "", apiKey: "" };
+    prevRagflowConfig.current = { serverUrl: "", apiKey: "" };
     prevDatamateServerUrl.current = "";
     prevIdataConfig.current = { serverUrl: "", apiKey: "", userId: "" };
     prevAidpConfig.current = { serverUrl: "", apiKey: "" };

@@ -213,11 +213,13 @@ export default function ToolTestPanel({
         Object.entries(parsedInputs).forEach(([paramName, paramInfo]) => {
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
-          // Check if this is the KB selector parameter and KB selection is enabled
-          // Haotian and iData use dataset_ids, others use index_names
-          const isKbSelectorParam = paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search" && toolKbType !== "idata_search" && toolKbType !== "aidp_search"
-            || paramName === "dataset_ids" && toolRequiresKbSelection && (toolKbType === "haotian_search" || toolKbType === "idata_search")
-            || paramName === "kds_list" && toolRequiresKbSelection && toolKbType === "aidp_search";
+          // Check if this is the KB selector parameter and KB selection is enabled.
+          // - index_names: used by knowledge_base_search, dify_search, datamate_search, ragflow_search
+          // - dataset_ids: used by haotian_search, idata_search, dify_search, ragflow_search
+          // - kds_list: used by aidp_search
+          const isKbSelectorParam = (paramName === "index_names" && toolRequiresKbSelection && toolKbType !== "haotian_search" && toolKbType !== "idata_search" && toolKbType !== "aidp_search")
+            || (paramName === "dataset_ids" && toolRequiresKbSelection && (toolKbType === "haotian_search" || toolKbType === "idata_search" || toolKbType === "ragflow_search" || toolKbType === "dify_search"))
+            || (paramName === "kds_list" && toolRequiresKbSelection && toolKbType === "aidp_search");
 
           if (isKbSelectorParam) {
             // For aidp_search kds_list: use testPanelKbIds (independent from config's selectedKbIds)
@@ -533,14 +535,12 @@ export default function ToolTestPanel({
           }
 
           if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
-            if (Array.isArray(effectiveValue) && effectiveValue.length > 0) {
-              toolParams[paramName] = effectiveValue;
-            } else {
-              const kbIds = paramName === "kds_list" && toolKbType === "aidp_search"
-                ? testPanelKbIds
-                : selectedKbIds;
-              toolParams[paramName] = kbIds;
-            }
+            // For tools like dify_search, ragflow_search, datamate_search,
+            // haotian_search, and idata_search, the KB selection parameter
+            // (index_names / dataset_ids) is a configuration-only init param
+            // that goes through kbSelectionConfig, not a runtime input to
+            // the tool's forward() method. Skip it in toolParams.
+            // (aidp_search kds_list is handled above at the dedicated block.)
             return;
           }
 
@@ -723,13 +723,15 @@ export default function ToolTestPanel({
               paramName === "dataset_ids" ||
               paramName === "kds_list") && toolRequiresKbSelection;
 
-                        // Handle KB selector parameters - use testPanelKbIds for aidp, selectedKbIds for others
+                        // Handle KB selector parameters.
+                        // For aidp_search: kds_list is a runtime input, include in manual JSON.
+                        // For other tools (dify, ragflow, datamate, haotian, idata):
+                        // KB params are config-only, skip in runtime manual JSON.
                         if (isKbSelectorParam && !isKnowledgeBaseSearchTool) {
-                          const kbIds = paramName === "kds_list" && toolKbType === "aidp_search"
-                            ? testPanelKbIds
-                            : selectedKbIds;
-                          if (kbIds.length > 0) {
-                            currentParamsJson[paramName] = kbIds;
+                          if (paramName === "kds_list" && toolKbType === "aidp_search") {
+                            if (testPanelKbIds.length > 0) {
+                              currentParamsJson[paramName] = testPanelKbIds;
+                            }
                           }
                           return;
                         }
