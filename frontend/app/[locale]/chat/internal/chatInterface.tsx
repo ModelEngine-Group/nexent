@@ -40,7 +40,7 @@ import {
   HistoryItem,
 } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
-import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
+import { handleStreamResponse, ResumeConfig, StreamingMessage } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 
 import { Button, Checkbox, Layout, message } from "antd";
@@ -637,7 +637,7 @@ export function ChatInterface() {
 
       // Call streaming processing function to handle response
       await handleStreamResponse(
-        reader,
+        reader as ReadableStreamDefaultReader<Uint8Array>,
         setCurrentSessionMessagesFactory(id),
         resetTimeout,
         stepIdCounter,
@@ -805,6 +805,185 @@ export function ChatInterface() {
     setShouldScrollToBottom(true);
   };
 
+  // Helper to handle resume completion when agent finished during disconnect
+  const handleResumeCompletion = (conversationId: number, status: string) => {
+    // Clean up streaming state
+    setStreamingConversations((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(conversationId);
+      return newSet;
+    });
+    setIsStreaming(false);
+
+    // Mark the message as complete in the UI
+    setSessionMessages((prev) => {
+      const messages = prev[conversationId];
+      if (!messages || messages.length === 0) return prev;
+      const newMessages = [...messages];
+      const lastMsg = newMessages[newMessages.length - 1];
+      if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+        newMessages[newMessages.length - 1] = {
+          ...lastMsg,
+          isComplete: true,
+        };
+      }
+      return {
+        ...prev,
+        [conversationId]: newMessages,
+      };
+    });
+  };
+
+
+  // Helper to create a session messages updater for a specific conversation
+  const createSessionMessagesUpdater = useCallback(
+    (targetConversationId: number) => {
+      return (valueOrUpdater: React.SetStateAction<ChatMessageType[]>) => {
+        setSessionMessages((prev) => {
+          const prevArr = prev[targetConversationId] || [];
+          const nextArr =
+            typeof valueOrUpdater === "function"
+              ? (valueOrUpdater as (prev: ChatMessageType[]) => ChatMessageType[])(
+                  prevArr
+                )
+              : valueOrUpdater;
+          return {
+            ...prev,
+            [targetConversationId]: [...nextArr],
+          };
+        });
+      };
+    },
+    []
+  );
+
+  // Helper to handle timeout expiration during resume streaming
+  const handleResumeTimeout = useCallback(
+    async (convId: number) => {
+      const ctrl = conversationControllersRef.current.get(convId);
+      if (ctrl && !ctrl.signal.aborted) {
+        try {
+          ctrl.abort(t("chatInterface.requestTimeout"));
+          await conversationService.stop(convId);
+        } catch (e) {
+          log.error(t("chatInterface.stopTimeoutRequestFailed"), e);
+        }
+      }
+      conversationTimeoutsRef.current.delete(convId);
+    },
+    [t]
+  );
+
+  // Helper to set up and trigger a timeout for resume streaming
+  const startResumeTimeout = useCallback(
+    (convId: number) => {
+      const existingTimeout = conversationTimeoutsRef.current.get(convId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+      }
+      const newTimeout = setTimeout(() => {
+        handleResumeTimeout(convId);
+      }, 120000);
+      conversationTimeoutsRef.current.set(convId, newTimeout);
+    },
+    [handleResumeTimeout]
+  );
+
+  // Helper function to resume streaming after tab switch
+  const resumeStreamingConversation = useCallback(
+    async (conversationId: number, streamingMessage: StreamingMessage) => {
+      const lastUnit = streamingMessage.last_unit;
+      const resumeConfig: ResumeConfig = {
+        streamingMessage,
+        lastUnitIndex: lastUnit?.unit_index ?? -1,
+      };
+
+      // Create new AbortController for the resume request
+      const controller = new AbortController();
+      conversationControllersRef.current.set(conversationId, controller);
+
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+      try {
+        // Call resume API
+        const response = await conversationService.runAgent(
+          {
+            query: "",
+            conversation_id: conversationId,
+            history: [],
+            is_resume: true,
+          },
+          controller.signal
+        );
+
+        // Check if this is a JSON response (agent finished during disconnect)
+        if (
+          response &&
+          typeof response === "object" &&
+          "type" in response &&
+          response.type === "json"
+        ) {
+          const jsonData = response.data as {
+            status: string;
+            message?: string;
+          };
+          handleResumeCompletion(conversationId, jsonData.status);
+          return;
+        }
+
+        reader = response as ReadableStreamDefaultReader<Uint8Array>;
+        if (!reader) {
+          throw new Error("Response body is null");
+        }
+
+        // Set streaming state
+        setStreamingConversations((prev) => {
+          const newSet = new Set(prev);
+          newSet.add(conversationId);
+          return newSet;
+        });
+        setIsStreaming(true);
+
+        // Set up timeout and call stream handler
+        startResumeTimeout(conversationId);
+
+        await handleStreamResponse(
+          reader,
+          createSessionMessagesUpdater(conversationId),
+          () => startResumeTimeout(conversationId),
+          stepIdCounter,
+          setIsSwitchedConversation,
+          false,
+          conversationManagement.setConversationTitle,
+          conversationManagement.fetchConversationList,
+          conversationId,
+          conversationService,
+          false,
+          t,
+          resumeConfig
+        );
+      } catch (error) {
+        log.error(t("chatInterface.resumeStreamFailed"), error);
+      } finally {
+        conversationControllersRef.current.delete(conversationId);
+        setStreamingConversations((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(conversationId);
+          return newSet;
+        });
+        setIsStreaming(false);
+      }
+    },
+    [
+      t,
+      conversationService,
+      conversationManagement,
+      createSessionMessagesUpdater,
+      startResumeTimeout,
+      handleResumeCompletion,
+    ]
+  );
+
   // When switching conversation, automatically load messages
   const handleDialogClick = async (dialog: ConversationListItem) => {
     // When switching conversation, keep all SSE connections active
@@ -888,6 +1067,15 @@ export function ChatInterface() {
             conversationManagement.clearConversationLoadError(
               dialog.conversation_id
             );
+
+            // Check if this conversation has an in-progress streaming message
+            const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
+            if (streamingMessage && streamingMessage.status === 'streaming') {
+              // Resume streaming - wait for state to update first
+              setTimeout(() => {
+                resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+              }, 100);
+            }
 
             // Asynchronously load all attachment URLs
             loadAttachmentUrls(formattedMessages, dialog.conversation_id);
@@ -996,6 +1184,15 @@ export function ChatInterface() {
           conversationManagement.clearConversationLoadError(
             dialog.conversation_id
           );
+
+          // Check if this conversation has an in-progress streaming message
+          const streamingMessage = (conversationData as any).streaming_message as StreamingMessage | undefined;
+          if (streamingMessage && streamingMessage.status === 'streaming') {
+            // Resume streaming - wait for state to update first
+            setTimeout(() => {
+              resumeStreamingConversation(dialog.conversation_id, streamingMessage);
+            }, 100);
+          }
 
           // Asynchronously load all attachment URLs
           loadAttachmentUrls(formattedMessages, dialog.conversation_id);

@@ -23,7 +23,7 @@ import types
 import importlib.util
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -324,7 +324,7 @@ class TestSystemPromptComponent:
         messages = comp.to_messages()
         assert len(messages) == 1
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "Test prompt content"
+        assert messages[0]["content"] == [{"type": "text", "text": "Test prompt content"}]
 
     def test_with_template_name(self):
         comp = agent_model_module.SystemPromptComponent(
@@ -340,6 +340,14 @@ class TestSystemPromptComponent:
         tokens = comp.estimate_tokens(chars_per_token=1.5)
         assert tokens > 0
         assert tokens == int(len("This is a test prompt with some words.") / 1.5)
+
+    def test_estimate_tokens_with_string_content_fallback(self):
+        """estimate_tokens handles legacy string content via str() fallback."""
+        comp = agent_model_module.SystemPromptComponent(content="hello world")
+        with patch.object(agent_model_module.SystemPromptComponent, "to_messages",
+                          return_value=[{"role": "system", "content": "hello world"}]):
+            tokens = comp.estimate_tokens(chars_per_token=1.5)
+            assert tokens == int(len("hello world") / 1.5)
 
     def test_default_priority(self):
         comp = agent_model_module.SystemPromptComponent(content="test")
