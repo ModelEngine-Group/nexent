@@ -3137,11 +3137,14 @@ async def run_agent_stream(
     )
 
 
-def stop_agent_tasks(conversation_id: int, user_id: str, tenant_id: str = None):
+def stop_agent_tasks(conversation_id: int, user_id: str, tenant_id: str):
     """
     Stop agent run and preprocess tasks for the specified conversation_id.
     Matches the behavior of agent_app.agent_stop_api.
     """
+    if not tenant_id:
+        raise ValueError("tenant_id is required to stop agent tasks")
+
     # Stop agent run
     agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, tenant_id=tenant_id)
 

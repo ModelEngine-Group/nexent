@@ -11124,8 +11124,16 @@ def test_stop_agent_tasks():
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
         with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
-            mock_preprocess.assert_called_once_with(123, user_id="user1", tenant_id=None)
+            result = stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id="tenant1")
+            mock_preprocess.assert_called_once_with(123, user_id="user1", tenant_id="tenant1")
+
+
+def test_stop_agent_tasks_requires_tenant_id():
+    """stop_agent_tasks rejects missing tenant_id before calling managers."""
+    from backend.services.agent_service import stop_agent_tasks
+
+    with pytest.raises(ValueError, match="tenant_id is required"):
+        stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id=None)
 
 
 # ============================================================================
@@ -11236,7 +11244,7 @@ def test_stop_agent_tasks_both_stopped():
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True) as mock_preprocess:
         with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
+            result = stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id="tenant1")
             assert result["status"] == "success"
             assert "agent run" in result["message"]
             assert "preprocess tasks" in result["message"]
@@ -11250,7 +11258,7 @@ def test_stop_agent_tasks_agent_only():
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
         with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
+            result = stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id="tenant1")
             assert result["status"] == "success"
             assert "agent run" in result["message"]
             assert "preprocess tasks" not in result["message"]
@@ -11264,7 +11272,7 @@ def test_stop_agent_tasks_preprocess_only():
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True) as mock_preprocess:
         with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
+            result = stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id="tenant1")
             assert result["status"] == "success"
             assert "agent run" not in result["message"]
             assert "preprocess tasks" in result["message"]
@@ -11278,7 +11286,7 @@ def test_stop_agent_tasks_none_stopped():
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=False) as mock_preprocess:
         with patch.object(agent_run_manager, "stop_agent_run", return_value=False):
-            result = stop_agent_tasks(conversation_id=123, user_id="user1")
+            result = stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id="tenant1")
             assert result["status"] == "success"
             assert result.get("already_stopped") is True
 
@@ -11727,7 +11735,7 @@ def test_stop_agent_tasks_logs_messages():
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True):
         with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
             with patch("backend.services.agent_service.logging") as mock_logging:
-                result = stop_agent_tasks(conversation_id=123, user_id="user1")
+                result = stop_agent_tasks(conversation_id=123, user_id="user1", tenant_id="tenant1")
                 # Should have called info logging
                 assert mock_logging.info.called
 
@@ -13615,5 +13623,4 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
 
     assert result["should_resume"] is True
     assert result["resume_from_unit_index"] == 0
-
 
