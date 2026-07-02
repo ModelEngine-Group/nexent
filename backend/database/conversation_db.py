@@ -790,7 +790,6 @@ def get_conversation_history(
         conversation = as_dict(conversation)
 
         subquery = select(
-            # Move the order_by to the json_agg function
             func.json_agg(
                 func.json_build_object(
                     'unit_id', ConversationMessageUnit.unit_id,
@@ -843,9 +842,11 @@ def get_conversation_history(
         for record in message_records:
             message_data = as_dict(record)
 
-            # Ensure units field is empty list instead of None
+            # Ensure units field is empty list instead of None, then sort by unit_index
             if message_data['units'] is None:
                 message_data['units'] = []
+            else:
+                message_data['units'] = sorted(message_data['units'], key=lambda u: u['unit_index'])
 
             # Process minio_files field - if it's a JSON string, parse it into Python object
             if message_data.get('minio_files'):
