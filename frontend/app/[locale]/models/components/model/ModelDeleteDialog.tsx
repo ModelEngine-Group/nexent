@@ -410,7 +410,8 @@ export const ModelDeleteDialog = ({
     (
       providerModel: any,
       provider: ModelSource,
-      modelType: ModelType | null
+      modelType: ModelType | null,
+      options?: { preferProviderValues?: boolean }
     ) => {
       const existingModel = models.find(
         (m) =>
@@ -420,27 +421,54 @@ export const ModelDeleteDialog = ({
       );
       if (!existingModel) return providerModel;
 
+      const pickValue = <T,>(
+        providerValue: T | undefined,
+        savedValue: T | undefined
+      ) =>
+        options?.preferProviderValues
+          ? (providerValue ?? savedValue)
+          : (savedValue ?? providerValue);
+
       return {
         ...providerModel,
-        max_tokens: existingModel.maxTokens ?? providerModel.max_tokens,
-        timeout_seconds:
-          existingModel.timeoutSeconds ?? providerModel.timeout_seconds,
-        concurrency_limit:
-          existingModel.concurrencyLimit ?? providerModel.concurrency_limit,
-        context_window_tokens:
-          existingModel.contextWindowTokens ??
+        saved_model_id: existingModel.id,
+        model_factory: existingModel.source ?? providerModel.model_factory,
+        max_tokens: pickValue(
+          providerModel.max_tokens,
+          existingModel.maxTokens
+        ),
+        timeout_seconds: pickValue(
+          providerModel.timeout_seconds,
+          existingModel.timeoutSeconds
+        ),
+        concurrency_limit: pickValue(
+          providerModel.concurrency_limit,
+          existingModel.concurrencyLimit
+        ),
+        context_window_tokens: pickValue(
           providerModel.context_window_tokens,
-        max_input_tokens:
-          existingModel.maxInputTokens ?? providerModel.max_input_tokens,
-        max_output_tokens:
-          existingModel.maxOutputTokens ?? providerModel.max_output_tokens,
-        default_output_reserve_tokens:
-          existingModel.defaultOutputReserveTokens ??
+          existingModel.contextWindowTokens
+        ),
+        max_input_tokens: pickValue(
+          providerModel.max_input_tokens,
+          existingModel.maxInputTokens
+        ),
+        max_output_tokens: pickValue(
+          providerModel.max_output_tokens,
+          existingModel.maxOutputTokens
+        ),
+        default_output_reserve_tokens: pickValue(
           providerModel.default_output_reserve_tokens,
-        tokenizer_family:
-          existingModel.tokenizerFamily ?? providerModel.tokenizer_family,
-        capacity_source:
-          existingModel.capacitySource ?? providerModel.capacity_source,
+          existingModel.defaultOutputReserveTokens
+        ),
+        tokenizer_family: pickValue(
+          providerModel.tokenizer_family,
+          existingModel.tokenizerFamily
+        ),
+        capacity_source: pickValue(
+          providerModel.capacity_source,
+          existingModel.capacitySource
+        ),
         capability_profile_version:
           existingModel.capabilityProfileVersion ??
           providerModel.capability_profile_version,
@@ -728,7 +756,9 @@ export const ModelDeleteDialog = ({
     return providerModels.some((m: any) => {
       if (!pendingSelectedProviderIds.has(m.id)) return false;
       const resolvedModel = selectedSource
-        ? overlaySavedModelConfig(m, selectedSource, deletingModelType)
+        ? overlaySavedModelConfig(m, selectedSource, deletingModelType, {
+            preferProviderValues: true,
+          })
         : m;
       return !hasPositiveW2Capacity(resolvedModel);
     });
@@ -1590,33 +1620,13 @@ export const ModelDeleteDialog = ({
                                 // row in snake_case so the edit dialog
                                 // pre-fills context_window_tokens etc. instead
                                 // of showing empty fields.
-                                const settingsTarget = existingModel
-                                  ? {
-                                      ...providerModel,
-                                      max_tokens:
-                                        existingModel.maxTokens ??
-                                        providerModel.max_tokens,
-                                      timeout_seconds:
-                                        existingModel.timeoutSeconds ??
-                                        providerModel.timeout_seconds,
-                                      concurrency_limit:
-                                        existingModel.concurrencyLimit ??
-                                        providerModel.concurrency_limit,
-                                      context_window_tokens:
-                                        existingModel.contextWindowTokens,
-                                      max_input_tokens:
-                                        existingModel.maxInputTokens,
-                                      max_output_tokens:
-                                        existingModel.maxOutputTokens,
-                                      default_output_reserve_tokens:
-                                        existingModel.defaultOutputReserveTokens,
-                                      tokenizer_family:
-                                        existingModel.tokenizerFamily,
-                                      capacity_source:
-                                        existingModel.capacitySource,
-                                      capability_profile_version:
-                                        existingModel.capabilityProfileVersion,
-                                    }
+                                const settingsTarget = selectedSource
+                                  ? overlaySavedModelConfig(
+                                      providerModel,
+                                      selectedSource,
+                                      deletingModelType,
+                                      { preferProviderValues: true }
+                                    )
                                   : providerModel;
                                 handleSingleModelSettingsClick(settingsTarget);
                               }}
@@ -1903,7 +1913,9 @@ export const ModelDeleteDialog = ({
                   : baseName;
 
             const updatePayload: any = {
-              model_id: qualifiedId,
+              model_id: selectedSingleModel.saved_model_id
+                ? String(selectedSingleModel.saved_model_id)
+                : qualifiedId,
               maxTokens: config.maxTokens,
               timeoutSeconds: config.timeoutSeconds,
               concurrencyLimit: config.concurrencyLimit,
@@ -1931,10 +1943,7 @@ export const ModelDeleteDialog = ({
               updatePayload.apiKey = config.apiKey;
             }
 
-            await modelService.updateBatchModel(
-              [updatePayload],
-              selectedSingleModel.model_factory
-            );
+            await modelService.updateBatchModel([updatePayload], provider);
 
             // Update the model in the list
             setProviderModels((prev) =>
@@ -1952,10 +1961,14 @@ export const ModelDeleteDialog = ({
                         config.defaultOutputReserveTokens,
                       tokenizer_family: config.tokenizerFamily,
                       capacity_source: config.capacitySource,
+                      saved_model_id: selectedSingleModel.saved_model_id,
+                      model_factory: provider || model.model_factory,
                     }
                   : model
               )
             );
+
+            await onSuccess();
 
             message.success(
               t("model.message.updateSuccess") || "Update successful"
