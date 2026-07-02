@@ -1971,3 +1971,324 @@ def test_get_message_units_with_records(monkeypatch, mock_session_ctx):
     assert len(result) == 2
     assert result[0]["unit_id"] == 1
     assert result[1]["unit_id"] == 2
+
+
+# =============================================================================
+# Tests for line 756 (sort units by unit_index)
+# =============================================================================
+
+
+def test_get_conversation_history_sorts_units_by_index(monkeypatch, mock_session_ctx):
+    """get_conversation_history sorts units by unit_index when present (line 756)."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+
+    # Conversation record
+    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+
+    # Message with units in REVERSE order (index 2, 1, 0) to verify sorting
+    mock_message = SimpleNamespace(
+        message_id=1,
+        message_index=0,
+        message_role="user",
+        message_content="Hello",
+        status="completed",
+        minio_files=None,
+        opinion_flag=None,
+        units=[
+            {"unit_id": 3, "unit_index": 2, "unit_type": "code", "unit_content": "c=3", "unit_status": "done"},
+            {"unit_id": 1, "unit_index": 0, "unit_type": "code", "unit_content": "a=1", "unit_status": "done"},
+            {"unit_id": 2, "unit_index": 1, "unit_type": "code", "unit_content": "b=2", "unit_status": "done"},
+        ],
+    )
+
+    conv_exec_result = MagicMock()
+    conv_exec_result.first.return_value = mock_conv
+
+    message_exec_result = MagicMock()
+    message_exec_result.all.return_value = [mock_message]
+
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+
+    session.execute.side_effect = [conv_exec_result, message_exec_result]
+    session.scalars.return_value = scalars_result
+
+    def as_dict_side_effect(record):
+        if isinstance(record, MagicMock):
+            return {}
+        if hasattr(record, 'message_id') and hasattr(record, 'message_role'):
+            return {
+                "message_id": record.message_id,
+                "message_index": record.message_index,
+                "role": record.message_role,
+                "message_content": record.message_content,
+                "status": record.status,
+                "minio_files": record.minio_files,
+                "opinion_flag": record.opinion_flag,
+                "units": record.units,
+            }
+        elif hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
+        return {}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation_history(1)
+
+    assert result is not None
+    # Units should be sorted by unit_index: 0, 1, 2
+    units = result['message_records'][0]['units']
+    assert units[0]['unit_index'] == 0
+    assert units[1]['unit_index'] == 1
+    assert units[2]['unit_index'] == 2
+    assert units[0]['unit_id'] == 1
+    assert units[1]['unit_id'] == 2
+    assert units[2]['unit_id'] == 3
+
+
+# =============================================================================
+# Tests for lines 759-762 (parse minio_files JSON string)
+# =============================================================================
+
+
+def test_get_conversation_history_parses_minio_files_json_string(monkeypatch, mock_session_ctx):
+    """get_conversation_history parses minio_files when it is a JSON string (line 762)."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+
+    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+    # minio_files is a JSON string that should be parsed into a Python object
+    mock_message = SimpleNamespace(
+        message_id=1,
+        message_index=0,
+        message_role="user",
+        message_content="Hello",
+        status="completed",
+        minio_files='[{"name": "report.pdf", "size": 1024}]',
+        opinion_flag=None,
+        units=None,
+    )
+
+    conv_exec_result = MagicMock()
+    conv_exec_result.first.return_value = mock_conv
+
+    message_exec_result = MagicMock()
+    message_exec_result.all.return_value = [mock_message]
+
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+
+    session.execute.side_effect = [conv_exec_result, message_exec_result]
+    session.scalars.return_value = scalars_result
+
+    def as_dict_side_effect(record):
+        if isinstance(record, MagicMock):
+            return {}
+        if hasattr(record, 'message_id') and hasattr(record, 'message_role'):
+            return {
+                "message_id": record.message_id,
+                "message_index": record.message_index,
+                "role": record.message_role,
+                "message_content": record.message_content,
+                "status": record.status,
+                "minio_files": record.minio_files,
+                "opinion_flag": record.opinion_flag,
+                "units": record.units,
+            }
+        elif hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
+        return {}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation_history(1)
+
+    assert result is not None
+    # minio_files should be parsed into a list of dicts
+    parsed_files = result['message_records'][0]['minio_files']
+    assert isinstance(parsed_files, list)
+    assert len(parsed_files) == 1
+    assert parsed_files[0]['name'] == "report.pdf"
+    assert parsed_files[0]['size'] == 1024
+
+
+def test_get_conversation_history_minio_files_non_string_kept_as_is(monkeypatch, mock_session_ctx):
+    """get_conversation_history keeps minio_files as-is when it's not a string (line 761 else branch)."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+
+    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+    # minio_files already a list (non-string) - should remain unchanged
+    pre_parsed_files = [{"name": "already_list.json"}]
+    mock_message = SimpleNamespace(
+        message_id=1,
+        message_index=0,
+        message_role="user",
+        message_content="Hello",
+        status="completed",
+        minio_files=pre_parsed_files,
+        opinion_flag=None,
+        units=None,
+    )
+
+    conv_exec_result = MagicMock()
+    conv_exec_result.first.return_value = mock_conv
+
+    message_exec_result = MagicMock()
+    message_exec_result.all.return_value = [mock_message]
+
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+
+    session.execute.side_effect = [conv_exec_result, message_exec_result]
+    session.scalars.return_value = scalars_result
+
+    def as_dict_side_effect(record):
+        if isinstance(record, MagicMock):
+            return {}
+        if hasattr(record, 'message_id') and hasattr(record, 'message_role'):
+            return {
+                "message_id": record.message_id,
+                "message_index": record.message_index,
+                "role": record.message_role,
+                "message_content": record.message_content,
+                "status": record.status,
+                "minio_files": record.minio_files,
+                "opinion_flag": record.opinion_flag,
+                "units": record.units,
+            }
+        elif hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
+        return {}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation_history(1)
+
+    assert result is not None
+    # Should remain a list (not re-parsed)
+    assert result['message_records'][0]['minio_files'] == pre_parsed_files
+
+
+def test_get_conversation_history_minio_files_invalid_json_kept(monkeypatch, mock_session_ctx):
+    """get_conversation_history keeps minio_files as original when JSON parsing fails (line 764-766)."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+
+    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+    # Invalid JSON string - should be kept as-is
+    invalid_json = "not valid json {"
+    mock_message = SimpleNamespace(
+        message_id=1,
+        message_index=0,
+        message_role="user",
+        message_content="Hello",
+        status="completed",
+        minio_files=invalid_json,
+        opinion_flag=None,
+        units=None,
+    )
+
+    conv_exec_result = MagicMock()
+    conv_exec_result.first.return_value = mock_conv
+
+    message_exec_result = MagicMock()
+    message_exec_result.all.return_value = [mock_message]
+
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+
+    session.execute.side_effect = [conv_exec_result, message_exec_result]
+    session.scalars.return_value = scalars_result
+
+    def as_dict_side_effect(record):
+        if isinstance(record, MagicMock):
+            return {}
+        if hasattr(record, 'message_id') and hasattr(record, 'message_role'):
+            return {
+                "message_id": record.message_id,
+                "message_index": record.message_index,
+                "role": record.message_role,
+                "message_content": record.message_content,
+                "status": record.status,
+                "minio_files": record.minio_files,
+                "opinion_flag": record.opinion_flag,
+                "units": record.units,
+            }
+        elif hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
+        return {}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation_history(1)
+
+    assert result is not None
+    # Should be kept as original invalid JSON string
+    assert result['message_records'][0]['minio_files'] == invalid_json
+
+
+def test_get_conversation_history_units_empty_list(monkeypatch, mock_session_ctx):
+    """get_conversation_history handles empty units list (line 754)."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+
+    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+    mock_message = SimpleNamespace(
+        message_id=1,
+        message_index=0,
+        message_role="user",
+        message_content="Hello",
+        status="completed",
+        minio_files=None,
+        opinion_flag=None,
+        units=[],  # Empty list - not None
+    )
+
+    conv_exec_result = MagicMock()
+    conv_exec_result.first.return_value = mock_conv
+
+    message_exec_result = MagicMock()
+    message_exec_result.all.return_value = [mock_message]
+
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+
+    session.execute.side_effect = [conv_exec_result, message_exec_result]
+    session.scalars.return_value = scalars_result
+
+    def as_dict_side_effect(record):
+        if isinstance(record, MagicMock):
+            return {}
+        if hasattr(record, 'message_id') and hasattr(record, 'message_role'):
+            return {
+                "message_id": record.message_id,
+                "message_index": record.message_index,
+                "role": record.message_role,
+                "message_content": record.message_content,
+                "status": record.status,
+                "minio_files": record.minio_files,
+                "opinion_flag": record.opinion_flag,
+                "units": record.units,
+            }
+        elif hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
+        return {}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_conversation_history(1)
+
+    assert result is not None
+    assert result['message_records'][0]['units'] == []
