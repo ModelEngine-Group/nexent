@@ -177,7 +177,26 @@ mock_message_observer = MagicMock()
 class MockAgentVerificationConfig:
     @classmethod
     def model_validate(cls, value):
-        return value or {}
+        config = {
+            "enabled": False,
+            "step_verification_enabled": True,
+            "final_verification_enabled": True,
+            "llm_verification_enabled": False,
+            "max_final_rounds": 2,
+            "strictness": "balanced",
+            "fail_policy": "repair_then_controlled_summary",
+            "pass_score": 0.75,
+            "critical_events": [
+                "tool_precheck",
+                "tool_result",
+                "retrieval",
+                "code_execution",
+                "handoff",
+                "final_answer",
+            ],
+        }
+        config.update(value or {})
+        return config
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
 sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
@@ -1769,6 +1788,7 @@ class TestCreateAgentConfig:
         template: str,
         prepared_prompt: str,
         components: Optional[List[Mock]] = None,
+        verification_config: Optional[Dict[str, Any]] = None,
     ):
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
@@ -1796,6 +1816,8 @@ class TestCreateAgentConfig:
                 "provide_run_summary": False,
                 "enable_context_manager": enable_context_manager,
             }
+            if verification_config is not None:
+                mock_search_agent.return_value["verification_config"] = verification_config
             mock_get_template.return_value = {"system_prompt": template}
             mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
             mock_build_memory.return_value = Mock(
@@ -1847,6 +1869,39 @@ class TestCreateAgentConfig:
         assert mocks["prepare_templates"].call_args.kwargs["system_prompt"] == "test duty | test constraint"
         assert mocks["agent_config"].call_args.kwargs["context_components"] == []
         assert mocks["agent_config"].call_args.kwargs["context_manager_config"].enabled is False
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_defaults_verification_disabled(self):
+        """Agent runtime should not enable self-verification unless the user opted in."""
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=False,
+            template="{{duty}}",
+            prepared_prompt="rendered",
+        )
+
+        verification_config = mocks["agent_config"].call_args.kwargs["verification_config"]
+        assert verification_config["enabled"] is False
+        assert verification_config["final_verification_enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_preserves_user_enabled_verification(self):
+        """Explicit user verification settings should be passed into the SDK runtime."""
+        mocks = await self._run_context_manager_case(
+            enable_context_manager=False,
+            template="{{duty}}",
+            prepared_prompt="rendered",
+            verification_config={
+                "enabled": True,
+                "step_verification_enabled": True,
+                "final_verification_enabled": True,
+                "llm_verification_enabled": False,
+                "strictness": "balanced",
+            },
+        )
+
+        verification_config = mocks["agent_config"].call_args.kwargs["verification_config"]
+        assert verification_config["enabled"] is True
+        assert verification_config["strictness"] == "balanced"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):

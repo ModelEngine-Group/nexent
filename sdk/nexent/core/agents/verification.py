@@ -71,6 +71,18 @@ class VerificationController:
         r"(traceback|exception|error:|failed|timeout|unauthorized|permission denied)",
         re.IGNORECASE,
     )
+    _SKILL_DOC_READ_RE = re.compile(r"\bread_skill_md\s*\(", re.IGNORECASE)
+    _SKILL_READ_FAILURE_RE = re.compile(
+        r"(^|\n)\s*(?:"
+        r"\[?(?:error|warning|skillnotfounderror|filenotfounderror|timeouterror|unexpectederror)\]?|"
+        r"skill not found:|skill directory not found:|skill\.md not found|file not found:|"
+        r"error reading skill:|failed to read"
+        r")",
+        re.IGNORECASE,
+    )
+    _SUMMARY_STEP_RE = re.compile(r"Step\s+\S+:\n(?P<body>.*?)(?=\n\nStep\s+\S+:\n|\Z)", re.DOTALL)
+    _SUMMARY_CODE_RE = re.compile(r"Code:\s*(?P<code>.*?)(?=\nObservation:|\Z)", re.DOTALL)
+    _SUMMARY_OBSERVATION_RE = re.compile(r"Observation:\s*(?P<observation>.*?)(?=\nOutput:|\Z)", re.DOTALL)
     _EMPTY_RE = re.compile(r"^\s*(execution logs:\s*)?(last output from code snippet:\s*)?\s*$", re.IGNORECASE)
     _RAW_TAG_RE = re.compile(r"</?(code|RUN)>|<DISPLAY:[^>]+>|</DISPLAY>", re.IGNORECASE)
     _CITATION_RE = re.compile(r"\[\[[a-e]\d+\]\]")
@@ -121,6 +133,14 @@ class VerificationController:
     def _build_display_message(self, result: VerificationResult) -> str:
         if result.passed and result.phase in {"pass", "final_pass"}:
             prefix = "最终自检通过" if result.phase == "final_pass" else "基础自检通过"
+            if result.severity == "warning" and result.failed_criteria:
+                note = result.user_visible_note or result.repair_instruction
+                if note:
+                    suffix = "" if "不阻断" in note or "放行" in note else "；不阻断输出"
+                    return f"{prefix}（有提示）：{note}{suffix}"
+                labels = self._failed_check_labels(result.failed_criteria)
+                if labels:
+                    return f"{prefix}（有提示）：{'、'.join(labels[:3])}不阻断输出"
             summary = self._build_pass_summary(result)
             return f"{prefix}：{summary}" if summary else prefix
 
@@ -133,6 +153,8 @@ class VerificationController:
                     "repair": "自检未通过，正在修正",
                     "final_fail": "最终自检未通过",
                 }.get(result.phase, "自检提示")
+                if result.passed and result.severity == "warning" and "不阻断" not in note:
+                    note = f"{note}；不阻断继续执行"
                 return f"{prefix}：{note}"
 
         return result.user_visible_note or result.repair_instruction or ""
@@ -203,6 +225,18 @@ class VerificationController:
         passed_names = {check.name for check in checks if check.passed}
         return [label_map[name] for name in ordered_names if name in passed_names and name in label_map]
 
+    def _failed_check_labels(self, failed_criteria: List[str]) -> List[str]:
+        label_map = {
+            "no_unresolved_raw_tags": "存在内部格式标记",
+            "no_unresolved_placeholders": "存在未替换占位符",
+            "previous_errors_acknowledged": "存在未说明的工具错误",
+            "citation_integrity": "引用格式需关注",
+            "format_safety": "格式需关注",
+            "llm_verifier_confidence": "自检模型置信度偏低",
+            "llm_verifier": "自检模型结果不稳定",
+        }
+        return [label_map.get(name, name) for name in failed_criteria]
+
     def verify_before_tool_call(
         self,
         code_action: str,
@@ -265,7 +299,7 @@ class VerificationController:
         return self._result_from_checks(
             event="tool_precheck",
             checks=checks,
-            blocking_names={"non_empty_code", "python_syntax", "action_scope"},
+            blocking_names={"non_empty_code", "python_syntax"},
             step_number=step_number,
         )
 
@@ -281,6 +315,7 @@ class VerificationController:
             return self._pass(event)
 
         observation_text = observation or ""
+        tool_error_signal = self._has_tool_error_signal(code_action, observation_text)
         checks = [
             VerificationCheck(
                 name="observation_present",
@@ -290,8 +325,8 @@ class VerificationController:
             ),
             VerificationCheck(
                 name="tool_error_handled",
-                passed=not self._ERROR_RE.search(observation_text),
-                reason="The observation contains an error signal." if self._ERROR_RE.search(observation_text) else "",
+                passed=not tool_error_signal,
+                reason="The observation contains an error signal." if tool_error_signal else "",
                 fix_hint="Do not ignore this tool error. Diagnose it, retry safely, or state the limitation.",
             ),
         ]
@@ -361,7 +396,7 @@ class VerificationController:
         return self._result_from_checks(
             event="final_answer",
             checks=checks,
-            blocking_names={"final_answer_non_empty", "no_unresolved_raw_tags", "no_unresolved_placeholders"},
+            blocking_names={"final_answer_non_empty"},
             step_number=step_number,
         )
 
@@ -388,15 +423,15 @@ class VerificationController:
             self.emit(deterministic, round_number)
             return deterministic
 
-        if not self.config.llm_verification_enabled:
-            deterministic.phase = "final_pass"
-            self.emit(deterministic, round_number)
-            return deterministic
-
         policy = self._build_final_verification_policy(task, memory_summary)
         if policy["task_profile"] == "lightweight_conversation":
             deterministic.phase = "final_pass"
             deterministic.user_visible_note = "Lightweight conversational task; deterministic checks passed."
+            self.emit(deterministic, round_number)
+            return deterministic
+
+        if not self._should_run_llm_verifier(policy):
+            deterministic.phase = "final_pass"
             self.emit(deterministic, round_number)
             return deterministic
 
@@ -589,17 +624,25 @@ class VerificationController:
             score = max(score, self.config.pass_score)
             threshold_passed = True
             status = "pass"
-        effective_passed = passed and threshold_passed
-        severity = "info" if effective_passed else "blocking"
+        blocking_failed_criteria = self._blocking_llm_failed_criteria(effective_failed_criteria, policy)
+        has_blocking_failure = bool(blocking_failed_criteria)
+        effective_passed = not has_blocking_failure
+        warning_criteria = effective_failed_criteria.copy()
+        if not warning_criteria and not has_blocking_failure and (not passed or not threshold_passed):
+            warning_criteria = ["llm_verifier_confidence"]
+        severity = "blocking" if has_blocking_failure else ("warning" if warning_criteria else "info")
+        visible_note = str(data.get("user_visible_note") or "")
+        if warning_criteria and not visible_note:
+            visible_note = "自检发现非阻断提示，已放行最终答案。"
         return VerificationResult(
             passed=effective_passed,
             severity=severity,
             event="final_answer",
             phase="final_pass" if effective_passed else "final_fail",
             score=score,
-            failed_criteria=effective_failed_criteria if effective_failed_criteria else ([] if effective_passed else ["llm_verifier"]),
+            failed_criteria=blocking_failed_criteria if has_blocking_failure else warning_criteria,
             repair_instruction=str(data.get("revision_instruction") or data.get("repair_instruction") or ""),
-            user_visible_note=str(data.get("user_visible_note") or ""),
+            user_visible_note=visible_note,
             checks=checks,
         )
 
@@ -626,7 +669,7 @@ class VerificationController:
     ) -> VerificationResult:
         failed = [check for check in checks if not check.passed]
         blocking_failed = [check for check in failed if check.name in blocking_names]
-        should_block = bool(blocking_failed) or (self.config.strictness == "strict" and bool(failed))
+        should_block = bool(blocking_failed)
         passed = not should_block
         severity = "info" if not failed else ("blocking" if should_block else "warning")
         phase = "pass" if not failed else ("blocked" if should_block else "warning")
@@ -678,6 +721,24 @@ class VerificationController:
             "tool_error_check_required": self._has_recent_error_signal(clean_memory_summary),
         }
 
+    def _should_run_llm_verifier(self, policy: Dict[str, Any]) -> bool:
+        if not self.config.llm_verification_enabled:
+            return False
+        if policy.get("task_profile") == "lightweight_conversation":
+            return False
+        return self.config.strictness == "strict"
+
+    def _blocking_llm_failed_criteria(self, failed_criteria: List[str], policy: Dict[str, Any]) -> List[str]:
+        if self.config.fail_policy == "warn" or self.config.strictness != "strict":
+            return []
+
+        blocking_criteria = {"intent_coverage"}
+        if policy.get("evidence_required", True):
+            blocking_criteria.add("evidence_grounding")
+        if policy.get("tool_error_check_required", True):
+            blocking_criteria.add("tool_error_handling")
+        return [criterion for criterion in failed_criteria if criterion in blocking_criteria]
+
     def _is_lightweight_conversation_task(self, task: str) -> bool:
         text = (task or "").strip()
         if not text:
@@ -703,7 +764,67 @@ class VerificationController:
 
     def _has_recent_error_signal(self, text: str) -> bool:
         clean_text = self._strip_internal_verification_feedback(text or "")
+        step_signals = list(self._iter_summary_step_signals(clean_text))
+        if step_signals:
+            return any(
+                self._has_tool_error_signal(code_action, observation)
+                for code_action, observation in step_signals
+            )
+        clean_text = self._strip_successful_skill_doc_observations(clean_text)
         return bool(self._ERROR_RE.search(clean_text))
+
+    def _iter_summary_step_signals(self, text: str):
+        for match in self._SUMMARY_STEP_RE.finditer(text or ""):
+            body = match.group("body") or ""
+            code_match = self._SUMMARY_CODE_RE.search(body)
+            observation_match = self._SUMMARY_OBSERVATION_RE.search(body)
+            code_action = code_match.group("code").strip() if code_match else ""
+            observation = observation_match.group("observation").strip() if observation_match else ""
+            if code_action or observation:
+                yield code_action, observation
+
+    def _has_tool_error_signal(self, code_action: str, observation: str) -> bool:
+        observation_text = observation or ""
+        if self._is_skill_doc_read_action(code_action):
+            return self._looks_like_skill_read_failure(observation_text)
+        return bool(self._ERROR_RE.search(observation_text))
+
+    def _is_skill_doc_read_action(self, code_action: str) -> bool:
+        return bool(self._SKILL_DOC_READ_RE.search(code_action or ""))
+
+    def _looks_like_skill_read_failure(self, observation: str) -> bool:
+        return bool(self._SKILL_READ_FAILURE_RE.search(observation or ""))
+
+    def _strip_successful_skill_doc_observations(self, text: str) -> str:
+        if "read_skill_md" not in (text or ""):
+            return text
+
+        blocks = re.split(r"(?=Step \d+:\n)", text)
+        sanitized_blocks: List[str] = []
+        for block in blocks:
+            if not self._is_skill_doc_read_action(block):
+                sanitized_blocks.append(block)
+                continue
+
+            marker = "Observation:"
+            marker_index = block.find(marker)
+            if marker_index == -1:
+                sanitized_blocks.append(block)
+                continue
+
+            observation_start = marker_index + len(marker)
+            output_index = block.find("\nOutput:", observation_start)
+            observation_end = output_index if output_index != -1 else len(block)
+            observation = block[observation_start:observation_end]
+            if self._looks_like_skill_read_failure(observation):
+                sanitized_blocks.append(block)
+                continue
+
+            replacement = " [skill documentation omitted for error-signal detection]"
+            sanitized_blocks.append(
+                block[:observation_start] + replacement + block[observation_end:]
+            )
+        return "".join(sanitized_blocks)
 
     def _classify_step_event(self, code_action: str, is_final_answer: bool) -> str:
         if is_final_answer:

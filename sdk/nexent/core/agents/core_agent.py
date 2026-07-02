@@ -529,8 +529,6 @@ Additional Args:
                     postcheck.repair_instruction or postcheck.user_visible_note or "Action result failed verification.",
                     self.logger,
                 )
-            if postcheck.severity == "warning":
-                self._append_verification_feedback(memory_step, postcheck)
 
         # Pre-truncate observations when ContextManager is enabled. Keeps the
         # head + tail of long outputs around a truncation marker so downstream

@@ -348,6 +348,56 @@ def test_final_verification_pass_message_explains_reason():
     assert any("最终自检通过" in message and "轻量对话无需外部证据" in message for message in messages)
 
 
+def test_balanced_final_verification_skips_llm_even_when_config_enabled():
+    """Balanced mode should avoid slow verifier LLM calls for reliability."""
+    controller, model = _make_verification_controller()
+
+    result = controller.verify_final_answer(
+        task="请根据项目代码分析当前实现",
+        candidate="当前实现已完成基础检查，未发现格式问题。",
+        memory_summary="Step 1:\nCode: print('ok')\nObservation: ok\nOutput: ok",
+        round_number=1,
+    )
+
+    assert result.passed is True
+    assert result.phase == "final_pass"
+    model.assert_not_called()
+
+
+def test_strict_final_verification_can_call_llm_verifier():
+    """Strict mode preserves the optional deep verifier path."""
+    controller, model = _make_verification_controller(
+        strictness="strict",
+    )
+    model.return_value = type(
+        "VerifierMessage",
+        (),
+        {
+            "content": json.dumps({
+                "passed": True,
+                "score": 0.9,
+                "status": "pass",
+                "failed_criteria": [],
+                "checks": [
+                    {"name": "intent_coverage", "passed": True},
+                    {"name": "format_safety", "passed": True},
+                ],
+            })
+        },
+    )()
+
+    result = controller.verify_final_answer(
+        task="请根据项目代码分析当前实现",
+        candidate="当前实现已完成基础检查，未发现格式问题。",
+        memory_summary="Step 1:\nCode: print('ok')\nObservation: ok\nOutput: ok",
+        round_number=1,
+    )
+
+    assert result.passed is True
+    assert result.phase == "final_pass"
+    model.assert_called_once()
+
+
 def test_verification_feedback_does_not_count_as_tool_error():
     """Self-verification feedback should not poison the next final-answer check."""
     controller, _ = _make_verification_controller()
@@ -369,6 +419,176 @@ Verification feedback:
 
     assert result.passed is True
     assert "previous_errors_acknowledged" not in result.failed_criteria
+
+
+def test_task_text_error_words_do_not_poison_final_error_check():
+    """Error-like words outside step observations should not trigger final failures."""
+    controller, _ = _make_verification_controller()
+    memory_summary = """
+Task: Explain why the word failed appears in this documentation.
+
+Step 1:
+Code: print("documentation parsed")
+Observation: documentation parsed
+Output: documentation parsed
+"""
+
+    result = controller.verify_before_final_answer(
+        candidate="已解释文档中的 failed 是普通文本。",
+        observation=memory_summary,
+        step_number=2,
+    )
+
+    assert result.passed is True
+    assert "previous_errors_acknowledged" not in result.failed_criteria
+
+
+def test_final_format_issues_warn_without_blocking_output():
+    """Minor final-answer formatting issues should not replace the answer with a failure summary."""
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_before_final_answer(
+        candidate="<code>{{TODO}}</code>",
+        observation="Step 1:\nCode: print('ok')\nObservation: ok\nOutput: ok",
+        step_number=2,
+    )
+
+    assert result.passed is True
+    assert result.severity == "warning"
+    assert "no_unresolved_raw_tags" in result.failed_criteria
+    assert "no_unresolved_placeholders" in result.failed_criteria
+
+
+def test_final_warning_pass_message_says_not_blocking():
+    """Warning-level final checks should be visible but clearly non-blocking."""
+    controller, _ = _make_verification_controller()
+
+    message = controller._build_display_message(core_agent_module.VerificationResult(
+        passed=True,
+        severity="warning",
+        event="final_answer",
+        phase="final_pass",
+        failed_criteria=["format_safety"],
+        user_visible_note="格式需关注",
+    ))
+
+    assert "最终自检通过" in message
+    assert "不阻断输出" in message
+
+
+def test_mcp_tool_success_passes_verification():
+    """MCP-style tool observations should pass when they return usable content."""
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action='mcp_github_issue_reader(query="verification")',
+        observation='{"items": [{"title": "verification config"}]}',
+        step_number=1,
+    )
+
+    assert result.passed is True
+    assert result.severity == "info"
+    assert result.event == "code_execution"
+
+
+def test_mcp_tool_error_warns_without_blocking():
+    """MCP tool failures should be surfaced as warnings instead of aborting the answer."""
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action='mcp_github_issue_reader(query="verification")',
+        observation="Error: MCP service temporarily unavailable",
+        step_number=1,
+    )
+
+    assert result.passed is True
+    assert result.severity == "warning"
+    assert "tool_error_handled" in result.failed_criteria
+
+
+def test_sub_agent_empty_result_warns_without_blocking():
+    """Delegated sub-agent calls should warn on empty output without failing the loop."""
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action='research_agent(task="summarize verification behavior")',
+        observation="Unable to answer this delegated task.",
+        step_number=1,
+    )
+
+    assert result.passed is True
+    assert result.severity == "warning"
+    assert result.event == "handoff"
+    assert "handoff_has_substance" in result.failed_criteria
+
+
+def test_skill_markdown_code_does_not_count_as_tool_error():
+    """Code examples in SKILL.md content should not be treated as tool failures."""
+    controller, _ = _make_verification_controller()
+    observation = """
+# Python skill
+
+Use this code pattern:
+
+```python
+try:
+    raise RuntimeError("example failure")
+except Exception as exc:
+    print(f"handled: {exc}")
+```
+"""
+
+    result = controller.verify_after_tool_call(
+        code_action='read_skill_md("python-helper")',
+        observation=observation,
+        step_number=1,
+    )
+
+    assert result.passed is True
+    assert result.severity == "info"
+    assert "tool_error_handled" not in result.failed_criteria
+
+
+def test_skill_markdown_code_does_not_poison_final_error_check():
+    """Final verification should ignore successful skill documentation content."""
+    controller, _ = _make_verification_controller()
+    memory_summary = """
+Step 1:
+Code: read_skill_md("python-helper")
+Observation:
+# Python skill
+
+```python
+raise RuntimeError("example failure")
+except Exception as exc:
+    print(exc)
+```
+Output:
+"""
+
+    result = controller.verify_before_final_answer(
+        candidate="已按技能说明完成处理。",
+        observation=memory_summary,
+        step_number=2,
+    )
+
+    assert result.passed is True
+    assert "previous_errors_acknowledged" not in result.failed_criteria
+
+
+def test_skill_read_failure_still_counts_as_tool_error():
+    """Actual read_skill_md failures should still be surfaced."""
+    controller, _ = _make_verification_controller()
+
+    result = controller.verify_after_tool_call(
+        code_action='read_skill_md("missing-skill")',
+        observation="Error reading skill: database unavailable",
+        step_number=1,
+    )
+
+    assert result.passed is True
+    assert result.severity == "warning"
+    assert "tool_error_handled" in result.failed_criteria
 
 
 def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
@@ -399,6 +619,68 @@ def test_llm_verifier_ignores_non_required_evidence_and_tool_error_failures():
     assert result.passed is True
     assert result.failed_criteria == []
     assert result.score >= controller.config.pass_score
+
+
+def test_llm_verifier_format_failures_are_non_blocking():
+    """Strict verifier should not block final output for non-critical formatting feedback."""
+    controller, _ = _make_verification_controller(strictness="strict")
+    verifier_payload = json.dumps({
+        "passed": False,
+        "score": 0.4,
+        "status": "revise",
+        "failed_criteria": ["citation_integrity", "format_safety"],
+        "checks": [
+            {"name": "citation_integrity", "passed": False},
+            {"name": "format_safety", "passed": False},
+        ],
+        "revision_instruction": "Improve formatting.",
+        "user_visible_note": "Citation and format need attention.",
+    })
+
+    result = controller._parse_llm_verifier_result(
+        verifier_payload,
+        {
+            "task_profile": "task_oriented",
+            "evidence_required": True,
+            "tool_error_check_required": True,
+        },
+    )
+
+    assert result.passed is True
+    assert result.severity == "warning"
+    assert result.phase == "final_pass"
+    assert result.failed_criteria == ["citation_integrity", "format_safety"]
+
+
+def test_llm_verifier_critical_failure_still_blocks_in_strict_mode():
+    """Strict verifier should still block real task-coverage failures."""
+    controller, _ = _make_verification_controller(strictness="strict")
+    verifier_payload = json.dumps({
+        "passed": False,
+        "score": 0.3,
+        "status": "revise",
+        "failed_criteria": ["intent_coverage", "format_safety"],
+        "checks": [
+            {"name": "intent_coverage", "passed": False},
+            {"name": "format_safety", "passed": False},
+        ],
+        "revision_instruction": "Answer the user's actual request.",
+        "user_visible_note": "The answer does not address the user request.",
+    })
+
+    result = controller._parse_llm_verifier_result(
+        verifier_payload,
+        {
+            "task_profile": "task_oriented",
+            "evidence_required": True,
+            "tool_error_check_required": True,
+        },
+    )
+
+    assert result.passed is False
+    assert result.severity == "blocking"
+    assert result.phase == "final_fail"
+    assert result.failed_criteria == ["intent_coverage"]
 
 
 def test_parse_code_blobs_run_format_with_newline():
