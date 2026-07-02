@@ -16,6 +16,7 @@ import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
 import { monitoringService } from "@/services/monitoringService";
 import type { MonitoringStatus } from "@/types/monitoring";
+import { USER_ROLES } from "@/const/auth";
 
 const { Header } = Layout;
 
@@ -32,8 +33,14 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
   const [monitoringStatus, setMonitoringStatus] =
     useState<MonitoringStatus | null>(null);
+  const canViewMonitoringDashboard = user?.role === USER_ROLES.SU;
 
   useEffect(() => {
+    if (!canViewMonitoringDashboard) {
+      setMonitoringStatus(null);
+      return;
+    }
+
     let mounted = true;
 
     monitoringService.fetchStatus().then((status) => {
@@ -45,9 +52,11 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [canViewMonitoringDashboard]);
 
-  const monitoringUrl = buildMonitoringUrl(monitoringStatus);
+  const monitoringUrl = canViewMonitoringDashboard
+    ? buildMonitoringUrl(monitoringStatus)
+    : null;
 
   const openMonitoringDashboard = () => {
     if (!monitoringUrl) return;
