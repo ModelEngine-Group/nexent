@@ -29,6 +29,8 @@ const RUNTIME_HTTP_BACKEND =
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 const MARKET_BACKEND =
   process.env.MARKET_BACKEND || "http://60.204.251.153:8010"; // market
+const SHARE_BASE_URL =
+  process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 const PORT = 3000;
 
 const proxy = createProxyServer();
@@ -432,6 +434,13 @@ app.prepare().then(() => {
     const parsedUrl = parse(req.url, true);
     const { pathname } = parsedUrl;
     req.parsedPathname = pathname;
+
+    // Runtime frontend configuration for browser-only features.
+    if (pathname === "/api/frontend-config") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
+      return;
+    }
 
     // Proxy HTTP requests
     if (pathname.includes("/attachments/") && !pathname.startsWith("/api/")) {

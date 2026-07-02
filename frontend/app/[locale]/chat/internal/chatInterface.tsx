@@ -47,10 +47,74 @@ import {
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 
-import { Button, Checkbox, Layout, message } from "antd";
+import { Button, Checkbox, Input, Layout, message, Modal } from "antd";
 import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
+
+let cachedShareBaseUrl: string | null | undefined;
+
+const getConfiguredShareBaseUrl = async () => {
+  if (cachedShareBaseUrl !== undefined) return cachedShareBaseUrl;
+
+  const buildTimeBaseUrl = process.env.NEXT_PUBLIC_SHARE_BASE_URL?.trim();
+  if (buildTimeBaseUrl) {
+    cachedShareBaseUrl = buildTimeBaseUrl;
+    return cachedShareBaseUrl;
+  }
+
+  try {
+    const response = await fetch("/api/frontend-config", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      const runtimeBaseUrl = data.shareBaseUrl?.trim();
+      cachedShareBaseUrl = runtimeBaseUrl || null;
+      return cachedShareBaseUrl;
+    }
+  } catch (error) {
+    log.warn("Failed to load runtime frontend config", error);
+  }
+
+  cachedShareBaseUrl = null;
+  return cachedShareBaseUrl;
+};
+
+const buildShareUrl = async (shareId: string, locale: string) => {
+  const configuredBaseUrl = await getConfiguredShareBaseUrl();
+  const baseUrl = configuredBaseUrl || window.location.origin;
+  return `${baseUrl.replace(/\/+$/, "")}/${locale}/share/${shareId}`;
+};
+
+const copyTextToClipboard = async (text: string): Promise<boolean> => {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      log.warn("Clipboard API failed, falling back to textarea copy", error);
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch (error) {
+    log.warn("Textarea copy fallback failed", error);
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
 
 // Get internationalization key based on message type
 const getI18nKeyByType = (type: string): string => {
@@ -146,6 +210,7 @@ export function ChatInterface() {
     Set<number>
   >(new Set());
   const [isCreatingShare, setIsCreatingShare] = useState(false);
+  const [manualShareUrl, setManualShareUrl] = useState<string | null>(null);
   const [agentModelIds, setAgentModelIds] = useState<number[]>([]);
   const [agentModelNames, setAgentModelNames] = useState<string[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
@@ -1596,11 +1661,25 @@ export function ChatInterface() {
         selected_user_message_ids: Array.from(selectedShareMessageIds),
       });
       const locale = i18n.language?.startsWith("en") ? "en" : "zh";
-      const shareUrl = `${window.location.origin}/${locale}/share/${result.share_id}`;
-      await navigator.clipboard.writeText(shareUrl);
-      message.success(t("chatInterface.shareLinkCopied", "Share link copied"));
+      const shareUrl = await buildShareUrl(result.share_id, locale);
+      const copied = await copyTextToClipboard(shareUrl);
+
       setIsShareMode(false);
       setSelectedShareMessageIds(new Set());
+
+      if (copied) {
+        message.success(
+          t("chatInterface.shareLinkCopied", "Share link copied")
+        );
+      } else {
+        setManualShareUrl(shareUrl);
+        message.warning(
+          t(
+            "chatInterface.shareCreatedCopyFailed",
+            "Share link created, but copy is unavailable"
+          )
+        );
+      }
     } catch (error) {
       log.error("Failed to create share", error);
       message.error(
@@ -1729,6 +1808,43 @@ export function ChatInterface() {
                 </div>
               </div>
             )}
+
+            <Modal
+              open={!!manualShareUrl}
+              title={t("chatInterface.shareLinkReady", "Share link ready")}
+              okText={t("chatInterface.copyShareLink", "Copy link")}
+              cancelText={t("common.close", "Close")}
+              onCancel={() => setManualShareUrl(null)}
+              onOk={async () => {
+                if (!manualShareUrl) return;
+                const copied = await copyTextToClipboard(manualShareUrl);
+                if (copied) {
+                  message.success(
+                    t("chatInterface.shareLinkCopied", "Share link copied")
+                  );
+                  setManualShareUrl(null);
+                } else {
+                  message.warning(
+                    t(
+                      "chatInterface.shareManualCopyRequired",
+                      "Please copy the link manually"
+                    )
+                  );
+                }
+              }}
+            >
+              <p className="mb-3 text-sm text-slate-600">
+                {t(
+                  "chatInterface.shareManualCopyHint",
+                  "The share link has been created. Copy it from the field below."
+                )}
+              </p>
+              <Input
+                value={manualShareUrl || ""}
+                readOnly
+                onClick={(event) => event.currentTarget.select()}
+              />
+            </Modal>
 
             <ChatStreamMain
               messages={currentMessages}
