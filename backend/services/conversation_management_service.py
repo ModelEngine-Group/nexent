@@ -790,8 +790,8 @@ async def get_message_id_by_index_impl(
         conversation_id=conversation_id,
         operation="conversation.message_id.read",
     )
-    message_id = await asyncio.to_thread(
-        get_message_id_by_index,
+    await asyncio.sleep(0)
+    message_id = get_message_id_by_index(
         conversation_id,
         message_index,
         user_id=user_id,

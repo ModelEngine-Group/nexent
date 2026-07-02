@@ -28,14 +28,14 @@ SET tenant_id = COALESCE(
         WHERE ut.user_id = cr.created_by
         ORDER BY
             CASE WHEN ut.tenant_id = :default_tenant_id THEN 0 ELSE 1 END,
-            ut.create_time ASC NULLS LAST,
+            (ut.create_time IS NULL) ASC,
+            ut.create_time ASC,
             ut.user_tenant_id ASC
         LIMIT 1
     ),
     :default_tenant_id
 )
-WHERE cr.tenant_id IS NULL
-   OR cr.tenant_id = ''
+WHERE NULLIF(cr.tenant_id, '') IS NULL
    OR cr.tenant_id = :default_tenant_id;
 
 CREATE INDEX IF NOT EXISTS idx_conversation_record_t_tenant_user_conversation_delete

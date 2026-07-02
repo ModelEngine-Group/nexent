@@ -193,12 +193,14 @@ class TestPreprocessManager:
         )
 
     def test_user_id_required_for_preprocess_identity(self):
+        task = Mock()
         with pytest.raises(ValueError):
-            self.manager.register_preprocess_task("task", 123, Mock(), tenant_id=self.tenant_id)
+            self.manager.register_preprocess_task("task", 123, task, tenant_id=self.tenant_id)
 
     def test_tenant_id_required_for_preprocess_identity(self):
+        task = Mock()
         with pytest.raises(ValueError):
-            self.manager.register_preprocess_task("task", 123, Mock(), user_id=self.user_id)
+            self.manager.register_preprocess_task("task", 123, task, user_id=self.user_id)
 
 
 class TestPreprocessTask:

@@ -4818,11 +4818,13 @@ async def test__stream_agent_chunks_schedule_task_failure(monkeypatch):
         disable_user_agent_ids=[],
     )
 
+    stream = agent_service._stream_agent_chunks(
+        agent_request, "u", "t", _authorized_run_info(query="q"), memory_ctx
+    )
+
     # When create_task fails, the exception propagates
     with pytest.raises(RuntimeError, match="schedule fail"):
-        async for out in agent_service._stream_agent_chunks(
-            agent_request, "u", "t", _authorized_run_info(query="q"), memory_ctx
-        ):
+        async for out in stream:
             pass
 
 
@@ -13613,6 +13615,5 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
 
     assert result["should_resume"] is True
     assert result["resume_from_unit_index"] == 0
-
 
 

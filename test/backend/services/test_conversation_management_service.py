@@ -676,8 +676,14 @@ class TestConversationManagementService(unittest.TestCase):
         """Should raise Exception when message_id not found."""
         mock_get_message.return_value = None
         import asyncio
+
+        def run_lookup():
+            return asyncio.run(
+                get_message_id_by_index_impl(123, 2, user_id=self.user_id, tenant_id=self.tenant_id)
+            )
+
         with self.assertRaises(Exception) as ctx:
-            asyncio.run(get_message_id_by_index_impl(123, 2, user_id=self.user_id, tenant_id=self.tenant_id))
+            run_lookup()
         self.assertIn("Message not found", str(ctx.exception))
         mock_get_message.assert_called_once_with(
             123, 2, user_id=self.user_id, tenant_id=self.tenant_id)
