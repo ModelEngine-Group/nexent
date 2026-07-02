@@ -405,3 +405,16 @@ export function parseKbIds(value: unknown): string[] {
   }
   return [];
 }
+
+/**
+ * Generate a random string ID.
+ * Uses crypto.randomUUID() when available (secure context, e.g. localhost or https).
+ * Falls back to Math.random() for non-secure contexts (e.g. http://).
+ * Not cryptographically secure — suitable for client-side identifiers only.
+ */
+export function safeUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2, 11);
+}
