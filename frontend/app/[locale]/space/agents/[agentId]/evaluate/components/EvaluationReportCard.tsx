@@ -83,7 +83,7 @@ export default function EvaluationReportCard({ run, loading }: EvaluationReportC
           </Flex>
           <Button
             size="small"
-            variant="outline"
+            variant="outlined"
             icon={<Download className="w-3.5 h-3.5" />}
             loading={exporting}
             onClick={() => exportReport(run.agent_evaluation_id)}

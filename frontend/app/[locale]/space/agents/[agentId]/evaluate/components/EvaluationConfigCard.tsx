@@ -175,7 +175,7 @@ export default function EvaluationConfigCard({
               </Text>
               <div className="mt-auto pt-3">
                 <Button
-                  variant="outline"
+                  variant="outlined"
                   size="small"
                   icon={<Download className="size-4" />}
                   onClick={handleDownloadTemplate}
