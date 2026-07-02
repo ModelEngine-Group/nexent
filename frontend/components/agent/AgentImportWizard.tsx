@@ -921,16 +921,16 @@ export default function AgentImportWizard({
     if (modelSelectionMode === "unified") {
       // Unified mode: apply selected model to all agents
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
-        agentInfo.model_id = selectedModelId;
-        agentInfo.model_name = selectedModelName;
+        if (selectedModelId !== null) {
+          agentInfo.model_ids = [selectedModelId];
+        }
       });
     } else {
       // Individual mode: apply models to all agents
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
         const modelSelection = selectedModelsByAgent[agentKey];
-        if (modelSelection && modelSelection.modelId && modelSelection.modelName) {
-          agentInfo.model_id = modelSelection.modelId;
-          agentInfo.model_name = modelSelection.modelName;
+        if (modelSelection && modelSelection.modelId) {
+          agentInfo.model_ids = [modelSelection.modelId];
         }
       });
     }

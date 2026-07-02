@@ -138,6 +138,32 @@ for module_path in [
 ]:
     sys.modules.setdefault(module_path, mock.MagicMock())
 
+
+# Provide real implementations for the utils.model_name_utils helpers used by
+# the module under test. Without these, attribute access on the MagicMock
+# yields a callable that returns yet another MagicMock, which silently breaks
+# every dict-key lookup downstream (`existing_model_map[<MagicMock>]` never
+# matches the string id sent by the provider response).
+def _real_add_repo_to_name(model_repo, model_name):
+    if "/" in (model_name or ""):
+        return model_name
+    if model_repo:
+        return f"{model_repo}/{model_name}"
+    return model_name
+
+
+def _real_split_repo_name(full_name):
+    if not full_name:
+        return ("", "")
+    if "/" in full_name:
+        head, _, tail = full_name.rpartition("/")
+        return (head, tail)
+    return ("", full_name)
+
+
+sys.modules["utils.model_name_utils"].add_repo_to_name = _real_add_repo_to_name
+sys.modules["utils.model_name_utils"].split_repo_name = _real_split_repo_name
+
 # services.providers.base should NOT be mocked as it contains _classify_provider_error used in tests
 
 # SiliconModelProvider and ModelEngineProvider will be imported from their real modules
@@ -212,6 +238,45 @@ from backend.services.model_provider_service import (
 
 
 # ============================================================================
+# Test helpers
+# ============================================================================
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _patch_provider_module_constant(module_basename: str, attr: str, value):
+    """Patch a constant on every sys.modules entry that exposes a provider
+    module under both `services.providers.<basename>` and
+    `backend.services.providers.<basename>` keys.
+
+    Production code imports providers via the non-`backend.` path
+    (`from services.providers.silicon_provider import ...`) while many tests
+    import via the `backend.` path. When both keys are loaded by an earlier
+    test, they reference distinct module objects with independent name
+    bindings for constants such as SILICON_GET_URL, so a mock.patch that
+    targets only one path silently misses. This helper patches every loaded
+    path so the test is order-independent.
+    """
+    candidate_paths = (
+        f"services.providers.{module_basename}",
+        f"backend.services.providers.{module_basename}",
+    )
+    patches = []
+    for path in candidate_paths:
+        module = sys.modules.get(path)
+        if module is not None and hasattr(module, attr):
+            patcher = mock.patch.object(module, attr, value)
+            patcher.start()
+            patches.append(patcher)
+    try:
+        yield
+    finally:
+        for patcher in reversed(patches):
+            patcher.stop()
+
+
+# ============================================================================
 # Test-cases for SiliconModelProvider.get_models
 # ============================================================================
 
@@ -221,12 +286,12 @@ async def test_get_models_llm_success():
     """Silicon provider should append chat tag/type for LLM models."""
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
-    # Patch HTTP client & constant inside the provider module
+    # Patch HTTP client & constant inside the provider module.
+    # SILICON_GET_URL is patched on every loaded path (see helper docstring).
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         # Prepare mocked http client / response behaviour
@@ -266,9 +331,8 @@ async def test_get_models_embedding_success():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         mock_client_instance = mock.AsyncMock()
@@ -305,9 +369,8 @@ async def test_get_models_unknown_type():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
         result = await SiliconModelProvider().get_models(provider_config)
 
@@ -322,9 +385,8 @@ async def test_get_models_exception():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         mock_client_instance = mock.AsyncMock()
@@ -399,6 +461,196 @@ async def test_prepare_model_dict_llm():
             "connect_status": "not_detected",
         }
         assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_excludes_w11_accept_signal_fields():
+    """ModelRequest exposes accepted_suggestion_match_kind /
+    accepted_capability_profile_version for app-layer ingest but they are
+    audit-only and have no DB column. model_dump() must exclude them so
+    SQLAlchemy does not raise 'Unconsumed column names' on insert when the
+    batch_create path reuses prepare_model_dict.
+    """
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "gpt-4"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/gpt-4",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ):
+        mock_model_req_instance = mock.MagicMock()
+        mock_model_req_instance.model_dump.return_value = {
+            "model_factory": "openai",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+        }
+        mock_model_request.return_value = mock_model_req_instance
+
+        await prepare_model_dict(
+            "openai",
+            {"id": "openai/gpt-4", "model_type": "llm"},
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        _, dump_kwargs = mock_model_req_instance.model_dump.call_args
+        assert dump_kwargs.get("exclude") == {
+            "accepted_suggestion_match_kind",
+            "accepted_capability_profile_version",
+        }
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
+    """Provider capacity candidates remain UI hints until an operator saves them.
+
+    Per the W1/W2 plan, _extract_capacity_hints tags provider-discovered
+    capacity values with capacity_source="provider_candidate" so the
+    catalog UI can show them as suggestions. They must not auto-persist
+    on batch_create; only operator acceptance (capacity_source="operator")
+    can write to the row. The original assertion only checked the dumped
+    result, which is trivially controlled by the mock; the strengthened
+    assertion below pins ModelRequest's constructor kwargs so the
+    contract is enforced regardless of what model_dump returns.
+    """
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "gpt-4"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/gpt-4",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "openai",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+            "api_key": "test-key",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "display_name": "openai/gpt-4",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+
+        model = {
+            "id": "openai/gpt-4",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "context_window_tokens": 128000,
+            "max_output_tokens": 16384,
+            "tokenizer_family": "o200k_base",
+            "capacity_source": "provider_candidate",
+        }
+
+        result = await prepare_model_dict(
+            "openai",
+            model,
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        # Result-level: the dumped dict (controlled by the mock) doesn't
+        # carry capacity hints downstream.
+        assert "context_window_tokens" not in result
+        assert "max_output_tokens" not in result
+        assert "tokenizer_family" not in result
+        assert "capacity_source" not in result
+
+        # Contract-level: prepare_model_dict must NOT thread provider
+        # candidates into ModelRequest. Without this assertion the bug
+        # we just fixed -- threading every W2 field through unconditionally
+        # -- would slip past the result-level check because the mock
+        # absorbs any kwargs silently.
+        _, kwargs = mock_model_request.call_args
+        assert "context_window_tokens" not in kwargs
+        assert "max_output_tokens" not in kwargs
+        assert "max_input_tokens" not in kwargs
+        assert "default_output_reserve_tokens" not in kwargs
+        assert "tokenizer_family" not in kwargs
+        assert "capacity_source" not in kwargs
+        assert "capability_profile_version" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_persists_operator_capacity():
+    """Operator-saved capacity reaches ModelRequest and lands on the row.
+
+    Regression test for the glm-5.1/glm-5.2 production incident: the
+    frontend batch-add path resolves user-typed top-level batch defaults
+    (or per-row gear values) and submits them with
+    capacity_source="operator". Before the fix, prepare_model_dict
+    silently dropped every W1/W2 field on the floor and only the legacy
+    max_tokens mirror persisted -- leaving DB rows with
+    context_window_tokens=NULL and max_output_tokens=NULL.
+    """
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("dashscope", "glm-5.2"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="dashscope/glm-5.2",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request:
+
+        mock_model_req_instance = mock.MagicMock()
+        mock_model_req_instance.model_dump.return_value = {
+            "model_factory": "dashscope",
+            "model_name": "glm-5.2",
+            "model_type": "llm",
+            "max_tokens": 31920,
+            "display_name": "dashscope/glm-5.2",
+        }
+        mock_model_request.return_value = mock_model_req_instance
+
+        model = {
+            "id": "dashscope/glm-5.2",
+            "model_type": "llm",
+            "max_tokens": 31920,
+            "context_window_tokens": 200000,
+            "max_input_tokens": 180000,
+            "max_output_tokens": 31920,
+            "default_output_reserve_tokens": 4096,
+            "tokenizer_family": "qwen",
+            "capacity_source": "operator",
+            "capability_profile_version": "dashscope/glm-5.2@1",
+        }
+
+        await prepare_model_dict(
+            "dashscope",
+            model,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+            "dash-key",
+        )
+
+        _, kwargs = mock_model_request.call_args
+        # W11 spec L721-727: pin every capacity field the constructor must
+        # thread for the accepted-suggestion save path. Missing any of these
+        # silently drops the field on the DB row and reproduces CM-031.
+        assert kwargs["context_window_tokens"] == 200000
+        assert kwargs["max_input_tokens"] == 180000
+        assert kwargs["max_output_tokens"] == 31920
+        assert kwargs["default_output_reserve_tokens"] == 4096
+        assert kwargs["tokenizer_family"] == "qwen"
+        assert kwargs["capability_profile_version"] == "dashscope/glm-5.2@1"
+        # capacity_source is forced to "operator" by the prepare_model_dict
+        # contract: only operator-marked values reach the row, and the
+        # marker itself is normalized to the canonical value rather than
+        # echoing whatever the caller sent.
+        assert kwargs["capacity_source"] == "operator"
+        # Canonical provider/model values land via constructor kwargs too,
+        # so model_factory + model_name are pinned to catch regressions
+        # in split_repo_name plumbing.
+        assert kwargs["model_factory"] == "dashscope"
+        assert kwargs["model_name"] == "glm-5.2"
 
 
 @pytest.mark.asyncio
@@ -1182,6 +1434,37 @@ def test_merge_existing_model_tokens_verify_function_call():
             tenant_id, provider, model_type)
 
 
+def test_merge_existing_model_tokens_empty_model_repo_matches_bare_name():
+    """Regression: DashScope-style rows have empty model_repo. The lookup key
+    must use add_repo_to_name so the row matches the bare "glm-4.7" id from
+    the provider response. The legacy code built "/glm-4.7" via raw
+    concatenation, so the merge silently no-opped -- same wire-key bug as
+    batch_create_models_for_tenant's delete loop.
+    """
+    model_list = [{"id": "glm-4.7", "model_type": "llm"}]
+    tenant_id = "test-tenant"
+    provider = "dashscope"
+    model_type = "llm"
+
+    existing_models = [
+        {
+            "model_repo": "",
+            "model_name": "glm-4.7",
+            "max_tokens": 131072,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.get_models_by_tenant_factory_type",
+        return_value=existing_models,
+    ):
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type
+        )
+
+        assert result[0]["max_tokens"] == 131072
+
+
 # ============================================================================
 # Test-cases for get_provider_models
 # ============================================================================
@@ -1873,9 +2156,8 @@ async def test_silicon_get_models_empty_list():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client, mock.patch(
-        "backend.services.providers.silicon_provider.SILICON_GET_URL",
-        "https://silicon.com",
+    ) as mock_client, _patch_provider_module_constant(
+        "silicon_provider", "SILICON_GET_URL", "https://silicon.com"
     ):
 
         mock_client_instance = mock.AsyncMock()

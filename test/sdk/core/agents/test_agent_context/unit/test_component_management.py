@@ -20,7 +20,7 @@ for _path in (str(PROJECT_ROOT), str(TEST_ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from loader import ContextManager, ContextManagerConfig
+from loader import ContextManager, ContextManagerConfig, ChatMessage, MessageRole
 from stubs import _SystemPromptStep
 
 
@@ -96,6 +96,53 @@ class TestClearComponents:
         cm.register_component(MockComponent(content="new"))
         assert len(cm.get_registered_components()) == 1
         assert cm.get_registered_components()[0]._content == "new"
+
+
+class TestReplaceComponents:
+    """Tests for replace_components() atomic swap method."""
+
+    def test_replace_on_empty_manager(self):
+        cm = ContextManager()
+        cm.replace_components([MockComponent(content="new1"), MockComponent(content="new2")])
+        assert len(cm.get_registered_components()) == 2
+
+    def test_replace_clears_existing(self):
+        cm = ContextManager()
+        cm.register_component(MockComponent(content="old1"))
+        cm.register_component(MockComponent(content="old2"))
+        cm.replace_components([MockComponent(content="new")])
+        registered = cm.get_registered_components()
+        assert len(registered) == 1
+        assert registered[0]._content == "new"
+
+    def test_replace_with_empty_list(self):
+        cm = ContextManager()
+        cm.register_component(MockComponent(content="old"))
+        cm.replace_components([])
+        assert cm.get_registered_components() == []
+
+    def test_replace_estimates_tokens(self):
+        cm = ContextManager()
+        comp = MockComponent(content="some content here", token_estimate=0)
+        cm.replace_components([comp])
+        assert cm.get_registered_components()[0].token_estimate > 0
+
+    def test_replace_preserves_existing_token_estimate(self):
+        cm = ContextManager()
+        comp = MockComponent(content="x", token_estimate=42)
+        cm.replace_components([comp])
+        assert cm.get_registered_components()[0].token_estimate == 42
+
+    def test_replace_preserves_order(self):
+        cm = ContextManager()
+        comps = [
+            MockComponent(content="first", priority=10),
+            MockComponent(content="second", priority=20),
+            MockComponent(content="third", priority=30),
+        ]
+        cm.replace_components(comps)
+        registered = cm.get_registered_components()
+        assert [c._content for c in registered] == ["first", "second", "third"]
 
 
 class TestGetRegisteredComponents:
@@ -271,6 +318,38 @@ class TestComponentManagementWithConfig:
         cm.register_component(comp)
         registered = cm.get_registered_components()
         assert registered[0].token_estimate > 0
+
+
+class TestExtractMessageText:
+    """Tests for ContextManager._extract_message_text static method."""
+
+    def test_dict_with_list_content(self):
+        msg = {"role": "system", "content": [{"type": "text", "text": "hello"}]}
+        assert ContextManager._extract_message_text(msg) == "hello"
+
+    def test_dict_with_string_content(self):
+        msg = {"role": "system", "content": "plain text"}
+        assert ContextManager._extract_message_text(msg) == "plain text"
+
+    def test_dict_with_none_content(self):
+        msg = {"role": "system", "content": None}
+        assert ContextManager._extract_message_text(msg) == ""
+
+    def test_chatmessage_object_with_list_content(self):
+        msg = ChatMessage(role=MessageRole.SYSTEM, content=[{"type": "text", "text": "from object"}])
+        assert ContextManager._extract_message_text(msg) == "from object"
+
+    def test_chatmessage_object_with_string_content(self):
+        msg = ChatMessage(role=MessageRole.SYSTEM, content="string from object")
+        assert ContextManager._extract_message_text(msg) == "string from object"
+
+    def test_dict_missing_content_key(self):
+        msg = {"role": "system"}
+        assert ContextManager._extract_message_text(msg) == ""
+
+    def test_list_content_with_non_dict_parts(self):
+        msg = {"role": "system", "content": [{"type": "text", "text": "a"}, "raw_string"]}
+        assert ContextManager._extract_message_text(msg) == "a"
 
 
 if __name__ == "__main__":

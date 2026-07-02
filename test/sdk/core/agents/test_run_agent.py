@@ -1,4 +1,5 @@
 import types
+import json
 import importlib.machinery
 import pytest
 import importlib
@@ -282,6 +283,61 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
     mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+
+
+def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
+    captured = {}
+    basic_agent_run_info.capacity_snapshot = {"capacity_fingerprint": "w1"}
+    basic_agent_run_info.safe_input_budget_snapshot = {"fingerprint": "w2"}
+
+    monkeypatch.setattr(
+        run_agent,
+        "set_monitoring_capacity_snapshot",
+        lambda snapshot: captured.setdefault("capacity", snapshot),
+    )
+    monkeypatch.setattr(
+        run_agent,
+        "set_monitoring_safe_input_budget_snapshot",
+        lambda snapshot: captured.setdefault("budget", snapshot),
+    )
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    assert captured["capacity"] == {"capacity_fingerprint": "w1"}
+    assert captured["budget"] == {"fingerprint": "w2"}
+
+
+def test_emit_uncertainty_reserve_warning(basic_agent_run_info):
+    basic_agent_run_info.safe_input_budget_snapshot = {
+        "warnings": ["uncertainty_reserve_active"],
+        "fingerprint": "w2",
+        "w1_fingerprint": "w1",
+        "uncertainty_reserve_tokens": 12800,
+        "hard_input_budget_tokens": 114200,
+    }
+
+    run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_called_once()
+    _, process_type, content = basic_agent_run_info.observer.add_message.call_args[0]
+    assert process_type == ProcessType.OTHER
+    payload = json.loads(content)
+    assert payload["code"] == "uncertainty_reserve_active"
+    assert payload["budget_fingerprint"] == "w2"
+    assert payload["uncertainty_reserve_tokens"] == 12800
+
+
+def test_emit_uncertainty_reserve_warning_noops_without_warning(basic_agent_run_info):
+    basic_agent_run_info.safe_input_budget_snapshot = {
+        "warnings": [],
+        "fingerprint": "w2",
+    }
+
+    run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_not_called()
 
     # Ensure no MCP-specific behaviour occurred
     basic_agent_run_info.observer.add_message.assert_not_called()
@@ -751,6 +807,45 @@ def test_normalize_mcp_config_edge_cases():
     assert result["transport"] == "sse"
     # Empty string authorization creates empty headers dict
     assert result.get("headers") == {"Authorization": ""}
+
+
+def test_mount_conversation_context_manager_updates_runtime_authority(basic_agent_run_info):
+    """Conversation-level ContextManager must replace the managed runtime CM."""
+    factory_context_manager = MagicMock(name="factory_context_manager")
+    conversation_context_manager = MagicMock(name="conversation_context_manager")
+    context_runtime = types.SimpleNamespace(
+        context_manager=factory_context_manager,
+        replace_components=MagicMock(name="replace_components"),
+    )
+    agent = types.SimpleNamespace(
+        context_runtime=context_runtime,
+        context_manager=factory_context_manager,
+    )
+    components = [MagicMock(name="component")]
+    basic_agent_run_info.context_manager = conversation_context_manager
+    basic_agent_run_info.agent_config.context_components = components
+
+    run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
+
+    conversation_context_manager.replace_components.assert_not_called()
+    context_runtime.replace_components.assert_called_once_with(components)
+    assert agent.context_runtime.context_manager is conversation_context_manager
+    assert agent.context_manager is conversation_context_manager
+
+
+def test_mount_conversation_context_manager_rejects_legacy_runtime(basic_agent_run_info):
+    """A reusable ContextManager is valid only when the active runtime is managed."""
+    conversation_context_manager = MagicMock(name="conversation_context_manager")
+    agent = types.SimpleNamespace(
+        context_runtime=types.SimpleNamespace(context_manager=None),
+        context_manager=None,
+    )
+    basic_agent_run_info.context_manager = conversation_context_manager
+
+    with pytest.raises(RuntimeError, match="managed context runtime"):
+        run_agent._mount_conversation_context_manager(agent, basic_agent_run_info)
+
+    conversation_context_manager.replace_components.assert_not_called()
 
 
 @pytest.mark.asyncio

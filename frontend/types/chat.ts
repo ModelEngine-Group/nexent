@@ -1,109 +1,133 @@
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 
-export type MessageRole = typeof MESSAGE_ROLES[keyof typeof MESSAGE_ROLES];
+export type MessageRole = (typeof MESSAGE_ROLES)[keyof typeof MESSAGE_ROLES];
 
 // Token metrics emitted per agent step via TOKEN_COUNT SSE event
 export interface TokenMetrics {
-  step_number: number
-  duration: number
-  step_input_tokens: number | null
-  step_output_tokens: number | null
-  total_output_tokens: number
-  estimated_context_tokens: number | null
-  token_threshold: number | null
+  step_number: number;
+  duration: number;
+  step_input_tokens: number | null;
+  step_output_tokens: number | null;
+  total_output_tokens: number;
+  estimated_context_tokens: number | null;
+  token_threshold: number | null;
 }
 
 // Step related types
 export interface StepSection {
-  content: string
-  expanded: boolean
+  content: string;
+  expanded: boolean;
 }
 
 export interface StepContent {
-  id: string
-  type: typeof chatConfig.messageTypes.MODEL_OUTPUT |
-        typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE |
-        typeof chatConfig.messageTypes.PARSING |
-        typeof chatConfig.messageTypes.EXECUTION |
-        typeof chatConfig.messageTypes.ERROR |
-        typeof chatConfig.messageTypes.AGENT_NEW_RUN |
-        typeof chatConfig.messageTypes.EXECUTING |
-        typeof chatConfig.messageTypes.GENERATING_CODE |
-        typeof chatConfig.messageTypes.SEARCH_CONTENT |
-        typeof chatConfig.messageTypes.CARD |
-        typeof chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER |
-        typeof chatConfig.messageTypes.VIRTUAL |
-        typeof chatConfig.messageTypes.MEMORY_SEARCH |
-        typeof chatConfig.messageTypes.PREPROCESS |
-        typeof chatConfig.messageTypes.VERIFICATION |
-        typeof chatConfig.messageTypes.MAX_STEPS_REACHED
-  content: string
-  expanded: boolean
-  timestamp: number
-  subType?: "thinking" | "code" | "deep_thinking" | "progress" | "file_processed" | "truncation" | "complete" | "error" | "verification"
-  isLoading?: boolean
-  _preserve?: boolean
+  id: string;
+  type:
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_THINKING
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE
+    | typeof chatConfig.messageTypes.PARSING
+    | typeof chatConfig.messageTypes.EXECUTION
+    | typeof chatConfig.messageTypes.ERROR
+    | typeof chatConfig.messageTypes.AGENT_NEW_RUN
+    | typeof chatConfig.messageTypes.EXECUTING
+    | typeof chatConfig.messageTypes.GENERATING_CODE
+    | typeof chatConfig.messageTypes.SEARCH_CONTENT
+    | typeof chatConfig.messageTypes.CARD
+    | typeof chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER
+    | typeof chatConfig.messageTypes.VIRTUAL
+    | typeof chatConfig.messageTypes.MEMORY_SEARCH
+    | typeof chatConfig.messageTypes.PREPROCESS
+    | typeof chatConfig.messageTypes.VERIFICATION
+    | typeof chatConfig.messageTypes.MAX_STEPS_REACHED;
+  content: string;
+  expanded: boolean;
+  timestamp: number;
+  subType?:
+    | "thinking"
+    | "code"
+    | "deep_thinking"
+    | "progress"
+    | "file_processed"
+    | "truncation"
+    | "complete"
+    | "error"
+    | "verification";
+  isLoading?: boolean;
+  _preserve?: boolean;
   _messageContainer?: {
-    search?: any[]
-    [key: string]: any
-  }
+    search?: any[];
+    [key: string]: any;
+  };
 }
 
 export interface MaxStepsInfo {
-  completedSteps: number
-  maxSteps: number
-  message: string
+  completedSteps: number;
+  maxSteps: number;
+  message: string;
 }
 
 export interface AgentStep {
-  id: string
-  title: string
-  content: string
-  expanded: boolean
-metrics: TokenMetrics | null
+  id: string;
+  title: string;
+  content: string;
+  expanded: boolean;
+  metrics: TokenMetrics | null;
   // Support for both formats
-  thinking: StepSection
-  code: StepSection
-  output: StepSection
-  contents: StepContent[]
-  parsingContent?: string
-  maxStepsInfo?: MaxStepsInfo
+  thinking: StepSection;
+  code: StepSection;
+  output: StepSection;
+  contents: StepContent[];
+  parsingContent?: string;
+  maxStepsInfo?: MaxStepsInfo;
 }
 
 // Agent related types - imported from agentConfig
 
 export interface ChatAgentSelectorProps {
   selectedAgentId: string | null;
-  onAgentSelect: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
+  onAgentSelect: (
+    agentId: string | null,
+    greetingMessage?: string,
+    exampleQuestions?: string[]
+  , modelIds?: number[], modelNames?: string[]) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
 }
 
 // Search result type
 export interface SearchResult {
-  title: string
-  url: string
-  text: string
-  published_date: string
-  source_type?: string
-  filename?: string
-  score?: number
-  score_details?: any
-  isExpanded?: boolean
-  tool_sign?: string
-  cite_index?: number
+  title: string;
+  url: string;
+  text: string;
+  published_date: string;
+  source_type?: string;
+  search_type?: string;
+  filename?: string;
+  score?: number;
+  score_details?: any;
+  isExpanded?: boolean;
+  tool_sign?: string;
+  cite_index?: number;
+  asset_id?: string;
+  preview_url?: string;
+  download_url?: string;
+  object_name?: string;
 }
 
 // File attachment type
 export interface FileAttachment {
-  name: string
-  type: string
-  size: number
-  url?: string
-  object_name?: string
-  presigned_url?: string  // Temporary URL for external tools (e.g., MCP); expires after a configurable period (24 hours by default)
-  description?: string
+  name: string;
+  type: string;
+  size: number;
+  url?: string;
+  object_name?: string;
+  presigned_url?: string; // Temporary URL for external tools (e.g., MCP); expires after a configurable period (24 hours by default)
+  preview_url?: string;
+  download_url?: string;
+  asset_id?: string;
+  description?: string;
 }
 
 // Attachment item type (for chat attachment component)
@@ -114,6 +138,9 @@ export interface AttachmentItem {
   url?: string;
   object_name?: string;
   contentType?: string;
+  preview_url?: string;
+  download_url?: string;
+  asset_id?: string;
 }
 
 // Chat attachment component props
@@ -129,6 +156,8 @@ type RemoteFilePreviewSource = {
   fileName: string;
   fileType?: string;
   fileSize?: number;
+  previewUrl?: string;
+  downloadUrl?: string;
 };
 
 type LocalFilePreviewSource = {
@@ -140,39 +169,39 @@ type LocalFilePreviewSource = {
 export type FilePreviewProps = {
   open: boolean;
   onClose: () => void;
-  previewContext?: 'knowledgeBase';
+  previewContext?: "knowledgeBase";
 } & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type
 export interface ChatMessageType {
-  id: string
-  role: "user" | "assistant" | "system"
-  message_id?: number
-  content: string
-  opinion_flag?: string
-  timestamp: Date
+  id: string;
+  role: "user" | "assistant" | "system";
+  message_id?: number;
+  content: string;
+  opinion_flag?: string;
+  timestamp: Date;
   sources?: {
-    id: string
-    title: string
-    url?: string
-    icon?: string
-  }[]
-  isComplete?: boolean
-  showRawContent?: boolean
-  docIds?: string[]
-  images?: string[]
-  isDeepSearch?: boolean
-  isDeepSeek?: boolean
-  sessionId?: string
-  referenceId?: string
-  reference?: any
-  steps?: AgentStep[]
-  finalAnswer?: string
-  error?: string
-  agentRun?: string
-  searchResults?: SearchResult[]
-  attachments?: FileAttachment[]
-  thinking?: any[]
+    id: string;
+    title: string;
+    url?: string;
+    icon?: string;
+  }[];
+  isComplete?: boolean;
+  showRawContent?: boolean;
+  docIds?: string[];
+  images?: string[];
+  isDeepSearch?: boolean;
+  isDeepSeek?: boolean;
+  sessionId?: string;
+  referenceId?: string;
+  reference?: any;
+  steps?: AgentStep[];
+  finalAnswer?: string;
+  error?: string;
+  agentRun?: string;
+  searchResults?: SearchResult[];
+  attachments?: FileAttachment[];
+  thinking?: any[];
 }
 
 // Message processing structure
@@ -206,11 +235,26 @@ export interface ChatStreamMainProps {
   currentConversationId?: number;
   shouldScrollToBottom?: boolean;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
+  onAgentSelect?: (
+    agentId: string | null,
+    greetingMessage?: string,
+    exampleQuestions?: string[],
+    modelIds?: number[],
+    modelNames?: string[]
+  ) => void;
   onCitationHover?: () => void;
   onScroll?: () => void;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
+  shareMode?: boolean;
+  selectedShareMessageIds?: Set<number>;
+  onToggleShareMessage?: (messageId: number) => void;
+  readOnly?: boolean;
+  agentModelIds?: number[];
+  agentModelNames?: string[];
+  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  selectedModelId?: number | null;
+  onModelSelect?: (modelId: number | null) => void;
 }
 
 // Card item type for task window
@@ -236,31 +280,38 @@ export interface MessageHandler {
 }
 
 export interface ApiMessageItem {
-  type: string
-  content: string
+  type: string;
+  content: string;
 }
 
 export interface SearchResultItem {
   cite_index: number;
   tool_sign: string;
-  title: string
-  text: string
-  source_type: string
-  url: string
-  filename: string | null
-  published_date: string | null
-  score: number | null
-  score_details: Record<string, any>
+  title: string;
+  text: string;
+  source_type: string;
+  url: string;
+  filename: string | null;
+  published_date: string | null;
+  score: number | null;
+  score_details: Record<string, any>;
+  asset_id?: string;
+  preview_url?: string;
+  download_url?: string;
+  object_name?: string;
 }
 
 export interface MinioFileItem {
-  type: string
-  name: string
-  size: number
-  object_name?: string
-  url?: string
-  presigned_url?: string  // Temporary URL for external tools (e.g., MCP), default 24h validity
-  description?: string
+  type: string;
+  name: string;
+  size: number;
+  object_name?: string;
+  url?: string;
+  presigned_url?: string; // Temporary URL for external tools (e.g., MCP), default 24h validity
+  preview_url?: string;
+  download_url?: string;
+  asset_id?: string;
+  description?: string;
 }
 
 // History item for API request payload
@@ -271,28 +322,28 @@ export interface HistoryItem {
 }
 
 export interface ApiMessage {
-  role: "user" | "assistant"
-  message: ApiMessageItem[]
-  message_id: number
-  opinion_flag?: string
-  picture?: string[]
-  search?: SearchResultItem[]
-  search_unit_id?: { [unitId: string]: SearchResultItem[] }
-  minio_files?: MinioFileItem[]
-  cards?: any[]
+  role: "user" | "assistant";
+  message: ApiMessageItem[];
+  message_id: number;
+  opinion_flag?: string;
+  picture?: string[];
+  search?: SearchResultItem[];
+  search_unit_id?: { [unitId: string]: SearchResultItem[] };
+  minio_files?: MinioFileItem[];
+  cards?: any[];
 }
 
 export interface ApiConversationDetail {
-  create_time: number
-  conversation_id: number
-  message: ApiMessage[]
+  create_time: number;
+  conversation_id: number;
+  message: ApiMessage[];
 }
 
 export interface ConversationListItem {
-  conversation_id: number
-  conversation_title: string
-  create_time: number
-  update_time: number
+  conversation_id: number;
+  conversation_title: string;
+  create_time: number;
+  update_time: number;
 }
 
 // File preview type

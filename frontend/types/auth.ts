@@ -152,7 +152,7 @@ export interface AuthenticationContextType {
 
   // Auth prompt modal (for side navigation pre-check)
   isAuthPromptModalOpen: boolean;
-  openAuthPromptModal: () => void;
+  openAuthPromptModal: (redirect?: string) => void;
   closeAuthPromptModal: () => void;
 
   // Session expired modal
@@ -199,7 +199,7 @@ export interface AuthenticationUIReturn {
 
   // Auth prompt modal (for side navigation pre-check)
   isAuthPromptModalOpen: boolean;
-  openAuthPromptModal: () => void;
+  openAuthPromptModal: (redirect?: string) => void;
   closeAuthPromptModal: () => void;
 
   // Session expired modal

@@ -15,7 +15,7 @@ import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
-import { ChatMessageType } from "@/types/chat";
+import { ChatMessageType, MinioFileItem, FileAttachment } from "@/types/chat";
 
 type CompareSide = "left" | "right";
 type CompareHistoryItem = { role: string; content: string };
@@ -29,6 +29,7 @@ interface UseCompareStreamOptions {
     question: string;
     conversationId: number;
     history: CompareHistoryItem[];
+    minio_files?: MinioFileItem[];
   }) => RunAgentParams;
   getHistory?: () => CompareHistoryItem[];
   persistenceKey?: string;
@@ -634,6 +635,7 @@ export function useCompareStream({
       setSideMessages: Dispatch<SetStateAction<ChatMessageType[]>>;
       stepIdCounterRef: { current: number };
       question: string;
+      minioFiles?: MinioFileItem[];
       onStreamEnd: () => void;
     }) => {
       const sessionId = compareSessionIdRef.current;
@@ -645,6 +647,7 @@ export function useCompareStream({
           question: params.question,
           conversationId: params.conversationId,
           history: sideHistory,
+          minio_files: params.minioFiles,
         });
 
         const guardedSetSideMessages: Dispatch<SetStateAction<ChatMessageType[]>> = (value) => {
@@ -660,7 +663,7 @@ export function useCompareStream({
         if (!reader) throw new Error(translate("agent.debug.nullResponse"));
 
         const streamResult = await handleStreamResponse(
-          reader,
+          reader as ReadableStreamDefaultReader<Uint8Array>,
           guardedSetSideMessages,
           resetCompareTimeout,
           params.stepIdCounterRef,
@@ -733,7 +736,7 @@ export function useCompareStream({
   );
 
   const runCompare = useCallback(
-    async (question: string) => {
+    async (question: string, minioFiles?: MinioFileItem[], messageAttachments?: FileAttachment[]) => {
       const conversationIds = ensureCompareConversationIds();
       if (
         compareHistoriesRef.current.left.length === 0 &&
@@ -761,12 +764,14 @@ export function useCompareStream({
         role: MESSAGE_ROLES.USER,
         content: question,
         timestamp: new Date(),
+        attachments: messageAttachments,
       };
       const rightUserMessage: ChatMessageType = {
         id: `${now}-right-user`,
         role: MESSAGE_ROLES.USER,
         content: question,
         timestamp: new Date(),
+        attachments: messageAttachments,
       };
 
       const leftAssistantMessage: ChatMessageType = {
@@ -802,6 +807,7 @@ export function useCompareStream({
           setSideMessages: setLeftMessages,
           stepIdCounterRef: compareStepIdCountersRef.current.left,
           question,
+          minioFiles: minioFiles,
           onStreamEnd: () => setCompareStreamingLeft(false),
         }),
         runCompareStream({
@@ -811,6 +817,7 @@ export function useCompareStream({
           setSideMessages: setRightMessages,
           stepIdCounterRef: compareStepIdCountersRef.current.right,
           question,
+          minioFiles: minioFiles,
           onStreamEnd: () => setCompareStreamingRight(false),
         }),
       ]);

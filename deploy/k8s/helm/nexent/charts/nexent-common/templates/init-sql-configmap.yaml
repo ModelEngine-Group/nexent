@@ -1,0 +1,21 @@
+{{- $sqlFiles := default dict .Values.sqlFiles -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexent-sql-files
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook-weight": "-3"
+data:
+  init.sql: |
+{{ default "" $sqlFiles.init | nindent 4 }}
+  migrations-.keep: ""
+{{ range $name, $content := default dict $sqlFiles.migrations }}
+  {{ printf "migrations-%s" $name | quote }}: |
+{{ $content | nindent 4 }}
+{{ end }}
+  supabase-.keep: ""
+{{ range $name, $content := default dict $sqlFiles.supabase }}
+  {{ printf "supabase-%s" $name | quote }}: |
+{{ $content | nindent 4 }}
+{{ end }}

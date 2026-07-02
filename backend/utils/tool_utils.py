@@ -57,18 +57,17 @@ def get_local_tools_description_zh() -> Dict[str, Dict]:
                 "description_zh": param_description_zh
             })
 
+        # Store complete inputs definition for runtime alignment
         tool_inputs = getattr(tool_class, 'inputs', {})
-        inputs_description_zh = {}
+        inputs_complete = {}
         if isinstance(tool_inputs, dict):
             for key, value in tool_inputs.items():
-                if isinstance(value, dict) and value.get("description_zh"):
-                    inputs_description_zh[key] = {
-                        "description_zh": value.get("description_zh")
-                    }
+                if isinstance(value, dict):
+                    inputs_complete[key] = value
 
         result[tool_name] = {
             "description_zh": description_zh,
             "params": init_params_list,
-            "inputs": inputs_description_zh
+            "inputs": inputs_complete
         }
     return result

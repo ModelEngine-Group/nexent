@@ -72,6 +72,10 @@ _monitoring_operation: ContextVar[str] = ContextVar(
 # display_name carried from model instance to client-level monitoring wrapper
 _monitoring_display_name: ContextVar[Optional[str]] = ContextVar(
     "_monitoring_display_name", default=None)
+_monitoring_capacity_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "_monitoring_capacity_snapshot", default=None)
+_monitoring_safe_input_budget_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "_monitoring_safe_input_budget_snapshot", default=None)
 
 
 def set_monitoring_context(
@@ -109,6 +113,26 @@ def get_monitoring_context() -> Dict[str, Any]:
         "agent_id": _monitoring_agent_id.get(),
         "conversation_id": _monitoring_conversation_id.get(),
     }
+
+
+def set_monitoring_capacity_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
+    """Bind resolved model capacity metadata for the current request scope."""
+    _monitoring_capacity_snapshot.set(snapshot)
+
+
+def get_monitoring_capacity_snapshot() -> Optional[Dict[str, Any]]:
+    """Return the resolved capacity metadata bound to the current request."""
+    return _monitoring_capacity_snapshot.get()
+
+
+def set_monitoring_safe_input_budget_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
+    """Bind resolved W2 safe-input budget metadata for the current request."""
+    _monitoring_safe_input_budget_snapshot.set(snapshot)
+
+
+def get_monitoring_safe_input_budget_snapshot() -> Optional[Dict[str, Any]]:
+    """Return the resolved W2 safe-input budget metadata bound to the current request."""
+    return _monitoring_safe_input_budget_snapshot.get()
 
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -1901,6 +1925,121 @@ def _detect_model_type(model_instance: Any) -> str:
     return "llm"
 
 
+_CAPACITY_MONITORING_FIELDS = (
+    "context_window_tokens",
+    "default_output_reserve_tokens",
+    "capability_profile_version",
+    "capacity_source",
+    "requested_output_tokens",
+    "provider_input_limit_tokens",
+    "tokenizer_family",
+    "counting_mode",
+    "unknown_capabilities",
+    "capacity_fingerprint",
+)
+
+
+def _dominant_capacity_source(field_sources: Any) -> Optional[str]:
+    if not isinstance(field_sources, dict) or not field_sources:
+        return None
+    values = [value for value in field_sources.values() if value]
+    if not values:
+        return None
+    for preferred in ("operator", "profile", "provider_candidate", "legacy", "default", "unknown"):
+        if preferred in values:
+            return preferred
+    return str(values[0])
+
+
+def _normalize_capacity_snapshot(snapshot: Any) -> Dict[str, Any]:
+    if snapshot is None:
+        return {}
+    if hasattr(snapshot, "model_dump"):
+        snapshot = snapshot.model_dump()
+    if not isinstance(snapshot, dict):
+        return {}
+
+    normalized = {
+        "context_window_tokens": snapshot.get("context_window_tokens"),
+        "default_output_reserve_tokens": snapshot.get("default_output_reserve_tokens"),
+        "capability_profile_version": snapshot.get("capability_profile_version"),
+        "capacity_source": snapshot.get("capacity_source")
+        or _dominant_capacity_source(snapshot.get("field_sources")),
+        "requested_output_tokens": snapshot.get("requested_output_tokens"),
+        "provider_input_limit_tokens": snapshot.get("provider_input_limit_tokens"),
+        "tokenizer_family": snapshot.get("tokenizer_family"),
+        "counting_mode": snapshot.get("counting_mode"),
+        "unknown_capabilities": snapshot.get("unknown_capabilities"),
+        "capacity_fingerprint": snapshot.get("capacity_fingerprint")
+        or snapshot.get("fingerprint"),
+    }
+    return {
+        key: value
+        for key, value in normalized.items()
+        if key in _CAPACITY_MONITORING_FIELDS and value is not None
+    }
+
+
+def _enrich_record_with_capacity_snapshot(record: Dict[str, Any]) -> None:
+    capacity_fields = _normalize_capacity_snapshot(get_monitoring_capacity_snapshot())
+    if capacity_fields:
+        record.update(capacity_fields)
+
+
+_BUDGET_MONITORING_FIELDS = frozenset(
+    {
+        "budget_fingerprint",
+        "budget_w1_fingerprint",
+        "budget_requested_output_tokens",
+        "budget_output_reserve_source",
+        "budget_provider_input_limit_tokens",
+        "budget_uncertainty_reserve_tokens",
+        "budget_uncertainty_reserve_basis",
+        "budget_soft_limit_ratio",
+        "budget_soft_input_budget_tokens",
+        "budget_hard_input_budget_tokens",
+        "budget_warnings",
+    }
+)
+
+
+def _normalize_safe_input_budget_snapshot(snapshot: Any) -> Dict[str, Any]:
+    if snapshot is None:
+        return {}
+    if hasattr(snapshot, "model_dump"):
+        snapshot = snapshot.model_dump()
+    if not isinstance(snapshot, dict):
+        return {}
+
+    normalized = {
+        "budget_fingerprint": snapshot.get("fingerprint")
+        or snapshot.get("budget_fingerprint"),
+        "budget_w1_fingerprint": snapshot.get("w1_fingerprint"),
+        "budget_requested_output_tokens": snapshot.get("requested_output_tokens"),
+        "budget_output_reserve_source": snapshot.get("output_reserve_source"),
+        "budget_provider_input_limit_tokens": snapshot.get("provider_input_limit_tokens"),
+        "budget_uncertainty_reserve_tokens": snapshot.get("uncertainty_reserve_tokens"),
+        "budget_uncertainty_reserve_basis": snapshot.get("uncertainty_reserve_basis"),
+        "budget_soft_limit_ratio": snapshot.get("soft_limit_ratio"),
+        "budget_soft_input_budget_tokens": snapshot.get("soft_input_budget_tokens"),
+        "budget_hard_input_budget_tokens": snapshot.get("hard_input_budget_tokens"),
+        "budget_warnings": snapshot.get("warnings"),
+    }
+    return {
+        key: value
+        for key, value in normalized.items()
+        if key in _BUDGET_MONITORING_FIELDS and value is not None
+    }
+
+
+def _enrich_record_with_safe_input_budget_snapshot(record: Dict[str, Any]) -> None:
+    budget_fields = _normalize_safe_input_budget_snapshot(
+        get_monitoring_safe_input_budget_snapshot()
+    )
+    if budget_fields:
+        record.update(budget_fields)
+
+
 def record_model_call(
     model_type: str,
     model_name: str,
@@ -1982,6 +2121,9 @@ class RecordModelCallContext:
                 record["conversation_id"] = conversation_id
             if self.display_name:
                 record["display_name"] = self.display_name
+
+            _enrich_record_with_capacity_snapshot(record)
+            _enrich_record_with_safe_input_budget_snapshot(record)
 
             buffer = get_monitoring_buffer()
             if buffer and buffer.is_enabled:
@@ -2211,6 +2353,9 @@ def _enqueue_client_monitoring_record(
         if display_name:
             record["display_name"] = display_name
 
+        _enrich_record_with_capacity_snapshot(record)
+        _enrich_record_with_safe_input_budget_snapshot(record)
+
         buffer.add_record(record)
     except Exception:
         pass
@@ -2295,6 +2440,9 @@ def _enrich_record_with_context(record, tracker, kwargs):
     display_name = getattr(tracker, "_display_name", None)
     if display_name:
         record["display_name"] = display_name
+
+    _enrich_record_with_capacity_snapshot(record)
+    _enrich_record_with_safe_input_budget_snapshot(record)
 
     return tenant_id
 
@@ -2537,6 +2685,10 @@ __all__ = [
     'is_opentelemetry_available',
     'set_monitoring_context',
     'get_monitoring_context',
+    'set_monitoring_capacity_snapshot',
+    'get_monitoring_capacity_snapshot',
+    'set_monitoring_safe_input_budget_snapshot',
+    'get_monitoring_safe_input_budget_snapshot',
     'set_agent_monitoring_context',
     'get_agent_monitoring_context',
     'agent_monitoring_context',

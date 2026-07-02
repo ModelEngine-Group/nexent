@@ -189,6 +189,12 @@ class ErrorCode(Enum):
     IDATA_RATE_LIMIT = "130405"  # iData rate limit
     IDATA_RESPONSE_ERROR = "130406"  # iData response error
 
+    # 05 - AIDP Service
+    AIDP_SERVICE_ERROR = "130501"  # AIDP service error
+    AIDP_CONFIG_INVALID = "130502"  # Invalid AIDP configuration
+    AIDP_CONNECTION_ERROR = "130503"  # AIDP connection error
+    AIDP_AUTH_ERROR = "130504"  # AIDP auth error
+
     # 05 - RAGFlow Service
     RAGFLOW_SERVICE_ERROR = "130501"  # RAGFlow service error
     RAGFLOW_CONFIG_INVALID = "130502"  # Invalid RAGFlow configuration
@@ -251,14 +257,17 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.SYSTEM_DATABASE_ERROR: 500,
     ErrorCode.SYSTEM_INTERNAL_ERROR: 500,
     # Dify (module 13)
+    # Auth failures against upstream services (Dify/iData/AIDP) are mapped to 502,
+    # not 401. 401 is reserved for this system's identity/session failures only,
+    # so the frontend can safely treat any 401 as a session-expired signal.
     ErrorCode.DIFY_CONFIG_INVALID: 400,
-    ErrorCode.DIFY_AUTH_ERROR: 401,
+    ErrorCode.DIFY_AUTH_ERROR: 502,
     ErrorCode.DIFY_CONNECTION_ERROR: 502,
     ErrorCode.DIFY_RESPONSE_ERROR: 502,
     ErrorCode.DIFY_RATE_LIMIT: 429,
     # iData (module 13)
     ErrorCode.IDATA_CONFIG_INVALID: 400,
-    ErrorCode.IDATA_AUTH_ERROR: 401,
+    ErrorCode.IDATA_AUTH_ERROR: 502,
     ErrorCode.IDATA_CONNECTION_ERROR: 502,
     ErrorCode.IDATA_RESPONSE_ERROR: 502,
     ErrorCode.IDATA_RATE_LIMIT: 429,
@@ -268,6 +277,10 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.RAGFLOW_CONNECTION_ERROR: 502,
     ErrorCode.RAGFLOW_RESPONSE_ERROR: 502,
     ErrorCode.RAGFLOW_RATE_LIMIT: 429,
+    # AIDP (module 13)
+    ErrorCode.AIDP_CONFIG_INVALID: 400,
+    ErrorCode.AIDP_AUTH_ERROR: 502,
+    ErrorCode.AIDP_CONNECTION_ERROR: 502,
     # OAuth (module 16)
     ErrorCode.OAUTH_PROVIDER_NOT_CONFIGURED: 400,
     ErrorCode.OAUTH_PROVIDER_DISABLED: 400,

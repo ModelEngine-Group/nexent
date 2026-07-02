@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
+import { Button, Tooltip } from "antd";
+import { Share2, X } from "lucide-react";
 import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
 import { useConfig } from "@/hooks/useConfig";
 import log from "@/lib/logger";
@@ -15,9 +17,16 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 interface ChatHeaderProps {
   title: string;
   onRename?: (newTitle: string) => void;
+  onShareClick?: () => void;
+  isShareMode?: boolean;
 }
 
-export function ChatHeader({ title, onRename }: ChatHeaderProps) {
+export function ChatHeader({
+  title,
+  onRename,
+  onShareClick,
+  isShareMode = false,
+}: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
 
@@ -119,7 +128,8 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   return (
     <>
       <header className="border-b border-transparent bg-background">
-        <div className="w-full flex justify-center pt-4 pb-2">
+        <div className="w-full grid grid-cols-[1fr_auto_1fr] items-center pt-4 pb-2 px-4">
+          <div />
           {isEditing ? (
             <Input
               ref={inputRef}
@@ -139,9 +149,26 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
               {title}
             </h1>
           )}
+          <div className="flex justify-end">
+            {onShareClick && (
+              <Tooltip
+                title={
+                  isShareMode
+                    ? t("common.cancel", "Cancel")
+                    : t("chatHeader.share", "Share")
+                }
+              >
+                <Button
+                  type={isShareMode ? "default" : "text"}
+                  shape="circle"
+                  icon={isShareMode ? <X size={16} /> : <Share2 size={16} />}
+                  onClick={onShareClick}
+                />
+              </Tooltip>
+            )}
+          </div>
         </div>
       </header>
-
     </>
   );
 }

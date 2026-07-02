@@ -87,6 +87,12 @@ export const fetchTools = async () => {
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
       category: tool.category,
+      labels: Array.isArray(tool.labels)
+        ? tool.labels
+        : typeof tool.labels === 'string'
+          ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+          : [],
+      updated_by: tool.updated_by || "",
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -141,9 +147,8 @@ export const fetchAgentList = async (tenantId?: string) => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
-      model_id: agent.model_id,
-      model_name: agent.model_name,
-      model_display_name: agent.model_display_name,
+      model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
+      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -192,9 +197,8 @@ export const fetchPublishedAgentList = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
-      model_id: agent.model_id,
-      model_name: agent.model_name,
-      model_display_name: agent.model_display_name,
+      model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
+      model_names: agent.model_names || (agent.model_name ? [agent.model_name] : []),
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
@@ -245,9 +249,10 @@ export const getCreatingSubAgentId = async () => {
         displayName: data.display_name,
         description: data.description,
         enabledToolIds: data.enable_tool_id_list || [],
-        modelName: data.model_name,
-        model_id: data.model_id,
+        modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
+        modelNames: data.model_names || (data.model_name ? [data.model_name] : []),
         maxSteps: data.max_steps,
+        requestedOutputTokens: data.requested_output_tokens ?? null,
         businessDescription: data.business_description,
         dutyPrompt: data.duty_prompt,
         constraintPrompt: data.constraint_prompt,
@@ -404,9 +409,9 @@ export interface UpdateAgentInfoPayload {
   constraint_prompt?: string;
   few_shots_prompt?: string;
   group_ids?: number[];
-  model_name?: string;
-  model_id?: number;
+  model_ids?: number[];
   max_steps?: number;
+  requested_output_tokens?: number | null;
   provide_run_summary?: boolean;
   enable_context_manager?: boolean;
   verification_config?: Record<string, any>;
@@ -762,9 +767,11 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
-      model: data.model_name,
-      model_id: data.model_id,
+      model: data.model_name || (Array.isArray(data.model_names) && data.model_names.length > 0 ? data.model_names[0] : ""),
+      model_ids: data.model_ids || (data.model_id ? [data.model_id] : []),
+      model_names: data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
+      requested_output_tokens: data.requested_output_tokens ?? null,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,
       few_shots_prompt: data.few_shots_prompt,
