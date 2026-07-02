@@ -115,7 +115,7 @@ class ErrorTransformer(MessageTransformer):
 class MessageObserver:
     # set the maximum buffer size, can be adjusted according to needs
     MAX_TOKEN_BUFFER_SIZE = 10
-    
+
     def __init__(self, lang="zh"):
         # unified output to the front end string, changed to queue
         self.message_query = []
@@ -170,10 +170,10 @@ class MessageObserver:
         """
         # Add token to think buffer
         self.think_buffer.append(new_token)
-        
+
         # Check for think tag patterns in the buffer
         buffer_text = ''.join(self.think_buffer)
-        
+
         # Check for think start tag
         if not self.in_think_mode:
             start_match = self.think_start_pattern.search(buffer_text)
@@ -185,7 +185,7 @@ class MessageObserver:
                 think_content = buffer_text[start_match.end():]
                 if think_content:
                     self.think_buffer.append(think_content)
-        
+
         # Check for think end tag
         if self.in_think_mode:
             end_match = self.think_end_pattern.search(buffer_text)
@@ -197,7 +197,7 @@ class MessageObserver:
                 if think_content:
                     self.message_query.append(
                         Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
-                
+
                 # Process content after </think> as normal content
                 after_think = buffer_text[end_match.end():]
                 if after_think:
@@ -205,13 +205,19 @@ class MessageObserver:
                 self.think_buffer.clear()
 
         while len(self.think_buffer) > self.MAX_TOKEN_BUFFER_SIZE:
-            think_content = self.think_buffer.popleft()
-            # In think mode, output accumulated content as deep thinking
-            if self.in_think_mode:
-                self.message_query.append(
-                    Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
-            else:
-                self._process_normal_content(think_content)
+            # Flush ALL tokens that exceed buffer size at once to avoid fragmentation
+            # Each flush is a single message_query.append with multiple tokens concatenated
+            accumulated_content = ''.join(list(self.think_buffer)[:-self.MAX_TOKEN_BUFFER_SIZE])
+            # Remove the flushed tokens from buffer
+            for _ in range(len(self.think_buffer) - self.MAX_TOKEN_BUFFER_SIZE):
+                self.think_buffer.popleft()
+            # Send accumulated content
+            if accumulated_content:
+                if self.in_think_mode:
+                    self.message_query.append(
+                        Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, accumulated_content).to_json())
+                else:
+                    self._process_normal_content(accumulated_content)
 
 
     def _process_normal_content(self, content):
@@ -219,7 +225,7 @@ class MessageObserver:
         Process normal content (non-deep-think content) for code block detection
         """
         self.token_buffer.append(content)
-        
+
         # concatenate the buffer into text for checking code blocks
         buffer_text = ''.join(self.token_buffer)
 
@@ -256,10 +262,15 @@ class MessageObserver:
         else:
             # not found the code block marker, pop the first token from the queue (if the buffer length exceeds a certain size)
             max_buffer_size = self.MAX_TOKEN_BUFFER_SIZE
-            while len(self.token_buffer) > max_buffer_size:
-                oldest_token = self.token_buffer.popleft()
+            if len(self.token_buffer) > max_buffer_size:
+                # Flush ALL tokens that exceed buffer size at once to avoid fragmentation
+                accumulated_content = ''.join(list(self.token_buffer)[:-max_buffer_size])
+                # Remove the flushed tokens from buffer
+                for _ in range(len(self.token_buffer) - max_buffer_size):
+                    self.token_buffer.popleft()
+                # Send accumulated content
                 self.message_query.append(
-                    Message(self.current_mode, oldest_token).to_json())
+                    Message(self.current_mode, accumulated_content).to_json())
 
     def flush_remaining_tokens(self):
         """
@@ -279,7 +290,7 @@ class MessageObserver:
                 if think_buffer_text:
                     self._process_normal_content(think_buffer_text)
             self.think_buffer.clear()
-        
+
         # Process remaining normal buffer content
         if self.token_buffer:
             buffer_text = ''.join(self.token_buffer)
