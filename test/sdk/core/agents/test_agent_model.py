@@ -1262,10 +1262,10 @@ class TestAgentConfig:
 class TestAgentVerificationConfig:
     """Tests for layered ReAct verification configuration."""
 
-    def test_default_verification_config_is_enabled(self):
+    def test_default_verification_config_is_disabled_by_default(self):
         config = agent_model_module.AgentVerificationConfig()
 
-        assert config.enabled is True
+        assert config.enabled is False
         assert config.step_verification_enabled is True
         assert config.final_verification_enabled is True
         assert config.max_final_rounds == 2
@@ -1279,7 +1279,7 @@ class TestAgentVerificationConfig:
             model_name="test",
         )
 
-        assert config.verification_config.enabled is True
+        assert config.verification_config.enabled is False
         assert config.verification_config.strictness == "balanced"
 
     def test_verification_config_rejects_invalid_rounds(self):
