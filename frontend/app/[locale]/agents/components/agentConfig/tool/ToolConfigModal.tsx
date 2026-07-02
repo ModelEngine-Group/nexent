@@ -652,27 +652,35 @@ export default function ToolConfigModal({
     refetchKnowledgeBases();
   }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
 
+  // Resolve the config payload for the knowledge-base config change handler
+  // based on the current tool type, avoiding a deeply-nested ternary expression.
+  const kbHandlerConfig = useMemo(() => {
+    switch (toolKbType) {
+      case "dify_search":
+        return difyConfig;
+      case "ragflow_search":
+        return ragflowConfig;
+      case "datamate_search":
+        return { serverUrl: datamateServerUrl };
+      case "idata_search":
+        return {
+          serverUrl: idataConfig.serverUrl,
+          apiKey: idataConfig.apiKey,
+          userId: idataConfig.userId,
+        };
+      case "aidp_search":
+        return {
+          serverUrl: aidpConfig.serverUrl,
+          apiKey: aidpConfig.apiKey,
+        };
+      default:
+        return undefined;
+    }
+  }, [toolKbType, difyConfig, ragflowConfig, datamateServerUrl, idataConfig, aidpConfig]);
+
   useKnowledgeBaseConfigChangeHandler({
     toolKbType,
-    config:
-      toolKbType === "dify_search"
-        ? difyConfig
-        : toolKbType === "ragflow_search"
-          ? ragflowConfig
-        : toolKbType === "datamate_search"
-          ? { serverUrl: datamateServerUrl }
-          : toolKbType === "idata_search"
-            ? {
-                serverUrl: idataConfig.serverUrl,
-                apiKey: idataConfig.apiKey,
-                userId: idataConfig.userId,
-              }
-            : toolKbType === "aidp_search"
-              ? {
-                  serverUrl: aidpConfig.serverUrl,
-                  apiKey: aidpConfig.apiKey,
-                }
-              : undefined,
+    config: kbHandlerConfig,
     onConfigChange: handleKbConfigChange,
   });
 

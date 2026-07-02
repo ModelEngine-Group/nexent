@@ -158,7 +158,7 @@ class KnowledgeBaseService {
     apiKey: string
   ): Promise<KnowledgeBase[]> {
     try {
-      const url = new URL(API_ENDPOINTS.ragflow.datasets, window.location.origin);
+      const url = new URL(API_ENDPOINTS.ragflow.datasets, globalThis.location.origin);
       url.searchParams.set("ragflow_api_base", ragflowApiBase);
       url.searchParams.set("api_key", apiKey);
 
