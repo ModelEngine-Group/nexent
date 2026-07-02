@@ -8,7 +8,7 @@ title: 环境准备
 
 ## 🧱 通用要求
 
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+
 - Docker & Docker Compose
 - uv（Python 包管理器）
