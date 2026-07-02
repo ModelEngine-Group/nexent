@@ -189,6 +189,14 @@ class ErrorCode(Enum):
     IDATA_RATE_LIMIT = "130405"  # iData rate limit
     IDATA_RESPONSE_ERROR = "130406"  # iData response error
 
+    # 05 - RAGFlow Service
+    RAGFLOW_SERVICE_ERROR = "130501"  # RAGFlow service error
+    RAGFLOW_CONFIG_INVALID = "130502"  # Invalid RAGFlow configuration
+    RAGFLOW_CONNECTION_ERROR = "130503"  # RAGFlow connection error
+    RAGFLOW_AUTH_ERROR = "130504"  # RAGFlow auth error
+    RAGFLOW_RATE_LIMIT = "130505"  # RAGFlow rate limit
+    RAGFLOW_RESPONSE_ERROR = "130506"  # RAGFlow response error
+
     # ==================== 14 Northbound / 北向接口 ====================
     # 01 - Request
     NORTHBOUND_REQUEST_FAILED = "140101"  # Northbound request failed
@@ -254,6 +262,12 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.IDATA_CONNECTION_ERROR: 502,
     ErrorCode.IDATA_RESPONSE_ERROR: 502,
     ErrorCode.IDATA_RATE_LIMIT: 429,
+    # RAGFlow (module 13)
+    ErrorCode.RAGFLOW_CONFIG_INVALID: 400,
+    ErrorCode.RAGFLOW_AUTH_ERROR: 401,
+    ErrorCode.RAGFLOW_CONNECTION_ERROR: 502,
+    ErrorCode.RAGFLOW_RESPONSE_ERROR: 502,
+    ErrorCode.RAGFLOW_RATE_LIMIT: 429,
     # OAuth (module 16)
     ErrorCode.OAUTH_PROVIDER_NOT_CONFIGURED: 400,
     ErrorCode.OAUTH_PROVIDER_DISABLED: 400,

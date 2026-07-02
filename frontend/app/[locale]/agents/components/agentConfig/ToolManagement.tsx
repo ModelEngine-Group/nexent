@@ -27,6 +27,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "datamate_search",
   "idata_search",
   "haotian_search",
+  "ragflow_search",
 ];
 
 // Tool types that require Embedding model
@@ -47,12 +48,13 @@ const TOOLS_REQUIRING_VIDEO_UNDERSTANDING = [
 
 function getToolKbType(
   toolName: string
-): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | null {
+): "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search" | "haotian_search" | "ragflow_search" | null {
   if (!TOOLS_REQUIRING_KB_SELECTION.includes(toolName)) return null;
   if (toolName === "dify_search") return "dify_search";
   if (toolName === "datamate_search") return "datamate_search";
   if (toolName === "idata_search") return "idata_search";
   if (toolName === "haotian_search") return "haotian_search";
+  if (toolName === "ragflow_search") return "ragflow_search";
   return "knowledge_base_search";
 }
 

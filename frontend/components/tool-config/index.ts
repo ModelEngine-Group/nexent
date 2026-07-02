@@ -8,7 +8,8 @@ export type ToolKbType =
   | "dify_search"
   | "datamate_search"
   | "idata_search"
-  | "haotian_search";
+  | "haotian_search"
+  | "ragflow_search";
 
 // Knowledge base selector component props
 export interface KnowledgeBaseSelectorProps {
@@ -22,7 +23,7 @@ export interface KnowledgeBaseSelectorProps {
   showCreateButton?: boolean;
   showDeleteButton?: boolean;
   showCheckbox?: boolean;
-  // Dify/iData configuration for fetching knowledge bases
+  // Dify/iData/RAGFlow configuration for fetching knowledge bases
   difyConfig?: {
     serverUrl?: string;
     apiKey?: string;
@@ -42,6 +43,8 @@ export function getKnowledgeBaseSourcesForTool(toolType: ToolKbType): string[] {
       return ["datamate"];
     case "idata_search":
       return ["idata"];
+    case "ragflow_search":
+      return ["ragflow"];
     default:
       return ["nexent"];
   }

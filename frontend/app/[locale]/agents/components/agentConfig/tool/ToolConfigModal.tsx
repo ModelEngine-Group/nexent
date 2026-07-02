@@ -59,12 +59,14 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "datamate_search",
   "idata_search",
   "haotian_search",
+  "ragflow_search",
 ];
 
 const TOOLS_SUPPORTING_RERANK = [
   "knowledge_base_search",
   "dify_search",
   "datamate_search",
+  "ragflow_search",
 ];
 
 function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
@@ -143,6 +145,15 @@ export default function ToolConfigModal({
     apiKey: "",
   });
 
+  // RAGFlow configuration state
+  const [ragflowConfig, setRagflowConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
   // iData configuration state
   const [idataConfig, setIdataConfig] = useState<{
     serverUrl: string;
@@ -191,6 +202,7 @@ export default function ToolConfigModal({
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "ragflow_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
     const name = tool?.name;
@@ -198,6 +210,7 @@ export default function ToolConfigModal({
     if (name === "datamate_search") return "datamate_search";
     if (name === "idata_search") return "idata_search";
     if (name === "haotian_search") return "haotian_search";
+    if (name === "ragflow_search") return "ragflow_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
 
@@ -278,6 +291,28 @@ export default function ToolConfigModal({
       });
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
+
+  // Get RAGFlow configuration from initial params
+  const ragflowServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const ragflowApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  // Initialize RAGFlow config from params
+  useEffect(() => {
+    if (toolKbType === "ragflow_search") {
+      const serverUrl = ragflowServerUrlParam?.value || "";
+      const apiKey = ragflowApiKeyParam?.value || "";
+
+      setRagflowConfig({
+        serverUrl,
+        apiKey,
+      });
+    }
+  }, [toolKbType, ragflowServerUrlParam, ragflowApiKeyParam]);
 
   // Get iData configuration from initial params
   const idataServerUrlParam = useMemo(() => {
@@ -372,21 +407,23 @@ export default function ToolConfigModal({
     toolKbType,
     toolKbType === "dify_search"
       ? difyConfig
-      : toolKbType === "datamate_search"
-        ? { serverUrl: datamateServerUrl }
-        : toolKbType === "idata_search"
-          ? idataConfig.serverUrl &&
-            idataConfig.apiKey &&
-            idataConfig.userId &&
-            idataConfig.knowledgeSpaceId
-            ? {
-                serverUrl: idataConfig.serverUrl,
-                apiKey: idataConfig.apiKey,
-                userId: idataConfig.userId,
-                knowledgeSpaceId: idataConfig.knowledgeSpaceId,
-              }
+      : toolKbType === "ragflow_search"
+        ? ragflowConfig
+        : toolKbType === "datamate_search"
+          ? { serverUrl: datamateServerUrl }
+          : toolKbType === "idata_search"
+            ? idataConfig.serverUrl &&
+              idataConfig.apiKey &&
+              idataConfig.userId &&
+              idataConfig.knowledgeSpaceId
+              ? {
+                  serverUrl: idataConfig.serverUrl,
+                  apiKey: idataConfig.apiKey,
+                  userId: idataConfig.userId,
+                  knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+                }
+              : undefined
             : undefined
-          : undefined
   );
 
   // Handle config change: clear knowledge base selection and refetch
@@ -426,15 +463,17 @@ export default function ToolConfigModal({
     config:
       toolKbType === "dify_search"
         ? difyConfig
-        : toolKbType === "datamate_search"
-          ? { serverUrl: datamateServerUrl }
-          : toolKbType === "idata_search"
-            ? {
-                serverUrl: idataConfig.serverUrl,
-                apiKey: idataConfig.apiKey,
-                userId: idataConfig.userId,
-              }
-            : undefined,
+        : toolKbType === "ragflow_search"
+          ? ragflowConfig
+          : toolKbType === "datamate_search"
+            ? { serverUrl: datamateServerUrl }
+            : toolKbType === "idata_search"
+              ? {
+                  serverUrl: idataConfig.serverUrl,
+                  apiKey: idataConfig.apiKey,
+                  userId: idataConfig.userId,
+                }
+              : undefined,
     onConfigChange: handleKbConfigChange,
   });
 
@@ -989,6 +1028,10 @@ export default function ToolConfigModal({
         queryClient.invalidateQueries({
           queryKey: ["knowledgeBases", "list", "dify_search"],
         });
+      } else if (toolKbType === "ragflow_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "ragflow_search"],
+        });
       } else if (toolKbType === "datamate_search") {
         queryClient.invalidateQueries({
           queryKey: ["knowledgeBases", "list", "datamate_search"],
@@ -1009,6 +1052,9 @@ export default function ToolConfigModal({
         if (difyConfig.serverUrl && difyConfig.apiKey) {
           refetchKnowledgeBases();
         }
+      // NOTE: ragflow_search intentionally omitted — network validation
+      // (connecting to RAGFlow server) should only happen during explicit
+      // user actions: opening the KB selector or testing the tool.
       } else if (toolKbType === "haotian_search") {
         if (haotianConfig.listUrl && haotianConfig.authorization) {
           refetchHaotianSets();
@@ -1024,6 +1070,7 @@ export default function ToolConfigModal({
     refetchHaotianSets,
     toolKbType,
     difyConfig,
+    ragflowConfig,
     haotianConfig,
   ]);
 
@@ -1955,16 +2002,18 @@ export default function ToolConfigModal({
           difyConfig={
             toolKbType === "dify_search"
               ? difyConfig
-              : toolKbType === "datamate_search"
-                ? { serverUrl: datamateServerUrl }
-                : toolKbType === "idata_search"
-                  ? {
-                      serverUrl: idataConfig.serverUrl,
-                      apiKey: idataConfig.apiKey,
-                      userId: idataConfig.userId,
-                      knowledgeSpaceId: idataConfig.knowledgeSpaceId,
-                    }
-                  : undefined
+              : toolKbType === "ragflow_search"
+                ? ragflowConfig
+                : toolKbType === "datamate_search"
+                  ? { serverUrl: datamateServerUrl }
+                  : toolKbType === "idata_search"
+                    ? {
+                        serverUrl: idataConfig.serverUrl,
+                        apiKey: idataConfig.apiKey,
+                        userId: idataConfig.userId,
+                        knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+                      }
+                    : undefined
           }
         />
       )}

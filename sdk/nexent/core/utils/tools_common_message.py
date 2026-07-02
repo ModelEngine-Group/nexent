@@ -13,6 +13,7 @@ class ToolSign(Enum):
     DIFY_SEARCH = "g"  # Dify search tool identifier
     IDATA_SEARCH = "h"  # iData search tool identifier
     HAOTIAN_SEARCH = "i"  # Haotian search tool identifier
+    RAGFLOW_SEARCH = "r"  # RAGFlow search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
@@ -30,6 +31,7 @@ TOOL_SIGN_MAPPING = {
     "dify_search": ToolSign.DIFY_SEARCH.value,
     "idata_search": ToolSign.IDATA_SEARCH.value,
     "haotian_search": ToolSign.HAOTIAN_SEARCH.value,
+    "ragflow_search": ToolSign.RAGFLOW_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,

@@ -148,6 +148,65 @@ class KnowledgeBaseService {
     }
   }
 
+  // Get RAGFlow knowledge bases as KnowledgeBase array
+  async getRagflowKnowledgeBases(
+    ragflowApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const url = new URL(API_ENDPOINTS.ragflow.datasets, window.location.origin);
+      url.searchParams.set("ragflow_api_base", ragflowApiBase);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      const result = await response.json();
+
+      if (result.code !== undefined && result.code !== 0) {
+        const errorCode = result.code || response.status;
+        const errorMessage = result.message || "Failed to fetch RAGFlow datasets";
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      const datasets: KnowledgeBase[] = (result.data || []).map((ds: any) => {
+        const stats = ds.stats || {};
+        return {
+          id: ds.id || ds.dataset_id || "",
+          name: ds.name || ds.dataset_name || "Unnamed",
+          display_name: ds.name || ds.dataset_name || "Unnamed",
+          description: ds.description || "",
+          documentCount: stats.doc_count || ds.doc_count || 0,
+          chunkCount: stats.chunk_count || ds.chunk_count || 0,
+          createdAt: ds.create_time || ds.create_date || null,
+          updatedAt: ds.update_time || ds.update_date || null,
+          embeddingModel: ds.embedding_model || "unknown",
+          knowledge_sources: "ragflow",
+          ingroup_permission: "",
+          group_ids: [],
+          store_size: "",
+          process_source: "RAGFlow",
+          avatar: "",
+          chunkNum: 0,
+          language: "",
+          nickname: "",
+          parserId: "",
+          permission: "",
+          tokenNum: 0,
+          source: "ragflow",
+          tenant_id: "",
+        };
+      });
+
+      return datasets;
+    } catch (error) {
+      log.error("Failed to get RAGFlow knowledge bases:", error);
+      throw error;
+    }
+  }
+
   // Get iData knowledge spaces
   async getIdataKnowledgeSpaces(
     idataApiBase: string,

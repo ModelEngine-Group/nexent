@@ -10,12 +10,21 @@ export type ToolKbType =
   | "dify_search"
   | "datamate_search"
   | "idata_search"
-  | "haotian_search";
+  | "haotian_search"
+  | "ragflow_search";
 
 /**
  * Configuration for Dify tool
  */
 export interface DifyConfig {
+  serverUrl: string;
+  apiKey: string;
+}
+
+/**
+ * Configuration for RAGFlow tool
+ */
+export interface RagflowConfig {
   serverUrl: string;
   apiKey: string;
 }
@@ -41,7 +50,7 @@ export interface IdataConfig {
  */
 export interface UseKnowledgeBaseConfigChangeHandlerOptions {
   toolKbType: ToolKbType | null;
-  config: DifyConfig | DatamateConfig | IdataConfig | undefined;
+  config: DifyConfig | DatamateConfig | IdataConfig | RagflowConfig | undefined;
   onConfigChange: () => void;
 }
 
@@ -57,6 +66,12 @@ export function useKnowledgeBaseConfigChangeHandler({
 }: UseKnowledgeBaseConfigChangeHandlerOptions) {
   // Track previous Dify config to detect changes
   const prevDifyConfig = useRef<DifyConfig>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
+  // Track previous RAGFlow config to detect changes
+  const prevRagflowConfig = useRef<RagflowConfig>({
     serverUrl: "",
     apiKey: "",
   });
@@ -103,6 +118,39 @@ export function useKnowledgeBaseConfigChangeHandler({
 
       // Update previous config
       prevDifyConfig.current = { ...difyConfig };
+      isInitialLoadComplete.current = true;
+    }
+  }, [toolKbType, config, onConfigChange]);
+
+  // Handle RAGFlow config change
+  useEffect(() => {
+    if (toolKbType !== "ragflow_search" || !config) {
+      return;
+    }
+
+    const ragflowConfig = config as RagflowConfig;
+
+    // Skip initial load - only handle actual config changes
+    if (!prevRagflowConfig.current.serverUrl && !prevRagflowConfig.current.apiKey) {
+      prevRagflowConfig.current = { ...ragflowConfig };
+      return;
+    }
+
+    const hasUrlChanged = ragflowConfig.serverUrl !== prevRagflowConfig.current.serverUrl;
+    const hasApiKeyChanged = ragflowConfig.apiKey !== prevRagflowConfig.current.apiKey;
+
+    // If URL or API key has changed, trigger callback
+    if (hasUrlChanged || hasApiKeyChanged) {
+      // Only clear and refetch if both values are not empty
+      if (ragflowConfig.serverUrl && ragflowConfig.apiKey) {
+        onConfigChange();
+      } else {
+        // Clear knowledge base list when URL or API key is cleared
+        onConfigChange();
+      }
+
+      // Update previous config
+      prevRagflowConfig.current = { ...ragflowConfig };
       isInitialLoadComplete.current = true;
     }
   }, [toolKbType, config, onConfigChange]);

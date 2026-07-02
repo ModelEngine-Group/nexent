@@ -164,6 +164,14 @@ export const ErrorCode = {
   // 03 - ME Service
   ME_CONNECTION_FAILED: "130301",
 
+  // 05 - RAGFlow Service
+  RAGFLOW_SERVICE_ERROR: "130501",
+  RAGFLOW_CONFIG_INVALID: "130502",
+  RAGFLOW_CONNECTION_ERROR: "130503",
+  RAGFLOW_AUTH_ERROR: "130504",
+  RAGFLOW_RATE_LIMIT: "130505",
+  RAGFLOW_RESPONSE_ERROR: "130506",
+
   // ==================== 14 Northbound / 北向接口 ====================
   // 01 - Request
   NORTHBOUND_REQUEST_FAILED: "140101",

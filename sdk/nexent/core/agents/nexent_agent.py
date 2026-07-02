@@ -236,6 +236,15 @@ extra_body=model_config.extra_body,
                 tools_obj.observer = self.observer
                 tools_obj.rerank_model = tool_config.metadata.get(
                     "rerank_model", None) if tool_config.metadata else None
+            elif class_name == "RAGFlowSearchTool":
+                # RAGFlowSearchTool does not accept rerank/rerank_model_name params
+                # RAGFlow handles reranking internally via its API
+                filtered_params = {k: v for k, v in params.items()
+                                   if k not in ["observer", "rerank_model", "rerank", "rerank_model_name"]}
+                tools_obj = tool_class(**filtered_params)
+                tools_obj.observer = self.observer
+                tools_obj.rerank_model = tool_config.metadata.get(
+                    "rerank_model", None) if tool_config.metadata else None
             elif class_name == "HaotianSearchTool":
                 # Haotian uses reranking_enable/reranking_model_name (not rerank/rerank_model_name)
                 filtered_params = {k: v for k, v in params.items()

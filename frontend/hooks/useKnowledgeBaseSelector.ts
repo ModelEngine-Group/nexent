@@ -32,6 +32,7 @@ export function useKnowledgeBasesForToolConfig(
     | "datamate_search"
     | "idata_search"
     | "haotian_search"
+    | "ragflow_search"
     | null = null,
   config?: {
     serverUrl?: string;
@@ -107,6 +108,22 @@ export function useKnowledgeBasesForToolConfig(
           log.info("Dify knowledge bases fetched successfully:", kbs.length);
         } else {
           // No Dify config provided, return empty
+          kbs = [];
+        }
+      } else if (toolType === "ragflow_search") {
+        // For RAGFlow, fetch knowledge bases using provided config
+        if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+          try {
+            // Use RAGFlow /api/v1/datasets endpoint to list datasets
+            kbs = await knowledgeBaseService.getRagflowKnowledgeBases(
+              difyConfig.serverUrl,
+              difyConfig.apiKey
+            );
+          } catch (error: any) {
+            log.error("Failed to fetch RAGFlow knowledge bases:", error);
+            kbs = [];
+          }
+        } else {
           kbs = [];
         }
       } else if (toolType === "idata_search") {

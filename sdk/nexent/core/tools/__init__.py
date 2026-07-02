@@ -6,6 +6,7 @@ from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
+from .ragflow_search_tool import RAGFlowSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool
@@ -37,6 +38,7 @@ __all__ = [
     "DataMateSearchTool",
     "IdataSearchTool",
     "HaotianSearchTool",
+    "RAGFlowSearchTool",
     "SendEmailTool",
     "GetEmailTool",
     "TavilySearchTool",
