@@ -173,6 +173,80 @@ class RAGFlowSearchTool(Tool):
         self.running_prompt_zh = "RAGFlow知识库检索中..."
         self.running_prompt_en = "Searching RAGFlow knowledge base..."
 
+    def _resolve_effective_dataset_ids(self, dataset_ids: str) -> List[str]:
+        """Resolve effective dataset IDs, preferring runtime override over configured value."""
+        if not dataset_ids:
+            return self.dataset_ids
+
+        dataset_ids = dataset_ids.strip()
+        try:
+            if dataset_ids.startswith("["):
+                return [str(d) for d in json.loads(dataset_ids)]
+            return [dataset_ids]
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                f"Failed to parse runtime dataset_ids as JSON array: {e}, "
+                f"falling back to configured datasets"
+            )
+            return self.dataset_ids
+
+    @staticmethod
+    def _parse_doc_ids(doc_id: str) -> List[str]:
+        """Parse a doc_id string into a list of document IDs.
+
+        Accepts a single document ID string or a JSON array of document IDs.
+        """
+        if not doc_id:
+            return []
+
+        doc_id = doc_id.strip()
+        if doc_id.startswith("["):
+            try:
+                return [str(d) for d in json.loads(doc_id)]
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse doc_id as JSON array: {e}")
+                return []
+
+        return [doc_id]
+
+    def _build_result_messages(
+        self, chunks: List[dict]
+    ) -> tuple:
+        """Build SearchResultTextMessage objects from API response chunks."""
+        search_results_json = []
+        search_results_return = []
+
+        for index, chunk in enumerate(chunks):
+            content = chunk.get("content_with_weight", "") or chunk.get("content_ltks", "")
+            doc_name = chunk.get("docnm_kwd", "") or chunk.get("doc_id", "")
+            important_words = chunk.get("important_kwd", [])
+
+            title = doc_name
+            if important_words:
+                title = f"{doc_name} [{', '.join(important_words[:3])}]"
+
+            message = SearchResultTextMessage(
+                title=title,
+                text=content,
+                url="",
+                source_type="ragflow",
+                filename=doc_name,
+                published_date="",
+                score=str(chunk.get("similarity", 0)),
+                score_details={
+                    "term_similarity": chunk.get("term_similarity"),
+                    "vector_similarity": chunk.get("vector_similarity"),
+                },
+                cite_index=self.record_ops + index,
+                search_type=self.name,
+                tool_sign=self.tool_sign,
+            )
+
+            search_results_json.append(message.to_dict())
+            search_results_return.append(message.to_model_dict())
+
+        return search_results_json, search_results_return
+
     def forward(self, query: str, doc_id: str = "", dataset_ids: str = "") -> str:
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
@@ -180,100 +254,42 @@ class RAGFlowSearchTool(Tool):
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
-        # Resolve dataset_ids: runtime override takes precedence over config-level value
-        effective_dataset_ids: List[str]
-        if dataset_ids:
-            dataset_ids = dataset_ids.strip()
-            try:
-                if dataset_ids.startswith("["):
-                    effective_dataset_ids = [str(d) for d in json.loads(dataset_ids)]
-                else:
-                    effective_dataset_ids = [dataset_ids]
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"Failed to parse runtime dataset_ids as JSON array: {e}, falling back to configured datasets")
-                effective_dataset_ids = self.dataset_ids
-        else:
-            effective_dataset_ids = self.dataset_ids
+        effective_dataset_ids = self._resolve_effective_dataset_ids(dataset_ids)
+        doc_ids_list = self._parse_doc_ids(doc_id)
 
         logger.info(
             f"RAGFlowSearchTool called with query: '{query}', top_k: {self.top_k}, "
             f"datasets: {effective_dataset_ids}, doc_id: '{doc_id}'"
         )
 
-        # Parse doc_id into a list of document IDs for the API payload
-        doc_ids_list: List[str] = []
-        if doc_id:
-            doc_id = doc_id.strip()
-            if doc_id.startswith("["):
-                # JSON array of document IDs
-                try:
-                    doc_ids_list = [str(d) for d in json.loads(doc_id)]
-                except (json.JSONDecodeError, TypeError) as e:
-                    logger.warning(f"Failed to parse doc_id as JSON array: {e}")
-            else:
-                # Single document ID
-                doc_ids_list = [doc_id]
-
-        all_chunks: List[dict] = []
-        search_results_json = []
-        search_results_return = []
-
         try:
-            # Single API call — RAGFlow handles multi-dataset and reranking internally
             search_results_data = self._search_ragflow(query, effective_dataset_ids, doc_ids_list)
             chunks = search_results_data.get("chunks", [])
-            all_chunks.extend(chunks)
 
-            if not all_chunks:
-                raise Exception("No results found! Try a less restrictive/shorter query.")
+            if not chunks:
+                raise ValueError("No results found! Try a less restrictive/shorter query.")
 
-            # Sort by similarity descending (RAGFlow returns sorted, but ensure consistency)
-            all_chunks.sort(key=lambda c: c.get("similarity", 0), reverse=True)
+            # Sort by similarity descending and take top_k
+            chunks.sort(key=lambda c: c.get("similarity", 0), reverse=True)
+            chunks = chunks[:self.top_k]
 
-            # Take top_k results
-            all_chunks = all_chunks[:self.top_k]
-
-            for index, chunk in enumerate(all_chunks):
-                content = chunk.get("content_with_weight", "") or chunk.get("content_ltks", "")
-                doc_name = chunk.get("docnm_kwd", "") or chunk.get("doc_id", "")
-                important_words = chunk.get("important_kwd", [])
-
-                title = doc_name
-                if important_words:
-                    title = f"{doc_name} [{', '.join(important_words[:3])}]"
-
-                search_result_message = SearchResultTextMessage(
-                    title=title,
-                    text=content,
-                    url="",
-                    source_type="ragflow",
-                    filename=doc_name,
-                    published_date="",
-                    score=str(chunk.get("similarity", 0)),
-                    score_details={
-                        "term_similarity": chunk.get("term_similarity"),
-                        "vector_similarity": chunk.get("vector_similarity"),
-                    },
-                    cite_index=self.record_ops + index,
-                    search_type=self.name,
-                    tool_sign=self.tool_sign,
-                )
-
-                search_results_json.append(search_result_message.to_dict())
-                search_results_return.append(search_result_message.to_model_dict())
-
+            search_results_json, search_results_return = self._build_result_messages(chunks)
             self.record_ops += len(search_results_return)
 
             if self.observer:
-                search_results_data = json.dumps(search_results_json, ensure_ascii=False)
-                self.observer.add_message("", ProcessType.SEARCH_CONTENT, search_results_data)
+                self.observer.add_message(
+                    "", ProcessType.SEARCH_CONTENT,
+                    json.dumps(search_results_json, ensure_ascii=False)
+                )
 
             return json.dumps(search_results_return, ensure_ascii=False)
 
+        except ValueError:
+            raise
         except Exception as e:
             error_msg = f"Error searching RAGFlow knowledge base: {str(e)}"
             logger.error(error_msg)
-            raise Exception(error_msg)
+            raise RuntimeError(error_msg) from e
 
     def _search_ragflow(self, query: str, dataset_ids: List[str], doc_ids: List[str] = None) -> Dict[str, Any]:
         """Send a single multi-dataset search request to RAGFlow API.
@@ -316,7 +332,7 @@ class RAGFlowSearchTool(Tool):
             result = response.json()
 
             if result.get("code") != 0:
-                raise Exception(
+                raise RuntimeError(
                     f"RAGFlow API returned error code {result.get('code')}: "
                     f"{result.get('message', 'Unknown error')}"
                 )
@@ -327,8 +343,8 @@ class RAGFlowSearchTool(Tool):
             return data
 
         except httpx.RequestError as e:
-            raise Exception(f"RAGFlow API request failed: {str(e)}")
+            raise ConnectionError(f"RAGFlow API request failed: {str(e)}") from e
         except httpx.HTTPStatusError as e:
-            raise Exception(f"RAGFlow API HTTP error: {str(e)}")
+            raise RuntimeError(f"RAGFlow API HTTP error: {str(e)}") from e
         except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse RAGFlow API response: {str(e)}")
+            raise ValueError(f"Failed to parse RAGFlow API response: {str(e)}") from e
