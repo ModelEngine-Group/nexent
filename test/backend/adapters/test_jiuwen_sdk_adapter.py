@@ -698,9 +698,10 @@ def _build_metric_mock(
         )
         invoke_result = MagicMock()
         invoke_result.content = invoke_response_content
-        m._model.invoke = MagicMock(
-            return_value=asyncio.coroutine(lambda: invoke_result)()
-        )
+        async def _invoke(*_args, **_kwargs):
+            return invoke_result
+
+        m._model.invoke = MagicMock(side_effect=_invoke)
         metric_holder["metric"] = m
         return m
 
