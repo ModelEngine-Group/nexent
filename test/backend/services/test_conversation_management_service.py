@@ -292,6 +292,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(call_args['message_idx'], 1)
         self.assertEqual(call_args['role'], "user")
         self.assertEqual(call_args['content'], "Hello, this is a test message")
+        self.assertEqual(mock_create_conversation_message.call_args.kwargs.get('tenant_id'), self.tenant_id)
 
     @patch('backend.services.conversation_management_service.create_conversation_message')
     def test_save_message_with_string_content_returns_message_id(self, mock_create_conversation_message):
@@ -313,6 +314,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(call_args['content'], "Hello, this is a test message")
         # The new save_message forwards the status kwarg (default "completed")
         self.assertEqual(mock_create_conversation_message.call_args.kwargs.get('status'), 'completed')
+        self.assertEqual(mock_create_conversation_message.call_args.kwargs.get('tenant_id'), self.tenant_id)
 
     @patch('backend.services.conversation_management_service.create_message_unit')
     def test_save_message_unit_inserts_single_row(self, mock_create_message_unit):
@@ -776,6 +778,7 @@ class TestSaveMessageEdgeCases(unittest.TestCase):
             self.assertEqual(result, 1)
             call_args = mock_create.call_args[0][0]
             self.assertEqual(call_args['content'], "The answer is 42")
+            self.assertEqual(mock_create.call_args.kwargs.get('tenant_id'), "t")
 
     def test_save_message_empty_units_returns_empty_string(self):
         """Should return empty string content when no string/final_answer units."""

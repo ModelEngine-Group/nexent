@@ -6,6 +6,8 @@
 -- Conversation child tables do not duplicate tenant_id; they are authorized by
 -- joining or subquerying through conversation_record_t.
 
+\set default_tenant_id '''tenant_id'''
+
 ALTER TABLE nexent.conversation_record_t
     ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
 
@@ -25,16 +27,16 @@ SET tenant_id = COALESCE(
         FROM nexent.user_tenant_t ut
         WHERE ut.user_id = cr.created_by
         ORDER BY
-            CASE WHEN ut.tenant_id = 'tenant_id' THEN 0 ELSE 1 END,
+            CASE WHEN ut.tenant_id = :default_tenant_id THEN 0 ELSE 1 END,
             ut.create_time ASC NULLS LAST,
             ut.user_tenant_id ASC
         LIMIT 1
     ),
-    'tenant_id'
+    :default_tenant_id
 )
 WHERE cr.tenant_id IS NULL
    OR cr.tenant_id = ''
-   OR cr.tenant_id = 'tenant_id';
+   OR cr.tenant_id = :default_tenant_id;
 
 CREATE INDEX IF NOT EXISTS idx_conversation_record_t_tenant_user_conversation_delete
     ON nexent.conversation_record_t (tenant_id, created_by, conversation_id, delete_flag);

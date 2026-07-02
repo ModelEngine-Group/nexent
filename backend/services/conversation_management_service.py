@@ -70,7 +70,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         int: Newly created message_id
 
     Raises:
-        Exception: If conversation_id is missing or the insert fails
+        ValueError: If conversation_id is missing
     """
     if tenant_id is None or user_id is None:
         logging.warning("Missing tenant_id or user_id to save message")
@@ -79,18 +79,15 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
     # Validate conversation_id
     conversation_id = message_data.get('conversation_id')
     if not conversation_id:
-        raise Exception("conversation_id is required, please call /conversation/create to create a conversation first")
+        raise ValueError(
+            "conversation_id is required, please call /conversation/create to create a conversation first"
+        )
     require_context_identity(
         tenant_id=tenant_id,
         user_id=user_id,
         conversation_id=conversation_id,
         operation="conversation.message.create",
     )
-
-    conversation_id = message_data.get('conversation_id')
-    if not conversation_id:
-        raise Exception(
-            "conversation_id is required, please call /conversation/create to create a conversation first")
 
     message_units = message_data.get('message') or []
     string_content = None
@@ -109,7 +106,7 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'content': string_content or "",
         'minio_files': message_data.get('minio_files'),
     }
-    return create_conversation_message(message_data_copy, user_id, status=status)
+    return create_conversation_message(message_data_copy, user_id, tenant_id=tenant_id, status=status)
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
@@ -441,6 +438,136 @@ def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[
     return None
 
 
+def _format_published_date(value: Any) -> Optional[str]:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _format_search_item(record: Dict[str, Any], include_message_id: bool = False) -> Dict[str, Any]:
+    search_item = {
+        "title": record["source_title"],
+        "text": record["source_content"],
+        "source_type": record["source_type"],
+        "url": record["source_location"],
+        "filename": record["source_title"] if record["source_type"] == "file" else None,
+        "published_date": _format_published_date(record["published_date"]),
+        "score": record["score_overall"],
+        "score_details": {},
+    }
+    if "cite_index" in record:
+        search_item["cite_index"] = record["cite_index"]
+    if "search_type" in record:
+        search_item["search_type"] = record["search_type"]
+    if "tool_sign" in record:
+        search_item["tool_sign"] = record["tool_sign"]
+    if record["score_accuracy"] is not None:
+        search_item["score_details"]["accuracy"] = record["score_accuracy"]
+    if record["score_semantic"] is not None:
+        search_item["score_details"]["semantic"] = record["score_semantic"]
+    if include_message_id:
+        search_item["message_id"] = record["message_id"]
+    return search_item
+
+
+def _group_search_records(
+    search_records: List[Dict[str, Any]],
+) -> tuple[Dict[int, List[Dict[str, Any]]], Dict[int, List[Dict[str, Any]]]]:
+    search_by_unit_id: Dict[int, List[Dict[str, Any]]] = {}
+    search_by_message: Dict[int, List[Dict[str, Any]]] = {}
+    for record in search_records:
+        search_item = _format_search_item(record)
+        unit_id = record["unit_id"]
+        message_id = record["message_id"]
+        if unit_id is not None:
+            search_by_unit_id.setdefault(unit_id, []).append(search_item)
+        search_by_message.setdefault(message_id, []).append(search_item)
+    return search_by_unit_id, search_by_message
+
+
+def _group_images_by_message(image_records: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+    image_by_message: Dict[int, List[str]] = {}
+    for record in image_records:
+        images = image_by_message.setdefault(record["message_id"], [])
+        if record["image_url"] not in images:
+            images.append(record["image_url"])
+    return image_by_message
+
+
+def _build_assistant_units(message_units: List[Dict[str, Any]], message_content: str) -> List[Dict[str, Any]]:
+    processed_units = []
+    for unit in message_units:
+        unit_id = unit.get("unit_id")
+        unit_type = unit.get("unit_type")
+        if unit_type == "search_content_placeholder" and unit_id:
+            processed_units.append({
+                "type": "search_content_placeholder",
+                "content": json.dumps({"placeholder": True, "unit_id": unit_id}, ensure_ascii=False),
+            })
+            continue
+        processed_units.append({
+            "type": unit_type,
+            "content": unit.get("unit_content"),
+        })
+
+    if not any(unit.get("type") == "final_answer" for unit in processed_units):
+        processed_units.append({
+            "type": "final_answer",
+            "content": message_content,
+        })
+    return processed_units
+
+
+def _build_message_unit_search(
+    message_units: List[Dict[str, Any]],
+    search_by_unit_id: Dict[int, List[Dict[str, Any]]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    unit_ids = {unit.get("unit_id") for unit in message_units}
+    return {
+        str(unit_id): search_results
+        for unit_id, search_results in search_by_unit_id.items()
+        if unit_id in unit_ids
+    }
+
+
+def _build_history_message(
+    msg: Dict[str, Any],
+    image_by_message: Dict[int, List[str]],
+    search_by_message: Dict[int, List[Dict[str, Any]]],
+    search_by_unit_id: Dict[int, List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    message_id = msg["message_id"]
+    message_units = msg["units"] or []
+    if msg["role"] == MESSAGE_ROLE["USER"]:
+        message_item = {
+            "role": msg["role"],
+            "message": msg["message_content"],
+            "message_id": message_id,
+            "opinion_flag": None,
+        }
+    else:
+        message_item = {
+            "role": msg["role"],
+            "message": _build_assistant_units(message_units, msg["message_content"]),
+            "message_id": message_id,
+            "opinion_flag": msg["opinion_flag"],
+        }
+
+    if msg.get("minio_files"):
+        message_item["minio_files"] = msg["minio_files"]
+    if message_id in image_by_message:
+        message_item["picture"] = image_by_message[message_id]
+    if message_id in search_by_message:
+        message_item["search"] = search_by_message[message_id]
+
+    message_unit_search = _build_message_unit_search(message_units, search_by_unit_id)
+    if message_unit_search:
+        message_item["searchByUnitId"] = message_unit_search
+    return message_item
+
+
 def get_conversation_history_service(conversation_id: int, user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get complete history of specified conversation
@@ -467,144 +594,12 @@ def get_conversation_history_service(conversation_id: int, user_id: str, tenant_
                 f"No history data found for conversation_id: {conversation_id}")
             return []
 
-        # Collect search content, grouped by unit_id
-        search_by_unit_id = {}
-        # Collect data for message-level search field
-        search_by_message = {}
-        for record in history_data['search_records']:
-            unit_id = record['unit_id']
-            message_id = record['message_id']
-
-            # Process published_date, ensure it's a datetime object
-            published_date = None
-            if record['published_date'] is not None:
-                if isinstance(record['published_date'], datetime):
-                    published_date = record['published_date'].strftime(
-                        "%Y-%m-%d")
-                elif isinstance(record['published_date'], str):
-                    published_date = record['published_date']
-
-            # Build search content
-            search_item = {"title": record["source_title"], "text": record["source_content"],
-                           "source_type": record["source_type"], "url": record["source_location"],
-                           "filename": record["source_title"] if record["source_type"] == "file" else None,
-                           "published_date": published_date, "score": record["score_overall"],
-                           "cite_index": record["cite_index"], "search_type": record["search_type"],
-                           "tool_sign": record["tool_sign"], "score_details": {}}
-
-            if record["score_accuracy"] is not None:
-                search_item["score_details"]["accuracy"] = record["score_accuracy"]
-            if record["score_semantic"] is not None:
-                search_item["score_details"]["semantic"] = record["score_semantic"]
-
-            # Group by unit_id (for frontend matching by unit_id)
-            if unit_id is not None:
-                if unit_id not in search_by_unit_id:
-                    search_by_unit_id[unit_id] = []
-                search_by_unit_id[unit_id].append(search_item)
-
-            # Group by message_id (for message-level search field)
-            if message_id not in search_by_message:
-                search_by_message[message_id] = []
-            search_by_message[message_id].append(search_item)
-
-        # Collect image content - grouped by message_id, with URL deduplication
-        image_by_message = {}
-        for record in history_data['image_records']:
-            message_id = record['message_id']
-            if message_id not in image_by_message:
-                image_by_message[message_id] = []
-            # Only add if not already present (by URL)
-            if record['image_url'] not in image_by_message[message_id]:
-                image_by_message[message_id].append(record['image_url'])
-
-        # Sort by message index and build final message list, including images and search content
-        messages = []
-
-        for msg in history_data['message_records']:
-            message_id = msg['message_id']
-            role = msg['role']
-            message_content = msg['message_content']
-            # Initialize for all message types
-            message_units = msg['units'] or []
-
-            if role == MESSAGE_ROLE["USER"]:
-                # User message: directly use message_content as message field value
-                message_item = {
-                    'role': role,
-                    'message': message_content,
-                    'message_id': message_id,
-                    'opinion_flag': None
-                }
-
-                # Add minio_files field (if any)
-                if 'minio_files' in msg and msg['minio_files']:
-                    message_item['minio_files'] = msg['minio_files']
-            else:
-                # Assistant message: message is an array, need to process search_content_placeholder
-                processed_units = []
-                for unit in message_units:
-                    unit_id = unit.get('unit_id')
-                    unit_type = unit.get('unit_type')
-                    unit_content = unit.get('unit_content')
-
-                    if unit_type == 'search_content_placeholder' and unit_id:
-                        placeholder_content = {
-                            "placeholder": True,
-                            "unit_id": unit_id
-                        }
-                        processed_units.append({
-                            'type': 'search_content_placeholder',
-                            'content': json.dumps(placeholder_content, ensure_ascii=False)
-                        })
-                    else:
-                        processed_units.append({
-                            'type': unit_type,
-                            'content': unit_content
-                        })
-
-                # Add final_answer type message unit only if not already present
-                has_final_answer = any(u.get('type') == 'final_answer' for u in processed_units)
-                if not has_final_answer:
-                    processed_units.append({
-                        'type': 'final_answer',
-                        'content': message_content
-                    })
-
-                message_item = {
-                    'role': role,
-                    'message': processed_units,
-                    'message_id': message_id,
-                    'opinion_flag': msg['opinion_flag']
-                }
-
-                # Add minio_files field (if any, e.g., skill-generated attachments)
-                if 'minio_files' in msg and msg['minio_files']:
-                    message_item['minio_files'] = msg['minio_files']
-
-            # Add image content (if any)
-            if message_id in image_by_message:
-                message_item['picture'] = image_by_message[message_id]
-
-            # Add search content (for frontend right panel display)
-            if message_id in search_by_message:
-                message_item['search'] = search_by_message[message_id]
-
-            # Add searchByUnitId for precise matching in frontend
-            message_unit_search = {}
-            for unit_id, search_results in search_by_unit_id.items():
-                # Only include unit_id belonging to the current message
-                for unit in message_units:
-                    if unit.get('unit_id') == unit_id:
-                        message_unit_search[str(unit_id)] = search_results
-                        break
-
-            if message_unit_search:
-                message_item['searchByUnitId'] = message_unit_search
-
-            messages.append(message_item)
-
-        # Build final result
+        search_by_unit_id, search_by_message = _group_search_records(history_data["search_records"])
+        image_by_message = _group_images_by_message(history_data["image_records"])
+        messages = [
+            _build_history_message(msg, image_by_message, search_by_message, search_by_unit_id)
+            for msg in history_data["message_records"]
+        ]
         formatted_history = {
             # Convert to string
             'conversation_id': str(history_data['conversation_id']),
@@ -622,6 +617,61 @@ def get_conversation_history_service(conversation_id: int, user_id: str, tenant_
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
         raise Exception(str(e))
+
+
+def _success_response(data: Any) -> Dict[str, Any]:
+    return {"code": 0, "message": "success", "data": data}
+
+
+def _error_response(code: int, message: str) -> Dict[str, Any]:
+    return {"code": code, "message": message, "data": None}
+
+
+def _ensure_conversation_access(
+    conversation_id: Optional[int],
+    user_id: str,
+    tenant_id: str,
+) -> Optional[Dict[str, Any]]:
+    if not conversation_id:
+        return None
+    require_context_identity(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        operation="conversation.sources.read",
+    )
+    return get_conversation(conversation_id, user_id, tenant_id=tenant_id)
+
+
+def _get_source_images(
+    conversation_id: Optional[int],
+    message_id: Optional[int],
+    user_id: str,
+    tenant_id: str,
+) -> List[str]:
+    if message_id:
+        image_records = get_source_images_by_message(message_id, user_id, tenant_id=tenant_id)
+    elif conversation_id:
+        image_records = get_source_images_by_conversation(conversation_id, user_id, tenant_id=tenant_id)
+    else:
+        image_records = []
+    return [image["image_url"] for image in image_records]
+
+
+def _get_source_searches(
+    conversation_id: Optional[int],
+    message_id: Optional[int],
+    user_id: str,
+    tenant_id: str,
+) -> List[Dict[str, Any]]:
+    if message_id:
+        search_records = get_source_searches_by_message(message_id, user_id, tenant_id=tenant_id)
+    elif conversation_id:
+        search_records = get_source_searches_by_conversation(conversation_id, user_id, tenant_id=tenant_id)
+    else:
+        search_records = []
+    include_message_id = bool(conversation_id and not message_id)
+    return [_format_search_item(record, include_message_id=include_message_id) for record in search_records]
 
 
 def get_sources_service(
@@ -645,94 +695,23 @@ def get_sources_service(
     """
     try:
         if not conversation_id and not message_id:
-            return {
-                "code": 400,
-                "message": "Must provide conversation_id or message_id parameter",
-                "data": None
-            }
+            return _error_response(400, "Must provide conversation_id or message_id parameter")
 
-        # If conversation ID is provided
-        if conversation_id:
-            require_context_identity(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                operation="conversation.sources.read",
-            )
-            conversation = get_conversation(conversation_id, user_id, tenant_id=tenant_id)
-            if not conversation:
-                return {
-                    "code": 404,
-                    "message": f"Conversation {conversation_id} does not exist",
-                    "data": None
-                }
+        conversation = _ensure_conversation_access(conversation_id, user_id, tenant_id)
+        if conversation_id and not conversation:
+            return _error_response(404, f"Conversation {conversation_id} does not exist")
 
         result = {"searches": [], "images": []}
-
-        # Get image sources
         if source_type in ["image", "all"]:
-            images = []
-            if message_id:
-                image_records = get_source_images_by_message(
-                    message_id, user_id, tenant_id=tenant_id)
-            elif conversation_id:
-                image_records = get_source_images_by_conversation(
-                    conversation_id, user_id, tenant_id=tenant_id)
-
-            for image in image_records:
-                images.append(image["image_url"])
-
-            result["images"] = images
-
-        # Get search sources
+            result["images"] = _get_source_images(conversation_id, message_id, user_id, tenant_id)
         if source_type in ["search", "all"]:
-            searches = []
-            search_records = []
-            if message_id:
-                search_records = get_source_searches_by_message(
-                    message_id, user_id, tenant_id=tenant_id)
-            elif conversation_id:
-                search_records = get_source_searches_by_conversation(
-                    conversation_id, user_id, tenant_id=tenant_id)
+            result["searches"] = _get_source_searches(conversation_id, message_id, user_id, tenant_id)
 
-            for record in search_records:
-                search_item = {
-                    "title": record["source_title"],
-                    "text": record["source_content"],
-                    "source_type": record["source_type"],
-                    "url": record["source_location"],
-                    "filename": record["source_title"] if record["source_type"] == "file" else None,
-                    "published_date": record["published_date"].strftime("%Y-%m-%d") if record[
-                        "published_date"] else None,
-                    "score": record["score_overall"]
-                }
-
-                search_item["score_details"] = {}
-                if record["score_accuracy"] is not None:
-                    search_item["score_details"]["accuracy"] = record["score_accuracy"]
-                if record["score_semantic"] is not None:
-                    search_item["score_details"]["semantic"] = record["score_semantic"]
-
-                if conversation_id and not message_id:
-                    search_item["message_id"] = record["message_id"]
-
-                searches.append(search_item)
-
-            result["searches"] = searches
-
-        return {
-            "code": 0,
-            "message": "success",
-            "data": result
-        }
+        return _success_response(result)
 
     except Exception as e:
         logging.error(f"Failed to get message sources: {str(e)}")
-        return {
-            "code": 500,
-            "message": str(e),
-            "data": None
-        }
+        return _error_response(500, str(e))
 
 
 async def generate_conversation_title_service(conversation_id: int, question: str, user_id: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
@@ -811,7 +790,8 @@ async def get_message_id_by_index_impl(
         conversation_id=conversation_id,
         operation="conversation.message_id.read",
     )
-    message_id = get_message_id_by_index(
+    message_id = await asyncio.to_thread(
+        get_message_id_by_index,
         conversation_id,
         message_index,
         user_id=user_id,

@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -223,7 +223,7 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
 
 
 @router.post("/message/id", response_model=ConversationResponse)
-async def get_message_id_endpoint(request: MessageIdRequest, authorization: Optional[str] = Header(None)):
+async def get_message_id_endpoint(request: MessageIdRequest, authorization: Annotated[Optional[str], Header()] = None):
     """
     Get message ID by conversation ID and message index
 

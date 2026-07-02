@@ -96,6 +96,24 @@ def create_conversation(
         return result_dict
 
 
+def _require_conversation_owner(
+    session,
+    conversation_id: int,
+    user_id: Optional[str],
+    tenant_id: Optional[str],
+) -> None:
+    stmt = select(ConversationRecord.conversation_id).where(
+        ConversationRecord.conversation_id == conversation_id,
+        ConversationRecord.delete_flag == 'N',
+    )
+    if user_id:
+        stmt = stmt.where(ConversationRecord.created_by == user_id)
+    if tenant_id:
+        stmt = stmt.where(ConversationRecord.tenant_id == tenant_id)
+    if session.execute(stmt).scalar_one_or_none() is None:
+        raise ValueError(f"Conversation {conversation_id} does not exist or is not accessible")
+
+
 def create_conversation_message(
     message_data: Dict[str, Any],
     user_id: Optional[str] = None,
@@ -122,6 +140,8 @@ def create_conversation_message(
         # Ensure conversation_id is integer type
         conversation_id = int(message_data['conversation_id'])
         message_idx = int(message_data['message_idx'])
+        if tenant_id:
+            _require_conversation_owner(session, conversation_id, user_id, tenant_id)
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
@@ -168,6 +188,8 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         # Ensure IDs are integer type
         message_id = int(message_id)
         conversation_id = int(conversation_id)
+        if tenant_id:
+            _require_conversation_owner(session, conversation_id, user_id, tenant_id)
 
         # Create units one by one to get unit_ids
         unit_ids = []
@@ -400,6 +422,16 @@ def get_conversation_messages(conversation_id: int, tenant_id: Optional[str] = N
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.delete_flag == 'N'
         ).order_by(asc(ConversationMessage.message_index))
+        if tenant_id:
+            stmt = stmt.where(
+                ConversationMessage.conversation_id.in_(
+                    select(ConversationRecord.conversation_id).where(
+                        ConversationRecord.conversation_id == conversation_id,
+                        ConversationRecord.tenant_id == tenant_id,
+                        ConversationRecord.delete_flag == 'N',
+                    )
+                )
+            )
 
         # Execute the query
         records = session.scalars(stmt).all()
@@ -866,6 +898,9 @@ def create_source_image(
         # Ensure message_id is of integer type
         message_id = int(image_data['message_id'])
         image_url = image_data['image_url']
+        conversation_id = image_data.get('conversation_id')
+        if tenant_id and conversation_id:
+            _require_conversation_owner(session, int(conversation_id), user_id, tenant_id)
 
         # Skip duplicate: same message_id + image_url already in DB
         if _image_exists(session, message_id, image_url):
@@ -874,7 +909,7 @@ def create_source_image(
         # Prepare data dictionary
         data = {
             "message_id": message_id,
-            "conversation_id": image_data.get('conversation_id'),
+            "conversation_id": conversation_id,
             "image_url": image_url,
             "delete_flag": 'N',
             # Use the database's CURRENT_TIMESTAMP function
@@ -1049,11 +1084,14 @@ def create_source_search(
     with get_db_session() as session:
         # Ensure message_id is an integer
         message_id = int(search_data['message_id'])
+        conversation_id = search_data.get('conversation_id')
+        if tenant_id and conversation_id:
+            _require_conversation_owner(session, int(conversation_id), user_id, tenant_id)
 
         # Prepare basic data dictionary
         data = {
             "message_id": message_id,
-            "conversation_id": search_data.get('conversation_id'),
+            "conversation_id": conversation_id,
             "source_type": search_data['source_type'],
             "source_title": search_data['source_title'],
             "source_location": search_data['source_location'],

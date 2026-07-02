@@ -101,6 +101,7 @@ db_models_mod = types.ModuleType("database.db_models")
 class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
+    tenant_id = MagicMock(name="ConversationRecord.tenant_id")
     create_time = MagicMock(name="ConversationRecord.create_time")
     update_time = MagicMock(name="ConversationRecord.update_time")
     created_by = MagicMock(name="ConversationRecord.created_by")
@@ -571,7 +572,9 @@ def test_create_conversation_message_with_minio_files(monkeypatch):
     assert message_id == 5
     # minio_files should be serialized to JSON string
     import json
-    assert _captured_insert_values["minio_files"] == json.dumps([{"name": "file.pdf", "url": "http://example.com/file.pdf"}])
+    assert _captured_insert_values["minio_files"] == json.dumps(
+        [{"name": "file.pdf", "url": "http://example.com/file.pdf"}]
+    )
 
 
 def test_create_conversation_message_default_status(monkeypatch):
@@ -596,6 +599,55 @@ def test_create_conversation_message_default_status(monkeypatch):
 
     assert message_id == 3
     assert _captured_insert_values["status"] == "completed"
+
+
+def test_create_conversation_message_checks_tenant_owner(monkeypatch):
+    """create_conversation_message validates the parent conversation owner when tenant_id is supplied."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = 1
+    session.execute.return_value.scalar.return_value = 8
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    message_id = create_conversation_message(
+        {
+            "conversation_id": 1,
+            "message_idx": 0,
+            "role": "user",
+            "content": "hello",
+            "minio_files": None,
+        },
+        user_id="actor",
+        tenant_id="tenant-1",
+    )
+
+    assert message_id == 8
+    assert session.execute.call_count == 2
+
+
+def test_create_conversation_message_rejects_unowned_tenant(monkeypatch):
+    """create_conversation_message rejects parent conversations outside the supplied tenant."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(ValueError, match="does not exist or is not accessible"):
+        create_conversation_message(
+            {
+                "conversation_id": 1,
+                "message_idx": 0,
+                "role": "user",
+                "content": "hello",
+                "minio_files": None,
+            },
+            user_id="actor",
+            tenant_id="tenant-1",
+        )
 
 
 # =============================================================================
@@ -695,6 +747,30 @@ def test_create_message_units_empty_list(monkeypatch):
     result = create_message_units([], message_id=1, conversation_id=2)
 
     assert result == []
+
+
+def test_create_message_units_checks_tenant_owner(monkeypatch):
+    """create_message_units validates the parent conversation owner when tenant_id is supplied."""
+    session = MagicMock()
+    session.execute.side_effect = [
+        MagicMock(scalar_one_or_none=MagicMock(return_value=10)),
+        MagicMock(scalar_one=MagicMock(return_value=100)),
+    ]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    unit_ids = create_message_units(
+        [{"type": "final_answer", "content": "ok"}],
+        message_id=5,
+        conversation_id=10,
+        user_id="tester",
+        tenant_id="tenant-1",
+    )
+
+    assert unit_ids == [100]
+    assert session.execute.call_count == 2
 
 
 # =============================================================================
@@ -887,6 +963,20 @@ def test_get_conversation_messages_empty(monkeypatch, mock_session_ctx):
     result = get_conversation_messages(42)
 
     assert result == []
+
+
+def test_get_conversation_messages_filters_by_tenant(monkeypatch, mock_session_ctx):
+    """get_conversation_messages applies parent conversation tenant filtering."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = [MagicMock()]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", lambda record: {"message_id": 1})
+
+    result = get_conversation_messages(42, tenant_id="tenant-1")
+
+    assert result == [{"message_id": 1}]
+    session.scalars.assert_called_once()
 
 
 # =============================================================================
@@ -1175,6 +1265,29 @@ def test_create_source_image_success(monkeypatch, fresh_insert_mock):
     assert fresh_insert_mock["image_url"] == "http://example.com/image.png"
 
 
+def test_create_source_image_checks_tenant_owner(monkeypatch, fresh_insert_mock):
+    """create_source_image validates parent conversation owner when tenant_id is supplied."""
+    session = MagicMock()
+    session.execute.side_effect = [
+        MagicMock(scalar_one_or_none=MagicMock(return_value=1)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        MagicMock(scalar_one=MagicMock(return_value=55)),
+    ]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    image_id = create_source_image(
+        {"message_id": 7, "conversation_id": 9, "image_url": "http://example.com/image.png"},
+        user_id="actor",
+        tenant_id="tenant-1",
+    )
+
+    assert image_id == 55
+    assert fresh_insert_mock["conversation_id"] == 9
+
+
 # =============================================================================
 # Tests for delete_source_image
 # =============================================================================
@@ -1274,6 +1387,38 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
     assert search_id == 89
     assert fresh_insert_mock["score_overall"] == 0.95
     assert fresh_insert_mock["score_accuracy"] == 0.90
+
+
+def test_create_source_search_checks_tenant_owner(monkeypatch, fresh_insert_mock):
+    """create_source_search validates parent conversation owner when tenant_id is supplied."""
+    session = MagicMock()
+    session.execute.side_effect = [
+        MagicMock(scalar_one_or_none=MagicMock(return_value=1)),
+        MagicMock(scalar_one=MagicMock(return_value=88)),
+    ]
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    search_id = create_source_search(
+        {
+            "message_id": 7,
+            "conversation_id": 9,
+            "source_type": "web",
+            "source_title": "Example Site",
+            "source_location": "http://example.com",
+            "source_content": "Content here",
+            "cite_index": 1,
+            "search_type": "search",
+            "tool_sign": "web_search",
+        },
+        user_id="actor",
+        tenant_id="tenant-1",
+    )
+
+    assert search_id == 88
+    assert fresh_insert_mock["conversation_id"] == 9
 
 
 # =============================================================================
