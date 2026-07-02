@@ -1862,38 +1862,42 @@ def test_get_source_searches_by_conversation_empty(monkeypatch, mock_session_ctx
 
 def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     """get_conversation_history processes messages with units."""
+    from types import SimpleNamespace
+
     session, ctx = mock_session_ctx
 
-    # Mock conversation record
-    mock_conv = MagicMock()
-    mock_conv.conversation_id = 1
-    mock_conv.create_time = 1000.0
+    # Use SimpleNamespace for accurate attribute checks
+    mock_conv = SimpleNamespace(conversation_id=1, create_time=1000.0)
+    mock_message = SimpleNamespace(
+        message_id=1,
+        message_index=0,
+        message_role="user",
+        message_content="Hello",
+        status="completed",
+        minio_files=None,
+        opinion_flag=None,
+        units=None,
+    )
 
-    # Need to handle the complex query flow - the units is a subquery not a direct column
-    # Mock scalars to return the conversation
-    mock_conv_result = MagicMock()
-    mock_conv_result.first.return_value = mock_conv
-    session.scalars.return_value = mock_conv_result
+    # First execute() call returns conversation check result
+    conv_exec_result = MagicMock()
+    conv_exec_result.first.return_value = mock_conv
 
-    # Mock execute for message query
-    mock_message = MagicMock()
-    mock_message.message_id = 1
-    mock_message.message_index = 0
-    mock_message.message_role = "user"
-    mock_message.message_content = "Hello"
-    mock_message.status = "completed"
-    mock_message.minio_files = None
-    mock_message.opinion_flag = None
-    mock_message.units = None
+    # Second execute() call returns messages
+    message_exec_result = MagicMock()
+    message_exec_result.all.return_value = [mock_message]
 
-    mock_message_result = MagicMock()
-    mock_message_result.all.return_value = [mock_message]
-    session.execute.return_value = mock_message_result
+    # Session.scalars() calls for search/image - all return empty
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+
+    session.execute.side_effect = [conv_exec_result, message_exec_result]
+    session.scalars.return_value = scalars_result
 
     def as_dict_side_effect(record):
-        if hasattr(record, 'conversation_id'):
-            return {"conversation_id": record.conversation_id, "create_time": 1000000}
-        elif hasattr(record, 'message_id'):
+        if isinstance(record, MagicMock):
+            return {}
+        if hasattr(record, 'message_id') and hasattr(record, 'message_role'):
             return {
                 "message_id": record.message_id,
                 "message_index": record.message_index,
@@ -1902,12 +1906,10 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
                 "status": record.status,
                 "minio_files": record.minio_files,
                 "opinion_flag": record.opinion_flag,
-                "units": None  # Explicitly include units key
+                "units": getattr(record, 'units', None),
             }
-        elif hasattr(record, 'search_id'):
-            return {"search_id": getattr(record, 'search_id', None)}
-        elif hasattr(record, 'image_id'):
-            return {"image_id": getattr(record, 'image_id', None)}
+        elif hasattr(record, 'conversation_id'):
+            return {"conversation_id": record.conversation_id, "create_time": record.create_time}
         return {}
 
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
