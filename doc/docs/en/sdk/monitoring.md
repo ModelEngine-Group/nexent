@@ -78,8 +78,8 @@ LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoin
 
 ```bash
 cd deploy
-[ -f docker/assets/monitoring/monitoring.env ] || cp docker/assets/monitoring/monitoring.env.example docker/assets/monitoring/monitoring.env
-vim docker/assets/monitoring/monitoring.env
+[ -f env/monitoring.env ] || cp env/monitoring.env.example env/monitoring.env
+vim env/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx
