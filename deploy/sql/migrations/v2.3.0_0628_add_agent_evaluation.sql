@@ -4,6 +4,15 @@
 -- Version: v2.3.0
 -- Date: 2026-06-30
 -- Description: Add evaluation_set_t / evaluation_set_case_t / agent_evaluation_t / agent_evaluation_case_t
+--
+-- Note on judge_model_id:
+--   Originally introduced in a follow-up migration (v2.3.0_0629_*.sql) after this
+--   file had been applied in some environments. The column, its index, and column
+--   comment are now defined here directly so a fresh install only needs this file.
+--   Re-running this migration on an environment that already applied the original
+--   0629 patch is still safe: CREATE TABLE IF NOT EXISTS is a no-op, ADD COLUMN IF
+--   NOT EXISTS is a no-op, CREATE INDEX IF NOT EXISTS is a no-op, and COMMENT is
+--   idempotent.
 -- =============================================================================
 
 SET search_path TO nexent;
@@ -87,6 +96,8 @@ CREATE TABLE IF NOT EXISTS nexent.agent_evaluation_t (
     score_overall DOUBLE PRECISION,
     error_message TEXT,
 
+    judge_model_id INTEGER,
+
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
     created_by VARCHAR(100),
@@ -97,9 +108,12 @@ CREATE TABLE IF NOT EXISTS nexent.agent_evaluation_t (
 CREATE INDEX IF NOT EXISTS ix_agent_eval_tenant_id ON nexent.agent_evaluation_t(tenant_id);
 CREATE INDEX IF NOT EXISTS ix_agent_eval_agent_id ON nexent.agent_evaluation_t(tenant_id, agent_id);
 CREATE INDEX IF NOT EXISTS ix_agent_eval_set_id ON nexent.agent_evaluation_t(tenant_id, evaluation_set_id);
+CREATE INDEX IF NOT EXISTS ix_agent_eval_judge_model_id ON nexent.agent_evaluation_t(tenant_id, judge_model_id);
 
 COMMENT ON TABLE nexent.agent_evaluation_t IS 'Offline evaluation runs for an agent.';
 COMMENT ON COLUMN nexent.agent_evaluation_t.status IS 'Run status: PENDING/RUNNING/COMPLETED/FAILED';
+COMMENT ON COLUMN nexent.agent_evaluation_t.judge_model_id IS
+    'Model id used by the judge. Persisted so the background worker can recover it after restart and so the frontend can display judge_model_name.';
 
 
 -- -----------------------------------------------------------------------------
