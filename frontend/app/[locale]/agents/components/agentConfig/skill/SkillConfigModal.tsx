@@ -540,7 +540,7 @@ export default function SkillConfigModal({
       open={isOpen}
       onCancel={onCancel}
       width={600}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button onClick={onCancel}>{t("common.cancel")}</Button>

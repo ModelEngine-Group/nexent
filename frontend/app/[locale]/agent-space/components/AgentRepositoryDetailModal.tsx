@@ -299,7 +299,7 @@ export function AgentRepositoryDetailModal({
       footer={null}
       width={720}
       centered
-      destroyOnClose
+      destroyOnHidden
       title={null}
       className="agent-repository-detail-modal"
       styles={{ body: { padding: 0 } }}
