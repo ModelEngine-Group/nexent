@@ -769,6 +769,9 @@ async def create_agent_config(
                 "agent_id": memory_context.agent_id,
             }
 
+            memory_tool_names = {"store_memory", "search_memory"}
+            tool_list = [t for t in tool_list if t.name not in memory_tool_names]
+
             store_tool_config = ToolConfig(
                 class_name="StoreMemoryTool",
                 name="store_memory",
