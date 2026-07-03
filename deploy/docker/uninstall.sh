@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROOT_ENV_FILE="$PROJECT_ROOT/deploy/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
-MONITORING_ENV_FILE="$SCRIPT_DIR/assets/monitoring/monitoring.env"
+MONITORING_ENV_FILE="$PROJECT_ROOT/deploy/env/monitoring.env"
 cd "$SCRIPT_DIR"
 
 DELETE_VOLUMES=""

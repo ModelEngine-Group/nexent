@@ -75,17 +75,19 @@ assert_common_package_files() {
   [ -f "$package_dir/deploy/uninstall.sh" ] || fail "deploy/uninstall.sh should be packaged"
   [ -f "$package_dir/VERSION" ] || fail "root VERSION should be packaged"
   [ -f "$package_dir/deploy/env/.env.example" ] || fail "deploy/env/.env.example should be packaged"
+  [ -f "$package_dir/deploy/env/monitoring.env.example" ] || fail "deploy/env/monitoring.env.example should be packaged"
   [ -f "$package_dir/deploy/sql/init.sql" ] || fail "deploy/sql/init.sql should be packaged"
   [ -d "$package_dir/deploy/sql/migrations" ] || fail "deploy/sql/migrations should be packaged"
   [ -d "$package_dir/deploy/sql/supabase" ] || fail "deploy/sql/supabase should be packaged"
   [ -f "$package_dir/deploy/sql/supabase/webhooks.sql" ] || fail "deploy/sql/supabase/webhooks.sql should be packaged"
   [ ! -f "$package_dir/.env" ] || fail "root .env should not be packaged"
   [ ! -f "$package_dir/deploy/env/.env" ] || fail "deploy/env/.env should not be packaged"
+  [ ! -f "$package_dir/deploy/env/monitoring.env" ] || fail "generated deploy/env/monitoring.env should not be packaged"
   [ ! -f "$package_dir/deploy/docker/.env" ] || fail "deploy/docker/.env should not be packaged"
   [ ! -f "$package_dir/deploy/docker/.env.generated" ] || fail "deploy/docker/.env.generated should not be packaged"
   if [ -d "$package_dir/deploy/docker" ]; then
     [ ! -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env" ] || fail "generated monitoring.env should not be packaged"
-    [ -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env.example" ] || fail "monitoring.env.example should be packaged"
+    [ ! -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env.example" ] || fail "monitoring.env.example should live under deploy/env"
   fi
   [ ! -f "$package_dir/deploy/docker/deploy.options" ] || fail "deploy/docker/deploy.options should not be packaged"
 }

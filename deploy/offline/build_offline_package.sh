@@ -503,8 +503,8 @@ copy_deployment_bundle() {
       --exclude='deploy.options' \
       --exclude='env/.env' \
       --exclude='env/.env.bak' \
+      --exclude='env/monitoring.env' \
       --exclude='docker/.env.generated' \
-      --exclude='docker/assets/monitoring/monitoring.env' \
       --exclude='k8s/helm/nexent/generated-values.yaml' \
       --exclude='k8s/helm/nexent/generated-runtime-values.yaml' \
       --exclude='k8s/helm/nexent/generated-secrets-values.yaml' \
@@ -515,7 +515,7 @@ copy_deployment_bundle() {
     find "$OUTPUT_DIR" -name '.DS_Store' -type f -delete 2>/dev/null || true
   fi
 
-  rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/assets/monitoring/monitoring.env" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
+  rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/env/monitoring.env" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
   rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-persistence-values.yaml"
   case "$TARGET" in
     docker) rm -rf "$OUTPUT_DIR/deploy/k8s" ;;

@@ -390,7 +390,7 @@ assert_contains "$DOCKER_DEPLOY_MONITORING_BLOCK" 'cleanup_stale_monitoring_serv
 assert_contains "$DOCKER_DEPLOY_MONITORING_BLOCK" '--env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE"' "docker deploy should load generated monitoring.env for monitoring compose"
 
 DOCKER_UNINSTALL_CONTENT="$(cat "$SCRIPT_DIR/../docker/uninstall.sh")"
-assert_contains "$DOCKER_UNINSTALL_CONTENT" 'MONITORING_ENV_FILE="$SCRIPT_DIR/assets/monitoring/monitoring.env"' "docker uninstall should know the generated monitoring env file"
+assert_contains "$DOCKER_UNINSTALL_CONTENT" 'MONITORING_ENV_FILE="$PROJECT_ROOT/deploy/env/monitoring.env"' "docker uninstall should know the generated monitoring env file"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'env_file_args+=(--env-file "$MONITORING_ENV_FILE")' "docker uninstall should load generated monitoring.env when downing monitoring compose"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'docker_compose_down_file "$COMPOSE_DIR/docker-compose-monitoring.yml" false "$remove_volumes"' "docker uninstall should down the monitoring compose file"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'remove_docker_containers_by_name < <(monitoring_container_names)' "docker uninstall should remove monitoring containers by name as a fallback"
@@ -410,7 +410,7 @@ assert_contains "$K8S_UNINSTALL_CONTENT" "nexent-grafana" "k8s monitoring fallba
 assert_contains "$K8S_UNINSTALL_CONTENT" "nexent-zipkin" "k8s monitoring fallback should include Zipkin"
 assert_contains "$K8S_UNINSTALL_CONTENT" "cleanup_leftover_nexent_resources" "k8s uninstall should use shared leftover cleanup"
 
-MONITORING_EXAMPLE_FILE="$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example"
+MONITORING_EXAMPLE_FILE="$SCRIPT_DIR/../env/monitoring.env.example"
 MONITORING_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml"
 MONITORING_COMPOSE_DEFAULTS="$TMP_DIR/docker-compose-monitoring-defaults.txt"
 awk '
@@ -439,16 +439,24 @@ while IFS='=' read -r key compose_default; do
   fi
 done < "$MONITORING_COMPOSE_DEFAULTS"
 
-assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "GRAFANA_ADMIN_PASSWORD=nexent@4321" "docker monitoring defaults should define Grafana admin password"
+if [ -f "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example" ]; then
+  echo "FAIL: monitoring.env.example should live under deploy/env"
+  exit 1
+fi
+if [ -f "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env" ]; then
+  echo "FAIL: monitoring.env should live under deploy/env"
+  exit 1
+fi
+assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "GRAFANA_ADMIN_PASSWORD=nexent@4321" "docker monitoring defaults should define Grafana admin password"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexent@4321}' "docker compose Grafana password fallback should match monitoring.env.example"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "adminPassword: nexent@4321" "k8s monitoring Grafana password should match docker monitoring default"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "LANGFUSE_POSTGRES_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse postgres password"
+assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_POSTGRES_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse postgres password"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_POSTGRES_PASSWORD:-nexent@4321' "docker compose Langfuse postgres password fallback should match monitoring.env.example"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "password: nexent@4321" "k8s monitoring Langfuse postgres password should match docker monitoring default"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "LANGFUSE_INIT_USER_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse init user password"
+assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_INIT_USER_PASSWORD=nexent@4321" "docker monitoring defaults should define Langfuse init user password"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-nexent@4321}' "docker compose Langfuse init user password fallback should match monitoring.env.example"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "userPassword: nexent@4321" "k8s monitoring Langfuse init user password should match docker monitoring default"
-assert_contains "$(cat "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env.example")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
+assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED=false" "docker monitoring defaults should include all compose Langfuse clickhouse settings"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"

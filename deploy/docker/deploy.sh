@@ -20,8 +20,8 @@ ORIGINAL_ARGS=("$@")
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
-MONITORING_ENV_EXAMPLE="$DOCKER_ASSETS_DIR/monitoring/monitoring.env.example"
-MONITORING_ENV_FILE="$DOCKER_ASSETS_DIR/monitoring/monitoring.env"
+MONITORING_ENV_EXAMPLE="$DEPLOY_ROOT/env/monitoring.env.example"
+MONITORING_ENV_FILE="$DEPLOY_ROOT/env/monitoring.env"
 SQL_DIR="$DEPLOY_ROOT/sql"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then
