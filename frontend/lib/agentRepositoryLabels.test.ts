@@ -2,31 +2,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TFunction } from "i18next";
 import {
-  getAgentRepositoryCategoryLabel,
   getAgentRepositoryTagLabel,
   getAgentRepositoryTagSearchText,
+  resolveAgentRepositoryTagForSubmit,
 } from "./agentRepositoryLabels";
 
 const t = ((key: string) => {
   const translations: Record<string, string> = {
-    "agentRepository.category.writingAssistant": "Writing Assistant",
-    "agentRepository.category.other": "Other",
     "agentRepository.tag.marketing": "Marketing",
     "agentRepository.tag.codeReview": "Code Review",
-    "agentRepository.review.unknownCategory": "Uncategorized",
   };
   return translations[key] ?? key;
 }) as TFunction;
 
 describe("agentRepositoryLabels", () => {
-  it("localizes category by stable key", () => {
-    const label = getAgentRepositoryCategoryLabel(
-      { id: 1, key: "writing_assistant", name: "写作助手" },
-      t
-    );
-    assert.equal(label, "Writing Assistant");
-  });
-
   it("localizes preset tag keys", () => {
     assert.equal(getAgentRepositoryTagLabel("marketing", t), "Marketing");
   });
@@ -43,5 +32,23 @@ describe("agentRepositoryLabels", () => {
     const searchText = getAgentRepositoryTagSearchText("marketing", t);
     assert.match(searchText, /marketing/);
     assert.match(searchText, /Marketing/);
+  });
+
+  it("resolves preset tag keys to localized submit values", () => {
+    assert.equal(resolveAgentRepositoryTagForSubmit("marketing", t), "Marketing");
+  });
+
+  it("resolves legacy Chinese preset values to localized submit values", () => {
+    assert.equal(
+      resolveAgentRepositoryTagForSubmit("代码审查", t),
+      "Code Review"
+    );
+  });
+
+  it("returns custom tags unchanged for submit", () => {
+    assert.equal(
+      resolveAgentRepositoryTagForSubmit("my-custom-tag", t),
+      "my-custom-tag"
+    );
   });
 });

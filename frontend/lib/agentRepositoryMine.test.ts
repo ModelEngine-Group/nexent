@@ -50,8 +50,66 @@ function makeListingItem(
   };
 }
 
-const ALLOWED_ICONS = ["🤖", "✍️"] as const;
-const ALLOWED_CATEGORY_IDS = [1, 2] as const;
+describe("buildApplyListingFormPrefill", () => {
+  it("maps valid icon and tags", () => {
+    const prefill = buildApplyListingFormPrefill(
+      makeListingItem({
+        icon: "✍️",
+        tags: ["marketing", "copywriting"],
+      })
+    );
+
+    assert.deepEqual(prefill, {
+      icon: "✍️",
+      tags: ["marketing", "copywriting"],
+    });
+  });
+
+  it("returns null when source item is null", () => {
+    assert.equal(buildApplyListingFormPrefill(null), null);
+  });
+
+  it("accepts custom emoji not in preset list", () => {
+    const prefill = buildApplyListingFormPrefill(
+      makeListingItem({
+        icon: "🎯",
+        tags: ["marketing"],
+      })
+    );
+
+    assert.deepEqual(prefill, {
+      icon: "🎯",
+      tags: ["marketing"],
+    });
+  });
+
+  it("ignores invalid icon but keeps tags", () => {
+    const prefill = buildApplyListingFormPrefill(
+      makeListingItem({
+        icon: "invalid",
+        tags: ["marketing"],
+      })
+    );
+
+    assert.deepEqual(prefill, {
+      icon: null,
+      tags: ["marketing"],
+    });
+  });
+
+  it("normalizes and truncates tags", () => {
+    const prefill = buildApplyListingFormPrefill(
+      makeListingItem({
+        tags: [" marketing ", "marketing", "copywriting", "a", "b", "c"],
+      }),
+      {
+        maxTags: 3,
+      }
+    );
+
+    assert.deepEqual(prefill?.tags, ["marketing", "copywriting", "a"]);
+  });
+});
 
 describe("agentRepositoryMine menu helpers", () => {
   it("returns apply only for published agent without matching repository version", () => {
@@ -484,72 +542,5 @@ describe("pickApplyListingPrefillSource", () => {
 
   it("returns null for empty items", () => {
     assert.equal(pickApplyListingPrefillSource([], "v1"), null);
-  });
-});
-
-describe("buildApplyListingFormPrefill", () => {
-  it("maps valid icon, category_id, and tags", () => {
-    const prefill = buildApplyListingFormPrefill(
-      makeListingItem({
-        icon: "✍️",
-        category_id: 2,
-        tags: ["marketing", "copywriting"],
-      }),
-      {
-        allowedIcons: ALLOWED_ICONS,
-        allowedCategoryIds: ALLOWED_CATEGORY_IDS,
-      }
-    );
-
-    assert.deepEqual(prefill, {
-      icon: "✍️",
-      categoryId: 2,
-      tags: ["marketing", "copywriting"],
-    });
-  });
-
-  it("returns null when source item is null", () => {
-    assert.equal(
-      buildApplyListingFormPrefill(null, {
-        allowedIcons: ALLOWED_ICONS,
-        allowedCategoryIds: ALLOWED_CATEGORY_IDS,
-      }),
-      null
-    );
-  });
-
-  it("ignores invalid icon and category_id but keeps tags", () => {
-    const prefill = buildApplyListingFormPrefill(
-      makeListingItem({
-        icon: "invalid",
-        category_id: 99,
-        tags: ["marketing"],
-      }),
-      {
-        allowedIcons: ALLOWED_ICONS,
-        allowedCategoryIds: ALLOWED_CATEGORY_IDS,
-      }
-    );
-
-    assert.deepEqual(prefill, {
-      icon: null,
-      categoryId: null,
-      tags: ["marketing"],
-    });
-  });
-
-  it("normalizes and truncates tags", () => {
-    const prefill = buildApplyListingFormPrefill(
-      makeListingItem({
-        tags: [" marketing ", "marketing", "copywriting", "a", "b", "c"],
-      }),
-      {
-        allowedIcons: ALLOWED_ICONS,
-        allowedCategoryIds: ALLOWED_CATEGORY_IDS,
-        maxTags: 3,
-      }
-    );
-
-    assert.deepEqual(prefill?.tags, ["marketing", "copywriting", "a"]);
   });
 });
