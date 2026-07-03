@@ -306,8 +306,8 @@ export default function SelectToolsDialog({
         footer={null}
         width={1100}
         zIndex={1000}
-        maskClosable={true}
-        destroyOnClose
+        mask={{ closable: true }}
+        destroyOnHidden
       >
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
 

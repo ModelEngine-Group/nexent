@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 from typing import Any
 
@@ -9,6 +10,15 @@ from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("store_memory_tool")
+
+
+def _run_coroutine(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 class StoreMemoryTool(Tool):
@@ -58,6 +68,21 @@ class StoreMemoryTool(Tool):
         self.running_prompt_en = "Saving to memory..."
         self.running_prompt_zh = "保存到记忆中..."
 
+    def _resolve_memory_levels(self) -> list[str]:
+        """Determine which memory levels to write to based on user preferences.
+
+        Conservative default: when config is unavailable, assume "never"
+        (no agent-level sharing) to protect user privacy.
+        """
+        levels = ["user_agent", "agent"]
+        if not self.memory_user_config or self.memory_user_config.agent_share_option == "never":
+            levels.remove("agent")
+        if self.memory_user_config and self.agent_id in getattr(self.memory_user_config, "disable_user_agent_ids", []):
+            levels = [l for l in levels if l != "user_agent"]
+        if self.memory_user_config and self.agent_id in getattr(self.memory_user_config, "disable_agent_ids", []):
+            levels = [l for l in levels if l != "agent"]
+        return levels
+
     def forward(self, content: str) -> str:
         logger.info(f"[ACTIVE MEMORY] StoreMemoryTool invoked: content={content[:200]}, user_id={self.user_id}, agent_id={self.agent_id}, store_count={self.store_count}/{self.max_stores_per_run}")
         if self.observer:
@@ -67,19 +92,13 @@ class StoreMemoryTool(Tool):
         if self.store_count >= self.max_stores_per_run:
             return "Memory storage limit reached for this conversation. Information will be saved automatically at the end."
 
-        levels = ["user_agent", "agent"]
-        if self.memory_user_config.agent_share_option == "never":
-            levels.remove("agent")
-        if self.agent_id in getattr(self.memory_user_config, "disable_user_agent_ids", []):
-            levels = [l for l in levels if l != "user_agent"]
-        if self.agent_id in getattr(self.memory_user_config, "disable_agent_ids", []):
-            levels = [l for l in levels if l != "agent"]
+        levels = self._resolve_memory_levels()
         if not levels:
             return "No memory levels available (all disabled by user preferences)."
 
         try:
             from ...memory.memory_service import add_memory_in_levels
-            result = asyncio.run(add_memory_in_levels(
+            result = _run_coroutine(add_memory_in_levels(
                 messages=[{"role": "user", "content": content}],
                 memory_config=self.memory_config,
                 tenant_id=self.tenant_id,
