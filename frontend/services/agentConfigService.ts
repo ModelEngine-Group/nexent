@@ -805,6 +805,7 @@ export const searchAgentInfo = async (
               is_available: tool.is_available,
               usage: tool.usage,
               category: tool.category,
+              inputs: tool.inputs,
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
                     name: param.name,
