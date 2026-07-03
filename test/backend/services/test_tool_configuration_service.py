@@ -1068,6 +1068,70 @@ class TestListAllTools:
         assert result[0]["params"] == []  # default value
 
 
+class TestListAllToolsWithLabels:
+    """Test list_all_tools with the labels parameter exercising the real function body."""
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    async def test_list_all_tools_without_labels(self, mock_query, mock_descriptions):
+        """list_all_tools without labels calls query_all_tools."""
+        mock_query.return_value = [
+            {"tool_id": 1, "name": "t1", "description": "d1", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""}
+        ]
+        mock_descriptions.return_value = {}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        assert len(result) == 1
+        assert result[0]["tool_id"] == 1
+        mock_query.assert_called_once_with("tenant1")
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_tools_by_labels')
+    async def test_list_all_tools_with_labels(self, mock_query_by_labels, mock_descriptions):
+        """list_all_tools with labels calls query_tools_by_labels."""
+        mock_query_by_labels.return_value = [
+            {"tool_id": 2, "name": "t2", "description": "d2", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""}
+        ]
+        mock_descriptions.return_value = {}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1", labels=["database", "file"])
+
+        assert len(result) == 1
+        assert result[0]["tool_id"] == 2
+        mock_query_by_labels.assert_called_once_with("tenant1", ["database", "file"])
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    async def test_list_all_tools_filters_system_managed_tools(self, mock_query, mock_descriptions):
+        """list_all_tools filters out tools in SYSTEM_MANAGED_TOOL_NAMES."""
+        mock_query.return_value = [
+            {"tool_id": 1, "name": "tavily_search", "description": "d1", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 2, "name": "store_memory", "description": "d2", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 3, "name": "search_memory", "description": "d3", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 4, "name": "postgres_database", "description": "d4", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+        ]
+        mock_descriptions.return_value = {}
+
+        from backend.services.tool_configuration_service import list_all_tools
+        result = await list_all_tools("tenant1")
+
+        result_names = [t["name"] for t in result]
+        assert "store_memory" not in result_names
+        assert "search_memory" not in result_names
+        assert "tavily_search" in result_names
+        assert "postgres_database" in result_names
+        assert len(result) == 2
+
+
 # test the fixture and helper function
 @pytest.fixture
 def sample_tool_info():

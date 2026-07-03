@@ -24,6 +24,8 @@ export interface StepContent {
   id: string;
   type:
     | typeof chatConfig.messageTypes.MODEL_OUTPUT
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_THINKING
+    | typeof chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING
     | typeof chatConfig.messageTypes.MODEL_OUTPUT_CODE
     | typeof chatConfig.messageTypes.PARSING
     | typeof chatConfig.messageTypes.EXECUTION

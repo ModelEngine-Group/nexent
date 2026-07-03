@@ -384,9 +384,7 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) =>
       message.type === chatConfig.messageTypes.AGENT_NEW_RUN ||
       message.type === chatConfig.messageTypes.GENERATING_CODE ||
-      message.type === chatConfig.messageTypes.EXECUTING ||
-      message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
-      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+      message.type === chatConfig.messageTypes.EXECUTING,
     render: (message, _t) => (
       <div
         style={{
@@ -401,6 +399,25 @@ const messageHandlers: MessageHandler[] = [
         }}
       >
         <span>{message.content}</span>
+      </div>
+    ),
+  },
+
+  // Thinking types processor - render through MarkdownRenderer for proper formatting
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+    render: (message, _t) => (
+      <div
+        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+      >
+        <MarkdownRenderer
+          content={convertToMarkdownCodeFences(message.content)}
+          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+          showDiagramToggle={false}
+          enableMultimodal={false}
+        />
       </div>
     ),
   },
@@ -1134,18 +1151,11 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) => message.type === "model_output",
     render: (message, _t) => (
       <div
-        style={{
-          fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-          fontSize: "0.875rem",
-          lineHeight: 1.5,
-          color: message.subType === "deep_thinking" ? "#6b7280" : "#1f2937",
-          fontWeight: 400,
-        }}
+        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
       >
         <MarkdownRenderer
           content={convertToMarkdownCodeFences(message.content)}
-          className="task-message-content"
+          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
           showDiagramToggle={false}
           enableMultimodal={false}
         />

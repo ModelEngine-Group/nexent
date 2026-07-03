@@ -491,8 +491,61 @@ NORTHBOUND_EXTERNAL_URL = os.getenv(
     "NORTHBOUND_EXTERNAL_URL", "http://localhost:5013/api").rstrip("/")
 
 
-# APP Version
-APP_VERSION = "v2.2.1"
+def _collect_version_candidates():
+    """Build the ordered list of candidate paths to read ``APP_VERSION`` from.
+
+    The order is: env override (test/script hook), the container image path,
+    and finally the local repository root. Exposed as a separate function so
+    tests can drive the resolver deterministically without monkey-patching
+    ``pathlib.Path`` globally.
+    """
+    candidates = []
+    override = os.getenv("APP_VERSION_FILE")
+    if override:
+        candidates.append(Path(override))
+    candidates.append(Path("/opt/nexent/VERSION"))
+    # backend/consts/const.py -> backend/consts -> backend -> <repo-root>
+    candidates.append(Path(__file__).resolve().parents[2] / "VERSION")
+    return candidates
+
+
+def _read_version_from(candidate):
+    """Return the parsed version string from ``candidate`` or ``None``.
+
+    Reads only the first non-blank line and strips surrounding whitespace.
+    Returns ``None`` if the file is missing, unreadable, or its first line
+    is empty after trimming.
+    """
+    try:
+        if not candidate.is_file():
+            return None
+        first_line = candidate.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    if not first_line:
+        return None
+    version = first_line[0].strip()
+    return version or None
+
+
+def _resolve_app_version(default: str = "v2.2.1") -> str:
+    """Read the semantic app version from the VERSION file.
+
+    Search order:
+      1. Explicit ``APP_VERSION_FILE`` environment override (test/script hook).
+      2. Container path ``/opt/nexent/VERSION`` (set by the runtime Dockerfile).
+      3. ``<repo-root>/VERSION`` for local development, where ``<repo-root>`` is
+         derived from this file's location (backend/consts -> repo root).
+      4. Hardcoded default as a last resort.
+    """
+    for candidate in _collect_version_candidates():
+        version = _read_version_from(candidate)
+        if version is not None:
+            return version
+    return default
+
+
+APP_VERSION = _resolve_app_version()
 
 
 # Skill Creation Streaming Configuration
@@ -503,3 +556,6 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "tool",
     "execution_logs",
 ])
+
+# SSE streaming event type for status messages
+STREAM_STATUS_EVENT = "event: stream_status\n"

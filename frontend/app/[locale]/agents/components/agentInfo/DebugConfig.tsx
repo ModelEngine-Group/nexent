@@ -27,6 +27,7 @@ import {
   MAX_FILE_COUNT,
   MAX_FILE_SIZE,
 } from "@/lib/chat/fileIconUtils";
+import { safeUUID } from "@/lib/utils";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
@@ -666,7 +667,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
       // Process stream response
       await handleStreamResponse(
-        reader,
+        reader as ReadableStreamDefaultReader<Uint8Array>,
         setMessages,
         resetTimeout,
         stepIdCounter.current,
@@ -883,7 +884,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         return;
       }
 
-      const fileId = crypto.randomUUID();
+      const fileId = safeUUID();
       const extension = getFileExtension(file.name);
 
       const isImage = file.type.startsWith("image/") || chatConfig.imageExtensions.includes(extension);

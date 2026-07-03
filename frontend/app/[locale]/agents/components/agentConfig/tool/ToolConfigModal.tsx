@@ -1429,6 +1429,7 @@ export default function ToolConfigModal({
 
       // Update local state only - actual save will happen when user clicks "Save Agent"
       updateTools(newSelectedTools);
+
       message.success(t("toolConfig.message.saveSuccess"));
       handleClose(); // Close modal
 

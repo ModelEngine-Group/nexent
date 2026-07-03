@@ -40,10 +40,20 @@ class MockModelModule:
 
 consts_mock.model = MockModelModule()
 
+# Mock consts.tool_labels with BUILTIN_LABEL_MAP
+tool_labels_mock = MagicMock()
+tool_labels_mock.BUILTIN_LABEL_MAP = {}
+consts_mock.tool_labels = tool_labels_mock
+
+# consts_mock must have __path__ to be recognized as a package
+# so that `from consts.tool_labels import ...` works
+consts_mock.__path__ = []
+
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.model'] = consts_mock.model
+sys.modules['consts.tool_labels'] = tool_labels_mock
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -106,6 +116,8 @@ from backend.database.tool_db import (
     create_tool,
     create_or_update_tool_by_tool_info,
     query_all_tools,
+    query_tools_by_labels,
+    update_tool_labels,
     query_tool_instances_by_id,
     query_tool_instances_by_agent_id,
     query_tools_by_ids,
@@ -1666,6 +1678,103 @@ class TestAddToolFieldDescriptionZh:
         
         # Should not have description_zh since tool not in SDK
         assert "description_zh" not in result or result.get("description_zh") is None
+
+
+def test_query_tools_by_labels(monkeypatch, mock_session):
+    """Test querying tools filtered by labels"""
+    session, query = mock_session
+    mock_tool_info = MockToolInfo()
+    mock_tool_info.labels = ["database", "search"]
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_tool_info]
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__)
+
+    result = query_tools_by_labels("tenant1", ["database"])
+
+    assert len(result) == 1
+    assert result[0]["tool_id"] == 1
+    assert result[0]["labels"] == ["database", "search"]
+
+
+def test_query_tools_by_labels_empty_result(monkeypatch, mock_session):
+    """Test querying tools by labels returns empty when no match"""
+    session, query = mock_session
+
+    mock_all = MagicMock()
+    mock_all.return_value = []
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = query_tools_by_labels("tenant1", ["nonexistent"])
+
+    assert result == []
+
+
+def test_update_tool_labels_success(monkeypatch, mock_session):
+    """Test successfully updating tool labels"""
+    session, query = mock_session
+    mock_tool_info = MockToolInfo()
+    mock_tool_info.labels = ["old_label"]
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_tool_info
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    session.flush = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = update_tool_labels(1, "tenant1", ["new_label"], "user1")
+
+    assert result is True
+    assert mock_tool_info.labels == ["new_label"]
+    assert mock_tool_info.updated_by == "user1"
+    session.flush.assert_called_once()
+
+
+def test_update_tool_labels_not_found(monkeypatch, mock_session):
+    """Test updating labels for non-existent tool returns False"""
+    session, query = mock_session
+
+    mock_first = MagicMock()
+    mock_first.return_value = None
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    result = update_tool_labels(999, "tenant1", ["label"], "user1")
+
+    assert result is False
 
 
 if __name__ == "__main__":

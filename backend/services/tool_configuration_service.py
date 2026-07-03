@@ -15,6 +15,7 @@ from pydantic_core import PydanticUndefined
 from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -30,6 +31,7 @@ from database.tool_db import (
     check_tool_list_initialized,
     create_or_update_tool_by_tool_info,
     query_all_tools,
+    query_tools_by_labels,
     query_tool_instances_by_id,
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
@@ -200,6 +202,7 @@ def get_local_tools() -> List[ToolInfo]:
             inputs=json.dumps(processed_inputs, ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
+            labels=getattr(tool_class, 'labels', None),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -245,7 +248,8 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         class_name=tool_name,
         usage=None,
         origin_name=tool_name,
-        category=None
+        category=None,
+        labels=None
     )
     return tool_info
 
@@ -486,11 +490,14 @@ async def update_tool_list(tenant_id: str, user_id: str):
                                           tool_list=local_tools+mcp_tools+langchain_tools)
 
 
-async def list_all_tools(tenant_id: str):
+async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     """
-    List all tools for a given tenant
+    List all tools for a given tenant, optionally filtered by labels (OR match).
     """
-    tools_info = query_all_tools(tenant_id)
+    if labels:
+        tools_info = query_tools_by_labels(tenant_id, labels)
+    else:
+        tools_info = query_all_tools(tenant_id)
 
     # Get description_zh from SDK for local tools (not persisted to DB)
     local_tool_descriptions = get_local_tools_description_zh()
@@ -499,6 +506,9 @@ async def list_all_tools(tenant_id: str):
     formatted_tools = []
     for tool in tools_info:
         tool_name = tool.get("name")
+
+        if tool_name in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
 
         # Always use SDK inputs for local tools to stay in sync with current tool code
         is_local = tool.get("source") == "local"
@@ -555,7 +565,9 @@ async def list_all_tools(tenant_id: str):
             "usage": tool.get("usage"),
             "params": tool.get("params", []),
             "inputs": inputs_str,
-            "category": tool.get("category")
+            "category": tool.get("category"),
+            "labels": tool.get("labels", []),
+            "updated_by": tool.get("updated_by", "")
         }
         formatted_tools.append(formatted_tool)
     return formatted_tools

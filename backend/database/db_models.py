@@ -65,6 +65,9 @@ class ConversationMessage(TableBase):
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
     opinion_flag = Column(String(
         1), doc="User evaluation of the conversation. Enumeration value \"Y\" represents a positive review, \"N\" represents a negative review")
+    status = Column(
+        String(30), default='completed',
+        doc="Lifecycle status: pending / streaming / completed / failed / stopped")
 
 
 class ConversationMessageUnit(TableBase):
@@ -85,6 +88,9 @@ class ConversationMessageUnit(TableBase):
     unit_type = Column(String(100), doc="Type of the smallest answer unit")
     unit_content = Column(
         String, doc="Complete content of the smallest reply unit")
+    unit_status = Column(
+        String(30), default='completed',
+        doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
 
 
 class ConversationSourceImage(TableBase):
@@ -419,6 +425,7 @@ class ToolInfo(TableBase):
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
+    labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
