@@ -195,6 +195,14 @@ class ErrorCode(Enum):
     AIDP_CONNECTION_ERROR = "130503"  # AIDP connection error
     AIDP_AUTH_ERROR = "130504"  # AIDP auth error
 
+    # 06 - RAGFlow Service
+    RAGFLOW_SERVICE_ERROR = "130507"  # RAGFlow service error
+    RAGFLOW_CONFIG_INVALID = "130508"  # Invalid RAGFlow configuration
+    RAGFLOW_CONNECTION_ERROR = "130509"  # RAGFlow connection error
+    RAGFLOW_AUTH_ERROR = "130510"  # RAGFlow auth error
+    RAGFLOW_RATE_LIMIT = "130511"  # RAGFlow rate limit
+    RAGFLOW_RESPONSE_ERROR = "130512"  # RAGFlow response error
+
     # ==================== 14 Northbound / 北向接口 ====================
     # 01 - Request
     NORTHBOUND_REQUEST_FAILED = "140101"  # Northbound request failed
@@ -263,6 +271,12 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.IDATA_CONNECTION_ERROR: 502,
     ErrorCode.IDATA_RESPONSE_ERROR: 502,
     ErrorCode.IDATA_RATE_LIMIT: 429,
+    # RAGFlow (module 13)
+    ErrorCode.RAGFLOW_CONFIG_INVALID: 400,
+    ErrorCode.RAGFLOW_AUTH_ERROR: 401,
+    ErrorCode.RAGFLOW_CONNECTION_ERROR: 502,
+    ErrorCode.RAGFLOW_RESPONSE_ERROR: 502,
+    ErrorCode.RAGFLOW_RATE_LIMIT: 429,
     # AIDP (module 13)
     ErrorCode.AIDP_CONFIG_INVALID: 400,
     ErrorCode.AIDP_AUTH_ERROR: 502,
