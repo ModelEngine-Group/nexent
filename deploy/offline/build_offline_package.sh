@@ -38,6 +38,38 @@ if [ -f "$VERSION_HELPER" ]; then
 fi
 
 show_help() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "用法：$0 [选项]"
+    echo ""
+    echo "构建 Nexent 离线部署包"
+    echo ""
+    echo "选项："
+    echo "  --version VERSION       Nexent 镜像版本（例如 v1.0.0 或 latest）"
+    echo "                           默认：$DEFAULT_VERSION"
+    echo "  --platform PLATFORM     目标平台（amd64 或 arm64）"
+    echo "                           默认：$DEFAULT_PLATFORM"
+    echo "  --output-dir DIR        离线包输出目录"
+    echo "                           默认：$DEFAULT_OUTPUT_DIR"
+    echo "  --include-source BOOL   是否包含源码（true 或 false）"
+    echo "                           默认：$DEFAULT_INCLUDE_SOURCE"
+    echo "  --target TARGET         docker、k8s 或 all"
+    echo "                           默认：$DEFAULT_TARGET"
+    echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
+    echo "                           默认：$DEFAULT_COMPRESS"
+    echo "  --components LIST       用于镜像选择的部署组件"
+    echo "  --image-source SOURCE   general、mainland 或 local-latest"
+    echo "  --registry-profile NAME 兼容旧参数，映射到 --image-source general|mainland"
+    echo "  --config FILE           包含组件和镜像源的部署配置"
+    echo "  --dry-run               只展示执行计划，不执行实际操作"
+    echo "  --help                  显示帮助信息"
+    echo ""
+    echo "示例："
+    echo "  $0 --version v1.0.0 --platform arm64"
+    echo "  $0 --version latest --platform amd64 --include-source false"
+    echo "  $0 --dry-run  # 只展示执行计划"
+    return
+  fi
+
   echo "Usage: $0 [OPTIONS]"
   echo ""
   echo "Build offline deployment package for Nexent"
@@ -114,7 +146,11 @@ parse_args() {
         exit 0
         ;;
       *)
-        echo "Unknown option: $1"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "未知选项：$1"
+        else
+          echo "Unknown option: $1"
+        fi
         show_help
         exit 1
         ;;
@@ -133,15 +169,27 @@ parse_args() {
   COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
 
   if [[ "$PLATFORM" != "amd64" && "$PLATFORM" != "arm64" ]]; then
-    echo "Error: Platform must be 'amd64' or 'arm64'"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Platform 必须是 'amd64' 或 'arm64'"
+    else
+      echo "Error: Platform must be 'amd64' or 'arm64'"
+    fi
     exit 1
   fi
   if [[ "$TARGET" != "docker" && "$TARGET" != "k8s" && "$TARGET" != "all" ]]; then
-    echo "Error: Target must be 'docker', 'k8s', or 'all'"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Target 必须是 'docker'、'k8s' 或 'all'"
+    else
+      echo "Error: Target must be 'docker', 'k8s', or 'all'"
+    fi
     exit 1
   fi
   if [[ "$COMPRESS" != "true" && "$COMPRESS" != "false" ]]; then
-    echo "Error: Compress must be 'true' or 'false'"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Compress 必须是 'true' 或 'false'"
+    else
+      echo "Error: Compress must be 'true' or 'false'"
+    fi
     exit 1
   fi
 }
@@ -163,6 +211,25 @@ prepare_deployment_image_config() {
 }
 
 show_dry_run_plan() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "=== DRY RUN 模式 ==="
+    echo "版本：$VERSION"
+    echo "平台：$PLATFORM"
+    echo "输出目录：$OUTPUT_DIR"
+    echo "包含源码：$INCLUDE_SOURCE"
+    echo "目标：$TARGET"
+    echo "压缩：$COMPRESS"
+    echo "组件：$DEPLOYMENT_COMPONENTS"
+    echo "镜像源：$DEPLOYMENT_IMAGE_SOURCE"
+    echo ""
+    echo "将拉取的镜像："
+    get_nexent_images
+    get_third_party_images
+    echo ""
+    echo "不会执行实际操作。"
+    exit 0
+  fi
+
     echo "=== DRY RUN MODE ==="
     echo "Version: $VERSION"
     echo "Platform: $PLATFORM"

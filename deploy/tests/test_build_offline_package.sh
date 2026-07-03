@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TMP_DIR="${TMPDIR:-/tmp}/nexent-offline-package-test-$$"
 BIN_DIR="$TMP_DIR/bin"
 OUT_DIR="$TMP_DIR/out"
+export DEPLOYMENT_LANG=en
 
 mkdir -p "$BIN_DIR" "$OUT_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT

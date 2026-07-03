@@ -13,6 +13,7 @@ mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
 DEPLOYMENT_ROOT_ENV="$TMP_DIR/root.env"
 : > "$DEPLOYMENT_ROOT_ENV"
+export DEPLOYMENT_LANG=en
 
 assert_eq() {
   local expected="$1"
@@ -85,6 +86,48 @@ write_full_config() {
     echo 'imageSource: "local-latest"'
   } > "$file"
 }
+
+assert_eq "en" "$(DEPLOYMENT_LANG="" LC_ALL="" LC_MESSAGES="" LANGUAGE="" LANG="en_US.UTF-8" deployment_detect_language)" "English locale should select English"
+assert_eq "zh" "$(DEPLOYMENT_LANG="" LC_ALL="" LC_MESSAGES="" LANGUAGE="" LANG="zh_CN.UTF-8" deployment_detect_language)" "Chinese LANG should select Chinese"
+assert_eq "zh" "$(DEPLOYMENT_LANG="" LC_ALL="zh_CN.UTF-8" LC_MESSAGES="" LANGUAGE="" LANG="en_US.UTF-8" deployment_detect_language)" "LC_ALL should take priority over LANG"
+assert_eq "en" "$(DEPLOYMENT_LANG="en" LC_ALL="" LC_MESSAGES="" LANGUAGE="" LANG="zh_CN.UTF-8" deployment_detect_language)" "DEPLOYMENT_LANG should force English"
+assert_eq "zh" "$(DEPLOYMENT_LANG=zh bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache Chinese"
+assert_eq "en" "$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash -c 'source deploy/common/common.sh; printf "%s" "$DEPLOYMENT_LANGUAGE"')" "language initialization should cache forced English"
+assert_eq "后端 API 服务" "$(DEPLOYMENT_LANGUAGE=zh deployment_i18n image_build.detail.main)" "image build TUI details should support Chinese"
+assert_eq "backend API service" "$(DEPLOYMENT_LANGUAGE=en deployment_i18n image_build.detail.main)" "image build TUI details should preserve English"
+
+ZH_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
+assert_contains "$ZH_DEPLOY_HELP" "用法：" "deploy wrapper help should follow Chinese locale"
+EN_DEPLOY_HELP="$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
+assert_contains "$EN_DEPLOY_HELP" "Usage:" "DEPLOYMENT_LANG should force English deploy wrapper help"
+
+ZH_ROOT_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../../deploy.sh" --help)"
+assert_contains "$ZH_ROOT_DEPLOY_HELP" "用法：" "root deploy help should follow Chinese locale"
+assert_contains "$ZH_ROOT_DEPLOY_HELP" "此根入口只转发到目标专用部署脚本。" "root deploy help should describe forwarding in Chinese"
+
+ZH_UNINSTALL_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../uninstall.sh" --help)"
+assert_contains "$ZH_UNINSTALL_HELP" "用法：" "uninstall wrapper help should follow Chinese locale"
+
+ZH_ROOT_UNINSTALL_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../../uninstall.sh" --help)"
+assert_contains "$ZH_ROOT_UNINSTALL_HELP" "用法：" "root uninstall help should follow Chinese locale"
+assert_contains "$ZH_ROOT_UNINSTALL_HELP" "此根入口只转发到目标专用卸载脚本。" "root uninstall help should describe forwarding in Chinese"
+
+ZH_IMAGE_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --help)"
+assert_contains "$ZH_IMAGE_HELP" "用法：deploy/images/build.sh" "image build help should follow Chinese locale"
+
+ZH_ROOT_BUILD_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../../build.sh" --help)"
+assert_contains "$ZH_ROOT_BUILD_HELP" "用法：" "root build help should follow Chinese locale"
+assert_contains "$ZH_ROOT_BUILD_HELP" "bash build.sh --package" "root build help should document package mode"
+
+ZH_OFFLINE_DRY_RUN="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
+assert_contains "$ZH_OFFLINE_DRY_RUN" "=== DRY RUN 模式 ===" "offline dry-run should follow Chinese locale"
+assert_contains "$ZH_OFFLINE_DRY_RUN" "目标：docker" "offline dry-run target label should follow Chinese locale"
+
+if DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../images/build.sh" --unknown >/tmp/nexent-image-build-zh-invalid.log 2>&1; then
+  echo "FAIL: unknown image build option should fail"
+  exit 1
+fi
+assert_contains "$(cat /tmp/nexent-image-build-zh-invalid.log)" "未知选项：--unknown" "invalid image build option should follow Chinese locale"
 
 APP_VERSION="latest"
 deployment_prepare_config --app-version latest

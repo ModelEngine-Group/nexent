@@ -58,29 +58,57 @@ ROOT_DIR_PARAM=""
 # Suppress the orphan warning
 export COMPOSE_IGNORE_ORPHANS=True
 
+print_docker_deploy_usage() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "用法：$0 [选项]"
+    echo ""
+    echo "部署选项："
+    echo "  --components LIST"
+    echo "  --port-policy development|production"
+    echo "  --image-source general|mainland|local-latest"
+    echo "  --monitoring-provider otlp|phoenix|langfuse|langsmith|grafana|zipkin"
+    echo "  --version VERSION"
+    echo "  --use-local-config"
+    echo "  --reconfigure"
+    echo "  --rotate-secrets"
+    echo "  --refresh-es-key"
+    echo "  --config PATH"
+    echo "  --root-dir PATH"
+    echo ""
+    echo "卸载：bash uninstall.sh"
+    return
+  fi
+
+  echo "Usage: $0 [options]"
+  echo ""
+  echo "Deploy options:"
+  echo "  --components LIST"
+  echo "  --port-policy development|production"
+  echo "  --image-source general|mainland|local-latest"
+  echo "  --monitoring-provider otlp|phoenix|langfuse|langsmith|grafana|zipkin"
+  echo "  --version VERSION"
+  echo "  --use-local-config"
+  echo "  --reconfigure"
+  echo "  --rotate-secrets"
+  echo "  --refresh-es-key"
+  echo "  --config PATH"
+  echo "  --root-dir PATH"
+  echo ""
+  echo "Uninstall: bash uninstall.sh"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     delete|delete-all|--delete-volumes|--remove-volumes|--keep-volumes)
-      echo "❌ Docker uninstall has moved to uninstall.sh. Use: bash uninstall.sh"
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ Docker 卸载已迁移到 uninstall.sh。请使用：bash uninstall.sh"
+      else
+        echo "❌ Docker uninstall has moved to uninstall.sh. Use: bash uninstall.sh"
+      fi
       exit 1
       ;;
     --help|-h)
-      echo "Usage: $0 [options]"
-      echo ""
-      echo "Deploy options:"
-      echo "  --components LIST"
-      echo "  --port-policy development|production"
-      echo "  --image-source general|mainland|local-latest"
-      echo "  --monitoring-provider otlp|phoenix|langfuse|langsmith|grafana|zipkin"
-      echo "  --version VERSION"
-      echo "  --use-local-config"
-      echo "  --reconfigure"
-      echo "  --rotate-secrets"
-      echo "  --refresh-es-key"
-      echo "  --config PATH"
-      echo "  --root-dir PATH"
-      echo ""
-      echo "Uninstall: bash uninstall.sh"
+      print_docker_deploy_usage
       exit 0
       ;;
     --mode)
@@ -1536,54 +1564,137 @@ choose_image_env() {
 
 main_deploy() {
   # Main deployment function
-  echo  "🚀 Nexent Deployment Script 🚀"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🚀 Nexent 部署脚本 🚀"
+  else
+    echo "🚀 Nexent Deployment Script 🚀"
+  fi
   echo ""
   echo "--------------------------------"
   echo ""
 
   APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
-    echo "❌ Failed to get app version, please check VERSION or backend/consts/const.py"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 获取应用版本失败，请检查 VERSION 或 backend/consts/const.py"
+    else
+      echo "❌ Failed to get app version, please check VERSION or backend/consts/const.py"
+    fi
     exit 1
   fi
-  echo "🌐 App version: $APP_VERSION"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🌐 应用版本：$APP_VERSION"
+  else
+    echo "🌐 App version: $APP_VERSION"
+  fi
 
   # Select deployment components, port policy and image source via shared config.
-  apply_deployment_common_config || { echo "❌ Deployment configuration failed"; exit 1; }
+  apply_deployment_common_config || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 部署配置失败"
+    else
+      echo "❌ Deployment configuration failed"
+    fi
+    exit 1
+  }
 
   deployment_persist_local_config
 
   # Check only the ports published by the selected deployment configuration.
   check_deployment_ports
 
-  configure_root_dir_from_env || { echo "❌ ROOT_DIR configuration failed"; exit 1; }
+  configure_root_dir_from_env || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ ROOT_DIR 配置失败"
+    else
+      echo "❌ ROOT_DIR configuration failed"
+    fi
+    exit 1
+  }
 
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
     update_env_var "NEXENT_MCP_DOCKER_IMAGE" "${NEXENT_MCP_DOCKER_IMAGE}"
-    echo "🔧 NEXENT_MCP_DOCKER_IMAGE set to: ${NEXENT_MCP_DOCKER_IMAGE}"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "🔧 NEXENT_MCP_DOCKER_IMAGE 已设置为：${NEXENT_MCP_DOCKER_IMAGE}"
+    else
+      echo "🔧 NEXENT_MCP_DOCKER_IMAGE set to: ${NEXENT_MCP_DOCKER_IMAGE}"
+    fi
   else
-    echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "⚠️  环境中未找到 NEXENT_MCP_DOCKER_IMAGE，将使用代码默认值"
+    else
+      echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
+    fi
   fi
 
   # Add permission
-  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
-  update_sql_files_checksum || { echo "ERROR SQL checksum update failed"; exit 1; }
-  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
+  prepare_directory_and_data || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 权限设置失败"
+    else
+      echo "❌ Permission setup failed"
+    fi
+    exit 1
+  }
+  update_sql_files_checksum || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "ERROR SQL checksum 更新失败"
+    else
+      echo "ERROR SQL checksum update failed"
+    fi
+    exit 1
+  }
+  generate_minio_ak_sk || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ MinIO key 生成失败"
+    else
+      echo "❌ MinIO key generation failed"
+    fi
+    exit 1
+  }
 
 
   # Generate Supabase secrets
-  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 1; }
+  generate_supabase_keys || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ Supabase secrets 生成失败"
+    else
+      echo "❌ Supabase secrets generation failed"
+    fi
+    exit 1
+  }
 
   # Deploy infrastructure services
-  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
+  deploy_infrastructure || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 基础设施部署失败"
+    else
+      echo "❌ Infrastructure deployment failed"
+    fi
+    exit 1
+  }
 
-  deploy_monitoring || { echo "❌ Monitoring deployment failed"; exit 1; }
+  deploy_monitoring || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 监控部署失败"
+    else
+      echo "❌ Monitoring deployment failed"
+    fi
+    exit 1
+  }
 
   stop_unselected_data_process_service
 
   # Generate Elasticsearch API key
-  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
+  generate_elasticsearch_api_key || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ Elasticsearch API key 生成失败"
+    else
+      echo "❌ Elasticsearch API key generation failed"
+    fi
+    exit 1
+  }
 
   echo ""
   echo "--------------------------------"
@@ -1591,17 +1702,38 @@ main_deploy() {
 
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
-    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
+    generate_env_for_infrastructure || {
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ 环境变量生成失败"
+      else
+        echo "❌ Environment generation failed"
+      fi
+      exit 1
+    }
 
     # Create default super admin user (only for full version)
     if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-      create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+      create_default_super_admin_user || {
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "❌ 默认超级管理员创建失败"
+        else
+          echo "❌ Default super admin user creation failed"
+        fi
+        exit 1
+      }
     fi
 
-    echo "🎉 Infrastructure deployment completed successfully!"
-    echo "     You can now start the core services manually using dev containers"
-    echo "     Environment file available at: $ROOT_ENV_FILE"
-    echo "💡 Use 'source deploy/env/.env' from the project root to load environment variables"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "🎉 基础设施部署完成！"
+      echo "     现在可以使用 dev containers 手动启动核心服务"
+      echo "     环境变量文件：$ROOT_ENV_FILE"
+      echo "💡 在项目根目录执行 'source deploy/env/.env' 可加载环境变量"
+    else
+      echo "🎉 Infrastructure deployment completed successfully!"
+      echo "     You can now start the core services manually using dev containers"
+      echo "     Environment file available at: $ROOT_ENV_FILE"
+      echo "💡 Use 'source deploy/env/.env' from the project root to load environment variables"
+    fi
 
     # Pull MCP image for later use
     pull_mcp_image
@@ -1612,16 +1744,34 @@ main_deploy() {
   fi
 
   # Start core services
-  deploy_core_services || { echo "❌ Core services deployment failed"; exit 1; }
+  deploy_core_services || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 核心服务部署失败"
+    else
+      echo "❌ Core services deployment failed"
+    fi
+    exit 1
+  }
 
-  echo "   ✅ Core services started successfully"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "   ✅ 核心服务启动成功"
+  else
+    echo "   ✅ Core services started successfully"
+  fi
   echo ""
   echo "--------------------------------"
   echo ""
 
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+    create_default_super_admin_user || {
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ 默认超级管理员创建失败"
+      else
+        echo "❌ Default super admin user creation failed"
+      fi
+      exit 1
+    }
   fi
 
   persist_deploy_options
@@ -1630,14 +1780,23 @@ main_deploy() {
   # Pull MCP image for later use
   pull_mcp_image
 
-  echo "🎉  Deployment completed successfully!"
-  echo "🌐  You can now access the application at http://localhost:3000"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🎉  部署完成！"
+    echo "🌐  现在可以访问应用：http://localhost:3000"
+  else
+    echo "🎉  Deployment completed successfully!"
+    echo "🌐  You can now access the application at http://localhost:3000"
+  fi
 }
 
 # get docker compose version
 version_info=$(get_compose_version)
 if [[ $version_info == "unknown" ]]; then
-    echo "Error: Docker Compose not found or version detection failed"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "错误：未找到 Docker Compose 或版本检测失败"
+    else
+        echo "Error: Docker Compose not found or version detection failed"
+    fi
     exit 1
 fi
 
@@ -1649,27 +1808,47 @@ version_number=$(echo "$version_info" | awk '{print $2}')
 docker_compose_command=""
 case $version_type in
     "v1")
-        echo "Detected Docker Compose V1, version: $version_number"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "检测到 Docker Compose V1，版本：$version_number"
+        else
+            echo "Detected Docker Compose V1, version: $version_number"
+        fi
         # The version 1.28.0 is the minimum requirement in Docker Compose v1 for default interpolation syntax.
         if [[ $version_number < "1.28.0" ]]; then
-            echo "Warning: V1 version is too old, consider upgrading to V2"
+            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                echo "警告：V1 版本过旧，建议升级到 V2"
+            else
+                echo "Warning: V1 version is too old, consider upgrading to V2"
+            fi
             exit 1
         fi
         docker_compose_command="docker-compose"
         ;;
     "v2")
-        echo "Detected Docker Compose V2, version: $version_number"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "检测到 Docker Compose V2，版本：$version_number"
+        else
+            echo "Detected Docker Compose V2, version: $version_number"
+        fi
         docker_compose_command="docker compose"
         ;;
     *)
-        echo "Error: Unknown docker compose version type."
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "错误：未知 Docker Compose 版本类型。"
+        else
+            echo "Error: Unknown docker compose version type."
+        fi
         exit 1
         ;;
 esac
 
 # Execute main deployment with error handling
 if ! main_deploy; then
-  echo "❌ Deployment failed. Please check the error messages above and try again."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "❌ 部署失败。请检查上面的错误信息后重试。"
+  else
+    echo "❌ Deployment failed. Please check the error messages above and try again."
+  fi
   exit 1
 fi
 

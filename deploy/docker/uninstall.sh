@@ -9,14 +9,40 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEPLOY_ROOT="$PROJECT_ROOT/deploy"
+DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 ROOT_ENV_FILE="$PROJECT_ROOT/deploy/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 MONITORING_ENV_FILE="$PROJECT_ROOT/deploy/env/monitoring.env"
 cd "$SCRIPT_DIR"
 
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+fi
+
 DELETE_VOLUMES=""
 
 print_usage() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "用法：$0 [delete-all] [选项]"
+    echo ""
+    echo "卸载 Nexent Docker 部署。"
+    echo ""
+    echo "选项："
+    echo "  --delete-volumes true|false  控制是否删除持久化数据"
+    echo "  --remove-volumes             等同于 --delete-volumes true"
+    echo "  --keep-volumes               等同于 --delete-volumes false"
+    echo "  --help, -h                   显示帮助信息"
+    echo ""
+    echo "示例："
+    echo "  bash uninstall.sh"
+    echo "  bash uninstall.sh --delete-volumes false"
+    echo "  bash uninstall.sh --delete-volumes true"
+    echo "  bash uninstall.sh delete-all"
+    return
+  fi
+
   echo "Usage: $0 [delete-all] [options]"
   echo ""
   echo "Uninstall Docker deployment for Nexent."
@@ -46,7 +72,11 @@ parse_bool_option() {
     true|TRUE|True|yes|YES|Yes|y|Y|1) return 0 ;;
     false|FALSE|False|no|NO|No|n|N|0) return 1 ;;
     *)
-      echo "❌ Invalid boolean value: $value. Use true or false."
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ 无效布尔值：$value。请使用 true 或 false。"
+      else
+        echo "❌ Invalid boolean value: $value. Use true or false."
+      fi
       exit 1
       ;;
   esac
@@ -75,7 +105,11 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "❌ Unknown option: $1"
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ 未知选项：$1"
+      else
+        echo "❌ Unknown option: $1"
+      fi
       print_usage
       exit 1
       ;;
@@ -158,10 +192,19 @@ resolve_delete_volumes() {
   [ -t 0 ] || return 1
 
   echo ""
-  echo "🧹 Delete Docker volumes and Nexent data directories?"
-  echo "   This removes persistent data under ROOT_DIR, including elasticsearch, postgresql, redis, minio, scripts, and supabase volumes."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🧹 是否删除 Docker volumes 和 Nexent 数据目录？"
+    echo "   这会删除 ROOT_DIR 下的持久化数据，包括 elasticsearch、postgresql、redis、minio、scripts 和 supabase volumes。"
+  else
+    echo "🧹 Delete Docker volumes and Nexent data directories?"
+    echo "   This removes persistent data under ROOT_DIR, including elasticsearch, postgresql, redis, minio, scripts, and supabase volumes."
+  fi
   local answer
-  read -r -p "   Delete data volumes? [y/N]: " answer
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    read -r -p "   删除数据 volumes？[y/N]：" answer
+  else
+    read -r -p "   Delete data volumes? [y/N]: " answer
+  fi
   answer="$(sanitize_input "$answer")"
   [[ "$answer" =~ ^[Yy]$ ]]
 }
@@ -285,7 +328,11 @@ remove_nexent_data_dirs() {
   root_dir="${root_dir%/}"
 
   if [ -z "$root_dir" ] || [ "$root_dir" = "/" ]; then
-    echo "❌ Refusing to remove unsafe ROOT_DIR: ${root_dir:-<empty>}"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 拒绝删除不安全的 ROOT_DIR：${root_dir:-<empty>}"
+    else
+      echo "❌ Refusing to remove unsafe ROOT_DIR: ${root_dir:-<empty>}"
+    fi
     return 1
   fi
 
@@ -304,7 +351,11 @@ remove_nexent_data_dirs() {
   local dir
   for dir in "${dirs[@]}"; do
     if [ -e "$dir" ]; then
-      echo "🧹 Removing data directory: $dir"
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "🧹 正在删除数据目录：$dir"
+      else
+        echo "🧹 Removing data directory: $dir"
+      fi
       rm -rf "$dir"
     fi
   done
@@ -318,11 +369,23 @@ main() {
 
   resolve_compose_command
 
-  echo "🛑 Stopping and removing Docker deployment..."
-  if [ "$remove_volumes" = "true" ]; then
-    echo "⚠️  Data volumes will be deleted."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🛑 正在停止并删除 Docker 部署..."
   else
-    echo "ℹ️  Data volumes will be preserved."
+    echo "🛑 Stopping and removing Docker deployment..."
+  fi
+  if [ "$remove_volumes" = "true" ]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "⚠️  数据 volumes 将被删除。"
+    else
+      echo "⚠️  Data volumes will be deleted."
+    fi
+  else
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "ℹ️  数据 volumes 将被保留。"
+    else
+      echo "ℹ️  Data volumes will be preserved."
+    fi
   fi
 
   docker_compose_down_file "$COMPOSE_DIR/docker-compose-monitoring.yml" false "$remove_volumes"
@@ -340,7 +403,11 @@ main() {
     remove_nexent_data_dirs
   fi
 
-  echo "✅ Docker deployment removed."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "✅ Docker 部署已删除。"
+  else
+    echo "✅ Docker deployment removed."
+  fi
 }
 
 main

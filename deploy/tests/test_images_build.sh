@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_SCRIPT="$PROJECT_ROOT/deploy/images/build.sh"
 ROOT_BUILD_SCRIPT="$PROJECT_ROOT/build.sh"
+export DEPLOYMENT_LANG=en
 
 fail() {
   echo "FAIL: $*"

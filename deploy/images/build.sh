@@ -36,6 +36,37 @@ if [ "$ARGS_COUNT" -eq 0 ] && [ -t 0 ]; then
 fi
 
 usage() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    cat <<'USAGE'
+用法：deploy/images/build.sh [选项]
+
+选项：
+  --images LIST              逗号分隔的镜像列表：all,main,web,data-process,mcp,terminal,docs
+  --image IMAGE              兼容参数，等同于只传一个 --images
+  --all                      构建全部镜像
+  --main                     构建 nexent/nexent
+  --web                      构建 nexent/nexent-web
+  --data-process             构建 nexent/nexent-data-process
+  --mcp                      构建 nexent/nexent-mcp
+  --terminal                 构建 nexent/nexent-ubuntu-terminal
+  --docs                     构建 nexent/nexent-docs
+  --components LIST          将部署组件兼容映射为镜像列表
+  --platform linux/amd64|linux/arm64|linux/amd64,linux/arm64
+  --version VERSION          镜像 tag，例如 v2.2.1 或 latest。默认读取根目录 VERSION
+  --registry general|mainland
+  --dependency-variant cpu|gpu
+                             data-process 依赖变体，默认 cpu
+  --terminal-variant slim|conda
+                             terminal 镜像变体，默认 slim
+  --push
+  --load
+  --no-cache
+  --dry-run
+  --interactive              交互式选择镜像、版本和镜像源
+USAGE
+    return
+  fi
+
   cat <<'USAGE'
 Usage: deploy/images/build.sh [options]
 
@@ -88,7 +119,15 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=true; shift ;;
     --interactive) INTERACTIVE=true; shift ;;
     --help|-h) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+    *)
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "未知选项：$1" >&2
+      else
+        echo "Unknown option: $1" >&2
+      fi
+      usage >&2
+      exit 1
+      ;;
   esac
 done
 
@@ -132,7 +171,11 @@ select_images_from_csv() {
         add_image_if_missing "$normalized"
         ;;
       *)
-        echo "Unsupported image: $normalized" >&2
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "不支持的镜像：$normalized" >&2
+        else
+          echo "Unsupported image: $normalized" >&2
+        fi
         exit 1
         ;;
     esac
@@ -145,12 +188,12 @@ image_tui_multiselect() {
 
   local images=(main web data-process mcp terminal docs)
   local details=(
-    "backend API service"
-    "Next.js frontend"
-    "document parsing and vectorization worker"
-    "MCP proxy image"
-    "OpenSSH terminal tool image"
-    "VitePress documentation site"
+    "$(deployment_i18n image_build.detail.main)"
+    "$(deployment_i18n image_build.detail.web)"
+    "$(deployment_i18n image_build.detail.data_process)"
+    "$(deployment_i18n image_build.detail.mcp)"
+    "$(deployment_i18n image_build.detail.terminal)"
+    "$(deployment_i18n image_build.detail.docs)"
   )
   local selected=(1 1 0 0 0 0)
   local cursor=0
@@ -158,8 +201,13 @@ image_tui_multiselect() {
 
   image_tui_render() {
     printf '\033[2J\033[H'
-    printf 'Select images to build\n'
-    printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.\n\n'
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      printf '选择要构建的镜像\n'
+      printf '使用 Up/Down 或 j/k 移动，空格切换，Enter 确认，q 退出。\n\n'
+    else
+      printf 'Select images to build\n'
+      printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.\n\n'
+    fi
     local row marker check
     for row in "${!images[@]}"; do
       marker=" "
@@ -212,7 +260,11 @@ image_tui_multiselect() {
       q|Q)
         printf '\033[?25h'
         printf '\033[2J\033[H'
-        echo "Image build configuration cancelled." >&2
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "已取消镜像构建配置。" >&2
+        else
+          echo "Image build configuration cancelled." >&2
+        fi
         return 130
         ;;
     esac
@@ -225,36 +277,77 @@ run_interactive_configuration() {
   local root_version
   root_version="$(deployment_read_version)"
 
-  echo "Nexent image build configuration"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "Nexent 镜像构建配置"
+  else
+    echo "Nexent image build configuration"
+  fi
   echo ""
 
   if [ -z "$IMAGES" ] && [ "${#REQUESTED_IMAGES[@]}" -eq 0 ] && [ -z "$COMPONENTS" ] && [ "$IMAGE" = "all" ]; then
     if [ -t 0 ]; then
       image_tui_multiselect || return $?
     else
-      echo "Images:"
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "镜像："
+      else
+        echo "Images:"
+      fi
       echo "  main, web, data-process, mcp, terminal, docs"
-      IMAGES="$(prompt_choice "Enter images (default: main,web): " "main,web")"
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        IMAGES="$(prompt_choice "请输入镜像（默认：main,web）：" "main,web")"
+      else
+        IMAGES="$(prompt_choice "Enter images (default: main,web): " "main,web")"
+      fi
     fi
   fi
 
-  echo "Image version:"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "镜像版本："
+  else
+    echo "Image version:"
+  fi
   echo "  1) latest"
-  echo "  2) Root VERSION ($root_version)"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "  2) 根目录 VERSION ($root_version)"
+  else
+    echo "  2) Root VERSION ($root_version)"
+  fi
   local version_choice
-  version_choice="$(prompt_choice "Choose version [1/2] (default: 1): " "1")"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    version_choice="$(prompt_choice "选择版本 [1/2]（默认：1）：" "1")"
+  else
+    version_choice="$(prompt_choice "Choose version [1/2] (default: 1): " "1")"
+  fi
   case "$version_choice" in
     1|latest|"") VERSION="latest" ;;
     2|root|version|VERSION) VERSION="$root_version" ;;
-    *) echo "Unsupported version choice: $version_choice" >&2; exit 1 ;;
+    *)
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "不支持的版本选择：$version_choice" >&2
+      else
+        echo "Unsupported version choice: $version_choice" >&2
+      fi
+      exit 1
+      ;;
   esac
 
   echo ""
-  echo "Image source:"
-  echo "  1) general (public image sources)"
-  echo "  2) mainland (mainland China image sources and build mirrors)"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "镜像源："
+    echo "  1) general（公共镜像源）"
+    echo "  2) mainland（中国大陆镜像源）"
+  else
+    echo "Image source:"
+    echo "  1) general (public image sources)"
+    echo "  2) mainland (mainland China image sources and build mirrors)"
+  fi
   local registry_choice
-  registry_choice="$(prompt_choice "Choose image source [1/2] (default: 1): " "1")"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    registry_choice="$(prompt_choice "选择镜像源 [1/2]（默认：1）：" "1")"
+  else
+    registry_choice="$(prompt_choice "Choose image source [1/2] (default: 1): " "1")"
+  fi
   case "$registry_choice" in
     2|mainland) REGISTRY="mainland" ;;
     1|general|"") REGISTRY="general" ;;
@@ -276,17 +369,38 @@ case "$REGISTRY" in
     PY_MIRROR_ARGS=(--build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua)
     WEB_MIRROR_ARGS=(--build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua)
     ;;
-  *) echo "Unsupported registry: $REGISTRY" >&2; exit 1 ;;
+  *)
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "不支持的 registry：$REGISTRY" >&2
+    else
+      echo "Unsupported registry: $REGISTRY" >&2
+    fi
+    exit 1
+    ;;
 esac
 
 case "$DEPENDENCY_VARIANT" in
   cpu|gpu) ;;
-  *) echo "Unsupported data-process dependency variant: $DEPENDENCY_VARIANT" >&2; exit 1 ;;
+  *)
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "不支持的 data-process 依赖变体：$DEPENDENCY_VARIANT" >&2
+    else
+      echo "Unsupported data-process dependency variant: $DEPENDENCY_VARIANT" >&2
+    fi
+    exit 1
+    ;;
 esac
 
 case "$TERMINAL_VARIANT" in
   slim|conda) ;;
-  *) echo "Unsupported terminal variant: $TERMINAL_VARIANT" >&2; exit 1 ;;
+  *)
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "不支持的 terminal 变体：$TERMINAL_VARIANT" >&2
+    else
+      echo "Unsupported terminal variant: $TERMINAL_VARIANT" >&2
+    fi
+    exit 1
+    ;;
 esac
 
 run_cmd() {
@@ -402,7 +516,14 @@ build_selected_image() {
       [ "$TERMINAL_VARIANT" = "conda" ] && image_name="nexent-ubuntu-terminal-conda"
       build_one "$image_name" "$DOCKERFILE_DIR/terminal/Dockerfile" --build-arg TERMINAL_VARIANT="$TERMINAL_VARIANT"
       ;;
-    *) echo "Unsupported image: $1" >&2; exit 1 ;;
+    *)
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "不支持的镜像：$1" >&2
+      else
+        echo "Unsupported image: $1" >&2
+      fi
+      exit 1
+      ;;
   esac
 }
 
@@ -430,7 +551,11 @@ select_images_from_components() {
         add_image_if_missing terminal
         ;;
       *)
-        echo "Unsupported component for image build: $normalized" >&2
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "镜像构建不支持该组件：$normalized" >&2
+        else
+          echo "Unsupported component for image build: $normalized" >&2
+        fi
         exit 1
         ;;
     esac
@@ -459,7 +584,11 @@ else
 fi
 
 if [ "${#SELECTED_IMAGES[@]}" -eq 0 ]; then
-  echo "No Nexent images selected for build."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "未选择任何 Nexent 镜像进行构建。"
+  else
+    echo "No Nexent images selected for build."
+  fi
   exit 0
 fi
 
