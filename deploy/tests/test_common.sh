@@ -120,6 +120,11 @@ fi
 deployment_prepare_config --components infrastructure,application --port-policy development --registry-profile mainland --app-version latest
 assert_eq "mainland" "$DEPLOYMENT_IMAGE_SOURCE" "legacy registry profile should map to mainland image source"
 
+DEPLOYMENT_APP_VERSION="v1.2.3"
+assert_eq "nexent/nexent:v1.2.3" "$(deployment_image_source_example_tag general)" "general image source description should list backend image tag"
+assert_eq "ccr.ccs.tencentyun.com/nexent-hub/nexent:v1.2.3" "$(deployment_image_source_example_tag mainland)" "mainland image source description should list mirrored backend image tag"
+assert_eq "nexent/nexent:latest" "$(deployment_image_source_example_tag local-latest)" "local-latest image source description should list local backend image tag"
+
 if deployment_prepare_config --components infrastructure,application --port-policy development --image-source pinned --app-version latest 2>/dev/null; then
   echo "FAIL: pinned image source should be rejected"
   exit 1

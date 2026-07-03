@@ -1032,6 +1032,23 @@ deployment_tui_select_port_policy() {
   printf '\033[2J\033[H'
 }
 
+deployment_image_source_example_tag() {
+  local source="$1"
+  local version="${DEPLOYMENT_APP_VERSION:-${APP_VERSION:-latest}}"
+  local prefix="nexent"
+
+  case "$source" in
+    mainland)
+      prefix="ccr.ccs.tencentyun.com/nexent-hub"
+      ;;
+    local-latest)
+      version="latest"
+      ;;
+  esac
+
+  printf '%s/nexent:%s' "$prefix" "$version"
+}
+
 deployment_tui_select_image_source() {
   [ -t 0 ] || return 0
   [ -n "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ] && return 0
@@ -1039,9 +1056,9 @@ deployment_tui_select_image_source() {
 
   local sources=(general mainland local-latest)
   local details=(
-    "pull images from standard public registries"
-    "pull from mainland China mirrors for better access in mainland networks"
-    "use locally built Nexent :latest images and avoid pulling app images"
+    "$(deployment_image_source_example_tag general)"
+    "$(deployment_image_source_example_tag mainland)"
+    "$(deployment_image_source_example_tag local-latest)"
   )
   local cursor=0
   local i key key_tail
@@ -1056,8 +1073,7 @@ deployment_tui_select_image_source() {
   deployment_tui_render_image_source() {
     printf '\033[2J\033[H'
     printf 'Select image source\n'
-    printf 'This controls where deployment images come from.\n'
-    printf 'Use local-latest only after building Nexent images locally.\n'
+    printf 'Each option shows the backend image tag pattern that will be used.\n'
     printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
     local row marker radio
     for row in "${!sources[@]}"; do
