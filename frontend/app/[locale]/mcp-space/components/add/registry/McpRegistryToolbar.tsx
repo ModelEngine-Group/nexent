@@ -103,7 +103,6 @@ export default function McpRegistryToolbar({
           onChange={(value) => onSourceChange(String(value))}
           options={[
             { label: t("mcpTools.registry.source.official"), value: "official" },
-            { label: "Smithery", value: "smithery" },
           ]}
         />
         <Dropdown

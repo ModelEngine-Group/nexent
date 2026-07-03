@@ -49,7 +49,7 @@ async def list_registry_mcp_services_api(
     http_request: Request = None,
 ):
     """
-    List MCP services from the external MCP Registry (official or Smithery).
+    List MCP services from the official MCP Registry.
     """
     try:
         get_current_user_info(authorization, http_request)
@@ -61,7 +61,6 @@ async def list_registry_mcp_services_api(
             version=query.version,
             cursor=query.cursor,
             limit=query.limit,
-            source=query.source,
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -79,49 +78,6 @@ async def list_registry_mcp_services_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to list MCP registry services"
-        )
-
-
-@router.get("/registry/server-detail")
-async def get_registry_server_detail_api(
-    source: str = Query(default="official"),
-    qualified_name: str = Query(default=""),
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    """
-    Get detail for a single registry server (Smithery only; official registry
-    data is already included in the list response).
-    """
-    try:
-        get_current_user_info(authorization, http_request)
-
-        if not qualified_name:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="qualified_name is required",
-            )
-
-        data = await list_registry_mcp_services(
-            source=source,
-            detail_qualified_name=qualified_name,
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content=data,
-        )
-    except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED,
-            detail=str(exc),
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to get registry server detail: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to get registry server detail"
         )
 
 

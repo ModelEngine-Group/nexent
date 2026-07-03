@@ -46,10 +46,10 @@ logger = logging.getLogger("remote_mcp_service")
 # Health Check
 # ---------------------------------------------------------------------------
 
-async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> list[str]:
+async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None, custom_headers: dict | None = None) -> bool:
     """Check if an MCP server is healthy and reachable via MCP protocol.
 
-    Returns the list of tool names on success.
+    Returns True if the server is reachable and responds to tool listing.
     Raises MCPConnectionError if the server is unreachable or does not support MCP.
     """
     url_stripped = remote_mcp_server.strip()
@@ -62,7 +62,7 @@ async def mcp_server_health(remote_mcp_server: str, authorization_token: str | N
     tool_names = await _mcp_protocol_health_check(url_stripped, headers)
     if not tool_names:
         raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
-    return tool_names
+    return True
 
 
 async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[str]:
@@ -349,7 +349,14 @@ async def add_mcp_service(
     # reachable URL here.
     resolved_registry_json = registry_json or {}
     if not is_container and server_url:
-        tool_names = await mcp_server_health(remote_mcp_server=server_url, authorization_token=authorization_token, custom_headers=custom_headers)
+        headers = {}
+        if authorization_token:
+            headers["Authorization"] = authorization_token
+        if custom_headers:
+            headers.update(custom_headers)
+        tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
+        if not tool_names:
+            raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
         # Store tool names in registry_json for tool count display
         resolved_registry_json["_toolNames"] = tool_names
 

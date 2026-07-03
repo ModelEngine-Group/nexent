@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Radio, Spin } from "antd";
+import { Alert, Button, Form, Input, Modal, Radio } from "antd";
 import { CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type {
@@ -15,7 +15,6 @@ import McpRegistryCardList from "./McpRegistryCardList";
 import McpRegistryDetailModal from "./McpRegistryDetailModal";
 import ContainerPortField from "../../shared/ContainerPortField";
 import { McpTransportType } from "@/const/mcpTools";
-import { fetchRegistryServerDetail } from "@/services/mcpToolsService";
 import {
   hasUnresolvedUrlTemplate,
   resolveHttpServerUrl,
@@ -32,36 +31,15 @@ export default function AddMcpServiceRegistrySection({
 }: AddMcpServiceRegistrySectionProps) {
   const [selected, setSelected] = useState<RegistryMcpCard | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<RegistryMcpCard | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
   const browser = useMcpRegistryBrowser(active);
   const quickAdd = useMcpRegistryQuickAdd({ onSuccess: onAdded });
 
   const handleSelect = async (service: RegistryMcpCard) => {
-    const isSmithery = (service._meta as Record<string, unknown> | undefined)?.source === "smithery";
-    const qualifiedName = String((service._meta as Record<string, unknown> | undefined)?.qualifiedName || service.server?.qualifiedName || "");
-    if (isSmithery && qualifiedName) {
-      setDetailLoading(true);
-      setSelected(service);
-      const detail = await fetchRegistryServerDetail("smithery", qualifiedName);
-      setSelectedDetail(detail);
-      setDetailLoading(false);
-    } else {
-      setSelected(service);
-      setSelectedDetail(service);
-    }
+    setSelected(service);
+    setSelectedDetail(service);
   };
 
   const handleQuickAdd = async (service: RegistryMcpCard) => {
-    const isSmithery = (service._meta as Record<string, unknown> | undefined)?.source === "smithery";
-    const qualifiedName = String((service._meta as Record<string, unknown> | undefined)?.qualifiedName || service.server?.qualifiedName || "");
-    if (isSmithery && qualifiedName) {
-      // Smithery list data lacks connections/packages; fetch detail for quick-add data
-      const detail = await fetchRegistryServerDetail("smithery", qualifiedName);
-      if (detail) {
-        quickAdd.open(detail);
-        return;
-      }
-    }
     quickAdd.open(service);
   };
 
@@ -106,13 +84,7 @@ export default function AddMcpServiceRegistrySection({
         />
       </div>
 
-      {detailLoading ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-          <Spin size="large" />
-        </div>
-      ) : null}
-
-      {selected && selectedDetail && !detailLoading ? (
+      {selected && selectedDetail ? (
         <McpRegistryDetailModal
           service={selectedDetail}
           onClose={handleCloseDetail}

@@ -21,12 +21,8 @@ export default function McpRegistryCard({
 }: McpRegistryCardProps) {
   const { t } = useTranslation("common");
   const server = service.server;
-  const isSmithery = (service._meta as Record<string, unknown> | undefined)?.source === "smithery";
-  // Smithery list data doesn't include remotes/packages, so show quick-add for
-  // all Smithery servers — the detail (with connection info) is fetched on-demand
-  // when the user clicks quick-add or opens the detail modal.
-  const canQuickAdd = isSmithery
-    || (Array.isArray(server.remotes) && server.remotes.length > 0)
+  const canQuickAdd
+    = (Array.isArray(server.remotes) && server.remotes.length > 0)
     || (Array.isArray(server.packages) && server.packages.length > 0);
   const officialMeta = ((
     service._meta as Record<string, unknown> | undefined

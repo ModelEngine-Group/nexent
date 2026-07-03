@@ -348,30 +348,6 @@ export const listRegistryMcpTools = async (query: URLSearchParams) => {
   }
 };
 
-export const fetchRegistryServerDetail = async (
-  source: string,
-  qualifiedName: string
-): Promise<RegistryMcpCard | null> => {
-  try {
-    const query = new URLSearchParams();
-    query.set("source", source);
-    query.set("qualified_name", qualifiedName);
-    const response = await fetchWithAuth(
-      `${API_ENDPOINTS.mcpTools.registryServerDetail}?${query.toString()}`
-    );
-    const data = await parseJson<{
-      servers?: RegistryMcpCard[];
-    }>(response);
-    if (data?.servers?.length) {
-      return data.servers[0];
-    }
-    return null;
-  } catch (error) {
-    log.error("fetchRegistryServerDetail failed", error);
-    return null;
-  }
-};
-
 type CommunityMcpListPayload = {
   search?: string;
   tag?: string;
