@@ -18,6 +18,7 @@ import {
   MAX_FILE_COUNT,
   MAX_FILE_SIZE,
 } from "@/lib/chat/fileIconUtils";
+import { safeUUID } from "@/lib/utils";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
 import { ChatModelSelector } from "./chatModelSelector";
@@ -549,7 +550,7 @@ export function ChatInput({
         return;
       }
 
-      const fileId = crypto.randomUUID();
+      const fileId = safeUUID();
       const extension = getFileExtension(file.name);
 
       // Supported image file types

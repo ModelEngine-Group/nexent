@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Tabs, Input, Checkbox, Button, Select } from "antd";
 import type { TabsProps } from "antd";
@@ -92,7 +92,11 @@ export default function SelectToolsDialog({
       );
       const catMap = new Map<string, any[]>();
       for (const tool of sourceTools) {
-        const cat = tool.category?.trim() || "toolPool.category.other";
+        // MCP tools are grouped by server name (usage); local/langchain by category
+        const cat =
+          tab.key === "mcp"
+            ? tool.usage?.trim() || "toolPool.category.other"
+            : tool.category?.trim() || "toolPool.category.other";
         if (!catMap.has(cat)) catMap.set(cat, []);
         catMap.get(cat)!.push(tool);
       }
@@ -258,10 +262,19 @@ export default function SelectToolsDialog({
     [prefetchKnowledgeBases, mergeInstanceParams, hasMissingRequired, confirm, updateTools, t]
   );
 
-  const tabItems: TabsProps["items"] = SOURCE_TABS.map((tab) => ({
-    key: tab.key,
-    label: t(tab.labelKey),
-  }));
+  const tabItems: TabsProps["items"] = SOURCE_TABS
+    .filter((tab) => (sourceGroups[tab.key] || []).length > 0)
+    .map((tab) => ({
+      key: tab.key,
+      label: t(tab.labelKey),
+    }));
+
+  // Auto-switch to first available tab when active tab becomes hidden
+  useEffect(() => {
+    if (tabItems.length > 0 && !tabItems.find((t) => t.key === activeTab)) {
+      setActiveTab(tabItems[0].key!);
+    }
+  }, [tabItems, activeTab]);
 
   const onCloseDialog = useCallback(() => {
     setSearch("");
@@ -293,8 +306,8 @@ export default function SelectToolsDialog({
         footer={null}
         width={1100}
         zIndex={1000}
-        maskClosable={true}
-        destroyOnClose
+        mask={{ closable: true }}
+        destroyOnHidden
       >
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
 
@@ -346,7 +359,7 @@ export default function SelectToolsDialog({
                       : "border-transparent text-gray-500 hover:text-gray-700"
                   }`}
                 >
-                  {g.category}
+                  {t(g.category)}
                   <span className="ml-1 text-xs text-gray-400">
                     ({selCount > 0 ? `${selCount}/` : ""}{count})
                   </span>
@@ -365,7 +378,7 @@ export default function SelectToolsDialog({
               .map((g) => (
                 <div key={g.category}>
                   <div className="mb-1 px-1 text-xs font-medium text-gray-400">
-                    {g.category}
+                    {t(g.category)}
                   </div>
                   <ul className="space-y-1">
                     {g.tools.map((tool: any) => {

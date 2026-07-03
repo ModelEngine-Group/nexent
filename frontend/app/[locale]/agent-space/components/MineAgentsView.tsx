@@ -136,6 +136,14 @@ export function MineAgentsView({
     router.push(`/${locale}/agents?agent_id=${agentId}`);
   };
 
+  const handleEvaluate = (agent: MyEditableAgentItem) => {
+    const versionNo = agent.current_version_no ?? 0;
+    if (versionNo <= 0) {
+      return;
+    }
+    router.push(`/${locale}/space/agents/${agent.agent_id}/evaluate?back_tab=mine`);
+  };
+
   const closeReviewModal = () => {
     setReviewModalOpen(false);
     setReviewModalAgent(null);
@@ -353,6 +361,7 @@ export function MineAgentsView({
                     }
                     onApplyListing={() => handleApplyListing(agent)}
                     onViewReview={(mode) => handleViewReview(agent, mode)}
+                    onEvaluate={() => handleEvaluate(agent)}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending

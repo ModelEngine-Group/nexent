@@ -150,7 +150,7 @@ export default function ToolManagement({ isCreatingMode, currentAgentId }: ToolM
                     >
                       <ChevronRight className={`size-3.5 shrink-0 text-gray-400 transition-transform ${!isCollapsed ? "rotate-90" : ""}`} />
                       <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${accent}`}>
-                        {cat.category}
+                        {t(cat.category)}
                       </span>
                       <span className="text-[10px] text-gray-400">
                         {cat.tools.length}
