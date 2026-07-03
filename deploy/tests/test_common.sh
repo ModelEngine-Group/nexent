@@ -11,6 +11,8 @@ source "$SCRIPT_DIR/../common/version.sh"
 TMP_DIR="${TMPDIR:-/tmp}/nexent-deployment-test-$$"
 mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
+DEPLOYMENT_ROOT_ENV="$TMP_DIR/root.env"
+: > "$DEPLOYMENT_ROOT_ENV"
 
 assert_eq() {
   local expected="$1"
@@ -151,9 +153,10 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 
 LOCAL_HELM_VALUES="$TMP_DIR/local-generated-values.yaml"
 deployment_render_helm_values "$LOCAL_HELM_VALUES"
-assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
-assert_contains "$(sed -n '1,90p' "$LOCAL_HELM_VALUES")" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
-assert_contains "$(sed -n '140,180p' "$LOCAL_HELM_VALUES")" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
+LOCAL_HELM_CONTENT="$(cat "$LOCAL_HELM_VALUES")"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent\"" "local-latest should render mcp chart with backend image"
+assert_contains "$LOCAL_HELM_CONTENT" "pullPolicy: \"Never\"" "local-latest should render mcp chart with local pull policy"
+assert_contains "$LOCAL_HELM_CONTENT" "repository: \"nexent/nexent-mcp\"" "local-latest should keep common mcp docker image"
 
 FAKE_DOCKER_DIR="$TMP_DIR/fake-docker"
 FAKE_DOCKER_LOG="$TMP_DIR/fake-docker.log"
@@ -301,14 +304,59 @@ DEPLOYMENT_ROOT_ENV="$ENV_CHECKSUM_C"
 ENV_CHECKSUM_C_VALUE="$(deployment_env_values_checksum)"
 assert_not_eq "$ENV_CHECKSUM_A_VALUE" "$ENV_CHECKSUM_C_VALUE" "env checksum should change when any valid env value changes"
 
+MONITORING_ROOT_ENV="$TMP_DIR/monitoring-root.env"
+MONITORING_EXAMPLE_TMP="$TMP_DIR/monitoring.env.example"
+MONITORING_ENV_TMP="$TMP_DIR/monitoring.env"
+cp "$SCRIPT_DIR/../env/monitoring.env.example" "$MONITORING_EXAMPLE_TMP"
+cat > "$MONITORING_ROOT_ENV" <<'ENV'
+LANGSMITH_API_KEY=ls-root-fallback
+MONITORING_PROVIDER=root-provider
+ENV
+DEPLOYMENT_ROOT_ENV="$MONITORING_ROOT_ENV"
+deployment_source_env_file "$MONITORING_ROOT_ENV"
+deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider langsmith --app-version latest
+deployment_prepare_monitoring_env k8s
+assert_eq "true" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "ENABLE_TELEMETRY")" "monitoring.env should record selected monitoring enablement"
+assert_eq "langsmith" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_PROVIDER")" "monitoring.env should record selected provider"
+assert_eq "https://smith.langchain.com/" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "monitoring.env should record K8s dashboard URL"
+assert_eq "http://nexent-otel-collector:4318" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_EXPORTER_OTLP_ENDPOINT")" "monitoring.env should record K8s OTLP endpoint"
+assert_eq "otel-collector-langsmith-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record K8s collector config file"
+assert_eq "ls-root-fallback" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGSMITH_API_KEY")" "monitoring.env should migrate LangSmith key from root .env when missing"
+MONITORING_PAYLOAD="$(deployment_env_values_payload)"
+assert_contains "$MONITORING_PAYLOAD" 'MONITORING_PROVIDER="langsmith"' "monitoring.env should override duplicate root monitoring keys in checksum payload"
+assert_not_contains "$MONITORING_PAYLOAD" "MONITORING_PROVIDER=root-provider" "root monitoring provider should not win over monitoring.env"
+MONITORING_CHECKSUM_A="$(deployment_env_values_checksum)"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_TRACE_MAX_CHARS" "1234"
+MONITORING_CHECKSUM_B="$(deployment_env_values_checksum)"
+assert_not_eq "$MONITORING_CHECKSUM_A" "$MONITORING_CHECKSUM_B" "env checksum should change when monitoring.env changes"
+MONITORING_HELM_VALUES="$TMP_DIR/monitoring-generated-values.yaml"
+deployment_render_helm_values "$MONITORING_HELM_VALUES"
+MONITORING_HELM_CONTENT="$(cat "$MONITORING_HELM_VALUES")"
+assert_contains "$MONITORING_HELM_CONTENT" 'provider: "langsmith"' "Helm values should render monitoring provider from monitoring.env"
+assert_contains "$MONITORING_HELM_CONTENT" 'langsmithApiKey: "ls-root-fallback"' "Helm values should pass LangSmith key to monitoring collector values"
+assert_contains "$MONITORING_HELM_CONTENT" 'configFile: "otel-collector-langsmith-config.yml"' "Helm values should pass collector config from monitoring.env"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-test"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-test"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER" "Basic stale"
+deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider langfuse --app-version latest
+deployment_prepare_monitoring_env docker
+EXPECTED_LANGFUSE_AUTH_HEADER="Basic $(printf "%s:%s" "pk-test" "sk-test" | base64 | tr -d '\n')"
+assert_eq "$EXPECTED_LANGFUSE_AUTH_HEADER" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER")" "monitoring.env should refresh derived Langfuse OTLP auth header"
+assert_eq "../assets/monitoring/otel-collector-langfuse-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record Docker collector config file"
+while IFS='=' read -r key _; do
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+  unset "$key"
+done < "$MONITORING_EXAMPLE_TMP"
+unset DEPLOYMENT_MONITORING_PROVIDER
+
 DEPLOYMENT_ROOT_ENV="$TMP_DIR/missing-env-file.env"
 MISSING_ENV_CHECKSUM_A="$(deployment_env_values_checksum 2>/dev/null)"
 MISSING_ENV_CHECKSUM_B="$(deployment_env_values_checksum 2>/dev/null)"
 assert_eq "$MISSING_ENV_CHECKSUM_A" "$MISSING_ENV_CHECKSUM_B" "missing env file should use a stable empty checksum fallback"
 
 K8S_DEPLOY_CHECKSUM_BLOCK="$(awk '/render_runtime_secret_values\(\) {/,/deployment_render_image_rollout_checksums/' "$SCRIPT_DIR/../k8s/deploy.sh")"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'env_checksum="$(deployment_env_values_checksum)"' "k8s deploy should compute rollout checksum from full .env"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    env: %s\\n'" "k8s deploy should render the full .env checksum under the env name"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'env_checksum="$(deployment_env_values_checksum)"' "k8s deploy should compute rollout checksum from root and monitoring env files"
+assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    env: %s\\n'" "k8s deploy should render the combined env checksum under the env name"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "supabase_secret_checksum" "k8s deploy should compute a dedicated Supabase secret rollout checksum"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    supabaseSecret: %s\\n'" "k8s deploy should render the Supabase secret checksum"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'JWT_SECRET:-' "supabase secret checksum should include JWT secret"
@@ -342,25 +390,29 @@ assert_contains "$(sed -n '1,260p' "$HELM_VALUES")" "enabled: true" "selected ch
 DOCKER_ENV="$TMP_DIR/.env.generated"
 deployment_render_docker_env "$DOCKER_ENV"
 assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "NEXENT_IMAGE=" "docker generated env should contain image variables"
-assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "ENABLE_TELEMETRY=" "docker generated env should contain monitoring enablement"
-assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "MONITORING_PROVIDER=" "docker generated env should contain monitoring provider"
-assert_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "MONITORING_DASHBOARD_URL=" "docker generated env should contain monitoring dashboard URL"
+assert_not_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "ENABLE_TELEMETRY=" "docker generated env should not contain monitoring enablement"
+assert_not_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "MONITORING_PROVIDER=" "docker generated env should not contain monitoring provider"
+assert_not_contains "$(sed -n '1,120p' "$DOCKER_ENV")" "MONITORING_DASHBOARD_URL=" "docker generated env should not contain monitoring dashboard URL"
 if grep -Eq '^DEPLOYMENT_(SCHEMA_VERSION|COMPONENTS|PORT_POLICY|IMAGE_SOURCE|REGISTRY_PROFILE|APP_VERSION|MONITORING_PROVIDER|SELECTED_DOCKER_SERVICES|DOCKER_PORTS)=' "$DOCKER_ENV"; then
   echo "FAIL: docker generated env should not contain persisted deployment decisions"
   exit 1
 fi
 
-DOCKER_MONITORING_CONFIG_BLOCK="$(awk '/docker_monitoring_collector_config_file\(\)/,/^pull_mcp_image\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$OTEL_EXPORTER_OTLP_ENDPOINT"' "docker deploy should persist backend OTLP endpoint for monitoring"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"' "docker deploy should point backend telemetry at Docker collector service"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'MONITORING_ENV_EXAMPLE' "docker deploy should use monitoring.env.example defaults"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'source "$MONITORING_ENV_FILE"' "docker deploy should source generated monitoring.env"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"' "docker deploy should persist monitoring collector config in monitoring.env"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-phoenix-config.yml' "docker deploy should map phoenix to its collector config"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-langfuse-config.yml' "docker deploy should map langfuse to its collector config"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-langsmith-config.yml' "docker deploy should map langsmith to its collector config"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-grafana-config.yml' "docker deploy should map grafana to its collector config"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'otel-collector-zipkin-config.yml' "docker deploy should map zipkin to its collector config"
+COMMON_MONITORING_CONFIG_BLOCK="$(awk '/deployment_monitoring_env_example_file\(\)/,/^deployment_sha256_string\(\)/' "$SCRIPT_DIR/../common/common.sh")"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'deployment_prepare_monitoring_env()' "common deploy should prepare monitoring.env"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'deployment_sync_env_defaults "$example_file" "$env_file"' "common deploy should sync monitoring.env defaults"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'deployment_source_env_file "$env_file"' "common deploy should source generated monitoring.env"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$otlp_endpoint"' "common deploy should persist target OTLP endpoint in monitoring.env"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'deployment_update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"' "common deploy should persist monitoring collector config in monitoring.env"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-phoenix-config.yml' "common deploy should map phoenix to its collector config"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-langfuse-config.yml' "common deploy should map langfuse to its collector config"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-langsmith-config.yml' "common deploy should map langsmith to its collector config"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-grafana-config.yml' "common deploy should map grafana to its collector config"
+assert_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'otel-collector-zipkin-config.yml' "common deploy should map zipkin to its collector config"
+assert_not_contains "$COMMON_MONITORING_CONFIG_BLOCK" 'update_env_var "OTEL_EXPORTER_OTLP_ENDPOINT"' "common monitoring prep should not write monitoring keys to deploy/env/.env"
+
+DOCKER_MONITORING_CONFIG_BLOCK="$(awk '/docker_monitoring_active_services\(\)/,/^pull_mcp_image\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'deployment_prepare_monitoring_env docker' "docker deploy should use shared monitoring.env preparation"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'docker_monitoring_active_services()' "docker deploy should define active monitoring services"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'docker_monitoring_profile_services()' "docker deploy should enumerate monitoring profile services"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'docker_monitoring_container_names()' "docker deploy should enumerate monitoring containers for cleanup"
@@ -369,14 +421,24 @@ assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'cleanup_stale_monitoring_serv
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'langfuse-worker langfuse-web langfuse-clickhouse langfuse-minio langfuse-redis langfuse-postgres' "docker deploy should treat Langfuse services as one provider bundle"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'down --remove-orphans' "docker deploy should stop monitoring services when monitoring is disabled"
 assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'rm -f "${stale_services[@]}"' "docker deploy should remove stale monitoring containers without deleting volumes"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'LANGFUSE_OTLP_AUTH_HEADER="Basic $(' "docker deploy should derive Langfuse OTLP auth header"
-assert_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$LANGFUSE_OTLP_AUTH_HEADER"' "docker deploy should persist Langfuse OTLP auth header in monitoring.env"
+assert_not_contains "$DOCKER_MONITORING_CONFIG_BLOCK" 'update_env_var "OTEL_EXPORTER_OTLP_ENDPOINT"' "docker deploy should not write monitoring keys to deploy/env/.env"
 assert_not_contains "$DOCKER_MONITORING_CONFIG_BLOCK" "LANGFUSE_OLTP_AUTH_HEADER" "docker deploy should not use the misspelled Langfuse OLTP auth header alias"
 
 if [ -e "$SCRIPT_DIR/../docker/start-monitoring.sh" ]; then
   echo "FAIL: standalone monitoring script should be removed"
   exit 1
 fi
+DOCKER_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.yml"
+DOCKER_PROD_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.prod.yml"
+DOCKER_DEV_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.dev.yml"
+for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
+  assert_contains "$(awk '/^  nexent-config:/,/^  nexent-runtime:/' "$compose_file")" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker config service should load monitoring.env after root .env"
+  assert_contains "$(awk '/^  nexent-runtime:/,/^  nexent-mcp:/' "$compose_file")" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
+  assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-northbound:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
+  assert_not_contains "$(awk '/^  nexent-northbound:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
+  assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
+done
+assert_not_contains "$(cat "$DOCKER_DEV_COMPOSE_FILE")" "monitoring.env" "docker dev data-process compose should not receive monitoring.env"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}' "docker monitoring compose should pass Langfuse OTLP auth header to the collector"
 assert_not_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" "LANGFUSE_OLTP_AUTH_HEADER" "docker monitoring compose should not pass the misspelled Langfuse auth header alias"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/templates/otel-collector.yaml")" "LANGFUSE_OTLP_AUTH_HEADER" "k8s collector should pass Langfuse OTLP auth header"
@@ -447,6 +509,11 @@ if [ -f "$SCRIPT_DIR/../docker/assets/monitoring/monitoring.env" ]; then
   echo "FAIL: monitoring.env should live under deploy/env"
   exit 1
 fi
+ROOT_ENV_EXAMPLE_CONTENT="$(cat "$SCRIPT_DIR/../env/.env.example")"
+assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "ENABLE_TELEMETRY=" "root .env.example should not contain monitoring enablement"
+assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "MONITORING_PROVIDER=" "root .env.example should not contain monitoring provider"
+assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "OTEL_EXPORTER_OTLP_ENDPOINT=" "root .env.example should not contain OTLP endpoint"
+assert_not_contains "$ROOT_ENV_EXAMPLE_CONTENT" "TELEMETRY_SAMPLE_RATE=" "root .env.example should not contain telemetry sampling"
 assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "GRAFANA_ADMIN_PASSWORD=nexent@4321" "docker monitoring defaults should define Grafana admin password"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexent@4321}' "docker compose Grafana password fallback should match monitoring.env.example"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-monitoring/values.yaml")" "adminPassword: nexent@4321" "k8s monitoring Grafana password should match docker monitoring default"

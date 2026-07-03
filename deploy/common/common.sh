@@ -129,18 +129,62 @@ deployment_source_root_env() {
   set +a
 }
 
-deployment_env_values_payload() {
-  local env_file="${DEPLOYMENT_ROOT_ENV:-}"
-
-  if [ -z "$env_file" ] || [ ! -f "$env_file" ]; then
-    deployment_warn "deploy/env/.env is not available; environment rollout checksum will use an empty payload."
+deployment_env_dir() {
+  if [ -n "${DEPLOYMENT_ROOT_ENV:-}" ]; then
+    dirname "$DEPLOYMENT_ROOT_ENV"
     return 0
   fi
 
-  sed 's/\r$//' "$env_file" | awk '
+  local common_dir
+  common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf '%s\n' "$(cd "$common_dir/../env" && pwd)"
+}
+
+deployment_monitoring_env_example_file() {
+  printf '%s/monitoring.env.example\n' "$(deployment_env_dir)"
+}
+
+deployment_monitoring_env_file() {
+  printf '%s/monitoring.env\n' "$(deployment_env_dir)"
+}
+
+deployment_legacy_monitoring_env_file() {
+  printf '%s/../docker/assets/monitoring/monitoring.env\n' "$(deployment_env_dir)"
+}
+
+deployment_source_env_file() {
+  local env_file="$1"
+  [ -f "$env_file" ] || return 0
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
+}
+
+deployment_env_values_payload() {
+  local env_file="${DEPLOYMENT_ROOT_ENV:-}"
+  local monitoring_env_file
+  local files=()
+
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    files+=("$env_file")
+  else
+    deployment_warn "deploy/env/.env is not available; environment rollout checksum will use available env files only."
+  fi
+
+  monitoring_env_file="$(deployment_monitoring_env_file)"
+  if [ -f "$monitoring_env_file" ]; then
+    files+=("$monitoring_env_file")
+  fi
+
+  [ "${#files[@]}" -gt 0 ] || return 0
+
+  awk '
     /^[[:space:]]*($|#)/ { next }
     {
       line = $0
+      sub(/\r$/, "", line)
       sub(/^[[:space:]]*/, "", line)
       sub(/^export[[:space:]]+/, "", line)
       if (line !~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
@@ -157,7 +201,7 @@ deployment_env_values_payload() {
         print values[key]
       }
     }
-  ' | LC_ALL=C sort -t '=' -k1,1
+  ' "${files[@]}" | LC_ALL=C sort -t '=' -k1,1
 }
 
 deployment_env_values_checksum() {
@@ -208,6 +252,177 @@ deployment_get_env_var_file() {
     value="${value%\'}"
   fi
   printf '%s' "$value"
+}
+
+deployment_sync_env_defaults() {
+  local example_file="$1"
+  local env_file="$2"
+  local line key value env_value
+
+  if [ ! -f "$example_file" ]; then
+    deployment_error "Monitoring env example not found: $example_file"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="$(deployment_trim "$line")"
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+    key="${line%%=*}"
+    if grep -q "^${key}=" "$env_file"; then
+      continue
+    fi
+
+    value="${line#*=}"
+    env_value="$(printenv "$key" 2>/dev/null || true)"
+    if [ -n "$env_value" ]; then
+      value="$env_value"
+    fi
+    deployment_update_env_var_file "$env_file" "$key" "$value"
+  done < "$example_file"
+}
+
+deployment_monitoring_env_value() {
+  local key="$1"
+  local default_value="${2:-}"
+  local env_file
+  local value
+
+  env_file="$(deployment_monitoring_env_file)"
+  if value="$(deployment_get_env_var_file "$env_file" "$key" 2>/dev/null)"; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if [ "${!key+x}" = "x" ]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  printf '%s' "$default_value"
+}
+
+deployment_update_monitoring_env_var() {
+  local key="$1"
+  local value="$2"
+  deployment_update_env_var_file "$(deployment_monitoring_env_file)" "$key" "$value"
+}
+
+deployment_monitoring_collector_config_file() {
+  local target="${1:-docker}"
+  local provider="${2:-${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}}"
+  local config_name
+
+  case "$provider" in
+    phoenix)
+      config_name="otel-collector-phoenix-config.yml"
+      ;;
+    langfuse)
+      config_name="otel-collector-langfuse-config.yml"
+      ;;
+    langsmith)
+      config_name="otel-collector-langsmith-config.yml"
+      ;;
+    grafana)
+      config_name="otel-collector-grafana-config.yml"
+      ;;
+    zipkin)
+      config_name="otel-collector-zipkin-config.yml"
+      ;;
+    otlp|*)
+      config_name="otel-collector-config.yml"
+      ;;
+  esac
+
+  case "$target" in
+    docker)
+      printf '../assets/monitoring/%s' "$config_name"
+      ;;
+    k8s|helm)
+      printf '%s' "$config_name"
+      ;;
+    *)
+      printf '%s' "$config_name"
+      ;;
+  esac
+}
+
+deployment_prepare_monitoring_env() {
+  local target="${1:-docker}"
+  local env_file
+  local example_file
+  local legacy_file
+  local telemetry_enabled
+  local dashboard_url
+  local provider
+  local collector_config_file
+  local otlp_endpoint
+  local langfuse_public_key
+  local langfuse_secret_key
+  local langfuse_auth_header
+  local langsmith_api_key
+
+  env_file="$(deployment_monitoring_env_file)"
+  example_file="$(deployment_monitoring_env_example_file)"
+  legacy_file="$(deployment_legacy_monitoring_env_file)"
+
+  if [ ! -f "$env_file" ] && [ -f "$legacy_file" ]; then
+    mkdir -p "$(dirname "$env_file")"
+    cp "$legacy_file" "$env_file"
+    deployment_log "✅ Migrated monitoring.env to $env_file"
+  fi
+
+  deployment_sync_env_defaults "$example_file" "$env_file" || return 1
+  deployment_source_env_file "$env_file"
+
+  telemetry_enabled="$(deployment_monitoring_enabled)"
+  provider="$DEPLOYMENT_MONITORING_PROVIDER"
+
+  deployment_update_monitoring_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
+  deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
+
+  deployment_source_env_file "$env_file"
+  dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
+  deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+
+  case "$target" in
+    k8s|helm)
+      otlp_endpoint="http://nexent-otel-collector:4318"
+      ;;
+    docker|*)
+      otlp_endpoint="http://otel-collector:4318"
+      ;;
+  esac
+  deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$otlp_endpoint"
+  deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_PROTOCOL" "http"
+
+  collector_config_file="$(deployment_monitoring_collector_config_file "$target" "$provider")"
+  deployment_update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"
+
+  if [ "$provider" = "langfuse" ]; then
+    langfuse_public_key="$(deployment_monitoring_env_value "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-lf-nexent-local")"
+    langfuse_secret_key="$(deployment_monitoring_env_value "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-lf-nexent-local")"
+    langfuse_auth_header="Basic $(printf "%s:%s" "$langfuse_public_key" "$langfuse_secret_key" | base64 | tr -d '\n')"
+    deployment_update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$langfuse_auth_header"
+  fi
+
+  if [ "$provider" = "langsmith" ]; then
+    langsmith_api_key="$(deployment_monitoring_env_value "LANGSMITH_API_KEY" "")"
+    deployment_update_monitoring_env_var "LANGSMITH_API_KEY" "$langsmith_api_key"
+    deployment_update_monitoring_env_var "LANGSMITH_PROJECT" "$(deployment_monitoring_env_value "LANGSMITH_PROJECT" "nexent")"
+    deployment_update_monitoring_env_var "LANGSMITH_OTLP_TRACES_ENDPOINT" "$(deployment_monitoring_env_value "LANGSMITH_OTLP_TRACES_ENDPOINT" "https://api.smith.langchain.com/otel/v1/traces")"
+  fi
+
+  deployment_source_env_file "$env_file"
+  DEPLOYMENT_MONITORING_PROVIDER="${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}"
+  export DEPLOYMENT_MONITORING_PROVIDER
 }
 
 deployment_sha256_string() {
@@ -1182,16 +1397,16 @@ deployment_monitoring_dashboard_url() {
       printf 'http://localhost:%s' "${ZIPKIN_PORT:-9411}"
       ;;
     k8s:phoenix|helm:phoenix)
-      printf 'http://localhost:30006'
+      printf 'http://localhost:%s' "${K8S_PHOENIX_NODE_PORT:-30006}"
       ;;
     k8s:langfuse|helm:langfuse)
-      printf 'http://localhost:30001'
+      printf 'http://localhost:%s' "${K8S_LANGFUSE_NODE_PORT:-30001}"
       ;;
     k8s:grafana|helm:grafana)
-      printf 'http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+      printf 'http://localhost:%s/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1' "${K8S_GRAFANA_NODE_PORT:-30002}"
       ;;
     k8s:zipkin|helm:zipkin)
-      printf 'http://localhost:30011'
+      printf 'http://localhost:%s' "${K8S_ZIPKIN_NODE_PORT:-30011}"
       ;;
     *:langsmith)
       printf 'https://smith.langchain.com/'
@@ -1218,9 +1433,6 @@ deployment_render_docker_env() {
     printf 'SUPABASE_KONG="%s"\n' "$SUPABASE_KONG"
     printf 'SUPABASE_GOTRUE="%s"\n' "$SUPABASE_GOTRUE"
     printf 'SUPABASE_DB="%s"\n' "$SUPABASE_DB"
-    printf 'ENABLE_TELEMETRY="%s"\n' "$(deployment_monitoring_enabled)"
-    printf 'MONITORING_PROVIDER="%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
-    printf 'MONITORING_DASHBOARD_URL="%s"\n' "$(deployment_monitoring_dashboard_url docker)"
   } > "$output_file"
 }
 
@@ -1383,6 +1595,128 @@ deployment_render_helm_chart_values() {
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
 }
 
+deployment_yaml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+deployment_render_helm_monitoring_global_values() {
+  local enabled
+  enabled="$(deployment_monitoring_enabled)"
+
+  printf '  monitoring:\n'
+  printf '    enabled: %s\n' "$enabled"
+  printf '    provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '    dashboardUrl: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_URL "$(deployment_monitoring_dashboard_url k8s)")")"
+  printf '    projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROJECT_NAME "nexent")")"
+  printf '    serviceName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_SERVICE_NAME "nexent-backend")")"
+  printf '    otlpEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_ENDPOINT "http://nexent-otel-collector:4318")")"
+  printf '    otlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "")")"
+  printf '    otlpMetricsEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENDPOINT "")")"
+  printf '    otlpProtocol: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_PROTOCOL "http")")"
+  printf '    otlpHeaders: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_HEADERS "")")"
+  printf '    otlpAuthorization: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_AUTHORIZATION "")")"
+  printf '    otlpApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_X_API_KEY "")")"
+  printf '    otlpLangfuseIngestionVersion: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION "")")"
+  printf '    langsmithApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_API_KEY "")")"
+  printf '    langsmithProject: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_PROJECT "nexent")")"
+  printf '    langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
+  printf '    otlpMetricsEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENABLED "true")")"
+  printf '    instrumentRequests: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_INSTRUMENT_REQUESTS "false")")"
+  printf '    fastapiIncludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_INCLUDED_URLS "/agent/run")")"
+  printf '    fastapiExcludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDED_URLS "")")"
+  printf '    fastapiExcludeSpans: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDE_SPANS "receive,send")")"
+  printf '    telemetrySampleRate: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TELEMETRY_SAMPLE_RATE "1.0")")"
+  printf '    traceContentMode: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_CONTENT_MODE "full")")"
+  printf '    traceMaxChars: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_CHARS "4000")")"
+  printf '    traceMaxItems: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_ITEMS "20")")"
+}
+
+deployment_render_helm_monitoring_chart_values() {
+  local enabled
+  local langfuse_nextauth_url
+  enabled="$(deployment_monitoring_enabled)"
+  langfuse_nextauth_url="$(deployment_monitoring_env_value K8S_LANGFUSE_NEXTAUTH_URL "http://localhost:${K8S_LANGFUSE_NODE_PORT:-30001}")"
+
+  printf 'nexent-monitoring:\n'
+  printf '  enabled: %s\n' "$enabled"
+  printf '  provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '  images:\n'
+  printf '    otelCollector:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_VERSION "0.151.0")")"
+  printf '    phoenix:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value PHOENIX_VERSION "15")")"
+  printf '    tempo:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TEMPO_VERSION "2.10.5")")"
+  printf '    grafana:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_VERSION "12.4")")"
+  printf '    zipkin:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value ZIPKIN_VERSION "latest")")"
+  printf '    langfuseWeb:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_VERSION "3")")"
+  printf '    langfuseWorker:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_VERSION "3")")"
+  printf '    clickhouse:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")")"
+  printf '    minio:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")")"
+  printf '    redis:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")")"
+  printf '    postgres:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")")"
+  printf '  collector:\n'
+  printf '    configFile: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_CONFIG_FILE "$(deployment_monitoring_collector_config_file k8s "$DEPLOYMENT_MONITORING_PROVIDER")")")"
+  printf '    service:\n'
+  printf '      grpcPort: %s\n' "$(deployment_monitoring_env_value OTEL_COLLECTOR_GRPC_PORT "4317")"
+  printf '      httpPort: %s\n' "$(deployment_monitoring_env_value OTEL_COLLECTOR_HTTP_PORT "4318")"
+  printf '    env:\n'
+  printf '      langsmithApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_API_KEY "")")"
+  printf '      langsmithProject: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_PROJECT "nexent")")"
+  printf '      langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
+  printf '      langfuseOtlpAuthHeader: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_OTLP_AUTH_HEADER "")")"
+  printf '  phoenix:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value PHOENIX_PORT "6006")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_PHOENIX_NODE_PORT "30006")"
+  printf '  grafana:\n'
+  printf '    adminUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_USER "admin")")"
+  printf '    adminPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_PASSWORD "nexent@4321")")"
+  printf '    defaultLanguage: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_DEFAULT_LANGUAGE "zh-Hans")")"
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value GRAFANA_PORT "3002")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_GRAFANA_NODE_PORT "30002")"
+  printf '  tempo:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value TEMPO_PORT "3200")"
+  printf '  zipkin:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value ZIPKIN_PORT "9411")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_ZIPKIN_NODE_PORT "30011")"
+  printf '  langfuse:\n'
+  printf '    nextauthUrl: %s\n' "$(deployment_yaml_quote "$langfuse_nextauth_url")"
+  printf '    nextauthSecret: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_NEXTAUTH_SECRET "nexent-langfuse-secret")")"
+  printf '    salt: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_SALT "nexent-langfuse-salt")")"
+  printf '    encryptionKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_ENCRYPTION_KEY "0000000000000000000000000000000000000000000000000000000000000000")")"
+  printf '    telemetryEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_TELEMETRY_ENABLED "false")")"
+  printf '    enableExperimentalFeatures: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES "false")")"
+  printf '    init:\n'
+  printf '      orgId: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_ORG_ID "nexent")")"
+  printf '      orgName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_ORG_NAME "Nexent")")"
+  printf '      projectId: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_ID "nexent")")"
+  printf '      projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_NAME "Nexent")")"
+  printf '      projectPublicKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_PUBLIC_KEY "pk-lf-nexent-local")")"
+  printf '      projectSecretKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_SECRET_KEY "sk-lf-nexent-local")")"
+  printf '      userEmail: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_EMAIL "admin@nexent.com")")"
+  printf '      userName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_NAME "admin")")"
+  printf '      userPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_PASSWORD "nexent@4321")")"
+  printf '    service:\n'
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_LANGFUSE_NODE_PORT "30001")"
+  printf '    postgres:\n'
+  printf '      user: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_USER "postgres")")"
+  printf '      password: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_PASSWORD "nexent@4321")")"
+  printf '      database: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_DB "postgres")")"
+  printf '    clickhouse:\n'
+  printf '      user: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_USER "clickhouse")")"
+  printf '      password: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_PASSWORD "clickhouse")")"
+  printf '    minio:\n'
+  printf '      rootUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_ROOT_USER "minio")")"
+  printf '      rootPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_ROOT_PASSWORD "miniosecret")")"
+  printf '      bucket: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_S3_BUCKET "langfuse")")"
+  printf '    redis:\n'
+  printf '      auth: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_REDIS_AUTH "myredissecret")")"
+}
+
 deployment_render_helm_values() {
   local output_file="$1"
   mkdir -p "$(dirname "$output_file")"
@@ -1398,21 +1732,8 @@ deployment_render_helm_values() {
     fi
     printf '  portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf '  imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
-    printf '  monitoring:\n'
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-      printf '    enabled: true\n'
-    else
-      printf '    enabled: false\n'
-    fi
-    printf '    provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
-    printf '    dashboardUrl: "%s"\n' "$(deployment_monitoring_dashboard_url k8s)"
-    printf 'nexent-monitoring:\n'
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-      printf '  enabled: true\n'
-    else
-      printf '  enabled: false\n'
-    fi
-    printf '  provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    deployment_render_helm_monitoring_global_values
+    deployment_render_helm_monitoring_chart_values
     deployment_render_helm_chart_values
   } > "$output_file"
 }

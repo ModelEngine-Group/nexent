@@ -172,6 +172,7 @@ apply_deployment_common_config() {
     esac
 
     deployment_apply_image_source
+    deployment_prepare_monitoring_env k8s || return 1
     deployment_render_helm_values "$GENERATED_VALUES"
     render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
     render_persistence_values "$GENERATED_PERSISTENCE_VALUES"
@@ -472,31 +473,6 @@ render_k8s_runtime_config_values() {
     printf '      queues: %s\n' "$(yaml_quote "$(env_or_default QUEUES "process_q,forward_q")")"
     printf '      workerName: %s\n' "$(yaml_quote "$(env_or_default WORKER_NAME "")")"
     printf '      workerConcurrency: %s\n' "$(yaml_quote "$(env_or_default WORKER_CONCURRENCY "4")")"
-    echo "    telemetry:"
-    printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default ENABLE_TELEMETRY "false")")"
-    printf '      provider: %s\n' "$(yaml_quote "$(env_or_default MONITORING_PROVIDER "otlp")")"
-    printf '      projectName: %s\n' "$(yaml_quote "$(env_or_default MONITORING_PROJECT_NAME "")")"
-    printf '      serviceName: %s\n' "$(yaml_quote "$(env_or_default OTEL_SERVICE_NAME "nexent-backend")")"
-    printf '      otlpEndpoint: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_ENDPOINT "http://nexent-otel-collector:4318")")"
-    printf '      otlpTracesEndpoint: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "")")"
-    printf '      otlpMetricsEndpoint: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_METRICS_ENDPOINT "")")"
-    printf '      otlpProtocol: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_PROTOCOL "http")")"
-    printf '      otlpHeaders: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_HEADERS "")")"
-    printf '      otlpAuthorization: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_AUTHORIZATION "")")"
-    printf '      otlpApiKey: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_X_API_KEY "")")"
-    printf '      otlpLangfuseIngestionVersion: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION "")")"
-    printf '      langsmithApiKey: %s\n' "$(yaml_quote "$(env_or_default LANGSMITH_API_KEY "")")"
-    printf '      langsmithProject: %s\n' "$(yaml_quote "$(env_or_default LANGSMITH_PROJECT "")")"
-    printf '      otlpMetricsEnabled: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_METRICS_ENABLED "true")")"
-    printf '      instrumentRequests: %s\n' "$(yaml_quote "$(env_or_default MONITORING_INSTRUMENT_REQUESTS "false")")"
-    printf '      fastapiIncludedUrls: %s\n' "$(yaml_quote "$(env_or_default MONITORING_FASTAPI_INCLUDED_URLS "")")"
-    printf '      fastapiExcludedUrls: %s\n' "$(yaml_quote "$(env_or_default MONITORING_FASTAPI_EXCLUDED_URLS "")")"
-    printf '      fastapiExcludeSpans: %s\n' "$(yaml_quote "$(env_or_default MONITORING_FASTAPI_EXCLUDE_SPANS "receive,send")")"
-    printf '      dashboardUrl: %s\n' "$(yaml_quote "$(env_or_default MONITORING_DASHBOARD_URL "")")"
-    printf '      telemetrySampleRate: %s\n' "$(yaml_quote "$(env_or_default TELEMETRY_SAMPLE_RATE "1.0")")"
-    printf '      traceContentMode: %s\n' "$(yaml_quote "$(env_or_default MONITORING_TRACE_CONTENT_MODE "full")")"
-    printf '      traceMaxChars: %s\n' "$(yaml_quote "$(env_or_default MONITORING_TRACE_MAX_CHARS "4000")")"
-    printf '      traceMaxItems: %s\n' "$(yaml_quote "$(env_or_default MONITORING_TRACE_MAX_ITEMS "20")")"
     echo "    oauth:"
     printf '      githubClientId: %s\n' "$(yaml_quote "$(env_or_default GITHUB_OAUTH_CLIENT_ID "")")"
     printf '      githubClientSecret: %s\n' "$(yaml_quote "$(env_or_default GITHUB_OAUTH_CLIENT_SECRET "")")"
@@ -622,6 +598,7 @@ update_values_yaml() {
   echo ""
 
   deployment_apply_image_source
+  deployment_prepare_monitoring_env k8s || exit 1
   deployment_render_helm_values "$GENERATED_VALUES"
   render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
   render_persistence_values "$GENERATED_PERSISTENCE_VALUES"
