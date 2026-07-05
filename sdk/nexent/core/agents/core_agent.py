@@ -402,7 +402,20 @@ Additional Args:
         )
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
-        self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
+        # Baseline for the per-step compression ratio. ``final_context.messages``
+        # is already the COMPRESSED payload, so using it here made save%
+        # structurally ~0%. Use the ContextManager's truly-uncompressed memory
+        # token count (computed in compress_if_needed from the raw memory) as the
+        # baseline; fall back to the (compressed) input size when no
+        # ContextManager is active -- the legacy path does not compress, so 0% is
+        # correct there.
+        uncompressed_tokens = None
+        if self.context_manager is not None:
+            uncompressed_tokens = self.context_manager.get_token_counts().get("last_uncompressed")
+        if uncompressed_tokens:
+            self._last_uncompressed_est = uncompressed_tokens
+        else:
+            self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
 
         # Inject ephemeral system messages before the last USER message
         # (the current query), maximizing prompt cache prefix reuse: the
@@ -481,9 +494,29 @@ Additional Args:
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
             raise FinalAnswerError()
 
+        # ContextManager path: the full code already lives verbatim in
+        # memory_step.model_output (the <code> block) and memory_step.code_action.
+        # ActionStep.to_messages() would otherwise render the same code a second
+        # time into the TOOL_CALL message ("Calling tools: ..."), roughly doubling
+        # the code portion of every step in history. Store compact call signatures
+        # in tool_call.arguments instead. The full code is still executed below
+        # via self.python_executor(code_action) and remains in model_output, so no
+        # information is lost. Gated on CM enabled: the legacy/disabled path keeps
+        # the original full-code arguments unchanged.
+        if self.context_manager and self.context_manager.config.enabled:
+            memory_step.invoked_tool_signatures = (
+                extract_invoked_tool_signatures(code_action, self.tools) if self.tools else []
+            )
+            compact_arguments = (
+                "\n".join(memory_step.invoked_tool_signatures)
+                if memory_step.invoked_tool_signatures
+                else truncate_content(code_action, max_length=100)
+            )
+        else:
+            compact_arguments = code_action
         tool_call = ToolCall(
             name="python_interpreter",
-            arguments=code_action,
+            arguments=compact_arguments,
             id=f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]

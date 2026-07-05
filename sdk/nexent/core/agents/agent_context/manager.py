@@ -282,6 +282,13 @@ class ContextManager:
                 compressed_msgs = self._renderer.build_messages(
                     memory, prev_summary_step, prev_tail_steps, curr_kept_steps
                 )
+                # Refresh the uncompressed baseline here too, so the per-step
+                # compression ratio (est_raw_i) reflects THIS step's full
+                # uncompressed memory instead of a stale value from the last
+                # full compression. Mirrors the bookkeeping on the full path
+                # below. Without this, stable_bypass steps (cache hits) report a
+                # frozen baseline and understate savings.
+                self._last_uncompressed_token_count = msg_token_count(original_messages, self.config.chars_per_token)
                 self._last_compressed_token_count = msg_token_count(compressed_msgs, self.config.chars_per_token)
                 return compressed_msgs
 
