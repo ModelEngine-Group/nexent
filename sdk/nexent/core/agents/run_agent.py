@@ -84,6 +84,44 @@ def _mount_conversation_context_manager(agent: Any, agent_run_info: AgentRunInfo
         )
     agent.context_manager = context_manager
 
+    # Rebind the reload tool to the conversation-level CM's offload store so
+    # reload resolves against the session-level store (where compression
+    # archives content across turns). The tool is constructed in
+    # create_single_agent against that build's own CM store, which is orphaned
+    # once the runtime switches to the conversation CM here; without this
+    # rebind every reload would miss (inventory advertises handles from the
+    # session store, but the tool would still read the empty per-build store).
+    _rebind_reload_tool_store(agent, context_manager)
+
+
+def _rebind_reload_tool_store(agent: Any, context_manager: Any) -> None:
+    """Point the ReloadOriginalContextTool at the conversation-level offload store.
+
+    The tool is created in ``create_single_agent`` bound to that agent build's
+    own ``ContextManager.offload_store``. When a conversation-level
+    ContextManager is mounted, compression archives into the mounted CM's
+    store, so the reload tool must follow it to keep reload working across
+    turns. Tools live on the agent as a name-keyed dict; we rebind by tool
+    name and never raise into the mount path.
+    """
+    tools = getattr(agent, "tools", None)
+    if not tools:
+        return
+    store = getattr(context_manager, "offload_store", None)
+    if store is None:
+        return
+    iterable = tools.values() if hasattr(tools, "values") else tools
+    for tool in iterable:
+        if getattr(tool, "name", None) == "reload_original_context_messages":
+            try:
+                tool._offload_store = store
+            except Exception:
+                logger.debug(
+                    "Failed to rebind reload tool offload store to conversation CM",
+                    exc_info=True,
+                )
+            return
+
 
 def _detect_transport(url: str) -> str:
     """
