@@ -294,6 +294,8 @@ async def regenerate_agent_name_batch_api(request: AgentNameBatchRegenerateReque
 async def list_all_agent_info_api(
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
+    include_drafts: bool = Query(
+        False, description="Include NL2AGENT draft agents (name starts with 'draft_')"),
     authorization: Optional[str] = Header(None),
     request: Request = None
 ):
@@ -305,11 +307,12 @@ async def list_all_agent_info_api(
             authorization, request)
 
         agent_list = await list_all_agent_info_impl(
-            tenant_id=tenant_id, user_id=user_id
+            tenant_id=tenant_id, user_id=user_id, include_drafts=include_drafts
         )
         if tenant_id != ASSET_OWNER_TENANT_ID:
             asset_agent_list = await list_all_agent_info_impl(
-                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id
+                tenant_id=ASSET_OWNER_TENANT_ID, user_id=user_id,
+                include_drafts=include_drafts
             )
             return agent_list + asset_agent_list
         return agent_list
