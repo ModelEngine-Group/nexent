@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Un
 
 if TYPE_CHECKING:
     from ..agent_model import ContextComponent, ContextStrategy
-    from ..context_runtime.contracts import ContextEvidence, FinalContext
+    from ...context_runtime.contracts import ContextEvidence, FinalContext
 
 from smolagents.memory import ActionStep, AgentMemory, MemoryStep, TaskStep
 from smolagents.models import ChatMessage, MessageRole
@@ -516,7 +516,7 @@ class ContextManager:
         self._previous_stable_fingerprint = fingerprint
         self._previous_stable_components = component_fingerprints
 
-        from ..context_runtime.contracts import ContextEvidence, FinalContext
+        from ...context_runtime.contracts import ContextEvidence, FinalContext
 
         return FinalContext(
             messages=messages,
