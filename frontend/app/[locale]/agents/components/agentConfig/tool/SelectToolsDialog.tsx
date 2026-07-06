@@ -148,9 +148,11 @@ export default function SelectToolsDialog({
   const visibleCategories = useMemo(() => currentGroups.map((g) => g.category), [currentGroups]);
 
   // Auto-select first visible category
-  if (visibleCategories.length > 0 && (!activeCategory || !visibleCategories.includes(activeCategory))) {
-    setTimeout(() => setActiveCategory(visibleCategories[0]), 0);
-  }
+  useEffect(() => {
+    if (visibleCategories.length > 0 && (!activeCategory || !visibleCategories.includes(activeCategory))) {
+      setActiveCategory(visibleCategories[0]);
+    }
+  }, [visibleCategories, activeCategory]);
 
   const selectedToolIds = useMemo(
     () => new Set(selectedTools.map((t) => parseInt(t.id))),

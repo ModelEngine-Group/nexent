@@ -278,7 +278,14 @@ async def add_remote_mcp_server_list(
         logger.error(f"MCP name already exists: {remote_mcp_server_name}")
         raise MCPNameIllegal("MCP name already exists")
 
-    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token, custom_headers=custom_headers):
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    tool_names = await _mcp_protocol_health_check(remote_mcp_server.strip(), headers)
+    if not tool_names:
         raise MCPConnectionError("MCP connection failed")
 
     insert_mcp_data = {
@@ -290,6 +297,7 @@ async def add_remote_mcp_server_list(
         "custom_headers": custom_headers,
         "source": source,
         "container_port": container_port,
+        "registry_json": {"_toolNames": tool_names},
     }
     create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
 
@@ -346,9 +354,9 @@ async def add_mcp_service(
 
     # Always validate connectivity for URL-based MCP services before saving.
     # Container-based services are started separately and do not require a
-    # reachable URL here.
+    # reachable URL here, but we still attempt to fetch tool names for display.
     resolved_registry_json = registry_json or {}
-    if not is_container and server_url:
+    if server_url:
         headers = {}
         if authorization_token:
             headers["Authorization"] = authorization_token
@@ -356,9 +364,15 @@ async def add_mcp_service(
             headers.update(custom_headers)
         tool_names = await _mcp_protocol_health_check(server_url.strip(), headers)
         if not tool_names:
-            raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
-        # Store tool names in registry_json for tool count display
-        resolved_registry_json["_toolNames"] = tool_names
+            if is_container:
+                logger.warning(
+                    "Container MCP service %s is not reachable yet, "
+                    "tool count will be unavailable until the next refresh", name
+                )
+            else:
+                raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
+        else:
+            resolved_registry_json["_toolNames"] = tool_names
 
     if enabled:
         status = True
@@ -1191,11 +1205,15 @@ async def refresh_mcp_service_tool_count(
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
 
-    tool_names = await mcp_server_health(
-        remote_mcp_server=server_url,
-        authorization_token=authorization_token,
-        custom_headers=custom_headers,
-    )
+    headers = {}
+    if authorization_token:
+        headers["Authorization"] = authorization_token
+    if custom_headers:
+        headers.update(custom_headers)
+
+    tool_names = await _mcp_protocol_health_check(server_url, headers)
+    if not tool_names:
+        raise MCPConnectionError("MCP server is unreachable or does not support MCP protocol")
 
     registry_json = record.get("registry_json") or {}
     registry_json["_toolNames"] = tool_names
