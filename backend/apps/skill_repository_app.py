@@ -5,7 +5,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
-from consts.exceptions import SkillDuplicateError, UnauthorizedError
+from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
 from consts.model import SkillRepositoryListingCreateRequest
 from services.skill_repository_service import (
     create_skill_repository_listing_impl,
@@ -76,6 +76,10 @@ async def list_my_editable_skills_api(
     search: Optional[str] = Query(
         None, description="Filter by skill name, description, source, creator, or tags"
     ),
+    new_skill_padding: bool = Query(
+        False,
+        description="Reserve first slot on page 1 for create-skill placeholder",
+    ),
     authorization: str = Header(None),
 ):
     """List editable skills for the current user with repository listing info."""
@@ -88,6 +92,7 @@ async def list_my_editable_skills_api(
             page=page,
             page_size=page_size,
             search=search,
+            new_skill_padding=new_skill_padding,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
@@ -156,6 +161,12 @@ async def update_skill_repository_status_api(
             f"(id={skill_repository_id}, status={status}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ForbiddenError as e:
+        logger.warning(
+            f"Forbidden skill repository status update attempt "
+            f"(id={skill_repository_id}, status={status}): {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Invalid skill repository status update "
@@ -187,6 +198,12 @@ async def create_skill_repository_listing_api(
             f"(skill_id={skill_id}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ForbiddenError as e:
+        logger.warning(
+            f"Forbidden skill repository listing creation attempt "
+            f"(skill_id={skill_id}): {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Invalid skill repository listing creation parameters "

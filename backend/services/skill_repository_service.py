@@ -15,7 +15,8 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.exceptions import SkillDuplicateError, SkillException, UnauthorizedError
+from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
+from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException, UnauthorizedError
 from database.skill_repository_db import (
     get_skill_repository_by_id_and_publisher,
     get_skill_repository_by_skill_id,
@@ -26,6 +27,7 @@ from database.skill_repository_db import (
     update_skill_repository_by_id,
     update_skill_repository_status_by_id,
 )
+from database.skill_db import get_skill_by_name
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.skill_service import SkillService
 
@@ -64,6 +66,7 @@ _ADMIN_REVIEW_STATUS_TRANSITIONS: FrozenSet[Tuple[str, str]] = frozenset({
 _MAX_LISTING_TAGS = 5
 _MAX_LISTING_TAG_LENGTH = 20
 _MAX_LISTING_ICON_LENGTH = 32
+_MAX_COPY_NAME_LENGTH = 100
 
 _UPDATE_SNAPSHOT_FIELDS = (
     "name",
@@ -105,6 +108,7 @@ def _to_summary_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "icon": record.get("icon"),
         "downloads": record.get("downloads") or 0,
         "created_at": record.get("created_at") or _serialize_created_at(record.get("create_time")),
+        "updated_at": record.get("updated_at") or _serialize_created_at(record.get("update_time")),
     }
 
 
@@ -128,6 +132,7 @@ def _to_detail_item(
         "tags": record.get("tags") or _as_list(snapshot.get("tags")),
         "downloads": record.get("downloads") or 0,
         "created_at": _serialize_created_at(record.get("create_time")),
+        "updated_at": _serialize_created_at(record.get("update_time")),
         "content": snapshot.get("content"),
         "config_schemas": _as_dict(snapshot.get("config_schemas")),
         "config_values": _as_dict(snapshot.get("config_values")),
@@ -160,11 +165,11 @@ def _to_repository_info_item(record: Dict[str, Any]) -> Dict[str, Any]:
 def _matches_ownership(skill: Dict[str, Any], user_id: str, ownership_filter: str) -> bool:
     """Return whether a skill belongs to the requested ownership bucket."""
     created_by = skill.get("created_by")
-    if ownership_filter == OWNERSHIP_CREATED:
+    if ownership_filter in (OWNERSHIP_ALL, OWNERSHIP_CREATED):
         return created_by == user_id
     if ownership_filter == OWNERSHIP_OTHERS:
-        return created_by != user_id
-    return True
+        return False
+    return created_by == user_id
 
 
 def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
@@ -186,12 +191,34 @@ def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
 def _count_skills_by_ownership(skills: List[Dict[str, Any]], user_id: str) -> Dict[str, int]:
     """Count editable skills in each ownership bucket."""
     created = sum(1 for skill in skills if skill.get("created_by") == user_id)
-    total = len(skills)
     return {
-        OWNERSHIP_ALL: total,
+        OWNERSHIP_ALL: created,
         OWNERSHIP_CREATED: created,
-        OWNERSHIP_OTHERS: total - created,
+        OWNERSHIP_OTHERS: 0,
     }
+
+
+def _paginate_mine_skills_with_optional_padding(
+    filtered_skills: List[Dict[str, Any]],
+    page: int,
+    page_size: int,
+    include_padding: bool,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Paginate mine skills with an optional create-skill placeholder at virtual index 0."""
+    skill_count = len(filtered_skills)
+    total = skill_count + 1 if include_padding else skill_count
+    if total == 0:
+        return [], 0
+
+    offset = (page - 1) * page_size
+    paged_entries: List[Dict[str, Any]] = []
+    for slot in range(offset, min(offset + page_size, total)):
+        if include_padding and slot == 0:
+            paged_entries.append({"new_skill_padding": True})
+        else:
+            skill_index = slot - 1 if include_padding else slot
+            paged_entries.append(filtered_skills[skill_index])
+    return paged_entries, total
 
 
 def _get_user_role(user_id: str) -> str:
@@ -200,6 +227,18 @@ def _get_user_role(user_id: str) -> str:
     if not user_tenant:
         return "USER"
     return str(user_tenant.get("user_role") or "USER")
+
+
+def _resolve_mine_skill_permission(
+    *,
+    skill: Dict[str, Any],
+    user_id: str,
+    user_role: str,
+) -> str:
+    """Resolve list-item permission for skill repository mine view."""
+    if user_role in CAN_EDIT_ALL_USER_ROLES:
+        return PERMISSION_EDIT
+    return PERMISSION_EDIT if skill.get("created_by") == user_id else PERMISSION_READ
 
 
 def _resolve_submitter_email(user_id: str) -> Optional[str]:
@@ -220,13 +259,15 @@ def _validate_create_listing_permission(
         return
     if user_role == "DEV" and skill_info.get("created_by") == user_id:
         return
-    raise UnauthorizedError(
+    raise ForbiddenError(
         f"User role {user_role} not authorized to create repository listing"
     )
 
 
 def _normalize_listing_tags(tags: Any) -> List[str]:
     """Trim, deduplicate, and validate marketplace listing tags."""
+    if tags is None:
+        return []
     if not isinstance(tags, list):
         raise ValueError("tags must be a list of strings")
 
@@ -247,8 +288,6 @@ def _normalize_listing_tags(tags: Any) -> List[str]:
         seen.add(tag)
         normalized.append(tag)
 
-    if not normalized:
-        raise ValueError("tags must contain at least one non-empty tag")
     if len(normalized) > _MAX_LISTING_TAGS:
         raise ValueError(f"tags must contain at most {_MAX_LISTING_TAGS} items")
     return normalized
@@ -256,7 +295,7 @@ def _normalize_listing_tags(tags: Any) -> List[str]:
 
 def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
     """Validate marketplace card fields required for listing submission."""
-    icon = repository_data.get("icon")
+    icon = repository_data.get("icon") or "skill"
     if not icon or not isinstance(icon, str) or not icon.strip():
         raise ValueError("icon is required and must be a non-empty string")
     if len(icon.strip()) > _MAX_LISTING_ICON_LENGTH:
@@ -266,13 +305,10 @@ def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
     repository_data["icon"] = icon.strip()
 
     category_id = repository_data.get("category_id")
-    if category_id is None or not isinstance(category_id, int):
-        raise ValueError("category_id is required and must be an integer")
+    if category_id is not None and not isinstance(category_id, int):
+        raise ValueError("category_id must be an integer")
 
-    tags = repository_data.get("tags")
-    if tags is None:
-        raise ValueError("tags is required for marketplace listing submission")
-    repository_data["tags"] = _normalize_listing_tags(tags)
+    repository_data["tags"] = _normalize_listing_tags(repository_data.get("tags"))
 
 
 def _build_skill_info_json(skill_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -330,6 +366,8 @@ def _build_repository_data_from_skill(
         "description": skill_info.get("description"),
         "source": skill_info.get("source"),
         "submitted_by": _resolve_submitter_email(user_id),
+        "icon": "skill",
+        "tags": skill_info.get("tags") or [],
         "skill_info_json": _build_skill_info_json(skill_info),
         "skill_zip_base64": _export_skill_zip_base64(
             skill_name=skill_name,
@@ -446,11 +484,11 @@ def _validate_repository_status_transition(
 
     if user_role in ("ADMIN", "DEV"):
         if record.get("publisher_tenant_id") != tenant_id:
-            raise UnauthorizedError(
+            raise ForbiddenError(
                 "Not authorized to update this repository listing"
             )
         if user_role == "DEV" and record.get("publisher_user_id") != user_id:
-            raise UnauthorizedError(
+            raise ForbiddenError(
                 "Not authorized to update this repository listing"
             )
         if (
@@ -469,7 +507,7 @@ def _validate_repository_status_transition(
             }
         return None
 
-    raise UnauthorizedError(
+    raise ForbiddenError(
         f"User role {user_role} not authorized to update repository status"
     )
 
@@ -548,6 +586,33 @@ def _extract_duplicate_skill_name(error_message: str) -> Optional[str]:
     return None
 
 
+def _truncate_copy_base_name(base_name: str, suffix: str) -> str:
+    """Trim a copied skill base name so the final name fits the database limit."""
+    max_base_length = max(_MAX_COPY_NAME_LENGTH - len(suffix), 1)
+    if len(base_name) <= max_base_length:
+        return base_name
+    return base_name[:max_base_length].rstrip() or base_name[:max_base_length]
+
+
+def _generate_available_copy_skill_name(
+    *,
+    base_name: str,
+    tenant_id: str,
+) -> str:
+    """Generate an available skill name for repository copy within the tenant."""
+    normalized_base = (base_name or "Skill").strip() or "Skill"
+    if not get_skill_by_name(normalized_base, tenant_id):
+        return normalized_base
+
+    index = 1
+    while True:
+        suffix = " 副本" if index == 1 else f" 副本 {index}"
+        candidate = f"{_truncate_copy_base_name(normalized_base, suffix)}{suffix}"
+        if not get_skill_by_name(candidate, tenant_id):
+            return candidate
+        index += 1
+
+
 def install_skill_from_repository_impl(
     *,
     skill_repository_id: int,
@@ -574,9 +639,13 @@ def install_skill_from_repository_impl(
         raise ValueError("Repository listing has invalid skill ZIP payload") from exc
 
     try:
+        copy_skill_name = _generate_available_copy_skill_name(
+            base_name=str(record.get("name") or "").strip(),
+            tenant_id=tenant_id,
+        )
         created_skill = SkillService(tenant_id=tenant_id).create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
-            skill_name=None,
+            skill_name=copy_skill_name,
             source="repository",
             user_id=user_id,
             tenant_id=tenant_id,
@@ -620,6 +689,7 @@ def list_my_editable_skills_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    new_skill_padding: bool = False,
 ) -> Dict[str, Any]:
     """List editable skills for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -632,6 +702,7 @@ def list_my_editable_skills_impl(
     safe_page = max(int(page or 1), 1)
     safe_page_size = max(int(page_size or 10), 1)
 
+    user_role = _get_user_role(user_id)
     skills = SkillService(tenant_id=tenant_id).list_skills(tenant_id=tenant_id)
     counts = _count_skills_by_ownership(skills, user_id)
 
@@ -640,9 +711,17 @@ def list_my_editable_skills_impl(
         if _matches_ownership(skill, user_id, normalized_ownership)
         and _matches_search(skill, search)
     ]
-    total = len(filtered_skills)
-    start = (safe_page - 1) * safe_page_size
-    paged_skills = filtered_skills[start:start + safe_page_size]
+    include_padding = (
+        new_skill_padding
+        and normalized_ownership == OWNERSHIP_ALL
+        and not (search and search.strip())
+    )
+    paged_skills, total = _paginate_mine_skills_with_optional_padding(
+        filtered_skills,
+        page=safe_page,
+        page_size=safe_page_size,
+        include_padding=include_padding,
+    )
 
     skill_ids = [
         int(skill["skill_id"])
@@ -664,8 +743,12 @@ def list_my_editable_skills_impl(
                 _to_repository_info_item(record)
             )
 
-    items = [
-        {
+    items = []
+    for skill in paged_skills:
+        if skill.get("new_skill_padding"):
+            items.append({"new_skill_padding": True})
+            continue
+        items.append({
             "skill_id": skill.get("skill_id"),
             "name": skill.get("name"),
             "description": skill.get("description"),
@@ -674,12 +757,15 @@ def list_my_editable_skills_impl(
             "created_by": skill.get("created_by"),
             "created_at": skill.get("create_time"),
             "updated_at": skill.get("update_time"),
+            "permission": _resolve_mine_skill_permission(
+                skill=skill,
+                user_id=user_id,
+                user_role=user_role,
+            ),
             "repository_info": repository_by_skill_id.get(int(skill["skill_id"]), [])
             if skill.get("skill_id") is not None
             else [],
-        }
-        for skill in paged_skills
-    ]
+        })
 
     return {
         "items": items,
@@ -752,6 +838,7 @@ def get_skill_repository_listing_detail_impl(
         "tags": record.get("tags") or _as_list(snapshot.get("tags")),
         "downloads": record.get("downloads") or 0,
         "created_at": _serialize_created_at(record.get("create_time")),
+        "updated_at": _serialize_created_at(record.get("update_time")),
         "content": snapshot.get("content"),
         "config_schemas": _as_dict(snapshot.get("config_schemas")),
         "config_values": _as_dict(snapshot.get("config_values")),

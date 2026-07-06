@@ -167,7 +167,7 @@ export default function SkillBuildModal({
   } | null>(null);
 
   // Whether the user is in multi-turn refinement mode (has already received a draft).
-  // Used to switch the placeholder from "创建" to "继续修改" and to pass existing_skill.
+  // Used to switch the placeholder from "创建 to "继续修改" and to pass existing_skill.
   const [isMultiTurn, setIsMultiTurn] = useState(false);
 
   // Name input dropdown control
@@ -346,7 +346,7 @@ export default function SkillBuildModal({
     const fieldsToSet = {
       name: skill.name,
       description: skill.description || "",
-      source: skill.source || "自定义",
+      source: skill.source || "custom",
       tags: skill.tags || [],
       content: skill.content || "",
     };
@@ -859,354 +859,7 @@ export default function SkillBuildModal({
     }
   }, [chatMessages]);
 
-  const renderInteractiveTab = () => {
-    return (
-      <div className="flex gap-4" style={{ height: 480 }}>
-        {/* Left side: Chat dialog */}
-        <div
-          className="flex flex-col border border-gray-200 rounded-lg overflow-hidden"
-          style={{ width: "40%", minWidth: 280 }}
-        >
-          {/* Chat header */}
-          <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">
-              {t("skillManagement.tabs.interactive")}
-            </span>
-            {chatMessages.length > 0 && (
-              <button
-                onClick={handleChatClear}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-                title={t("agent.debug.clear")}
-              >
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-
-          {/* Chat messages area */}
-          <div
-            ref={chatContainerRef}
-            className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar"
-          >
-            {chatMessages.length === 0 && (
-              <div className="text-center text-gray-400 text-sm mt-8">
-                {t("skillManagement.form.chatPlaceholder")}
-              </div>
-            )}
-            {chatMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[90%] px-3 py-2 rounded-lg text-sm ${
-                    msg.role === "user"
-                      ? "bg-blue-500 text-white"
-                      : "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {msg.role === "assistant" && msg.id === currentAssistantIdRef.current && isThinkingVisible ? (
-                    <div className="min-w-[200px] flex flex-col items-center">
-                      <Loader2 size={24} className="animate-spin text-blue-500" />
-                      {thinkingDescription && (
-                        <span className="text-xs text-gray-500 mt-2">
-                          {thinkingDescription}
-                        </span>
-                      )}
-                    </div>
-                  ) : msg.role === "assistant" ? (
-                    <div className="markdown-content">
-                      <MarkdownRenderer
-                        content={msg.content}
-                        className="text-sm"
-                      />
-                    </div>
-                  ) : (
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Chat input area */}
-          <div className="p-3 border-t border-gray-200">
-            <Flex gap={8} align="center">
-              <TextArea
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onPressEnter={(e) => {
-                  if (!e.shiftKey) {
-                    e.preventDefault();
-                    if (!isChatLoading && !isStreaming) {
-                      handleChatSend();
-                    }
-                  }
-                }}
-                placeholder={isMultiTurn
-                  ? t("skillManagement.form.multiTurnPlaceholder")
-                  : t("skillManagement.form.chatPlaceholder")
-                }
-                disabled={isChatLoading || isStreaming}
-                autoSize={{ minRows: 1, maxRows: 3 }}
-                className="resize-none"
-              />
-              {isChatLoading || isStreaming ? (
-                <Tooltip title={t("skillManagement.stopGenerating") || "停止生成"}>
-                  <Button
-                    type="primary"
-                    danger
-                    shape="circle"
-                    icon={<Square size={14} />}
-                    onClick={handleStop}
-                    style={{ backgroundColor: "#ef4444" }}
-                  />
-                </Tooltip>
-              ) : (
-                <Button
-                  type="primary"
-                  icon={<Send size={14} />}
-                  onClick={handleChatSend}
-                  disabled={!chatInput.trim()}
-                  style={{ width: 30, height: 30, flexShrink: 0 }}
-                />
-              )}
-            </Flex>
-          </div>
-        </div>
-
-        {/* Right side: Form */}
-        <div
-          style={{ width: "60%" }}
-          className="flex flex-col border border-gray-200 rounded-lg overflow-hidden"
-        >
-          {/* Form header area */}
-          <div className="px-3 pt-3 pb-0 flex-shrink-0">
-            <Form
-              form={form}
-              layout="vertical"
-              initialValues={{
-                source: "自定义",
-                tags: [],
-              }}
-            >
-              <Form.Item
-                name="name"
-                label={t("skillManagement.form.name")}
-                rules={[
-                  { required: true, message: t("skillManagement.form.nameRequired") },
-                ]}
-                help={interactiveSkillName.trim() ? (
-                  isCreateMode ? (
-                    <span className="text-xs text-green-600">
-                      {t("skillManagement.form.newSkillHint")}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-amber-600">
-                      {t("skillManagement.form.existingSkillHint")}
-                    </span>
-                  )
-                ) : undefined}
-                validateStatus={interactiveSkillName.trim() ? (isCreateMode ? "success" : "warning") : undefined}
-              >
-                <AutoComplete
-                  open={shouldShowDropdown && dropdownOptions.length > 0}
-                  options={dropdownOptions}
-                  onSearch={handleNameSearch}
-                  onSelect={handleNameSelect}
-                  onChange={handleNameChange}
-                  onFocus={handleNameFocus}
-                  onBlur={handleNameBlur}
-                  value={interactiveSkillName}
-                  placeholder={t("skillManagement.form.namePlaceholder")}
-                  allowClear
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="description"
-                label={t("skillManagement.form.description")}
-                rules={[
-                  { required: true, message: t("skillManagement.form.descriptionRequired") },
-                ]}
-              >
-                <TextArea
-                  rows={2}
-                  placeholder={t("skillManagement.form.descriptionPlaceholder")}
-                />
-              </Form.Item>
-
-              <Row gutter={12}>
-                <Col span={8}>
-                  <Form.Item
-                    name="source"
-                    label={t("skillManagement.form.source")}
-                  >
-                    <Input value="自定义" />
-                  </Form.Item>
-                </Col>
-                <Col span={16}>
-                  <Form.Item
-                    name="tags"
-                    label={t("skillManagement.form.tags")}
-                  >
-                    <div className="overflow-x-auto" style={{ maxWidth: "100%" }}>
-                      <Select
-                        mode="tags"
-                        suffixIcon={null}
-                        placeholder={t("skillManagement.form.tagsPlaceholder")}
-                        onFocus={() => setIsTagsFocused(true)}
-                        onBlur={() => setIsTagsFocused(false)}
-                        open={false}
-                        style={{ width: "100%", minWidth: 200 }}
-                        popupMatchSelectWidth={false}
-                      />
-                    </div>
-                  </Form.Item>
-                </Col>
-              </Row>
-            </Form>
-          </div>
-
-          {/* Tabs area */}
-          <div className="flex-1 min-h-0 px-3 pb-3 flex flex-col">
-            <Tabs
-              activeKey={activeSkillTab}
-              onChange={(key) => setActiveSkillTab(key)}
-              type="card"
-              size="small"
-              className="flex-1 flex flex-col"
-              tabBarStyle={{ marginBottom: 0, flexShrink: 0 }}
-              tabBarExtraContent={{
-                right: (
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Plus size={14} />}
-                    onClick={() => {
-                      const newPath = `file_${Date.now()}.md`;
-                      setSkillTabs((prev) => [...prev, { path: newPath, content: "" }]);
-                      setActiveSkillTab(newPath);
-                      shouldAutoScrollRef.current[newPath] = true;
-                    }}
-                    className="add-tab-btn"
-                  />
-                ),
-              }}
-              items={skillTabs.map((tab) => ({
-                key: tab.path,
-                label: (
-                  <div className="flex items-center group/tab">
-                    {editingTabKey === tab.path ? (
-                      <input
-                        className="text-xs px-1 py-0.5 border border-blue-400 rounded w-24"
-                        value={editingTabName}
-                        autoFocus
-                        onChange={(e) => setEditingTabName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setSkillTabs((prev) =>
-                              prev.map((t) => (t.path === editingTabKey ? { ...t, path: editingTabName } : t))
-                            );
-                            if (activeSkillTab === editingTabKey) {
-                              setActiveSkillTab(editingTabName);
-                            }
-                            setEditingTabKey(null);
-                            setEditingTabName("");
-                          } else if (e.key === "Escape") {
-                            e.stopPropagation();
-                            setEditingTabKey(null);
-                            setEditingTabName("");
-                          }
-                        }}
-                        onBlur={() => {
-                          setSkillTabs((prev) =>
-                            prev.map((t) => (t.path === editingTabKey ? { ...t, path: editingTabName } : t))
-                          );
-                          if (activeSkillTab === editingTabKey) {
-                            setActiveSkillTab(editingTabName);
-                          }
-                          setEditingTabKey(null);
-                          setEditingTabName("");
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className={activeSkillTab === tab.path ? "font-bold" : ""}>
-                        {tab.path}
-                      </span>
-                    )}
-                    {!isStreaming && (
-                      <div className="flex items-center ml-1 w-0 group-hover/tab:w-auto overflow-hidden transition-all duration-200">
-                        {tab.path !== "SKILL.md" && (
-                          <button
-                            className="p-0.5 hover:bg-gray-200 rounded flex-shrink-0"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setTimeout(() => {
-                                setEditingTabKey(tab.path);
-                                setEditingTabName(tab.path);
-                              }, 0);
-                            }}
-                            title="Rename"
-                          >
-                            <Pencil size={12} />
-                          </button>
-                        )}
-                        {tab.path !== "SKILL.md" && (
-                          <button
-                            className="p-0.5 hover:bg-gray-200 rounded flex-shrink-0"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const newTabs = skillTabs.filter((t) => t.path !== tab.path);
-                              setSkillTabs(newTabs);
-                              if (activeSkillTab === tab.path) {
-                                setActiveSkillTab(newTabs[0]?.path || "");
-                              }
-                            }}
-                            title="Delete"
-                          >
-                            <X size={12} />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ),
-                children: (
-                  <TextArea
-                    rows={6}
-                    placeholder={isStreaming ? "" : `${tab.path} content...`}
-                    value={tab.content}
-                    disabled={isStreaming}
-                    ref={(el) => {
-                      textareaRefs.current[tab.path] = el;
-                      if (el && shouldAutoScrollRef.current[tab.path] === undefined) {
-                        shouldAutoScrollRef.current[tab.path] = true;
-                      }
-                    }}
-                    onScroll={() => handleTextareaScroll(tab.path)}
-                    onChange={(e) => {
-                      if (isStreaming) return;
-                      setSkillTabs((prev) =>
-                        prev.map((t) =>
-                          t.path === tab.path ? { ...t, content: e.target.value } : t
-                        )
-                      );
-                    }}
-                  />
-                ),
-              }))}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const modalBodyFrame = "min(90vh, 700px)";
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
@@ -1240,130 +893,475 @@ export default function SkillBuildModal({
     };
 
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200" style={{ height: 480 }}>
-        <div className="h-full flex transition-all duration-300 ease-in-out">
-          {/* Left: Name display + Upload Dragger */}
-          <div
-            className={`transition-all duration-300 ease-in-out ${
-              uploadFile ? "w-[40%] pr-2" : "w-full"
-            }`}
-          >
-            <div className="h-full flex flex-col gap-3">
-              {/* Name field */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {t("skillManagement.form.name")}
-                </label>
-                <Spin spinning={uploadExtractingName}>
-                  <Input
-                    value={uploadExtractedSkillName}
-                    readOnly
-                    placeholder={t("skillManagement.form.uploadSkillNamePlaceholder")}
-                    style={{ fontWeight: 500 }}
-                    status={!uploadExtractedSkillName && uploadFile ? "warning" : undefined}
-                  />
-                </Spin>
-                {uploadExtractedSkillName && existingSkill && (
-                  <span className="ml-1 text-xs text-amber-600">
-                    {t("skillManagement.form.existingSkillHint")}
-                  </span>
-                )}
-                {uploadExtractedSkillName && !existingSkill && (
-                  <span className="text-xs text-green-600">
-                    {t("skillManagement.form.newSkillHint")}
-                  </span>
-                )}
-              </div>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+          <p className="text-sm font-semibold text-gray-800">
+            {t("skillManagement.tabs.upload")}
+          </p>
+          <p className="text-xs text-gray-500">
+            {t("skillManagement.form.uploadHint")}
+          </p>
+        </div>
 
-              {/* Upload area */}
-              <div className="flex-1 min-h-0">
-                <div className="h-full" onClick={() => {
-                  const input = document.getElementById("skill-upload-input") as HTMLInputElement;
-                  input?.click();
-                }}>
-                  <div
-                    className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200 border-2 border-dashed rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-colors"
-                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleFileSelection(e.dataTransfer.files);
-                    }}
-                  >
-                    <div className="flex flex-col items-center justify-center h-full py-6 px-4">
-                      <p className="!mb-3">
-                        <UploadIcon className="text-blue-600" size={48} />
-                      </p>
-                      <p className="ant-upload-text !mb-2 text-base text-gray-700">
-                        {t("skillManagement.form.uploadDragText")}
-                      </p>
-                      <p className="ant-upload-hint text-gray-500">
-                        {t("skillManagement.form.uploadHint")}
-                      </p>
-                    </div>
+        <div className="flex flex-1 flex-col gap-4 p-4">
+          <Spin spinning={uploadExtractingName}>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                {t("skillManagement.form.name")}
+              </label>
+              <Input
+                value={uploadExtractedSkillName}
+                readOnly
+                placeholder={t("skillManagement.form.uploadSkillNamePlaceholder")}
+                style={{ fontWeight: 500 }}
+                status={!uploadExtractedSkillName && uploadFile ? "warning" : undefined}
+              />
+              {uploadExtractedSkillName && existingSkill ? (
+                <span className="ml-1 text-xs text-amber-600">
+                  {t("skillManagement.form.existingSkillHint")}
+                </span>
+              ) : null}
+              {uploadExtractedSkillName && !existingSkill ? (
+                <span className="text-xs text-green-600">
+                  {t("skillManagement.form.newSkillHint")}
+                </span>
+              ) : null}
+            </div>
+          </Spin>
+
+          <div
+            className="flex flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/70 px-6 py-10 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/40"
+            onClick={() => {
+              const input = document.getElementById("skill-upload-input") as HTMLInputElement;
+              input?.click();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleFileSelection(e.dataTransfer.files);
+            }}
+          >
+            <UploadIcon className="mb-3 text-blue-600" size={48} />
+            <p className="mb-2 text-base font-medium text-gray-700">
+              {t("skillManagement.form.uploadDragText")}
+            </p>
+            <p className="text-sm text-gray-500">
+              {t("skillManagement.form.uploadHint")}
+            </p>
+            <input
+              id="skill-upload-input"
+              type="file"
+              accept=".md,.zip"
+              className="hidden"
+              onChange={(e) => handleFileSelection(e.target.files)}
+            />
+          </div>
+
+          {uploadFile ? (
+            <div className="rounded-lg border border-gray-200 bg-white">
+              <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2">
+                <h4 className="m-0 text-sm font-medium text-gray-700">
+                  {t("knowledgeBase.upload.completed")}
+                </h4>
+                <span className="text-xs text-gray-500">1</span>
+              </div>
+              <div className="flex items-center justify-between px-3 py-2 hover:bg-gray-50">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium text-gray-700">
+                    {uploadFile.name}
                   </div>
                 </div>
-                <input
-                  id="skill-upload-input"
-                  type="file"
-                  accept=".md,.zip"
-                  className="hidden"
-                  onChange={(e) => handleFileSelection(e.target.files)}
-                />
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  className="ml-2 flex-shrink-0"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setUploadFile(null);
+                    setUploadExtractedSkillName("");
+                    const input = document.getElementById("skill-upload-input") as HTMLInputElement;
+                    if (input) input.value = "";
+                  }}
+                >
+                  <Trash2 size={14} />
+                </Button>
               </div>
             </div>
-          </div>
-
-          {/* Right: File list panel */}
-          <div
-            className={`rounded-lg transition-all duration-300 ease-in-out overflow-hidden ${
-              uploadFile ? "w-[60%] opacity-100 pl-2" : "w-0 opacity-0"
-            }`}
-          >
-            {uploadFile && (
-              <div className="h-full">
-                <div className="h-full border border-gray-200 rounded-lg bg-white">
-                  <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50">
-                    <h4 className="text-sm font-medium text-gray-700 m-0">
-                      {t("knowledgeBase.upload.completed")}
-                    </h4>
-                    <span className="text-xs text-gray-500">1</span>
-                  </div>
-                  <div className="overflow-auto h-[calc(100%-41px)]">
-                    <div className="border-b border-gray-100 last:border-b-0">
-                      <div className="flex items-center justify-between py-2 px-3 hover:bg-gray-50 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-gray-700 truncate">
-                            {uploadFile.name}
-                          </div>
-                        </div>
-                        <Button
-                          type="text"
-                          danger
-                          size="small"
-                          className="ml-2 flex-shrink-0"
-                          onClick={() => {
-                            setUploadFile(null);
-                            setUploadExtractedSkillName("");
-                            const input = document.getElementById("skill-upload-input") as HTMLInputElement;
-                            if (input) input.value = "";
-                          }}
-                        >
-                          <Trash2 size={14} />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          ) : null}
         </div>
       </div>
     );
   };
+  const renderChatPanel = () => (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-800">
+            {t("skillManagement.tabs.interactive")}
+          </p>
+          <p className="text-xs text-gray-500">
+            {isMultiTurn
+              ? t("skillManagement.form.multiTurnPlaceholder")
+              : t("skillManagement.form.chatPlaceholder")}
+          </p>
+        </div>
+        {chatMessages.length > 0 ? (
+          <button
+            onClick={handleChatClear}
+            className="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            title={t("agent.debug.clear")}
+          >
+            <Trash2 size={15} />
+          </button>
+        ) : null}
+      </div>
+
+      <div
+        ref={chatContainerRef}
+        className="custom-scrollbar flex-1 space-y-3 overflow-y-auto p-4"
+      >
+        {chatMessages.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
+            {t("skillManagement.form.chatPlaceholder")}
+          </div>
+        ) : null}
+        {chatMessages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "rounded-tr-sm bg-blue-500 text-white"
+                  : "rounded-tl-sm bg-gray-100 text-gray-800"
+              }`}
+            >
+              {msg.role === "assistant" &&
+              msg.id === currentAssistantIdRef.current &&
+              isThinkingVisible ? (
+                <div className="flex min-w-[200px] flex-col items-center">
+                  <Loader2 size={24} className="animate-spin text-blue-500" />
+                  {thinkingDescription ? (
+                    <span className="mt-2 text-xs text-gray-500">
+                      {thinkingDescription}
+                    </span>
+                  ) : null}
+                </div>
+              ) : msg.role === "assistant" ? (
+                <div className="markdown-content">
+                  <MarkdownRenderer content={msg.content} className="text-sm" />
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-gray-200 p-3">
+        <Flex gap={8} align="center">
+          <TextArea
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onPressEnter={(e) => {
+              if (!e.shiftKey) {
+                e.preventDefault();
+                if (!isChatLoading && !isStreaming) {
+                  handleChatSend();
+                }
+              }
+            }}
+            placeholder={
+              isMultiTurn
+                ? t("skillManagement.form.multiTurnPlaceholder")
+                : t("skillManagement.form.chatPlaceholder")
+            }
+            disabled={isChatLoading || isStreaming}
+            autoSize={{ minRows: 1, maxRows: 3 }}
+            className="resize-none"
+          />
+          {isChatLoading || isStreaming ? (
+            <Tooltip title={t("skillManagement.stopGenerating") || "Stop generating"}>
+              <Button
+                type="primary"
+                danger
+                shape="circle"
+                icon={<Square size={14} />}
+                onClick={handleStop}
+                style={{ backgroundColor: "#ef4444" }}
+              />
+            </Tooltip>
+          ) : (
+            <Button
+              type="primary"
+              icon={<Send size={14} />}
+              onClick={handleChatSend}
+              disabled={!chatInput.trim()}
+              style={{ width: 32, height: 32, flexShrink: 0 }}
+            />
+          )}
+        </Flex>
+      </div>
+    </div>
+  );
+
+  const renderDraftPanel = () => (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-200 px-4 py-3">
+        <p className="text-sm font-semibold text-gray-800">
+          {t("skillManagement.title")}
+        </p>
+        <p className="text-xs text-gray-500">
+          {activeTab === "interactive"
+            ? t("skillManagement.tabs.interactive")
+            : t("skillManagement.tabs.upload")}
+        </p>
+      </div>
+
+      <div className="shrink-0 px-4 pt-4">
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            source: "custom",
+            tags: [],
+          }}
+        >
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="name"
+                label={t("skillManagement.form.name")}
+                rules={[
+                  { required: true, message: t("skillManagement.form.nameRequired") },
+                ]}
+                help={
+                  interactiveSkillName.trim() ? (
+                    isCreateMode ? (
+                      <span className="text-xs text-green-600">
+                        {t("skillManagement.form.newSkillHint")}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-amber-600">
+                        {t("skillManagement.form.existingSkillHint")}
+                      </span>
+                    )
+                  ) : undefined
+                }
+                validateStatus={
+                  interactiveSkillName.trim()
+                    ? isCreateMode
+                      ? "success"
+                      : "warning"
+                    : undefined
+                }
+              >
+                <AutoComplete
+                  open={shouldShowDropdown && dropdownOptions.length > 0}
+                  options={dropdownOptions}
+                  onSearch={handleNameSearch}
+                  onSelect={handleNameSelect}
+                  onChange={handleNameChange}
+                  onFocus={handleNameFocus}
+                  onBlur={handleNameBlur}
+                  value={interactiveSkillName}
+                  placeholder={t("skillManagement.form.namePlaceholder")}
+                  allowClear
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="source" label={t("skillManagement.form.source")}>
+                <Select
+                  options={[{ label: "自定义", value: "custom" }]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="description"
+            label={t("skillManagement.form.description")}
+            rules={[
+              { required: true, message: t("skillManagement.form.descriptionRequired") },
+            ]}
+          >
+            <TextArea
+              rows={2}
+              placeholder={t("skillManagement.form.descriptionPlaceholder")}
+            />
+          </Form.Item>
+
+          <Form.Item name="tags" label={t("skillManagement.form.tags")}>
+            <Select
+              mode="tags"
+              suffixIcon={null}
+              placeholder={t("skillManagement.form.tagsPlaceholder")}
+              onFocus={() => setIsTagsFocused(true)}
+              onBlur={() => setIsTagsFocused(false)}
+              open={false}
+              style={{ width: "100%" }}
+              popupMatchSelectWidth={false}
+            />
+          </Form.Item>
+        </Form>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+        <Tabs
+          activeKey={activeSkillTab}
+          onChange={(key) => setActiveSkillTab(key)}
+          type="card"
+          size="small"
+          className="flex min-h-0 flex-1 flex-col"
+          tabBarStyle={{ marginBottom: 0, flexShrink: 0 }}
+          tabBarExtraContent={{
+            right: (
+              <Button
+                type="text"
+                size="small"
+                icon={<Plus size={14} />}
+                onClick={() => {
+                  const newPath = `file_${Date.now()}.md`;
+                  setSkillTabs((prev) => [...prev, { path: newPath, content: "" }]);
+                  setActiveSkillTab(newPath);
+                  shouldAutoScrollRef.current[newPath] = true;
+                }}
+                className="add-tab-btn"
+              />
+            ),
+          }}
+          items={skillTabs.map((tab) => ({
+            key: tab.path,
+            label: (
+              <div className="flex items-center group/tab">
+                {editingTabKey === tab.path ? (
+                  <input
+                    className="w-24 rounded border border-blue-400 px-1 py-0.5 text-xs"
+                    value={editingTabName}
+                    autoFocus
+                    onChange={(e) => setEditingTabName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSkillTabs((prev) =>
+                          prev.map((t) =>
+                            t.path === editingTabKey ? { ...t, path: editingTabName } : t
+                          )
+                        );
+                        if (activeSkillTab === editingTabKey) {
+                          setActiveSkillTab(editingTabName);
+                        }
+                        setEditingTabKey(null);
+                        setEditingTabName("");
+                      } else if (e.key === "Escape") {
+                        e.stopPropagation();
+                        setEditingTabKey(null);
+                        setEditingTabName("");
+                      }
+                    }}
+                    onBlur={() => {
+                      setSkillTabs((prev) =>
+                        prev.map((t) =>
+                          t.path === editingTabKey ? { ...t, path: editingTabName } : t
+                        )
+                      );
+                      if (activeSkillTab === editingTabKey) {
+                        setActiveSkillTab(editingTabName);
+                      }
+                      setEditingTabKey(null);
+                      setEditingTabName("");
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className={activeSkillTab === tab.path ? "font-bold" : ""}>
+                    {tab.path}
+                  </span>
+                )}
+                {!isStreaming && (
+                  <div className="ml-1 flex w-0 items-center overflow-hidden transition-all duration-200 group-hover/tab:w-auto">
+                    {tab.path !== "SKILL.md" ? (
+                      <button
+                        className="flex-shrink-0 rounded p-0.5 hover:bg-gray-200"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setTimeout(() => {
+                            setEditingTabKey(tab.path);
+                            setEditingTabName(tab.path);
+                          }, 0);
+                        }}
+                        title="Rename"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    ) : null}
+                    {tab.path !== "SKILL.md" ? (
+                      <button
+                        className="flex-shrink-0 rounded p-0.5 hover:bg-gray-200"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const newTabs = skillTabs.filter((t) => t.path !== tab.path);
+                          setSkillTabs(newTabs);
+                          if (activeSkillTab === tab.path) {
+                            setActiveSkillTab(newTabs[0]?.path || "");
+                          }
+                        }}
+                        title="Delete"
+                      >
+                        <X size={12} />
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ),
+            children: (
+              <TextArea
+                className="min-h-[190px] font-mono text-xs"
+                placeholder={isStreaming ? "" : `${tab.path} content...`}
+                value={tab.content}
+                disabled={isStreaming}
+                ref={(el) => {
+                  textareaRefs.current[tab.path] = el;
+                  if (el && shouldAutoScrollRef.current[tab.path] === undefined) {
+                    shouldAutoScrollRef.current[tab.path] = true;
+                  }
+                }}
+                onScroll={() => handleTextareaScroll(tab.path)}
+                onChange={(e) => {
+                  if (isStreaming) return;
+                  setSkillTabs((prev) =>
+                    prev.map((t) =>
+                      t.path === tab.path ? { ...t, content: e.target.value } : t
+                    )
+                  );
+                }}
+              />
+            ),
+          }))}
+        />
+      </div>
+    </div>
+  );
 
   const tabItems = [
     {
@@ -1374,7 +1372,6 @@ export default function SkillBuildModal({
           <span>{t("skillManagement.tabs.interactive")}</span>
         </Flex>
       ),
-      children: renderInteractiveTab(),
     },
     {
       key: "upload",
@@ -1384,7 +1381,6 @@ export default function SkillBuildModal({
           <span>{t("skillManagement.tabs.upload")}</span>
         </Flex>
       ),
-      children: renderUploadTab(),
     },
   ];
 
@@ -1404,7 +1400,17 @@ export default function SkillBuildModal({
       title={t("skillManagement.title")}
       open={isOpen}
       onCancel={handleModalClose}
-      width={900}
+      centered
+      width={1180}
+      styles={{
+        body: {
+          display: "flex",
+          flexDirection: "column",
+          height: modalBodyFrame,
+          maxHeight: modalBodyFrame,
+          overflow: "hidden",
+        },
+      }}
       footer={[
         <Button
           key="cancel"
@@ -1438,8 +1444,12 @@ export default function SkillBuildModal({
         activeKey={activeTab}
         onChange={setActiveTab}
         items={tabItems}
-        className="skill-build-tabs"
+        className="skill-build-tabs shrink-0"
       />
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(340px,0.9fr)_minmax(520px,1.1fr)]">
+        {activeTab === "interactive" ? renderChatPanel() : renderUploadTab()}
+        {renderDraftPanel()}
+      </div>
     </Modal>
   );
 }
