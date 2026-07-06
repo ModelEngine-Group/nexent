@@ -325,12 +325,12 @@ class TestScoreDescription:
         desc_tokens = store._tokenize("hello world")
         query_tokens = store._tokenize("xyzzy")
         score = store._score_description(desc_tokens, query_tokens)
-        assert score == 0.0
+        assert score == pytest.approx(0.0)
 
     def test_empty_desc_tokens_returns_zero(self):
         store = OffloadStore()
         score = store._score_description(set(), {"hello"})
-        assert score == 0.0
+        assert score == pytest.approx(0.0)
 
     def test_partial_substring_match(self):
         store = OffloadStore()
@@ -389,8 +389,10 @@ class TestContextManagerOffloadStore:
         from factories import make_cm
         cm = make_cm()
         assert isinstance(cm.offload_store, OffloadStore)
-        # Singleton property
-        assert cm.offload_store is cm.offload_store
+        # Singleton property: repeated access returns the same instance
+        first = cm.offload_store
+        second = cm.offload_store
+        assert first is second
         # Functional end-to-end
         handle = cm.offload_store.store("cm content", "cm desc")
         assert handle and cm.offload_store.reload(handle) == "cm content"
