@@ -368,10 +368,6 @@ class ContextManager:
                     actions_to_compress = (
                         curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
                     )
-
-                    actions_to_compress = (
-                        curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
-                    )
                     actions_to_keep = (
                         curr_action_steps[-keep_n:] if keep_n > 0 else []
                     )
