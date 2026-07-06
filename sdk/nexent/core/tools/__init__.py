@@ -27,6 +27,12 @@ from .read_skill_md_tool import read_skill_md
 from .read_skill_config_tool import read_skill_config
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .nl2agent.search_local_resources_tool import search_local_resources
+from .nl2agent.search_web_mcps_tool import search_web_mcps
+from .nl2agent.search_web_skills_tool import search_web_skills
+from .nl2agent.apply_local_resources_tool import apply_local_resources
+from .nl2agent.install_web_skill_tool import install_web_skill
+from .nl2agent.finalize_agent_tool import finalize_agent
 
 __all__ = [
     "MySqlTool",
@@ -60,4 +66,10 @@ __all__ = [
     "read_skill_config",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "search_local_resources",
+    "search_web_mcps",
+    "search_web_skills",
+    "apply_local_resources",
+    "install_web_skill",
+    "finalize_agent",
 ]
