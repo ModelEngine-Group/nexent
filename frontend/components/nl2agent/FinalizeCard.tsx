@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "antd";
 import { CheckCircle2, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 
 export interface FinalizeCardProps {
   agentId: number;
@@ -20,9 +21,11 @@ export interface FinalizeCardProps {
 export const FinalizeCard: React.FC<FinalizeCardProps> = ({ agentId, status }) => {
   const { t } = useTranslation("common");
   const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale || "en";
 
   const handleReview = () => {
-    router.push(`/en/agents?agent_id=${agentId}`);
+    router.push(`/${locale}/agents?agent_id=${agentId}`);
   };
 
   return (
