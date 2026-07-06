@@ -2687,12 +2687,20 @@ async def prepare_agent_run(
         override_model_id=agent_request.model_id,
         requested_output_tokens=agent_request.requested_output_tokens,
         tool_params=agent_request.tool_params,
+        conversation_id=agent_request.conversation_id,
     )
 
     # Mount conversation-level reusable ContextManager if enabled
     cm_config = getattr(agent_run_info.agent_config,
                         'context_manager_config', None)
     if cm_config and cm_config.enabled:
+        from nexent.core.agents.context.history_projector import HistoryProjector
+        from services.conversation_management_service import get_message_units_by_run_id
+
+        cm_config.history_projector = HistoryProjector(
+            query_units_fn=get_message_units_by_run_id
+        )
+
         cm = agent_run_manager.get_or_create_context_manager(
             conversation_id=str(agent_request.conversation_id),
             config=cm_config,

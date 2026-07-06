@@ -667,6 +667,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -980,6 +981,7 @@ async def create_agent_config(
         capacity_snapshot=capacity_snapshot,
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
+        conversation_id=conversation_id,
     )
     return agent_config
 
@@ -1393,6 +1395,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    conversation_id: Optional[int] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1427,7 +1430,7 @@ async def create_agent_run_info(
     if requested_output_tokens is not None:
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
 
-    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
+    agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params, conversation_id=conversation_id)
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")

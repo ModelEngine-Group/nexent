@@ -449,6 +449,7 @@ class NexentAgent:
                 context_runtime = ManagedContextRuntime(
                     context_manager,
                     components=getattr(agent_config, 'context_components', None) or [],
+                    conversation_id=getattr(agent_config, 'conversation_id', None),
                 )
             else:
                 from ..context_runtime.legacy.runtime import LegacyContextRuntime

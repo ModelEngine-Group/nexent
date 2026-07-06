@@ -13,9 +13,10 @@ from ..contracts import FinalContext
 class ManagedContextRuntime:
     """Adapter for the ContextManager-owned managed path."""
 
-    def __init__(self, context_manager: Any, components: Sequence[Any] | None = None):
+    def __init__(self, context_manager: Any, components: Sequence[Any] | None = None, conversation_id: int | None = None):
         self.context_manager = context_manager
         self.components = list(components or ())
+        self.conversation_id = conversation_id
         self._run_context = None
 
     def replace_components(self, components: Sequence[Any] | None) -> None:
@@ -54,6 +55,7 @@ class ManagedContextRuntime:
             tools=tools,
             purpose="step",
             run_context=self._ensure_run_context(memory),
+            conversation_id=self.conversation_id,
         )
 
     def prepare_final_answer(
@@ -75,6 +77,7 @@ class ManagedContextRuntime:
             task=task,
             final_answer_templates=final_answer_templates,
             run_context=self._ensure_run_context(memory),
+            conversation_id=self.conversation_id,
         )
 
     def render_summary_messages(self, *, memory: Any) -> list[Any]:

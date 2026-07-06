@@ -240,6 +240,10 @@ class AgentConfig(BaseModel):
         description="Layered ReAct self-verification configuration",
         default_factory=AgentVerificationConfig,
     )
+    conversation_id: Optional[int] = Field(
+        description="Conversation ID for history projection in managed context runtime",
+        default=None,
+    )
 
 
 class AgentHistory(BaseModel):
