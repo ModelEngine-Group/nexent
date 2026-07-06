@@ -522,6 +522,15 @@ export const API_ENDPOINTS = {
     models: `${API_BASE_URL}/monitoring/models`,
     status: `${API_BASE_URL}/monitoring/status`,
   },
+  nl2agent: {
+    sessionStart: `${API_BASE_URL}/nl2agent/session/start`,
+    applyLocalResources: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/apply-local-resources`,
+    installWebSkill: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/install-web-skill`,
+    finalize: (agentId: number) =>
+      `${API_BASE_URL}/nl2agent/session/${agentId}/finalize`,
+  },
 };
 
 // Common error handling
