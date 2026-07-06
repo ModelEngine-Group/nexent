@@ -192,7 +192,7 @@ export default function A2AChatModal({
       onCancel={onClose}
       footer={null}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="flex flex-col" style={{ height: 500 }}>
         {/* Agent Info Header */}

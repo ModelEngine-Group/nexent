@@ -150,7 +150,7 @@ VerificationFailPolicy = Literal["repair_then_controlled_summary", "warn"]
 class AgentVerificationConfig(BaseModel):
     """Configuration for layered ReAct self-verification."""
 
-    enabled: bool = Field(description="Whether self-verification is enabled", default=True)
+    enabled: bool = Field(description="Whether self-verification is enabled", default=False)
     step_verification_enabled: bool = Field(
         description="Whether to verify critical ReAct step events",
         default=True,
