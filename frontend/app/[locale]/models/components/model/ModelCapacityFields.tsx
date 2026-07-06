@@ -334,9 +334,7 @@ export const ModelCapacityFields = ({
   // behind dropdown chrome. Otherwise show the preset list to help
   // operators avoid typos like "1280000" instead of "128000".
   const suggestionFields = suggestion?.suggestions ?? null;
-  const fieldHasSuggestion = (
-    field: keyof ModelCapacityFormState
-  ): boolean => {
+  const fieldHasSuggestion = (field: keyof ModelCapacityFormState): boolean => {
     if (!suggestionFields) return false;
     const suggested = (suggestionFields as Record<string, unknown>)[field];
     return suggested != null && suggested !== "";
@@ -380,7 +378,9 @@ export const ModelCapacityFields = ({
           <Tooltip title={t(tooltipKey)}>
             <span>{t(labelKey)}</span>
           </Tooltip>
-          {requiredSet.has(field) && <span className="text-red-500 ml-1">*</span>}
+          {requiredSet.has(field) && (
+            <span className="text-red-500 ml-1">*</span>
+          )}
         </label>
         {inputControl}
       </div>
@@ -461,44 +461,25 @@ export const ModelCapacityFields = ({
               : t("model.dialog.capacity.suggestion.notFound")
           }
           description={
-            <div className="space-y-2">
-              <div className="text-xs">
-                {suggestion.matchExplanation ||
-                  t("model.dialog.capacity.suggestion.noExplanation")}
-              </div>
-              {hasSuggestion && (
+            hasSuggestion ? (
+              <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  {suggestion.matchKind && (
-                    <Tag>
-                      {t(
-                        `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
-                        { defaultValue: suggestion.matchKind }
-                      )}
-                    </Tag>
-                  )}
-                  {suggestion.matchConfidence && (
-                    <Tag color="blue">
-                      {t(
-                        `model.dialog.capacity.suggestion.confidence.${suggestion.matchConfidence}`,
-                        { defaultValue: suggestion.matchConfidence }
-                      )}
-                    </Tag>
-                  )}
                   {suggestion.canonicalModelName && (
-                    <Tag color="green">{suggestion.canonicalModelName}</Tag>
+                    <span className="font-medium text-sm">
+                      {suggestion.canonicalModelName}
+                    </span>
                   )}
-                  {suggestion.suggestedProvider && (
-                    <Tag color="purple">{suggestion.suggestedProvider}</Tag>
+                  {suggestion.matchKind && (
+                    <>
+                      <span className="text-gray-300">·</span>
+                      <span className="text-xs text-gray-500">
+                        {t(
+                          `model.dialog.capacity.suggestion.match.${suggestion.matchKind}`,
+                          { defaultValue: suggestion.matchKind }
+                        )}
+                      </span>
+                    </>
                   )}
-                  {suggestion.matchKind === "catalog_fuzzy" &&
-                    (!acceptedSuggestion ||
-                      (acceptedSuggestion &&
-                        acceptedSuggestion.canonicalModelName !==
-                          suggestion.canonicalModelName)) && (
-                      <div className="text-xs text-yellow-700 mt-1">
-                        {t("model.dialog.capacity.suggestion.profileMissWarning")}
-                      </div>
-                    )}
                   {onUseSuggestion && (
                     <Button
                       size="small"
@@ -510,8 +491,21 @@ export const ModelCapacityFields = ({
                     </Button>
                   )}
                 </div>
-              )}
-            </div>
+                {suggestion.matchKind === "catalog_fuzzy" &&
+                  (!acceptedSuggestion ||
+                    (acceptedSuggestion &&
+                      acceptedSuggestion.canonicalModelName !==
+                        suggestion.canonicalModelName)) && (
+                    <div className="text-xs text-yellow-700">
+                      {t("model.dialog.capacity.suggestion.profileMissWarning")}
+                    </div>
+                  )}
+              </div>
+            ) : (
+              <div className="text-xs">
+                {t("model.dialog.capacity.suggestion.notFoundDescription")}
+              </div>
+            )
           }
         />
       )}
