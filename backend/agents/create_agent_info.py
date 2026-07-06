@@ -922,6 +922,34 @@ async def create_agent_config(
         model_info.get("model_name") if model_info else model_name,
     )
 
+    # Inject session context metadata into NL2AGENT builtin tools. The 6 NL2AGENT
+    # builtin tools read agent_id/user_id/tenant_id/model_id/language from
+    # ToolConfig.metadata at runtime (see sdk/nexent/core/tools/nl2agent/_context.py).
+    # The draft agent_id is NOT the NL2AGENT agent's own id; it is the target agent
+    # being built. For the NL2AGENT default agent, the draft agent_id is passed via
+    # the request context (agent_id here is the NL2AGENT agent itself). The actual
+    # draft target agent_id is stored in the conversation metadata by the frontend
+    # after POST /nl2agent/session/start. For tool runtime, we pass the NL2AGENT's
+    # own agent_id here as a fallback; the frontend also sets the draft agent_id via
+    # the apply-local-resources/finalize endpoints which take agent_id from the URL.
+    _NL2AGENT_TOOL_CLASS_NAMES = {
+        "NL2AgentSearchLocalResourcesTool",
+        "NL2AgentSearchWebMcpsTool",
+        "NL2AgentSearchWebSkillsTool",
+        "NL2AgentApplyLocalResourcesTool",
+        "NL2AgentInstallWebSkillTool",
+        "NL2AgentFinalizeAgentTool",
+    }
+    for tool_cfg in tool_list:
+        if tool_cfg.class_name in _NL2AGENT_TOOL_CLASS_NAMES:
+            tool_cfg.metadata = {
+                "agent_id": agent_id,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "model_id": model_id_to_use,
+                "language": language,
+            }
+
     # Managed context assembly starts from raw sources.  No legacy rendered
     # prompt is supplied on this path.
     context_components = []
