@@ -13589,6 +13589,72 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
     assert result["resume_from_unit_index"] == 0
 
 
+@patch("backend.services.agent_service.streaming_channel_manager")
+@patch("backend.services.agent_service.get_latest_assistant_message")
+def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
+    """_detect_resume_position should return no_resume when message is failed."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_msg.return_value = {"message_id": 1, "status": "failed"}
+    mock_channel_mgr.get_channel.return_value = None  # No active channel
+
+    result = _detect_resume_position(conversation_id=1, user_id="user1")
+
+    assert result["should_resume"] is False
+    assert result["message_status"] == "failed"
+    assert result["reason"] == "backend_failed"
+    assert result["message_id"] == 1
+
+
+@patch("backend.services.agent_service.streaming_channel_manager")
+@patch("backend.services.agent_service.get_latest_assistant_message")
+def test_detect_resume_position_message_stopped(mock_get_msg, mock_channel_mgr):
+    """_detect_resume_position should return no_resume when message is stopped."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_msg.return_value = {"message_id": 1, "status": "stopped"}
+    mock_channel_mgr.get_channel.return_value = None  # No active channel
+
+    result = _detect_resume_position(conversation_id=1, user_id="user1")
+
+    assert result["should_resume"] is False
+    assert result["message_status"] == "stopped"
+    assert result["reason"] == "backend_stopped"
+    assert result["message_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_already_finished_with_stopped_status():
+    """run_agent_stream resume mode should handle stopped status correctly."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': False,
+                'message_id': 1,
+                'message_status': 'stopped',
+                'reason': 'backend_stopped'
+            }
+
+            result = await agent_service.run_agent_stream(
+                agent_request,
+                MagicMock(),
+                "Bearer token"
+            )
+
+            assert result.status_code == 200
 
 
 
