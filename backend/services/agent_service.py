@@ -2935,9 +2935,16 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
-    # Auto-create conversation when conversation_id is not provided
+    # Auto-create conversation when conversation_id is not provided.
+    # Skip in debug mode: debug runs are ephemeral and must not persist
+    # conversations, titles, or messages to the user's history.
     is_new_conversation = False
-    if agent_request.conversation_id is None:
+    if agent_request.is_debug:
+        logger.info(
+            "Skipping conversation auto-create: is_debug=True (conversation_id=%s)",
+            agent_request.conversation_id,
+        )
+    elif agent_request.conversation_id is None:
         default_title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
         conversation_data = create_new_conversation(
             title=default_title,
