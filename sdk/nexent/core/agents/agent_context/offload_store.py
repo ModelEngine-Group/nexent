@@ -72,14 +72,24 @@ class OffloadStore:
             while (self._current_total + len(content) > self._max_total_chars
                    and self._store):
                 oldest = next(iter(self._store))
+                evicted_desc = self._store[oldest].description
                 self._current_total -= len(self._store[oldest].content)
                 del self._store[oldest]
+                logger.warning(
+                    f"OffloadStore over char budget; evicting oldest entry "
+                    f"(desc={evicted_desc[:80]!r}) to store new content"
+                )
 
             # Evict oldest entry if count budget exceeded
             if len(self._store) >= self._max_entries:
                 oldest = next(iter(self._store))
+                evicted_desc = self._store[oldest].description
                 self._current_total -= len(self._store[oldest].content)
                 del self._store[oldest]
+                logger.warning(
+                    f"OffloadStore reached max_entries ({self._max_entries}); "
+                    f"evicting oldest entry (desc={evicted_desc[:80]!r})"
+                )
 
             # Pre-compute tokens at store time so build_reload_inventory
             # never re-tokenizes descriptions during scoring.
