@@ -246,24 +246,24 @@ _load_summary_modules()
 _load_context_runtime_contracts()
 
 
-# ── 4. Load agent_context.py via importlib ────────────────────
+# ── 4. Load agent_context package via importlib ────────────────────
 
 def _locate_agent_context() -> str:
     """
-    Resolve the absolute path to agent_context.py.
+    Resolve the absolute path to the agent_context package __init__.py.
 
     Directory layout assumed:
         <repo_root>/
-            sdk/nexent/core/agents/agent_context.py
-            tests/sdk/core/agents/         ← this file lives here
+            sdk/nexent/core/agents/agent_context/__init__.py
+            test/sdk/core/agents/         <- this file lives here
     """
-    here   = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.abspath(__file__))
     # tests/sdk/core/agents → tests/sdk/core → tests/sdk → tests → repo_root
-    repo   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here)))))
-    target = os.path.join(repo, "sdk", "nexent", "core", "agents", "agent_context.py")
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here)))))
+    target = os.path.join(repo, "sdk", "nexent", "core", "agents", "agent_context", "__init__.py")
     if not os.path.exists(target):
         raise FileNotFoundError(
-            f"Cannot locate agent_context.py.\n"
+            f"Cannot locate agent_context/__init__.py.\n"
             f"Expected: {target}\n"
             f"Check the number of os.path.dirname levels in loader.py."
         )
@@ -276,10 +276,18 @@ def _load_agent_context():
         return sys.modules[module_name]
 
     target = _locate_agent_context()
-    spec   = importlib.util.spec_from_file_location(module_name, target)
+    pkg_path = os.path.dirname(target)
+
+    # Register the agent_context package path so sub-module imports resolve
+    parent = sys.modules.get("sdk.nexent.core.agents")
+    if parent is not None:
+        parent.__path__.append(pkg_path)
+
+    spec = importlib.util.spec_from_file_location(module_name, target)
     module = importlib.util.module_from_spec(spec)
-    module.__package__              = "sdk.nexent.core.agents"
-    sys.modules[module_name]        = module
+    module.__package__ = "sdk.nexent.core.agents.agent_context"
+    module.__path__ = [pkg_path]
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
