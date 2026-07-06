@@ -100,9 +100,10 @@ class TestCompressPreviousExtra:
         assert "task2" in _llm_text(model)
         assert "fresh" in result
 
-    def test_P3_incremental_llm_none_falls_through_to_fresh(self):
+    def test_P3_incremental_llm_none_returns_empty_result(self):
         """When generate_summary returns SummaryResult(summary_text=None) in incremental path,
-        code fall-through to fresh, should call LLM again.
+        v2 compressor returns PreviousCompressResult(summary_text=None) immediately (no fall-through to fresh).
+        LLM is called exactly once.
         """
         cm = make_cm()
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(3)]
@@ -110,41 +111,33 @@ class TestCompressPreviousExtra:
         fp = pair_fingerprint(anchor_t.task, anchor_a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache("old summary", 2, fp)
 
-        call_count = [0]
-        def side_effect(text, model_, call_type="summary", prompt_type="initial"):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return SummaryResult(summary_text=None, records=[])
-            return SummaryResult(summary_text='{"task_overview": "fresh summary"}', records=[])
-
-        with patch.object(cm._llm, 'generate_summary', side_effect=side_effect):
+        with patch.object(cm._llm, 'generate_summary', return_value=SummaryResult(summary_text=None, records=[])):
             result = _compress_previous_with_cache(cm, pairs, MagicMock())
 
-        assert call_count[0] == 2
-        assert result is not None
+        assert result is None
 
     def test_P4_fresh_llm_none_returns_none_and_preserves_old_cache(self):
-        """When _summarize_pairs returns (None, False, []):
-        - function returns None
+        """When _summarize_pairs returns PreviousCompressResult(summary_text=None):
+        - function returns None (no summary produced)
         - existing _previous_summary_cache not modified
         """
         cm = make_cm()
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(2)]
         cm._previous_summary_cache = PreviousSummaryCache("old summary", 99, "bad_fp")
 
-        with patch.object(cm._prev_compressor, '_summarize_pairs', return_value=(None, False, [])):
+        with patch.object(cm._prev_compressor, '_summarize_pairs', return_value=PreviousCompressResult(summary_text=None, new_cache=None)):
             result = _compress_previous_with_cache(cm, pairs, MagicMock())
 
         assert result is None
         assert cm._previous_summary_cache.summary_text == "old summary"
 
     def test_P4_fresh_llm_none_no_cache_remains_none(self):
-        """Initial no cache, fresh LLM returns None -> cache still None."""
+        """Initial no cache, fresh _summarize_pairs returns None -> cache still None."""
         cm = make_cm()
         pairs = [make_pair("task", "action", 0)]
         assert cm._previous_summary_cache is None
 
-        with patch.object(cm._prev_compressor, '_summarize_pairs', return_value=(None, False, [])):
+        with patch.object(cm._prev_compressor, '_summarize_pairs', return_value=PreviousCompressResult(summary_text=None, new_cache=None)):
             result = _compress_previous_with_cache(cm, pairs, MagicMock())
 
         assert result is None
@@ -195,25 +188,20 @@ class TestCompressCurrentExtra:
         assert "old summary" not in _llm_text(model)
         assert "fresh summary" in result
 
-    def test_C4_incremental_llm_none_falls_through_to_fresh(self):
+    def test_C4_incremental_llm_none_returns_empty_result(self):
+        """When generate_summary returns SummaryResult(summary_text=None) in incremental path,
+        v2 compressor returns CurrentCompressResult(summary_text=None) immediately (no fall-through to fresh).
+        LLM is called exactly once.
+        """
         cm = make_cm()
         actions = self._make_actions(3)
         fp = action_fingerprint(actions[1])
         cm._current_summary_cache = CurrentSummaryCache("old summary", 2, fp)
 
-        call_count = [0]
-        def side_effect(text, model_, call_type="summary", prompt_type="initial"):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return SummaryResult(summary_text=None, records=[])
-            return SummaryResult(summary_text='{"task_overview": "fresh summary"}', records=[])
-
-        with patch.object(cm._llm, 'generate_summary', side_effect=side_effect):
+        with patch.object(cm._llm, 'generate_summary', return_value=SummaryResult(summary_text=None, records=[])):
             result = _compress_current_with_cache(cm, TaskStep(task="t"), actions, MagicMock())
 
-        assert call_count[0] == 2
-        assert result is not None
-        assert cm._current_summary_cache.end_steps == len(actions)
+        assert result is None
 
     def test_C5_fresh_actions_trimmed_cache_uses_original_len(self):
         """trim_actions_to_budget trimmed some actions,
@@ -258,8 +246,8 @@ class TestCompressCurrentExtra:
 
     def test_C6_vs_previous_asymmetry(self):
         """Regression test: clarify asymmetry between previous and current behavior when LLM=None.
-        previous fresh=None -> cache not written (preserve old value)
-        current  fresh=None -> cache not written
+        previous _summarize_pairs=None -> cache not written (preserve old value)
+        current  generate_summary=None -> cache not written (L3 fallback produces summary, no cache)
         """
         cm = make_cm()
         pairs = [make_pair("task", "action", 0)]
@@ -268,7 +256,7 @@ class TestCompressCurrentExtra:
         old_prev_cache = PreviousSummaryCache("old prev", 99, "bad")
         cm._previous_summary_cache = old_prev_cache
 
-        with patch.object(cm._prev_compressor, '_summarize_pairs', return_value=(None, False, [])):
+        with patch.object(cm._prev_compressor, '_summarize_pairs', return_value=PreviousCompressResult(summary_text=None, new_cache=None)):
             _compress_previous_with_cache(cm, pairs, MagicMock())
         assert cm._previous_summary_cache is old_prev_cache
 
