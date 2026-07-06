@@ -18,6 +18,7 @@ import { resolveS3UrlToDataUrl } from "@/services/storageService";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
+import { tryRenderNl2AgentCard } from "@/components/nl2agent";
 
 interface MarkdownRendererProps {
   content: string;
@@ -1362,6 +1363,15 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     : children ?? "";
                   const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
                   if (match && match[1]) {
+                    // NL2AGENT structured cards: render React components instead
+                    // of a plain code block when the fenced language tag is an
+                    // nl2agent-* tag.
+                    if (match[1].startsWith("nl2agent-")) {
+                      const node = tryRenderNl2AgentCard(match[1], codeContent);
+                      if (node) {
+                        return <>{node}</>;
+                      }
+                    }
                     // Check if it's a Mermaid diagram
                     if (match[1] === "mermaid") {
                       if (!enableMultimodal) {
