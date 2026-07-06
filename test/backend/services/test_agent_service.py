@@ -3949,18 +3949,16 @@ async def test_run_agent_stream(
     "backend.services.agent_service._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("backend.services.agent_service.build_memory_context")
-@patch('backend.services.agent_service.save_messages')
-@patch("backend.services.agent_service.generate_stream_with_memory")
-@patch("backend.services.agent_service.create_new_conversation")
 @patch("backend.services.agent_service.generate_conversation_title_service", new=AsyncMock())
+@patch("backend.services.agent_service.create_new_conversation")
+@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch('backend.services.agent_service.save_messages')
+@patch("backend.services.agent_service.build_memory_context")
 async def test_run_agent_stream_auto_creates_conversation_when_missing(
-    mock_generate_title,
-    mock_create_conversation,
-    mock_generate_stream,
-    mock_save_messages,
     mock_build_mem_ctx,
-    mock_resolve,
+    mock_save_messages,
+    mock_generate_stream,
+    mock_create_conversation,
     mock_agent_request,
     mock_http_request,
 ):
@@ -3975,6 +3973,7 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
 
     mock_generate_stream.return_value = stream_chunks()
     mock_agent_request.conversation_id = None
+    mock_agent_request.is_debug = False
 
     response = await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
 
