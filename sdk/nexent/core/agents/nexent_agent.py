@@ -356,6 +356,98 @@ class NexentAgent:
             )
             from nexent.core.tools.read_skill_config_tool import read_skill_config
             return read_skill_config
+        elif class_name == "NL2AgentSearchLocalResourcesTool":
+            from nexent.core.tools.nl2agent.search_local_resources_tool import (
+                get_search_local_resources_tool,
+            )
+            metadata = tool_config.metadata or {}
+            get_search_local_resources_tool(
+                agent_id=metadata.get("agent_id"),
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                model_id=metadata.get("model_id"),
+                language=metadata.get("language"),
+            )
+            from nexent.core.tools.nl2agent.search_local_resources_tool import (
+                search_local_resources,
+            )
+            return search_local_resources
+        elif class_name == "NL2AgentSearchWebMcpsTool":
+            from nexent.core.tools.nl2agent.search_web_mcps_tool import (
+                get_search_web_mcps_tool,
+            )
+            metadata = tool_config.metadata or {}
+            get_search_web_mcps_tool(
+                agent_id=metadata.get("agent_id"),
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                model_id=metadata.get("model_id"),
+                language=metadata.get("language"),
+            )
+            from nexent.core.tools.nl2agent.search_web_mcps_tool import search_web_mcps
+            return search_web_mcps
+        elif class_name == "NL2AgentSearchWebSkillsTool":
+            from nexent.core.tools.nl2agent.search_web_skills_tool import (
+                get_search_web_skills_tool,
+            )
+            metadata = tool_config.metadata or {}
+            get_search_web_skills_tool(
+                agent_id=metadata.get("agent_id"),
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                model_id=metadata.get("model_id"),
+                language=metadata.get("language"),
+            )
+            from nexent.core.tools.nl2agent.search_web_skills_tool import (
+                search_web_skills,
+            )
+            return search_web_skills
+        elif class_name == "NL2AgentApplyLocalResourcesTool":
+            from nexent.core.tools.nl2agent.apply_local_resources_tool import (
+                get_apply_local_resources_tool,
+            )
+            metadata = tool_config.metadata or {}
+            get_apply_local_resources_tool(
+                agent_id=metadata.get("agent_id"),
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                model_id=metadata.get("model_id"),
+                language=metadata.get("language"),
+            )
+            from nexent.core.tools.nl2agent.apply_local_resources_tool import (
+                apply_local_resources,
+            )
+            return apply_local_resources
+        elif class_name == "NL2AgentInstallWebSkillTool":
+            from nexent.core.tools.nl2agent.install_web_skill_tool import (
+                get_install_web_skill_tool,
+            )
+            metadata = tool_config.metadata or {}
+            get_install_web_skill_tool(
+                agent_id=metadata.get("agent_id"),
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                model_id=metadata.get("model_id"),
+                language=metadata.get("language"),
+            )
+            from nexent.core.tools.nl2agent.install_web_skill_tool import (
+                install_web_skill,
+            )
+            return install_web_skill
+        elif class_name == "NL2AgentFinalizeAgentTool":
+            from nexent.core.tools.nl2agent.finalize_agent_tool import (
+                get_finalize_agent_tool,
+            )
+            metadata = tool_config.metadata or {}
+            get_finalize_agent_tool(
+                agent_id=metadata.get("agent_id"),
+                user_id=metadata.get("user_id"),
+                tenant_id=metadata.get("tenant_id"),
+                model_id=metadata.get("model_id"),
+                language=metadata.get("language"),
+            )
+            from nexent.core.tools.nl2agent.finalize_agent_tool import finalize_agent
+            return finalize_agent
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 
