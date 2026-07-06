@@ -8,6 +8,7 @@ from smolagents.memory import ActionStep, MemoryStep, TaskStep
 
 from ...utils.token_estimation import estimate_tokens_text
 from ..summary_cache import PreviousSummaryCache, CurrentSummaryCache
+from .summary_step import SummaryTaskStep
 
 logger = logging.getLogger("agent_context.budget")
 
@@ -20,7 +21,6 @@ def extract_pairs(steps: List[MemoryStep]) -> List[tuple]:
     """Extract (TaskStep, ActionStep) pairs from a step list."""
     pairs = []
     i = 0
-    from .summary_step import SummaryTaskStep
     while i < len(steps):
         if isinstance(steps[i], TaskStep) and not isinstance(steps[i], SummaryTaskStep):
             if i + 1 < len(steps) and isinstance(steps[i + 1], ActionStep):
