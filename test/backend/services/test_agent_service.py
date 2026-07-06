@@ -13657,5 +13657,39 @@ async def test_run_agent_stream_resume_already_finished_with_stopped_status():
             assert result.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_run_agent_stream_resume_already_finished_with_failed_status():
+    """run_agent_stream resume mode should handle failed status correctly."""
+    from backend.services import agent_service
+
+    agent_request = MagicMock()
+    agent_request.agent_id = 1
+    agent_request.conversation_id = 999
+    agent_request.query = "test"
+    agent_request.history = []
+    agent_request.minio_files = []
+    agent_request.is_debug = False
+    agent_request.resume = True
+
+    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+        mock_resolve.return_value = ("user1", "tenant1", "en")
+
+        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+            mock_detect.return_value = {
+                'should_resume': False,
+                'message_id': 1,
+                'message_status': 'failed',
+                'reason': 'backend_failed'
+            }
+
+            result = await agent_service.run_agent_stream(
+                agent_request,
+                MagicMock(),
+                "Bearer token"
+            )
+
+            assert result.status_code == 200
+
+
 
 
