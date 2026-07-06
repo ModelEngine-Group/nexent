@@ -139,6 +139,7 @@ mock_sdk_module = types.ModuleType("sdk")
 mock_sdk_nexent_module = types.ModuleType("sdk.nexent")
 mock_sdk_nexent_core_module = types.ModuleType("sdk.nexent.core")
 mock_sdk_nexent_core_agents_module = types.ModuleType("sdk.nexent.core.agents")
+mock_sdk_nexent_core_tools_module = types.ModuleType("sdk.nexent.core.tools")
 mock_sdk_nexent_core_utils_module = types.ModuleType("sdk.nexent.core.utils")
 mock_sdk_nexent_core_utils_observer_module = types.ModuleType(
     "sdk.nexent.core.utils.observer"
@@ -184,6 +185,9 @@ mock_sdk_nexent_core_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core")]
 mock_sdk_nexent_core_agents_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents")
+]
+mock_sdk_nexent_core_tools_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core" / "tools")
 ]
 mock_sdk_nexent_core_utils_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core" / "utils")]
@@ -290,6 +294,7 @@ module_mocks = {
     "sdk.nexent": mock_sdk_nexent_module,
     "sdk.nexent.core": mock_sdk_nexent_core_module,
     "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
+    "sdk.nexent.core.tools": mock_sdk_nexent_core_tools_module,
     "sdk.nexent.core.context_runtime": mock_sdk_context_runtime_module,
     "sdk.nexent.core.context_runtime.legacy": mock_sdk_context_runtime_legacy_module,
     "sdk.nexent.core.context_runtime.legacy.runtime": mock_sdk_context_runtime_legacy_runtime_module,
@@ -351,6 +356,7 @@ sys.modules.setdefault("sdk", mock_sdk_module)
 sys.modules.setdefault("sdk.nexent", mock_sdk_nexent_module)
 sys.modules.setdefault("sdk.nexent.core", mock_sdk_nexent_core_module)
 sys.modules.setdefault("sdk.nexent.core.agents", mock_sdk_nexent_core_agents_module)
+sys.modules.setdefault("sdk.nexent.core.tools", mock_sdk_nexent_core_tools_module)
 sys.modules.setdefault("sdk.nexent.core.context_runtime", mock_sdk_context_runtime_module)
 sys.modules.setdefault("sdk.nexent.core.context_runtime.legacy", mock_sdk_context_runtime_legacy_module)
 sys.modules.setdefault(
@@ -2548,6 +2554,95 @@ class TestCreateLocalToolDify:
         assert result == mock_tool_instance
         assert mock_tool_instance.observer == nexent_agent_instance.observer
         assert mock_tool_instance.rerank_model == "rerank_instance"
+
+
+class TestCreateLocalToolRAGFlow:
+    """Tests for create_local_tool with RAGFlowSearchTool."""
+
+    def test_create_local_tool_ragflow_search_success(self, nexent_agent_instance):
+        """Test successful RAGFlowSearchTool creation filters out unsupported params."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="RAGFlowSearchTool",
+            name="ragflow_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={
+                "server_url": "http://localhost:9380",
+                "api_key": "ragflow-key",
+                "dataset_ids": '["ds1"]',
+                "observer": "should_be_filtered",
+                "rerank_model": "should_be_filtered",
+                "rerank": True,
+                "rerank_model_name": "should_be_filtered",
+            },
+            source="local",
+            metadata={"rerank_model": "rerank_display_instance"}
+        )
+
+        original_value = nexent_agent.__dict__.get("RAGFlowSearchTool")
+        nexent_agent.__dict__["RAGFlowSearchTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["RAGFlowSearchTool"] = original_value
+            elif "RAGFlowSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["RAGFlowSearchTool"]
+
+        # Verify filtered params are NOT passed to __init__
+        call_kwargs = mock_tool_class.call_args[1]
+        assert "observer" not in call_kwargs
+        assert "rerank_model" not in call_kwargs
+        assert "rerank" not in call_kwargs
+        assert "rerank_model_name" not in call_kwargs
+        # Verify valid params ARE passed
+        assert call_kwargs["server_url"] == "http://localhost:9380"
+        assert call_kwargs["api_key"] == "ragflow-key"
+        assert call_kwargs["dataset_ids"] == '["ds1"]'
+
+        # Verify observer is set post-init
+        assert result == mock_tool_instance
+        assert mock_tool_instance.observer == nexent_agent_instance.observer
+        # Verify rerank_model is set from metadata for display purposes
+        assert mock_tool_instance.rerank_model == "rerank_display_instance"
+
+    def test_create_local_tool_ragflow_search_without_metadata(self, nexent_agent_instance):
+        """Test RAGFlowSearchTool creation when metadata is None or empty."""
+        mock_tool_class = MagicMock()
+        mock_tool_instance = MagicMock()
+        mock_tool_class.return_value = mock_tool_instance
+
+        tool_config = ToolConfig(
+            class_name="RAGFlowSearchTool",
+            name="ragflow_search",
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={"server_url": "http://localhost:9380", "api_key": "key"},
+            source="local",
+            metadata=None,
+        )
+
+        original_value = nexent_agent.__dict__.get("RAGFlowSearchTool")
+        nexent_agent.__dict__["RAGFlowSearchTool"] = mock_tool_class
+
+        try:
+            result = nexent_agent_instance.create_local_tool(tool_config)
+        finally:
+            if original_value is not None:
+                nexent_agent.__dict__["RAGFlowSearchTool"] = original_value
+            elif "RAGFlowSearchTool" in nexent_agent.__dict__:
+                del nexent_agent.__dict__["RAGFlowSearchTool"]
+
+        assert result == mock_tool_instance
+        assert mock_tool_instance.observer == nexent_agent_instance.observer
+        assert mock_tool_instance.rerank_model is None
 
 
 class TestCreateLocalToolAnalyze:

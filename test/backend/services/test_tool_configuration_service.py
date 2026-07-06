@@ -1754,15 +1754,34 @@ class TestUpdateToolList:
     @patch('backend.services.tool_configuration_service.get_langchain_tools')
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
     async def test_update_tool_list_mcp_error(self, mock_update_table, mock_get_langchain_tools, mock_get_mcp_tools, mock_get_local_tools):
-        """Test MCP tool retrieval failure scenario"""
-        mock_get_local_tools.return_value = []
-        mock_get_langchain_tools.return_value = []
+        """Test MCP tool retrieval failure scenario — handled gracefully (mcp_tools = []).
+
+        MCP errors should not block local/langchain tool updates. When MCP
+        fails, mcp_tools is set to an empty list and the update continues.
+        """
+        local_tools = [
+            ToolInfo(name="local_tool", description="Local tool", params=[], source=ToolSourceEnum.LOCAL.value,
+                     inputs="{}", output_type="string", class_name="LocalTool", usage=None)
+        ]
+        langchain_tools = [
+            ToolInfo(name="langchain_tool", description="LangChain tool", params=[], source=ToolSourceEnum.LANGCHAIN.value,
+                     inputs="{}", output_type="string", class_name="LangchainTool", usage="test_server")
+        ]
+        mock_get_local_tools.return_value = local_tools
+        mock_get_langchain_tools.return_value = langchain_tools
         mock_get_mcp_tools.side_effect = Exception("MCP connection failed")
 
         from backend.services.tool_configuration_service import update_tool_list
 
-        with pytest.raises(MCPConnectionError, match="failed to get all mcp tools"):
-            await update_tool_list("test_tenant", "test_user")
+        # Should NOT raise — MCP error is logged but not propagated
+        await update_tool_list("test_tenant", "test_user")
+
+        # update_tool_table is still called, but with only local + langchain tools
+        mock_update_table.assert_called_once_with(
+            tenant_id="test_tenant",
+            user_id="test_user",
+            tool_list=local_tools + langchain_tools,
+        )
 
     @patch('backend.services.tool_configuration_service.get_local_tools')
     @patch('backend.services.tool_configuration_service.get_all_mcp_tools')
@@ -3568,6 +3587,98 @@ class TestValidateLocalToolDatamateSearchTool:
                 "tenant1",
                 "user1"
             )
+
+
+class TestValidateLocalToolRAGFlowSearch:
+    """Test cases for _validate_local_tool function with ragflow_search tool."""
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_ragflow_search_success(self, mock_signature, mock_get_class):
+        """Test successful ragflow_search tool validation — filters out rerank params."""
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ragflow search result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature without observer (ragflow_search filters it differently)
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "ragflow_search",
+            {"query": "test query"},
+            {
+                "server_url": "http://localhost:9380",
+                "api_key": "test_key",
+                "dataset_ids": '["ds1"]',
+                "rerank_model": "should_be_filtered",
+                "rerank": True,
+                "rerank_model_name": "should_be_filtered",
+            },
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "ragflow search result"
+        mock_get_class.assert_called_once_with("ragflow_search")
+
+        # Verify rerank params are filtered out
+        expected_params = {
+            "server_url": "http://localhost:9380",
+            "api_key": "test_key",
+            "dataset_ids": '["ds1"]',
+        }
+        mock_tool_class.assert_called_once_with(**expected_params)
+        mock_tool_instance.forward.assert_called_once_with(query="test query")
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_ragflow_search_without_rerank_params(self, mock_signature, mock_get_class):
+        """Test ragflow_search validation passes through all non-rerank params."""
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "ragflow result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "ragflow_search",
+            {"query": "test query", "dataset_ids": '["ds_override"]'},
+            {
+                "server_url": "http://localhost:9380",
+                "api_key": "key",
+                "dataset_ids": '["ds1"]',
+                "top_k": 5,
+                "similarity_threshold": 0.3,
+                "vector_similarity_weight": 0.5,
+                "keyword": True,
+                "highlight": False,
+            },
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "ragflow result"
+        # All non-rerank params should be passed through
+        call_kwargs = mock_tool_class.call_args[1]
+        assert call_kwargs["server_url"] == "http://localhost:9380"
+        assert call_kwargs["api_key"] == "key"
+        assert call_kwargs["top_k"] == 5
+        assert call_kwargs["keyword"] is True
+        assert call_kwargs["highlight"] is False
 
 
 class TestValidateLocalToolAnalyzeTextFile:
