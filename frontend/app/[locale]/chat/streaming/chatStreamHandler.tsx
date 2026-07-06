@@ -82,6 +82,7 @@ interface JsonData {
   status?: string;
   last_unit_index?: number;
   replay_chunk_count?: number;
+  conversation_id?: number;
 }
 
 // Reconstruct streaming state from persisted units (for tab-switch recovery)
@@ -311,12 +312,7 @@ export const handleStreamResponse = async (
   resetTimeout: () => void,
   stepIdCounter: React.MutableRefObject<number>,
   setIsSwitchedConversation: React.Dispatch<React.SetStateAction<boolean>>,
-  isNewConversation: boolean,
-  setConversationTitle: (title: string) => void,
-  fetchConversationList: () => Promise<any>,
-  currentConversationId: number,
-  // TODO: Sevice should not be passed but imported
-  conversationService: any,
+  onConversationCreated: (conversationId: number) => void,
   isDebug: boolean = false,
   t: any,
   resumeConfig?: ResumeConfig
@@ -326,10 +322,6 @@ export const handleStreamResponse = async (
 
   // Resume mode: skip chunks that are already received
   let skipUntilUnitIndex = resumeConfig?.lastUnitIndex ?? -1;
-
-  // Guard flag to prevent duplicate title generation
-  // null = not applicable (existing conversation), true = not started, false = already scheduled
-  let titleGenerationGuard: boolean | null = resumeConfig ? null : (isNewConversation ? true : null);
 
   // Create an empty step object
   let currentStep: AgentStep = {
@@ -361,46 +353,6 @@ export const handleStreamResponse = async (
     lastContentType = recovered.lastContentType;
     lastModelOutputIndex = recovered.lastModelOutputIndex;
     finalAnswer = recovered.finalAnswer;
-  }
-
-  // Generate conversation title immediately when stream starts (for new conversations)
-  // This runs in parallel with the streaming response
-  if (titleGenerationGuard === true) {
-    // Mark as scheduled immediately to prevent duplicate calls
-    titleGenerationGuard = false;
-
-    // Capture user message at this point to avoid setMessages callback issues
-    let capturedUserMessage: string | null = null;
-    setMessages((prevMessages) => {
-      const firstUserMessage = prevMessages.find(
-        (msg) => msg.role === MESSAGE_ROLES.USER
-      );
-      if (firstUserMessage?.content) {
-        capturedUserMessage = firstUserMessage.content;
-      }
-      return prevMessages;
-    });
-
-    setTimeout(async () => {
-      // Use captured message directly instead of setMessages callback
-      if (capturedUserMessage) {
-        conversationService
-          .generateTitle({
-            conversation_id: currentConversationId,
-            question: capturedUserMessage,
-          })
-          .then((title: string) => {
-            if (title) {
-              setConversationTitle(title);
-            }
-            // Update the conversation list
-            fetchConversationList();
-          })
-          .catch((error: Error) => {
-            log.error(t("chatStreamHandler.generateTitleFailed"), error);
-          });
-      }
-    }, 0);
   }
 
   try {
@@ -473,6 +425,16 @@ export const handleStreamResponse = async (
 
             if (jsonData.type && jsonData.content) {
               const messageType = jsonData.type;
+
+              // Handle conversation_created event - notify frontend of new conversation ID
+              if (messageType === 'conversation_created') {
+                const convId = jsonData.content?.conversation_id;
+                if (typeof convId === 'number') {
+                  onConversationCreated(convId);
+                }
+                continue;
+              }
+
               const messageContent = jsonData.content;
 
               // In resume mode, skip metadata messages to prevent creating duplicate steps or indicators.

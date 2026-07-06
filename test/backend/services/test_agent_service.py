@@ -3950,6 +3950,62 @@ async def test_run_agent_stream(
     return_value=("u", "t", "en"),
 )
 @patch("backend.services.agent_service.build_memory_context")
+@patch('backend.services.agent_service.save_messages')
+@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.create_new_conversation")
+@patch("backend.services.agent_service.generate_conversation_title_service", new=AsyncMock())
+async def test_run_agent_stream_auto_creates_conversation_when_missing(
+    mock_generate_title,
+    mock_create_conversation,
+    mock_generate_stream,
+    mock_save_messages,
+    mock_build_mem_ctx,
+    mock_resolve,
+    mock_agent_request,
+    mock_http_request,
+):
+    """When conversation_id is None, backend auto-creates one and emits conversation_created."""
+    mock_create_conversation.return_value = {"conversation_id": 999}
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
+
+    async def stream_chunks():
+        yield "data: chunk1\n\n"
+
+    mock_generate_stream.return_value = stream_chunks()
+    mock_agent_request.conversation_id = None
+
+    response = await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    # Assert conversation was created
+    mock_create_conversation.assert_called_once()
+
+    # Assert agent_request got the new conversation_id
+    assert mock_agent_request.conversation_id == 999
+
+    # Assert save_messages received the updated conversation_id
+    mock_save_messages.assert_called_once()
+    args, kwargs = mock_save_messages.call_args
+    assert args[0].conversation_id == 999
+    assert kwargs.get("target") == "user" or args[1] == "user"
+
+    # Consume the stream and assert conversation_created SSE event is first
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    first_chunk = chunks[0]
+    assert "conversation_created" in first_chunk
+    assert '"conversation_id": 999' in first_chunk
+
+
+@pytest.mark.asyncio
+@patch(
+    "backend.services.agent_service._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("backend.services.agent_service.build_memory_context")
 @patch("backend.services.agent_service.save_messages")
 @patch("backend.services.agent_service.generate_stream_with_memory")
 async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
