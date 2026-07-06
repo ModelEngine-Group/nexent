@@ -799,12 +799,24 @@ export const searchAgentInfo = async (
             return {
               id: String(tool.tool_id),
               name: tool.name,
+              origin_name: tool.origin_name,
               description: tool.description,
               description_zh: tool.description_zh,
               source: tool.source,
               is_available: tool.is_available,
               usage: tool.usage,
               category: tool.category,
+              // Pass through `inputs` so the ToolTestPanel can parse runtime
+              // input parameters when reopening a tool from the selected
+              // tools list. Without this, the test panel falls back to
+              // showing the config params (top_k, dataset_ids, etc.) and
+              // hides the parsed-mode toggle button.
+              inputs: tool.inputs,
+              labels: Array.isArray(tool.labels)
+                ? tool.labels
+                : typeof tool.labels === "string"
+                  ? (() => { try { const p = JSON.parse(tool.labels); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                  : [],
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
                     name: param.name,
