@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from ..contracts import FinalContext
+from nexent.monitor import get_monitoring_manager, OPENINFERENCE_SPAN_KIND_CHAIN
 
 
 class ManagedContextRuntime:
@@ -48,15 +49,24 @@ class ManagedContextRuntime:
         current_run_start_idx: int,
         tools: Sequence[Any] | None = None,
     ) -> FinalContext:
-        return self.context_manager.assemble_final_context(
-            model=model,
-            memory=memory,
-            current_run_start_idx=current_run_start_idx,
-            tools=tools,
-            purpose="step",
-            run_context=self._ensure_run_context(memory),
-            conversation_id=self.conversation_id,
-        )
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.prepare_step",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.current_run_start_idx": current_run_start_idx,
+                "context.conversation_id": self.conversation_id,
+            },
+        ):
+            return self.context_manager.assemble_final_context(
+                model=model,
+                memory=memory,
+                current_run_start_idx=current_run_start_idx,
+                tools=tools,
+                purpose="step",
+                run_context=self._ensure_run_context(memory),
+                conversation_id=self.conversation_id,
+            )
 
     def prepare_final_answer(
         self,
@@ -68,17 +78,27 @@ class ManagedContextRuntime:
         final_answer_templates: dict,
         tools: Sequence[Any] | None = None,
     ) -> FinalContext:
-        return self.context_manager.assemble_final_context(
-            model=model,
-            memory=memory,
-            current_run_start_idx=current_run_start_idx,
-            tools=tools,
-            purpose="final_answer",
-            task=task,
-            final_answer_templates=final_answer_templates,
-            run_context=self._ensure_run_context(memory),
-            conversation_id=self.conversation_id,
-        )
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.prepare_final_answer",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.current_run_start_idx": current_run_start_idx,
+                "context.conversation_id": self.conversation_id,
+                "context.task": task,
+            },
+        ):
+            return self.context_manager.assemble_final_context(
+                model=model,
+                memory=memory,
+                current_run_start_idx=current_run_start_idx,
+                tools=tools,
+                purpose="final_answer",
+                task=task,
+                final_answer_templates=final_answer_templates,
+                run_context=self._ensure_run_context(memory),
+                conversation_id=self.conversation_id,
+            )
 
     def render_summary_messages(self, *, memory: Any) -> list[Any]:
         """Return display-only memory messages without compression side effects."""

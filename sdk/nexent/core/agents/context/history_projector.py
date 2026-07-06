@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .context_item import AuthorityTier, ContextItem, ContextItemType, RepresentationTier
 from .item_handler_registry import ItemHandlerRegistry
+from nexent.monitor import get_monitoring_manager, OPENINFERENCE_SPAN_KIND_CHAIN, OPENINFERENCE_SPAN_KIND_RETRIEVER
 
 
 class HistoryProjector:
@@ -42,16 +43,48 @@ class HistoryProjector:
         Raises:
             ValueError: If purpose is not recognized.
         """
-        units = self.query_units_fn(conversation_id, run_id)
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.history_project",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.conversation_id": conversation_id,
+                "context.run_id": run_id,
+                "context.purpose": purpose,
+            },
+        ):
+            with monitoring_manager.trace_operation(
+                "context.history_query",
+                OPENINFERENCE_SPAN_KIND_RETRIEVER,
+                **{
+                    "context.conversation_id": conversation_id,
+                    "context.run_id": run_id,
+                },
+            ):
+                units = self.query_units_fn(conversation_id, run_id)
+            
+            if monitoring_manager.is_enabled:
+                monitoring_manager.add_span_event(
+                    "context.history_query.completed",
+                    {"context.unit_count": len(units)},
+                )
 
-        if purpose == "model_context":
-            return self._project_model_context(units)
-        elif purpose == "resume":
-            return self._project_resume_context(units)
-        elif purpose == "chat":
-            return self._project_chat_context(units)
-        else:
-            raise ValueError(f"Unknown purpose: {purpose}")
+            if purpose == "model_context":
+                items = self._project_model_context(units)
+            elif purpose == "resume":
+                items = self._project_resume_context(units)
+            elif purpose == "chat":
+                items = self._project_chat_context(units)
+            else:
+                raise ValueError(f"Unknown purpose: {purpose}")
+            
+            if monitoring_manager.is_enabled:
+                monitoring_manager.add_span_event(
+                    "context.history_project.completed",
+                    {"context.item_count": len(items)},
+                )
+            
+            return items
 
     def _project_model_context(self, units: List[Dict[str, Any]]) -> List[ContextItem]:
         """Project units into HISTORY_TURN and TOOL_CALL_RESULT items for model context.

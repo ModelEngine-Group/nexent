@@ -26,6 +26,7 @@ from smolagents.models import ChatMessage, MessageRole
 from .summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
 from .summary_config import ContextManagerConfig, StrategyType
 from ..context_runtime.contracts import ContextEvidence, FinalContext
+from nexent.monitor import get_monitoring_manager, OPENINFERENCE_SPAN_KIND_CHAIN, OPENINFERENCE_SPAN_KIND_LLM
 
 logger = logging.getLogger("agent_context")
 
@@ -493,21 +494,41 @@ class ContextManager:
         current_run_start_idx,
         context_overhead_tokens: int = 0,
     ) -> List[ChatMessage]:
-        # G1
-        if not self.config.enabled:
-            return original_messages
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.compress_if_needed",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.context_overhead_tokens": context_overhead_tokens,
+                "context.current_run_start_idx": current_run_start_idx,
+            },
+        ):
+            # G1
+            if not self.config.enabled:
+                return original_messages
 
-        soft_input_budget_tokens = self._soft_input_budget_tokens()
-        hard_input_budget_tokens = self._hard_input_budget_tokens()
-        soft_history_budget_tokens = max(0, soft_input_budget_tokens - context_overhead_tokens)
-        hard_history_budget_tokens = max(0, hard_input_budget_tokens - context_overhead_tokens)
+            soft_input_budget_tokens = self._soft_input_budget_tokens()
+            hard_input_budget_tokens = self._hard_input_budget_tokens()
+            soft_history_budget_tokens = max(0, soft_input_budget_tokens - context_overhead_tokens)
+            hard_history_budget_tokens = max(0, hard_input_budget_tokens - context_overhead_tokens)
 
-        if self._estimate_tokens(memory) <= soft_history_budget_tokens:
-            # No compression needed; record that compressed == uncompressed
-            # so benchmark token_reduction reads as zero rather than stale.
-            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
-            self._last_compressed_token_count = self._last_uncompressed_token_count
-            return original_messages
+            if self._estimate_tokens(memory) <= soft_history_budget_tokens:
+                # No compression needed; record that compressed == uncompressed
+                # so benchmark token_reduction reads as zero rather than stale.
+                self._last_uncompressed_token_count = self._msg_token_count(original_messages)
+                self._last_compressed_token_count = self._last_uncompressed_token_count
+                
+                if monitoring_manager.is_enabled:
+                    monitoring_manager.add_span_event(
+                        "context.compress.skipped",
+                        {
+                            "context.reason": "under_budget",
+                            "context.estimated_tokens": self._estimate_tokens(memory),
+                            "context.soft_budget": soft_history_budget_tokens,
+                        },
+                    )
+                
+                return original_messages
 
         with self._lock:
             # Run detection
@@ -1084,58 +1105,86 @@ class ContextManager:
 
     def _do_generate_summary(self, text: str, model, call_type: str = "summary",
                              prompt_type: str = "initial") -> Optional[str]:
-        # prompt_type selects which system prompt to render. For "incremental"
-        # we use the dedicated incremental_summary_system_prompt (with fallback
-        # to summary_system_prompt if it is empty) and a user prompt phrased
-        # as an update; "initial" keeps the original fresh-compaction phrasing.
-        if prompt_type == "incremental":
-            system_prompt = (
-                self.config.incremental_summary_system_prompt
-                or self.config.summary_system_prompt
-            )
-        else:
-            system_prompt = self.config.summary_system_prompt
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.generate_summary",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.call_type": call_type,
+                "context.prompt_type": prompt_type,
+            },
+        ):
+            # prompt_type selects which system prompt to render. For "incremental"
+            # we use the dedicated incremental_summary_system_prompt (with fallback
+            # to summary_system_prompt if it is empty) and a user prompt phrased
+            # as an update; "initial" keeps the original fresh-compaction phrasing.
+            if prompt_type == "incremental":
+                system_prompt = (
+                    self.config.incremental_summary_system_prompt
+                    or self.config.summary_system_prompt
+                )
+            else:
+                system_prompt = self.config.summary_system_prompt
 
-        schema_desc = json.dumps(
-            self.config.summary_json_schema, ensure_ascii=False, indent=2
-        )
-        if prompt_type == "incremental":
-            # text already contains the "## Previous Summary" + "## New ..."
-            # sections; the prompt only needs to instruct the update.
-            user_prompt = (
-                f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
-                f"{text}"
+            schema_desc = json.dumps(
+                self.config.summary_json_schema, ensure_ascii=False, indent=2
             )
-        else:
-            user_prompt = (
-                f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
-                f"Conversation content to summarize:\n{text}"
-            )
-        messages = [
-            ChatMessage(role=MessageRole.SYSTEM,
-                        content=[{"type": "text", "text": system_prompt}]),
-            ChatMessage(role=MessageRole.USER,
-                        content=[{"type": "text", "text": user_prompt}]),
-        ]
-        response = model(messages, stop_sequences=[])
+            if prompt_type == "incremental":
+                # text already contains the "## Previous Summary" + "## New ..."
+                # sections; the prompt only needs to instruct the update.
+                user_prompt = (
+                    f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+                    f"{text}"
+                )
+            else:
+                user_prompt = (
+                    f"Output a summary following this JSON structure:\n{schema_desc}\n\n"
+                    f"Conversation content to summarize:\n{text}"
+                )
+            messages = [
+                ChatMessage(role=MessageRole.SYSTEM,
+                            content=[{"type": "text", "text": system_prompt}]),
+                ChatMessage(role=MessageRole.USER,
+                            content=[{"type": "text", "text": user_prompt}]),
+            ]
+            
+            with monitoring_manager.trace_llm_request(
+                "context.compression.generate_summary",
+                model_name=getattr(model, "model_id", "unknown"),
+                **{
+                    "context.call_type": call_type,
+                    "context.input_chars": len(text),
+                },
+            ):
+                response = model(messages, stop_sequences=[])
 
-        raw_output = response.content
-        if isinstance(raw_output, list):
-            raw_output = " ".join(
-                block.get("text", "")
-                for block in raw_output
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-        if not isinstance(raw_output, str):
-            raw_output = str(raw_output)
+            raw_output = response.content
+            if isinstance(raw_output, list):
+                raw_output = " ".join(
+                    block.get("text", "")
+                    for block in raw_output
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+            if not isinstance(raw_output, str):
+                raw_output = str(raw_output)
 
-        summary = self._format_summary(raw_output)
-        self._record_llm_call_token(
-            input_len=self._msg_char_count(messages),
-            output_len=len(raw_output),
-            response=response, call_type=call_type,
-        )
-        return summary
+            summary = self._format_summary(raw_output)
+            self._record_llm_call_token(
+                input_len=self._msg_char_count(messages),
+                output_len=len(raw_output),
+                response=response, call_type=call_type,
+            )
+            
+            if monitoring_manager.is_enabled:
+                monitoring_manager.add_span_event(
+                    "context.generate_summary.completed",
+                    {
+                        "context.output_chars": len(raw_output),
+                        "context.call_type": call_type,
+                    },
+                )
+            
+            return summary
 
 
     def _record_llm_call_token(self, input_len, output_len, response, call_type):
@@ -1427,113 +1476,124 @@ class ContextManager:
         ``messages``; cache protocol behavior is decided later from provider
         capabilities only.
         """
-        if run_context is None:
-            run_context = self.prepare_run_context(memory, fallback_system_prompt="")
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.assemble_final_context",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.purpose": purpose,
+                "context.conversation_id": conversation_id,
+                "context.use_context_items": self.config.use_context_items,
+                "context.current_run_start_idx": current_run_start_idx,
+            },
+        ) as span:
+            if run_context is None:
+                run_context = self.prepare_run_context(memory, fallback_system_prompt="")
 
-        context_items_for_evidence: tuple = ()
-        if self.config.use_context_items:
-            projected_items = self.project_context_items(run_context.components)
+            context_items_for_evidence: tuple = ()
+            if self.config.use_context_items:
+                projected_items = self.project_context_items(run_context.components)
 
-            history_projector = self.config.history_projector
-            if history_projector is not None and conversation_id is not None:
-                try:
-                    history_items = history_projector.project(
-                        conversation_id=conversation_id,
-                        purpose=purpose if purpose in ("model_context", "resume", "chat") else "model_context",
-                    )
-                    projected_items.extend(history_items)
-                except Exception:
-                    logger.warning("History projection failed, continuing without history items", exc_info=True)
+                history_projector = self.config.history_projector
+                if history_projector is not None and conversation_id is not None:
+                    try:
+                        history_items = history_projector.project(
+                            conversation_id=conversation_id,
+                            purpose=purpose if purpose in ("model_context", "resume", "chat") else "model_context",
+                        )
+                        projected_items.extend(history_items)
+                    except Exception:
+                        logger.warning("History projection failed, continuing without history items", exc_info=True)
 
-            context_items_for_evidence = tuple(projected_items)
+                context_items_for_evidence = tuple(projected_items)
 
-            # Group items by source component and use component's to_messages()
-            # to get formatted human-readable text instead of raw dicts
-            seen_components = set()
-            item_messages = []
-            for item in projected_items:
-                source_component = item.metadata.get("_source_component")
-                if source_component and id(source_component) not in seen_components:
-                    seen_components.add(id(source_component))
-                    # Use the component's to_messages() to get formatted text
-                    for msg in source_component.to_messages():
-                        item_messages.append(msg)
+                # Group items by source component and use component's to_messages()
+                # to get formatted human-readable text instead of raw dicts
+                seen_components = set()
+                item_messages = []
+                for item in projected_items:
+                    source_component = item.metadata.get("_source_component")
+                    if source_component and id(source_component) not in seen_components:
+                        seen_components.add(id(source_component))
+                        # Use the component's to_messages() to get formatted text
+                        for msg in source_component.to_messages():
+                            item_messages.append(msg)
 
-            # Convert history-projected items (no _source_component) via handlers
-            for item in projected_items:
-                if item.metadata.get("_source_component") is None:
-                    from .context.item_handler_registry import ItemHandlerRegistry
-                    handler = ItemHandlerRegistry.get(item.item_type)
-                    for msg in handler.to_messages(item):
-                        item_messages.append(msg)
+                # Convert history-projected items (no _source_component) via handlers
+                for item in projected_items:
+                    if item.metadata.get("_source_component") is None:
+                        from .context.item_handler_registry import ItemHandlerRegistry
+                        handler = ItemHandlerRegistry.get(item.item_type)
+                        for msg in handler.to_messages(item):
+                            item_messages.append(msg)
 
-            stable_from_items = [m for m in item_messages if self._message_role(m) in ("system", "developer")]
-            dynamic_from_items = [m for m in item_messages if self._message_role(m) not in ("system", "developer")]
+                stable_from_items = [m for m in item_messages if self._message_role(m) in ("system", "developer")]
+                dynamic_from_items = [m for m in item_messages if self._message_role(m) not in ("system", "developer")]
 
-            run_context = ManagedRunContext(
-                component_messages=tuple(item_messages),
-                stable_messages=tuple(stable_from_items),
-                dynamic_messages=tuple(dynamic_from_items),
-                selected_component_types=run_context.selected_component_types,
-                components=run_context.components,
+                run_context = ManagedRunContext(
+                    component_messages=tuple(item_messages),
+                    stable_messages=tuple(stable_from_items),
+                    dynamic_messages=tuple(dynamic_from_items),
+                    selected_component_types=run_context.selected_component_types,
+                    components=run_context.components,
+                )
+
+            tools = self._canonical_tools(tools or ())
+            purpose_stable, purpose_dynamic = self._purpose_messages(
+                purpose=purpose,
+                task=task,
+                final_answer_templates=final_answer_templates,
             )
 
-        tools = self._canonical_tools(tools or ())
-        purpose_stable, purpose_dynamic = self._purpose_messages(
-            purpose=purpose,
-            task=task,
-            final_answer_templates=final_answer_templates,
-        )
+            original_messages = self._messages_from_memory(memory)
+            stable_messages = [*run_context.stable_messages, *purpose_stable]
+            dynamic_messages = [*run_context.dynamic_messages, *purpose_dynamic]
 
-        original_messages = self._messages_from_memory(memory)
-        stable_messages = [*run_context.stable_messages, *purpose_stable]
-        dynamic_messages = [*run_context.dynamic_messages, *purpose_dynamic]
+            context_overhead_tokens = (
+                self._msg_token_count(dynamic_messages)
+                + self._estimate_tools_tokens(tools)
+                + self._msg_token_count(purpose_stable)
+            )
+            compressed_messages = self.compress_if_needed(
+                model,
+                memory,
+                original_messages,
+                current_run_start_idx,
+                context_overhead_tokens=context_overhead_tokens,
+            )
+            history_messages = self._without_leading_stable_messages(compressed_messages)
+            messages = [
+                *stable_messages,
+                *dynamic_messages,
+                *history_messages,
+            ]
 
-        context_overhead_tokens = (
-            self._msg_token_count(dynamic_messages)
-            + self._estimate_tools_tokens(tools)
-            + self._msg_token_count(purpose_stable)
-        )
-        compressed_messages = self.compress_if_needed(
-            model,
-            memory,
-            original_messages,
-            current_run_start_idx,
-            context_overhead_tokens=context_overhead_tokens,
-        )
-        history_messages = self._without_leading_stable_messages(compressed_messages)
-        messages = [
-            *stable_messages,
-            *dynamic_messages,
-            *history_messages,
-        ]
+            self._last_compressed_token_count = self._msg_token_count(messages) + self._estimate_tools_tokens(tools)
 
-        self._last_compressed_token_count = self._msg_token_count(messages) + self._estimate_tools_tokens(tools)
+            fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
+            component_fingerprints = self._stable_component_fingerprints(
+                purpose_stable,
+                components=run_context.components,
+            )
+            if tools:
+                component_fingerprints["tools"] = self._fingerprint(tools)
+            reasons = self._change_reasons(fingerprint, component_fingerprints)
+            self._previous_stable_fingerprint = fingerprint
+            self._previous_stable_components = component_fingerprints
 
-        fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
-        component_fingerprints = self._stable_component_fingerprints(
-            purpose_stable,
-            components=run_context.components,
-        )
-        if tools:
-            component_fingerprints["tools"] = self._fingerprint(tools)
-        reasons = self._change_reasons(fingerprint, component_fingerprints)
-        self._previous_stable_fingerprint = fingerprint
-        self._previous_stable_components = component_fingerprints
-
-        return FinalContext(
-            messages=messages,
-            tools=tools,
-            evidence=ContextEvidence(
-                selected_component_types=run_context.selected_component_types,
-                stable_message_count=len(stable_messages),
-                dynamic_message_count=len(messages) - len(stable_messages),
-                compression_records=tuple(self._step_local_log or ()),
-                stable_prefix_fingerprint=fingerprint,
-                prefix_change_reasons=tuple(reasons),
-                context_items=context_items_for_evidence,
-            ),
-        )
+            return FinalContext(
+                messages=messages,
+                tools=tools,
+                evidence=ContextEvidence(
+                    selected_component_types=run_context.selected_component_types,
+                    stable_message_count=len(stable_messages),
+                    dynamic_message_count=len(messages) - len(stable_messages),
+                    compression_records=tuple(self._step_local_log or ()),
+                    stable_prefix_fingerprint=fingerprint,
+                    prefix_change_reasons=tuple(reasons),
+                    context_items=context_items_for_evidence,
+                ),
+            )
 
     def _purpose_messages(
         self,
@@ -1840,12 +1900,28 @@ class ContextManager:
         Returns:
             List of ContextItem instances ready for policy-driven selection.
         """
-        _ensure_handlers_registered()
-        from .context.projector import ContextProjector
+        monitoring_manager = get_monitoring_manager()
+        with monitoring_manager.trace_operation(
+            "context.project_items",
+            OPENINFERENCE_SPAN_KIND_CHAIN,
+        ):
+            _ensure_handlers_registered()
+            from .context.projector import ContextProjector
 
-        source_components = self._component_source(components)
-        projector = ContextProjector()
-        return projector.project(list(source_components))
+            source_components = self._component_source(components)
+            projector = ContextProjector()
+            items = projector.project(list(source_components))
+            
+            if monitoring_manager.is_enabled:
+                monitoring_manager.add_span_event(
+                    "context.project_items.completed",
+                    {
+                        "context.component_count": len(source_components),
+                        "context.item_count": len(items),
+                    },
+                )
+            
+            return items
 
     def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
         """Compatibility alias for callers not yet migrated to managed assembly.
