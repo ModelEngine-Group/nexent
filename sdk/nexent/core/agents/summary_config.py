@@ -111,6 +111,15 @@ class ContextManagerConfig:
     in subsequent PRs. Default False for backward compatibility.
     """
 
+    history_projector: Any = None
+    """Optional HistoryProjector instance for projecting DB conversation history into ContextItems.
+    
+    When set and use_context_items=True, the projector is called during build_context_messages
+    to produce HISTORY_TURN, TOOL_CALL_RESULT, and WORKING_MEMORY items from persisted
+    conversation history. Must be injected by the backend service layer since the SDK
+    cannot import database modules directly.
+    """
+
     # === NEW: Per-Component Token Budgets ===
     component_budgets: Dict[str, int] = field(default_factory=lambda: {
         "system_prompt": 4000,

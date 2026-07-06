@@ -1406,6 +1406,7 @@ class ContextManager:
         task: Optional[str] = None,
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: Optional[ManagedRunContext] = None,
+        conversation_id: Optional[int] = None,
     ) -> FinalContext:
         """Return the only managed-path payload allowed to enter a model call.
 
@@ -1422,6 +1423,18 @@ class ContextManager:
         context_items_for_evidence: tuple = ()
         if self.config.use_context_items:
             projected_items = self.project_context_items(run_context.components)
+
+            history_projector = self.config.history_projector
+            if history_projector is not None and conversation_id is not None:
+                try:
+                    history_items = history_projector.project(
+                        conversation_id=conversation_id,
+                        purpose=purpose if purpose in ("model_context", "resume", "chat") else "model_context",
+                    )
+                    projected_items.extend(history_items)
+                except Exception:
+                    logger.warning("History projection failed, continuing without history items", exc_info=True)
+
             context_items_for_evidence = tuple(projected_items)
 
             # Group items by source component and use component's to_messages()
@@ -1434,6 +1447,14 @@ class ContextManager:
                     seen_components.add(id(source_component))
                     # Use the component's to_messages() to get formatted text
                     for msg in source_component.to_messages():
+                        item_messages.append(msg)
+
+            # Convert history-projected items (no _source_component) via handlers
+            for item in projected_items:
+                if item.metadata.get("_source_component") is None:
+                    from .context.item_handler_registry import ItemHandlerRegistry
+                    handler = ItemHandlerRegistry.get(item.item_type)
+                    for msg in handler.to_messages(item):
                         item_messages.append(msg)
 
             stable_from_items = [m for m in item_messages if self._message_role(m) in ("system", "developer")]

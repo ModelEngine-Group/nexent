@@ -68,6 +68,8 @@ class ConversationMessage(TableBase):
     status = Column(
         String(30), default='completed',
         doc="Lifecycle status: pending / streaming / completed / failed / stopped")
+    run_id = Column(
+        Integer, doc="Agent run sequence number. Matches unit run_id for assistant messages")
 
 
 class ConversationMessageUnit(TableBase):
@@ -91,6 +93,14 @@ class ConversationMessageUnit(TableBase):
     unit_status = Column(
         String(30), default='completed',
         doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
+    run_id = Column(
+        Integer, doc="Agent run sequence number within this conversation. Increments per new agent invocation")
+    step_id = Column(
+        Integer, doc="ReAct step sequence number within this run. Increments on step_count chunks")
+    tool_call_id = Column(
+        String(100), doc="UUID pairing tool call with its execution result. NULL for non-tool units")
+    event_time = Column(
+        TIMESTAMP(timezone=False), doc="Actual event timestamp when chunk was processed. Not batch insert time")
 
 
 class ConversationSourceImage(TableBase):
