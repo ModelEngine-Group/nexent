@@ -37,3 +37,10 @@ class ToolCallResultHandler(ContextItemHandler):
             loss_metadata={},
             content=item.content,
         )
+
+    def to_messages(self, item: ContextItem) -> List[Dict[str, Any]]:
+        content = item.content or {}
+        tool_call = content.get("tool_call", "")
+        execution_result = content.get("execution_result", "")
+        text = f"[Tool Call]\n{tool_call}\n\n[Execution Result]\n{execution_result}"
+        return [{"role": "user", "content": [{"type": "text", "text": text}]}]

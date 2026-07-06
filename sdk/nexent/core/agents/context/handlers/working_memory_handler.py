@@ -33,3 +33,14 @@ class WorkingMemoryHandler(ContextItemHandler):
             loss_metadata={},
             content=item.content,
         )
+
+    def to_messages(self, item: ContextItem) -> List[Dict[str, Any]]:
+        content = item.content or {}
+        wm_type = content.get("type", "working_memory")
+        if wm_type == "active_goal":
+            text = f"[Active Goal]\n{content.get('text', '')}"
+        elif wm_type == "pending_tool_call":
+            text = f"[Pending Tool Call: {content.get('tool_call_id', 'unknown')}]\n{content.get('tool_content', '')}"
+        else:
+            text = f"[Working Memory]\n{content}"
+        return [{"role": "user", "content": [{"type": "text", "text": text}]}]

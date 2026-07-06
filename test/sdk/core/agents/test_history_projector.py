@@ -5,7 +5,7 @@ units into ContextItem instances for model_context, resume, and chat purposes.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from nexent.core.agents.agent_context import ContextManager
 from nexent.core.agents.agent_model import (
@@ -580,23 +580,13 @@ class TestEndToEndIntegration:
         memory.system_prompt = None
         memory.steps = []
 
-        mock_handler = MagicMock()
-        mock_handler.to_messages.return_value = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there"},
-        ]
-
-        with patch(
-            "nexent.core.agents.context.item_handler_registry.ItemHandlerRegistry.get",
-            return_value=mock_handler,
-        ):
-            final = manager.assemble_final_context(
-                model=None,
-                memory=memory,
-                current_run_start_idx=0,
-                tools=[],
-                conversation_id=123,
-            )
+        final = manager.assemble_final_context(
+            model=None,
+            memory=memory,
+            current_run_start_idx=0,
+            tools=[],
+            conversation_id=123,
+        )
 
         assert final is not None
         assert len(final.evidence.context_items) > 0

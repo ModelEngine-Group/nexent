@@ -38,3 +38,14 @@ class HistoryTurnHandler(ContextItemHandler):
             loss_metadata={},
             content=item.content,
         )
+
+    def to_messages(self, item: ContextItem) -> List[Dict[str, Any]]:
+        content = item.content or {}
+        messages = []
+        user_query = content.get("user_query", "")
+        if user_query:
+            messages.append({"role": "user", "content": [{"type": "text", "text": user_query}]})
+        assistant_response = content.get("assistant_response", "")
+        if assistant_response:
+            messages.append({"role": "assistant", "content": [{"type": "text", "text": assistant_response}]})
+        return messages

@@ -298,6 +298,9 @@ class ContextManager:
 
         self._components: List = []
 
+        from .context.handlers import register_all
+        register_all()
+
     # ============================================================
     #  Cache validation
     # ============================================================

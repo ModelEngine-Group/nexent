@@ -33,3 +33,12 @@ class ContextItemHandler(ABC):
             loss_metadata={},
             content=item.content,
         )
+
+    def to_messages(self, item: ContextItem) -> List[Dict[str, Any]]:
+        """Convert a ContextItem into message dicts for LLM consumption.
+
+        Default implementation wraps item content as a user-role text message.
+        Subclasses should override for type-specific formatting.
+        """
+        text = str(item.content) if not isinstance(item.content, str) else item.content
+        return [{"role": "user", "content": [{"type": "text", "text": text}]}]
