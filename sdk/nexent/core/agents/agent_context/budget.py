@@ -11,7 +11,7 @@ from smolagents.memory import ActionStep, TaskStep
 
 from ..summary_cache import CurrentSummaryCache, PreviousSummaryCache
 from ..summary_config import ContextManagerConfig
-from ..utils.token_estimation import estimate_tokens_text
+from ...utils.token_estimation import estimate_tokens_text
 
 from .summary_step import SummaryTaskStep
 

@@ -15,7 +15,7 @@ from smolagents.models import ChatMessage, MessageRole
 
 from ..summary_cache import CompressionCallRecord
 from ..summary_config import ContextManagerConfig
-from ..utils.token_estimation import (
+from ...utils.token_estimation import (
     _extract_text_from_messages,
     estimate_tokens,
     estimate_tokens_for_steps,
