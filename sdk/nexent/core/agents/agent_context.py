@@ -38,6 +38,16 @@ from ..utils.token_estimation import (
     estimate_tokens_for_system_prompt
 )
 
+_handlers_registered = False
+
+def _ensure_handlers_registered():
+    """Lazily register all context item handlers (idempotent)."""
+    global _handlers_registered
+    if not _handlers_registered:
+        from .context.handlers import register_all
+        register_all()
+        _handlers_registered = True
+
 
 @dataclass
 class SummaryTaskStep(TaskStep):
@@ -297,9 +307,6 @@ class ContextManager:
             self.config.max_summary_reduce_tokens = int(self.config.token_threshold * 0.2)
 
         self._components: List = []
-
-        from .context.handlers import register_all
-        register_all()
 
     # ============================================================
     #  Cache validation
@@ -1833,6 +1840,7 @@ class ContextManager:
         Returns:
             List of ContextItem instances ready for policy-driven selection.
         """
+        _ensure_handlers_registered()
         from .context.projector import ContextProjector
 
         source_components = self._component_source(components)
