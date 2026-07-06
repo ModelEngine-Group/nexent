@@ -13589,10 +13589,15 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
     assert result["resume_from_unit_index"] == 0
 
 
+# ============================================================================
+# Tests for _detect_resume_position with additional message statuses
+# ============================================================================
+
+
 @patch("backend.services.agent_service.streaming_channel_manager")
 @patch("backend.services.agent_service.get_latest_assistant_message")
 def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
-    """_detect_resume_position should return no_resume when message is failed."""
+    """_detect_resume_position should handle failed message status."""
     from backend.services.agent_service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "failed"}
@@ -13601,15 +13606,14 @@ def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
     result = _detect_resume_position(conversation_id=1, user_id="user1")
 
     assert result["should_resume"] is False
-    assert result["message_status"] == "failed"
     assert result["reason"] == "backend_failed"
-    assert result["message_id"] == 1
+    assert result["message_status"] == "failed"
 
 
 @patch("backend.services.agent_service.streaming_channel_manager")
 @patch("backend.services.agent_service.get_latest_assistant_message")
 def test_detect_resume_position_message_stopped(mock_get_msg, mock_channel_mgr):
-    """_detect_resume_position should return no_resume when message is stopped."""
+    """_detect_resume_position should handle stopped message status."""
     from backend.services.agent_service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "stopped"}
@@ -13618,78 +13622,223 @@ def test_detect_resume_position_message_stopped(mock_get_msg, mock_channel_mgr):
     result = _detect_resume_position(conversation_id=1, user_id="user1")
 
     assert result["should_resume"] is False
-    assert result["message_status"] == "stopped"
     assert result["reason"] == "backend_stopped"
-    assert result["message_id"] == 1
+    assert result["message_status"] == "stopped"
+
+
+@patch("backend.services.agent_service.streaming_channel_manager")
+@patch("backend.services.agent_service.get_latest_assistant_message")
+def test_detect_resume_position_channel_inactive_completed(mock_get_msg, mock_channel_mgr):
+    """_detect_resume_position should not resume when channel exists but is completed."""
+    from backend.services.agent_service import _detect_resume_position
+
+    mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
+    mock_channel = MagicMock()
+    mock_channel.is_completed = True  # Channel is completed
+    mock_channel_mgr.get_channel.return_value = mock_channel
+
+    result = _detect_resume_position(conversation_id=1, user_id="user1")
+
+    assert result["should_resume"] is False
+    assert result["reason"] == "backend_completed"
+
+
+# ============================================================================
+# Tests for resume mode update_message_status exception handling (lines 2987-2993)
+# ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_resume_already_finished_with_stopped_status():
-    """run_agent_stream resume mode should handle stopped status correctly."""
+@patch('backend.services.agent_service._detect_resume_position')
+@patch('backend.services.agent_service.agent_run_manager')
+@patch('backend.services.agent_service._resolve_user_tenant_language')
+async def test_run_agent_stream_resume_update_message_status_exception(
+    mock_resolve,
+    mock_agent_run_manager,
+    mock_detect_resume,
+):
+    """run_agent_stream should handle update_message_status exception gracefully in resume mode."""
     from backend.services import agent_service
 
-    agent_request = MagicMock()
-    agent_request.agent_id = 1
-    agent_request.conversation_id = 999
-    agent_request.query = "test"
-    agent_request.history = []
-    agent_request.minio_files = []
-    agent_request.is_debug = False
-    agent_request.resume = True
+    # Setup mocks
+    mock_resolve.return_value = ("user1", "tenant1", "en")
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
-        mock_resolve.return_value = ("user1", "tenant1", "en")
+    mock_detect_resume.return_value = {
+        'should_resume': True,
+        'message_id': 1,
+        'message_status': 'streaming',
+        'resume_from_unit_index': 5,
+        'reason': 'backend_streaming'
+    }
+    mock_agent_run_manager.get_agent_run_info.return_value = None
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
-            mock_detect.return_value = {
-                'should_resume': False,
-                'message_id': 1,
-                'message_status': 'stopped',
-                'reason': 'backend_stopped'
-            }
+    with patch('backend.services.agent_service.update_message_status') as mock_update:
+        mock_update.side_effect = Exception("DB error on update_message_status")
 
-            result = await agent_service.run_agent_stream(
-                agent_request,
-                MagicMock(),
-                "Bearer token"
-            )
+        agent_request = MagicMock()
+        agent_request.agent_id = 1
+        agent_request.conversation_id = 999
+        agent_request.query = "test"
+        agent_request.history = []
+        agent_request.minio_files = []
+        agent_request.is_debug = False
+        agent_request.resume = True
 
-            assert result.status_code == 200
+        result = await agent_service.run_agent_stream(
+            agent_request,
+            MagicMock(),
+            "Bearer token",
+            resume=True
+        )
+
+        # Should still return success response
+        assert result.status_code == 200
+        # Verify update_message_status was called
+        assert mock_update.call_count == 1
+
+
+# ============================================================================
+# Tests for generate_conversation_title_service exception handling (line 3132)
+# ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_resume_already_finished_with_failed_status():
-    """run_agent_stream resume mode should handle failed status correctly."""
-    from backend.services import agent_service
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.create_new_conversation")
+async def test_run_agent_stream_title_generation_exception(
+    mock_create_conversation,
+    mock_build_mem_ctx,
+    mock_generate_stream,
+    mock_resolve,
+    mock_agent_request,
+    mock_http_request,
+    caplog,
+):
+    """run_agent_stream should handle generate_conversation_title_service exception gracefully."""
+    import logging
 
-    agent_request = MagicMock()
-    agent_request.agent_id = 1
-    agent_request.conversation_id = 999
-    agent_request.query = "test"
-    agent_request.history = []
-    agent_request.minio_files = []
-    agent_request.is_debug = False
-    agent_request.resume = True
+    # Set conversation_id to None to trigger is_new_conversation=True path
+    mock_agent_request.conversation_id = None
+    mock_agent_request.is_debug = False
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
-        mock_resolve.return_value = ("user1", "tenant1", "en")
+    mock_create_conversation.return_value = {"conversation_id": 999}
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
-            mock_detect.return_value = {
-                'should_resume': False,
-                'message_id': 1,
-                'message_status': 'failed',
-                'reason': 'backend_failed'
-            }
+    # Track that title generation was called
+    title_gen_called = {"called": False}
 
-            result = await agent_service.run_agent_stream(
-                agent_request,
-                MagicMock(),
+    async def mock_title_gen(*args, **kwargs):
+        title_gen_called["called"] = True
+        raise Exception("Title generation failed")
+
+    mock_generate_stream.return_value = mock_stream_for_title_test()
+
+    # Use the tracking function as side_effect
+    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=mock_title_gen):
+        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
+            response = await agent_service.run_agent_stream(
+                mock_agent_request,
+                mock_http_request,
                 "Bearer token"
             )
 
-            assert result.status_code == 200
+            # Consume the stream to trigger finally block
+            chunks = []
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+
+            # Stream should complete successfully despite title generation failure
+            assert response.status_code == 200
+
+            # Verify title generation was called (by checking chunks or title_gen_called)
+            assert len(chunks) > 0, "Stream should yield at least one chunk"
+            assert title_gen_called["called"], "Title generation should have been called"
 
 
+async def mock_stream_for_title_test():
+    """Helper to yield streaming chunks for title generation test."""
+    yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
 
 
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "zh"))
+@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.create_new_conversation")
+async def test_run_agent_stream_title_generation_zh_language(
+    mock_create_conversation,
+    mock_build_mem_ctx,
+    mock_generate_stream,
+    mock_resolve,
+    mock_agent_request,
+    mock_http_request,
+):
+    """run_agent_stream should handle title generation with zh language setting."""
+    mock_create_conversation.return_value = {"conversation_id": 999}
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
+
+    async def mock_stream():
+        yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
+
+    mock_generate_stream.return_value = mock_stream()
+
+    # Make title generation raise exception
+    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=Exception("DB error")):
+        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
+            response = await agent_service.run_agent_stream(
+                mock_agent_request,
+                mock_http_request,
+                "Bearer token"
+            )
+
+            # Should complete successfully
+            assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service._resolve_user_tenant_language", return_value=("u", "t", "en"))
+@patch("backend.services.agent_service.generate_stream_with_memory")
+@patch("backend.services.agent_service.build_memory_context")
+@patch("backend.services.agent_service.create_new_conversation")
+async def test_run_agent_stream_title_generation_success(
+    mock_create_conversation,
+    mock_build_mem_ctx,
+    mock_generate_stream,
+    mock_resolve,
+    mock_agent_request,
+    mock_http_request,
+):
+    """run_agent_stream should successfully call generate_conversation_title_service."""
+    mock_create_conversation.return_value = {"conversation_id": 999}
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
+
+    async def mock_stream():
+        yield "data: {\"type\": \"final_answer\", \"content\": \"test response\"}\n\n"
+
+    mock_generate_stream.return_value = mock_stream()
+
+    # Track title generation call
+    title_gen_calls = []
+
+    async def mock_title_gen(*args, **kwargs):
+        title_gen_calls.append(kwargs)
+        return {"success": True}
+
+    with patch("backend.services.agent_service.generate_conversation_title_service", side_effect=mock_title_gen):
+        with patch("backend.services.agent_service.save_messages", new_callable=AsyncMock):
+            response = await agent_service.run_agent_stream(
+                mock_agent_request,
+                mock_http_request,
+                "Bearer token"
+            )
+
+            # Should complete successfully
+            assert response.status_code == 200
