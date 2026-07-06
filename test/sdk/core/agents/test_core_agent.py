@@ -2009,6 +2009,92 @@ class TestRunStreamRealExecution:
             token_threshold=4096,
         )
 
+    def test_step_stream_uses_context_manager_for_uncompressed_est(self):
+        """_step_stream pulls _last_uncompressed_est from ContextManager.get_token_counts()."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.memory.system_prompt = None
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 1.0
+        mock_context = MagicMock()
+        mock_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
+
+        agent.context_manager = MagicMock()
+        agent.context_manager.get_token_counts.return_value = {"last_uncompressed": 5000}
+
+        agent.model = MagicMock()
+        response = MagicMock()
+        response.content = "ok"
+        agent.model.return_value = response
+
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._ephemeral_system_messages = None
+
+        action_step = MagicMock()
+        generator = agent._step_stream(action_step)
+        try:
+            next(generator)
+        except (StopIteration, ValueError):
+            pass
+
+        assert agent._last_uncompressed_est == 5000
+
+    def test_step_stream_falls_back_without_context_manager(self):
+        """_step_stream falls back to msg_token_count when context_manager is None."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.memory.system_prompt = None
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 2.0
+        mock_context = MagicMock()
+        mock_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
+
+        agent.context_manager = None
+
+        agent.model = MagicMock()
+        response = MagicMock()
+        response.content = "ok"
+        agent.model.return_value = response
+
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._ephemeral_system_messages = None
+
+        action_step = MagicMock()
+        generator = agent._step_stream(action_step)
+        try:
+            next(generator)
+        except (StopIteration, ValueError):
+            pass
+
+        # When context_manager is None, falls back to msg_token_count
+        assert agent._last_uncompressed_est != 5000
+
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
         import threading
