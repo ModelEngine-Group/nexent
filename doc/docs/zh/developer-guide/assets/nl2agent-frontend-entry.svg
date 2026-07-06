@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title desc">
+  <title id="title">NL2AGENT 前端入口设计</title>
+  <desc id="desc">展示智能体管理页中的 Agent Builder 入口、启动会话请求、sessionStorage 写入以及跳转聊天页的前端流程。</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#7c3aed"/>
+    </marker>
+    <linearGradient id="purple-soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#faf5ff"/>
+      <stop offset="100%" stop-color="#f3e8ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="660" fill="#f8fafc"/>
+  <rect x="42" y="36" width="1116" height="588" rx="22" fill="#ffffff" filter="url(#shadow)"/>
+  <rect x="42" y="36" width="1116" height="54" rx="22" fill="#f1f5f9"/>
+  <circle cx="72" cy="63" r="7" fill="#ef4444"/>
+  <circle cx="96" cy="63" r="7" fill="#f59e0b"/>
+  <circle cx="120" cy="63" r="7" fill="#22c55e"/>
+  <text x="600" y="70" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#334155">Agent Management</text>
+
+  <g transform="translate(82 122)">
+    <text x="0" y="0" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#111827">智能体管理</text>
+    <line x1="0" y1="24" x2="460" y2="24" stroke="#e5e7eb"/>
+
+    <g transform="translate(0 58)">
+      <rect width="260" height="108" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+      <circle cx="34" cy="34" r="18" fill="#dbeafe"/>
+      <path d="M34 25 V43 M25 34 H43" stroke="#2563eb" stroke-width="3" stroke-linecap="round"/>
+      <text x="68" y="35" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700" fill="#2563eb">创建智能体</text>
+      <text x="68" y="61" font-family="Inter, Arial, sans-serif" font-size="13" fill="#64748b">手动进入配置表单</text>
+    </g>
+
+    <g transform="translate(282 58)">
+      <rect width="260" height="108" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+      <circle cx="34" cy="34" r="18" fill="#dcfce7"/>
+      <path d="M27 28 H41 V42 H27 Z M31 24 H37" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="68" y="35" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700" fill="#16a34a">导入智能体</text>
+      <text x="68" y="61" font-family="Inter, Arial, sans-serif" font-size="13" fill="#64748b">从 JSON 文件导入</text>
+    </g>
+
+    <g transform="translate(0 188)">
+      <rect width="260" height="108" rx="8" fill="url(#purple-soft)" stroke="#c084fc" stroke-width="2"/>
+      <circle cx="34" cy="34" r="18" fill="#ede9fe"/>
+      <path d="M34 20 L38 31 L50 34 L38 38 L34 50 L30 38 L18 34 L30 31 Z" fill="#7c3aed"/>
+      <text x="68" y="35" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700" fill="#7c3aed">Agent Builder</text>
+      <text x="68" y="61" font-family="Inter, Arial, sans-serif" font-size="13" fill="#64748b">对话式创建智能体</text>
+    </g>
+
+    <g transform="translate(282 188)">
+      <rect width="260" height="108" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+      <text x="18" y="34" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#334155">智能体列表</text>
+      <rect x="18" y="51" width="224" height="10" rx="5" fill="#e2e8f0"/>
+      <rect x="18" y="72" width="172" height="10" rx="5" fill="#e2e8f0"/>
+      <rect x="18" y="93" width="206" height="10" rx="5" fill="#e2e8f0"/>
+    </g>
+  </g>
+
+  <g transform="translate(708 122)">
+    <rect width="366" height="322" rx="14" fill="#ffffff" stroke="#dbeafe" filter="url(#shadow)"/>
+    <rect width="366" height="50" rx="14" fill="#eff6ff"/>
+    <text x="22" y="31" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700" fill="#1e40af">Chat</text>
+    <rect x="22" y="76" width="214" height="44" rx="12" fill="#f1f5f9"/>
+    <text x="40" y="103" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">你好，我会帮助你创建智能体。</text>
+    <rect x="130" y="146" width="214" height="44" rx="12" fill="#ede9fe"/>
+    <text x="148" y="173" font-family="Inter, Arial, sans-serif" font-size="13" fill="#5b21b6">我想做一个销售分析助手</text>
+    <rect x="22" y="216" width="278" height="66" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="42" y="243" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#334155">当前智能体</text>
+    <text x="42" y="266" font-family="Inter, Arial, sans-serif" font-size="13" fill="#64748b">sessionStorage.selectedAgentId</text>
+  </g>
+
+  <path d="M350 356 C500 356 550 224 694 224" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+  <g transform="translate(454 232)">
+    <rect width="194" height="116" rx="12" fill="#ffffff" stroke="#ddd6fe"/>
+    <text x="18" y="30" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#5b21b6">点击入口后</text>
+    <text x="18" y="56" font-family="Inter, Arial, sans-serif" font-size="12" fill="#475569">1. startNl2AgentSession()</text>
+    <text x="18" y="78" font-family="Inter, Arial, sans-serif" font-size="12" fill="#475569">2. 写入 selectedAgentId</text>
+    <text x="18" y="100" font-family="Inter, Arial, sans-serif" font-size="12" fill="#475569">3. router.push('/chat')</text>
+  </g>
+
+  <g transform="translate(82 500)">
+    <rect width="992" height="72" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+    <circle cx="34" cy="36" r="16" fill="#ede9fe"/>
+    <path d="M34 25 L37 33 L46 36 L37 39 L34 48 L31 39 L22 36 L31 33 Z" fill="#7c3aed"/>
+    <text x="64" y="31" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#111827">入口设计要点</text>
+    <text x="64" y="54" font-family="Inter, Arial, sans-serif" font-size="13" fill="#475569">Agent Builder 不是新页面入口，而是创建 draft agent 后复用现有聊天页和当前智能体选择逻辑。</text>
+  </g>
+</svg>

@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820" role="img" aria-labelledby="title desc">
+  <title id="title">NL2AGENT 聊天卡片设计</title>
+  <desc id="desc">展示 NL2AGENT 在聊天页中渲染的本地资源、网络 MCP、网络技能和终步确认四类交互卡片。</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2563eb"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="820" fill="#f8fafc"/>
+  <rect x="64" y="42" width="1072" height="724" rx="22" fill="#ffffff" filter="url(#shadow)"/>
+  <rect x="64" y="42" width="1072" height="58" rx="22" fill="#f1f5f9"/>
+  <text x="100" y="78" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#111827">NL2AGENT Chat</text>
+  <rect x="940" y="62" width="154" height="18" rx="9" fill="#e2e8f0"/>
+
+  <g transform="translate(100 130)">
+    <rect width="314" height="54" rx="14" fill="#f1f5f9"/>
+    <text x="20" y="32" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">我需要一个能分析客户反馈的助手。</text>
+  </g>
+
+  <g transform="translate(100 216)">
+    <rect width="460" height="264" rx="8" fill="#ffffff" stroke="#e5e7eb"/>
+    <rect width="460" height="44" rx="8" fill="#f9fafb"/>
+    <text x="18" y="28" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#111827">Recommended Local Resources</text>
+    <text x="374" y="28" font-family="Inter, Arial, sans-serif" font-size="12" fill="#64748b">4 items</text>
+    <text x="18" y="74" font-family="Inter, Arial, sans-serif" font-size="11" fill="#94a3b8">TOOLS</text>
+    <g transform="translate(18 88)">
+      <rect width="424" height="42" rx="6" fill="#ffffff"/>
+      <rect x="0" y="11" width="16" height="16" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+      <path d="M4 19 L7 22 L13 15" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="28" y="18" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#111827">SQL Query Tool</text>
+      <rect x="132" y="5" width="54" height="18" rx="9" fill="#ecfdf5" stroke="#a7f3d0"/>
+      <text x="147" y="18" font-family="Inter, Arial, sans-serif" font-size="10" fill="#047857">sdk</text>
+      <text x="28" y="36" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">读取结构化数据并生成可解释结果</text>
+    </g>
+    <g transform="translate(18 136)">
+      <rect width="424" height="42" rx="6" fill="#ffffff"/>
+      <rect x="0" y="11" width="16" height="16" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+      <path d="M4 19 L7 22 L13 15" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="28" y="18" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#111827">Chart Render Tool</text>
+      <text x="28" y="36" font-family="Inter, Arial, sans-serif" font-size="11" fill="#64748b">把分析结果转成图表说明</text>
+    </g>
+    <text x="18" y="203" font-family="Inter, Arial, sans-serif" font-size="11" fill="#94a3b8">SKILLS</text>
+    <g transform="translate(18 216)">
+      <rect x="0" y="0" width="16" height="16" rx="3" fill="#ffffff" stroke="#94a3b8"/>
+      <path d="M4 8 L7 11 L13 4" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="28" y="13" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#111827">客户反馈摘要技能</text>
+    </g>
+    <rect x="18" y="236" width="92" height="28" rx="6" fill="#1677ff"/>
+    <text x="64" y="255" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">全部应用</text>
+  </g>
+
+  <g transform="translate(640 216)">
+    <rect width="420" height="126" rx="8" fill="#f0f9ff" stroke="#bae6fd"/>
+    <text x="18" y="32" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a">feedback-mcp-server</text>
+    <rect x="162" y="16" width="68" height="20" rx="10" fill="#e0f2fe" stroke="#bae6fd"/>
+    <text x="176" y="30" font-family="Inter, Arial, sans-serif" font-size="10" fill="#0369a1">registry</text>
+    <text x="18" y="58" font-family="Inter, Arial, sans-serif" font-size="12" fill="#475569">连接第三方客户反馈系统，提供读取和检索接口。</text>
+    <text x="18" y="84" font-family="Inter, Arial, sans-serif" font-size="11" fill="#94a3b8">https://example.com/mcp/feedback</text>
+    <rect x="326" y="20" width="76" height="30" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+    <path d="M344 31 V41 M339 36 H349" stroke="#0369a1" stroke-width="2" stroke-linecap="round"/>
+    <text x="376" y="40" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">安装</text>
+  </g>
+
+  <g transform="translate(640 378)">
+    <rect width="420" height="130" rx="8" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text x="18" y="34" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a">客服质检技能</text>
+    <text x="18" y="62" font-family="Inter, Arial, sans-serif" font-size="12" fill="#475569">根据业务规则检查对话质量并输出改进建议。</text>
+    <rect x="18" y="80" width="52" height="20" rx="10" fill="#ede9fe" stroke="#ddd6fe"/>
+    <text x="31" y="94" font-family="Inter, Arial, sans-serif" font-size="10" fill="#6d28d9">quality</text>
+    <rect x="78" y="80" width="40" height="20" rx="10" fill="#ede9fe" stroke="#ddd6fe"/>
+    <text x="91" y="94" font-family="Inter, Arial, sans-serif" font-size="10" fill="#6d28d9">crm</text>
+    <rect x="326" y="20" width="76" height="30" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+    <path d="M344 31 V41 M339 36 H349" stroke="#6d28d9" stroke-width="2" stroke-linecap="round"/>
+    <text x="376" y="40" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">安装</text>
+  </g>
+
+  <g transform="translate(100 536)">
+    <rect width="460" height="122" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <circle cx="30" cy="34" r="12" fill="#10b981"/>
+    <path d="M24 34 L29 39 L37 28" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="54" y="32" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#065f46">Your agent is ready</text>
+    <text x="54" y="58" font-family="Inter, Arial, sans-serif" font-size="12" fill="#047857">草稿智能体已生成，进入配置页完成评审和发布。</text>
+    <rect x="54" y="78" width="104" height="30" rx="6" fill="#1677ff"/>
+    <text x="106" y="98" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">评审并发布</text>
+    <text x="174" y="97" font-family="Inter, Arial, sans-serif" font-size="11" fill="#94a3b8">agent_id: 1024</text>
+  </g>
+
+  <g transform="translate(640 564)">
+    <rect width="420" height="94" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="22" y="32" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#111827">交互边界</text>
+    <text x="22" y="58" font-family="Inter, Arial, sans-serif" font-size="12" fill="#475569">本地资源支持批量应用；网络 MCP 复用已有 AddMcpServiceModal；网络技能逐个安装。</text>
+  </g>
+
+  <path d="M560 347 C596 347 602 279 632 279" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  <path d="M560 587 C596 587 602 443 632 443" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+</svg>

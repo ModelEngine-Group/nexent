@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">NL2AGENT Markdown 卡片渲染流程</title>
+  <desc id="desc">展示 LLM 输出 nl2agent-* 代码围栏后，markdownRenderer 解析语言标签并路由到对应 React 卡片组件的流程。</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#334155"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="560" fill="#f8fafc"/>
+  <text x="76" y="58" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#111827">围栏块到交互卡片的前端渲染链路</text>
+  <text x="76" y="88" font-family="Inter, Arial, sans-serif" font-size="14" fill="#64748b">不新增 SSE 协议；仅在 Markdown code renderer 中识别 nl2agent-* 语言标签。</text>
+
+  <g transform="translate(76 128)">
+    <rect width="250" height="204" rx="14" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+    <text x="22" y="34" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700" fill="#111827">LLM 最终回答</text>
+    <rect x="22" y="58" width="206" height="112" rx="8" fill="#0f172a"/>
+    <text x="38" y="84" font-family="Consolas, monospace" font-size="12" fill="#a7f3d0">```nl2agent-web-skill</text>
+    <text x="38" y="108" font-family="Consolas, monospace" font-size="12" fill="#e2e8f0">{</text>
+    <text x="52" y="130" font-family="Consolas, monospace" font-size="12" fill="#e2e8f0">"agent_id": 1024,</text>
+    <text x="52" y="152" font-family="Consolas, monospace" font-size="12" fill="#e2e8f0">"name": "客服质检"</text>
+    <text x="38" y="174" font-family="Consolas, monospace" font-size="12" fill="#a7f3d0">```</text>
+  </g>
+
+  <g transform="translate(426 128)">
+    <rect width="270" height="204" rx="14" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+    <text x="22" y="34" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700" fill="#111827">markdownRenderer.tsx</text>
+    <rect x="22" y="58" width="226" height="120" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="40" y="88" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">1. 读取 language-xxx</text>
+    <text x="40" y="116" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">2. 判断 startsWith("nl2agent-")</text>
+    <text x="40" y="144" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">3. 交给 tryRenderNl2AgentCard</text>
+  </g>
+
+  <g transform="translate(796 128)">
+    <rect width="328" height="204" rx="14" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+    <text x="22" y="34" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700" fill="#111827">frontend/components/nl2agent</text>
+    <rect x="22" y="58" width="128" height="34" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="86" y="80" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#334155">LocalResourcesCard</text>
+    <rect x="172" y="58" width="128" height="34" rx="8" fill="#f0f9ff" stroke="#bae6fd"/>
+    <text x="236" y="80" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#0369a1">WebMcpCard</text>
+    <rect x="22" y="112" width="128" height="34" rx="8" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text x="86" y="134" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#6d28d9">WebSkillCard</text>
+    <rect x="172" y="112" width="128" height="34" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <text x="236" y="134" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#047857">FinalizeCard</text>
+    <text x="22" y="176" font-family="Inter, Arial, sans-serif" font-size="12" fill="#64748b">解析失败时返回红色错误框。</text>
+  </g>
+
+  <path d="M326 230 H412" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M696 230 H782" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+  <g transform="translate(156 406)">
+    <rect width="888" height="82" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="28" y="34" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#111827">调用关系</text>
+    <text x="28" y="60" font-family="Inter, Arial, sans-serif" font-size="13" fill="#475569">LocalResourcesCard 调 applyLocalResources；WebSkillCard 调 installWebSkill；FinalizeCard 跳转到 /agents?agent_id=...；WebMcpCard 打开既有 AddMcpServiceModal。</text>
+  </g>
+</svg>
