@@ -101,6 +101,16 @@ class ContextManagerConfig:
     inject_app_context: bool = True
     """Whether to inject APP_NAME, APP_DESCRIPTION, time, user_id."""
 
+    # === NEW: ContextItem Projection ===
+    use_context_items: bool = False
+    """Whether to project components into fine-grained ContextItems before assembly.
+
+    When True, uses ContextProjector to convert ContextComponent instances into
+    ContextItem candidates, then converts them back to messages for the existing
+    assembly pipeline. This enables W12 history projections and W13 policy decisions
+    in subsequent PRs. Default False for backward compatibility.
+    """
+
     # === NEW: Per-Component Token Budgets ===
     component_budgets: Dict[str, int] = field(default_factory=lambda: {
         "system_prompt": 4000,

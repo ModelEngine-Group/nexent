@@ -87,7 +87,11 @@ class ContextProjector:
                 current_representation=RepresentationTier.FULL,
                 content=component.content,
                 token_estimate=component.token_estimate or component.estimate_tokens(),
-                metadata={"template_name": component.template_name, **component.metadata},
+                metadata={
+                    "template_name": component.template_name,
+                    "_source_component": component,
+                    **component.metadata,
+                },
             )
         ]
 
@@ -105,7 +109,11 @@ class ContextProjector:
                     current_representation=RepresentationTier.FULL,
                     content=tool,
                     token_estimate=_estimate_item_tokens(tool),
-                    metadata={"priority": component.priority, **component.metadata},
+                    metadata={
+                        "priority": component.priority,
+                        "_source_component": component,
+                        **component.metadata,
+                    },
                 )
             )
         return items
@@ -124,7 +132,11 @@ class ContextProjector:
                     current_representation=RepresentationTier.FULL,
                     content=skill,
                     token_estimate=_estimate_item_tokens(skill),
-                    metadata={"priority": component.priority, **component.metadata},
+                    metadata={
+                        "priority": component.priority,
+                        "_source_component": component,
+                        **component.metadata,
+                    },
                 )
             )
         return items
@@ -147,6 +159,7 @@ class ContextProjector:
                     metadata={
                         "memory_type": memory_type,
                         "search_query": component.search_query,
+                        "_source_component": component,
                         **memory.get("metadata", {}),
                         **component.metadata,
                     },
@@ -167,7 +180,11 @@ class ContextProjector:
                 current_representation=RepresentationTier.FULL,
                 content=component.summary,
                 token_estimate=component.token_estimate or component.estimate_tokens(),
-                metadata={"kb_ids": component.kb_ids, **component.metadata},
+                metadata={
+                    "kb_ids": component.kb_ids,
+                    "_source_component": component,
+                    **component.metadata,
+                },
             )
         ]
 
@@ -185,7 +202,11 @@ class ContextProjector:
                     current_representation=RepresentationTier.FULL,
                     content=agent,
                     token_estimate=_estimate_item_tokens(agent),
-                    metadata={"priority": component.priority, **component.metadata},
+                    metadata={
+                        "priority": component.priority,
+                        "_source_component": component,
+                        **component.metadata,
+                    },
                 )
             )
         return items
@@ -205,7 +226,11 @@ class ContextProjector:
                     current_representation=RepresentationTier.FULL,
                     content=agent,
                     token_estimate=_estimate_item_tokens(agent),
-                    metadata={"priority": component.priority, **component.metadata},
+                    metadata={
+                        "priority": component.priority,
+                        "_source_component": component,
+                        **component.metadata,
+                    },
                 )
             )
         return items

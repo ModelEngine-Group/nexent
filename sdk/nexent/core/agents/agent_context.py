@@ -1419,6 +1419,34 @@ class ContextManager:
         if run_context is None:
             run_context = self.prepare_run_context(memory, fallback_system_prompt="")
 
+        context_items_for_evidence: tuple = ()
+        if self.config.use_context_items:
+            projected_items = self.project_context_items(run_context.components)
+            context_items_for_evidence = tuple(projected_items)
+
+            # Group items by source component and use component's to_messages()
+            # to get formatted human-readable text instead of raw dicts
+            seen_components = set()
+            item_messages = []
+            for item in projected_items:
+                source_component = item.metadata.get("_source_component")
+                if source_component and id(source_component) not in seen_components:
+                    seen_components.add(id(source_component))
+                    # Use the component's to_messages() to get formatted text
+                    for msg in source_component.to_messages():
+                        item_messages.append(msg)
+
+            stable_from_items = [m for m in item_messages if self._message_role(m) in ("system", "developer")]
+            dynamic_from_items = [m for m in item_messages if self._message_role(m) not in ("system", "developer")]
+
+            run_context = ManagedRunContext(
+                component_messages=tuple(item_messages),
+                stable_messages=tuple(stable_from_items),
+                dynamic_messages=tuple(dynamic_from_items),
+                selected_component_types=run_context.selected_component_types,
+                components=run_context.components,
+            )
+
         tools = self._canonical_tools(tools or ())
         purpose_stable, purpose_dynamic = self._purpose_messages(
             purpose=purpose,
@@ -1472,6 +1500,7 @@ class ContextManager:
                 compression_records=tuple(self._step_local_log or ()),
                 stable_prefix_fingerprint=fingerprint,
                 prefix_change_reasons=tuple(reasons),
+                context_items=context_items_for_evidence,
             ),
         )
 
@@ -1763,6 +1792,28 @@ class ContextManager:
                     messages.append(msg)
 
         return messages
+
+    def project_context_items(
+        self,
+        components: Optional[Sequence[Any]] = None,
+    ) -> List[Any]:
+        """Project registered components into fine-grained ContextItem candidates.
+
+        Uses ContextProjector to convert ContextComponent instances into ContextItem
+        objects with proper authority tiers, minimum fidelity constraints, and token
+        estimates. Each item is validated against the ItemHandlerRegistry.
+
+        Args:
+            components: Optional component list. If None, uses registered components.
+
+        Returns:
+            List of ContextItem instances ready for policy-driven selection.
+        """
+        from .context.projector import ContextProjector
+
+        source_components = self._component_source(components)
+        projector = ContextProjector()
+        return projector.project(list(source_components))
 
     def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
         """Compatibility alias for callers not yet migrated to managed assembly.
