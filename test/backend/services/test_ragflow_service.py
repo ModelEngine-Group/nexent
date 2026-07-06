@@ -50,12 +50,12 @@ class TestValidateRAGFlowConfig:
 
     def test_none_url_raises(self):
         with pytest.raises(AppException) as excinfo:
-            _validate_ragflow_config(None, "test_api_key")
+            _validate_ragflow_config(None, "test_api_key")  # type: ignore[arg-type]
         assert excinfo.value.error_code == ErrorCode.RAGFLOW_CONFIG_INVALID
 
     def test_non_string_url_raises(self):
         with pytest.raises(AppException):
-            _validate_ragflow_config(123, "test_api_key")
+            _validate_ragflow_config(123, "test_api_key")  # type: ignore[arg-type]
 
     def test_empty_api_key_raises(self):
         with pytest.raises(AppException) as excinfo:
@@ -65,12 +65,12 @@ class TestValidateRAGFlowConfig:
 
     def test_none_api_key_raises(self):
         with pytest.raises(AppException) as excinfo:
-            _validate_ragflow_config("http://localhost:9380", None)
+            _validate_ragflow_config("http://localhost:9380", None)  # type: ignore[arg-type]
         assert excinfo.value.error_code == ErrorCode.RAGFLOW_CONFIG_INVALID
 
     def test_non_string_api_key_raises(self):
         with pytest.raises(AppException):
-            _validate_ragflow_config("http://localhost:9380", 456)
+            _validate_ragflow_config("http://localhost:9380", 456)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

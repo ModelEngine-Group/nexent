@@ -18,6 +18,8 @@ import pytest
 class _MockTool:
     """A proper class that RAGFlowSearchTool can inherit from."""
     def __init__(self, *args, **kwargs):
+        # No-op: smolagents.Tool.__init__ does setup that we don't need in tests.
+        # RAGFlowSearchTool calls super().__init__() which must not fail.
         pass
 
 
@@ -83,7 +85,7 @@ from sdk.nexent.core.utils.observer import MessageObserver, ProcessType  # noqa:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def mock_observer() -> MessageObserver:
+def mock_observer():
     observer = MagicMock(spec=MessageObserver)
     observer.lang = "en"
     return observer
@@ -191,8 +193,8 @@ class TestRAGFlowSearchToolInit:
         assert tool.dataset_ids == ["ds1", "ds2"]
         assert tool.api_key == "test_key"
         assert tool.top_k == 5
-        assert tool.similarity_threshold == 0.25
-        assert tool.vector_similarity_weight == 0.5
+        assert tool.similarity_threshold == pytest.approx(0.25)
+        assert tool.vector_similarity_weight == pytest.approx(0.5)
         assert tool.keyword is True
         assert tool.highlight is False
         assert tool.observer is mock_observer
@@ -380,8 +382,8 @@ class TestRAGFlowSearchToolInit:
                 observer=mock_observer,
             )
         assert tool.top_k == 3
-        assert tool.similarity_threshold == 0.2
-        assert tool.vector_similarity_weight == 0.3
+        assert tool.similarity_threshold == pytest.approx(0.2)
+        assert tool.vector_similarity_weight == pytest.approx(0.3)
         assert tool.keyword is False
         assert tool.highlight is True
 
@@ -519,8 +521,8 @@ class TestBuildResultMessages:
         assert json_msgs[0]["source_type"] == "ragflow"
         assert json_msgs[0]["filename"] == "doc_a.txt"
         assert json_msgs[0]["score"] == "0.95"
-        assert json_msgs[0]["score_details"]["term_similarity"] == 0.90
-        assert json_msgs[0]["score_details"]["vector_similarity"] == 0.97
+        assert json_msgs[0]["score_details"]["term_similarity"] == pytest.approx(0.90)
+        assert json_msgs[0]["score_details"]["vector_similarity"] == pytest.approx(0.97)
         assert json_msgs[0]["cite_index"] == ragflow_tool.record_ops + 0
         assert json_msgs[0]["search_type"] == "ragflow_search"
         assert json_msgs[0]["tool_sign"] == "k"
@@ -776,7 +778,7 @@ class TestForward:
         result_json = ragflow_tool.forward("test query")
         results = json.loads(result_json)
 
-        assert len(results) == ragflow_tool.top_k  # top_k = 3
+        assert len(results) == ragflow_tool.top_k
 
     def test_forward_with_doc_id_override(self, ragflow_tool: RAGFlowSearchTool):
         self._setup_success_flow(ragflow_tool)
