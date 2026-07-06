@@ -1,0 +1,9 @@
+# Output artifacts from test runs (large, not version-controlled)
+*.out
+*.log
+
+# Python cache
+__pycache__/
+
+# Claude local settings
+.claude/
