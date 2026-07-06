@@ -1013,7 +1013,8 @@ function DataConfig({ isActive }: DataConfigProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
+        <div className="w-full h-full">
+          <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
           <Col
             className="h-full"
             xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
@@ -1188,6 +1189,7 @@ function DataConfig({ isActive }: DataConfigProps) {
             )}
           </Col>
         </Row>
+          </div>
       </div>
 
       <Modal

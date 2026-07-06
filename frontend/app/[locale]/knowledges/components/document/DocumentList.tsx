@@ -552,7 +552,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     return (
       <div
-        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm `}
+        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm overflow-hidden`}
       >
         {/* Title bar */}
         <div
@@ -562,20 +562,17 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             className="flex items-start justify-between w-full"
             style={{ width: "100%" }}
           >
-            <div className="flex items-start" style={{ width: "100%" }}>
+            <div className="flex items-start flex-1 min-w-0">
               {isCreatingMode ? (
-                <div
-                  className="flex items-start flex-1"
-                  style={{ width: "100%" }}
-                >
-                  <div className="flex flex-col">
+                <div className="flex flex-wrap items-start gap-3 w-full">
+                  <div className="flex flex-col flex-1" style={{ minWidth: 120 }}>
                     <Input
                       value={knowledgeBaseName}
                       onChange={(e) =>
                         onNameChange && onNameChange(e.target.value)
                       }
                       placeholder={t("document.input.knowledgeBaseName")}
-                      className={`${LAYOUT.KB_TITLE_MARGIN} w-[240px] font-medium`}
+                      className={`${LAYOUT.KB_TITLE_MARGIN} max-w-[240px] font-medium`}
                       size="large"
                       prefix={<span className="text-blue-600">📚</span>}
                       status={
@@ -601,26 +598,17 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         </div>
                       )}
                   </div>
-                  {/* Right-aligned container for dropdowns */}
+                  {/* Right dropdowns for create mode */}
                   <div
-                    className="flex items-start ml-auto justify-end"
-                    style={{
-                      gap: "12px",
-                      justifyContent: "flex-end",
-                      alignItems: "flex-start",
-                      width: "100%",
-                    }}
+                    className="flex items-center justify-end flex-wrap"
+                    style={{ gap: "12px" }}
                   >
                     {/* Embedding model selection - first position in create mode */}
                     {isCreatingMode && onEmbeddingModelChange && (
                       <Select
                         value={selectedEmbeddingModel}
                         onChange={onEmbeddingModelChange}
-                        style={{
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
+                        style={{ flex: "1 1 200px", minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={
                           t("knowledgeBase.create.embeddingModelPlaceholder") ||
                           "Select embedding model"
@@ -658,11 +646,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         mode="multiple"
                         value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
-                        style={{
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
+                        style={{ flex: "1 1 200px", minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t(
                           "knowledgeBase.create.permission.groupPlaceholder"
                         )}
@@ -677,11 +661,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       <Select
                         value={ingroupPermission}
                         onChange={onIngroupPermissionChange}
-                        style={{
-                          width: 160,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
+                        style={{ flex: "1 1 160px", minWidth: 160, justifyContent: "center", alignItems: "flex-end" }}
                         placeholder={t(
                           "knowledgeBase.ingroup.permission.DEFAULT"
                         )}
@@ -693,7 +673,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         value={preserveSourceFile}
                         onChange={onPreserveSourceFileChange}
                         style={{
-                          width: 200,
+                          flex: "1 1 200px",
+                          minWidth: 200,
                           justifyContent: "center",
                           alignItems: "flex-end",
                         }}
