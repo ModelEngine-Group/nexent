@@ -530,28 +530,109 @@ class ContextManager:
                 
                 return original_messages
 
-        with self._lock:
-            # Run detection
-            if (self._last_run_start_idx is not None
-                    and current_run_start_idx != self._last_run_start_idx):
-                self._current_summary_cache = None
-            self._last_run_start_idx = current_run_start_idx
+            with self._lock:
+                # Run detection
+                if (self._last_run_start_idx is not None
+                        and current_run_start_idx != self._last_run_start_idx):
+                    self._current_summary_cache = None
+                self._last_run_start_idx = current_run_start_idx
 
-            # Note: The memory here always consists of the unmodified, summary-task-step-free
-            # original previous_run + current_run.
-            # - previous_run: [(TaskStep, ActionStep), ...]
-            # - current_run:  [TaskStep, ActionStep, ActionStep, ...]
-            if self._effective_tokens(memory, current_run_start_idx) <= soft_history_budget_tokens:
-                # Stable-phase bypass: No LLM call; construct compressed messages directly from existing cache.
+                # Note: The memory here always consists of the unmodified, summary-task-step-free
+                # original previous_run + current_run.
+                # - previous_run: [(TaskStep, ActionStep), ...]
+                # - current_run:  [TaskStep, ActionStep, ActionStep, ...]
+                if self._effective_tokens(memory, current_run_start_idx) <= soft_history_budget_tokens:
+                    # Stable-phase bypass: No LLM call; construct compressed messages directly from existing cache.
+                    self._step_local_log.clear()
+
+                    prev_steps = memory.steps[:current_run_start_idx]
+                    curr_steps = memory.steps[current_run_start_idx:]
+
+                    prev_summary_step = None
+                    prev_tail_steps = list(prev_steps)
+                    prev_pairs = self._extract_pairs(prev_steps)
+                    if prev_pairs:
+                        is_valid, covered_idx = self._is_prev_cache_valid(prev_pairs)
+                        if is_valid:
+                            prev_summary_step = SummaryTaskStep(
+                                task=self._previous_summary_cache.summary_text
+                            )
+                            uncovered = prev_pairs[covered_idx:]
+                            prev_tail_steps = self._pairs_to_steps(uncovered)
+
+                    curr_kept_steps = list(curr_steps)
+                    if curr_steps:
+                        curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
+                        curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
+                        if curr_action_steps:
+                            is_valid, covered_idx = self._is_curr_cache_valid(curr_action_steps)
+                            if is_valid:
+                                uncovered = curr_action_steps[covered_idx:]
+                                curr_kept_steps = (
+                                    ([curr_task] if curr_task else [])
+                                    + [SummaryTaskStep(task=self._current_summary_cache.summary_text)]
+                                    + list(uncovered)
+                                )
+
+                    record = CompressionCallRecord(
+                        call_type="stable_bypass", cache_hit=True,
+                        details={"reason": "stable_period_effective_under_threshold"},
+                    )
+                    self.compression_calls_log.append(record)
+                    self._step_local_log.append(record)
+
+                    compressed_msgs = self._build_messages(
+                        memory, prev_summary_step, prev_tail_steps, curr_kept_steps
+                    )
+                    self._last_uncompressed_token_count = self._msg_token_count(original_messages)
+                    self._last_compressed_token_count = self._msg_token_count(compressed_msgs)
+                    return compressed_msgs
+
                 self._step_local_log.clear()
+
+                self._last_uncompressed_token_count = self._msg_token_count(original_messages)
 
                 prev_steps = memory.steps[:current_run_start_idx]
                 curr_steps = memory.steps[current_run_start_idx:]
 
-                prev_summary_step = None
-                prev_tail_steps = list(prev_steps)
+                prev_tokens = self._effective_prev_tokens(prev_steps)
+                curr_tokens = self._effective_curr_tokens(curr_steps)
+
+                compress_prev = prev_tokens > soft_history_budget_tokens * 0.6
+                compress_curr = curr_tokens > soft_history_budget_tokens * 0.4
+
+                total_effective_tokens = prev_tokens + curr_tokens + context_overhead_tokens
+                if compress_prev or compress_curr:
+                    logger.info(
+                        f"Context compression triggered: total_tokens={total_effective_tokens}, "
+                        f"soft_budget={soft_input_budget_tokens}, "
+                        f"hard_budget={hard_input_budget_tokens}, "
+                        f"context_overhead_tokens={context_overhead_tokens}, "
+                        f"prev_tokens={prev_tokens} (compress={compress_prev}), "
+                        f"curr_tokens={curr_tokens} (compress={compress_curr})"
+                    )
+
+                # --------------- Previous phase ---------------
+                prev_summary_step: Optional[SummaryTaskStep] = None
+                prev_tail_steps: List[MemoryStep] = list(prev_steps)
                 prev_pairs = self._extract_pairs(prev_steps)
-                if prev_pairs:
+
+                if compress_prev and prev_pairs:
+                    keep_n = min(self.config.keep_recent_pairs, len(prev_pairs))
+                    pairs_to_compress = prev_pairs[:-keep_n] if keep_n > 0 else prev_pairs
+                    pairs_to_keep = prev_pairs[-keep_n:] if keep_n > 0 else []
+                    if pairs_to_compress:
+                        summary_text = self._compress_previous_with_cache(
+                            pairs_to_compress, model
+                        )
+                        if summary_text:
+                            if "[CONTEXT COMPACTION" in summary_text:
+                                prev_summary_step = SummaryTaskStep(task=summary_text, prefix="Context fallback, Truncated raw history:")
+                            else:
+                                prev_summary_step = SummaryTaskStep(task=summary_text)
+                            prev_tail_steps = self._pairs_to_steps(pairs_to_keep)
+                elif prev_pairs:
+                    # if cache is valid, use cache + uncovered display
                     is_valid, covered_idx = self._is_prev_cache_valid(prev_pairs)
                     if is_valid:
                         prev_summary_step = SummaryTaskStep(
@@ -560,11 +641,43 @@ class ContextManager:
                         uncovered = prev_pairs[covered_idx:]
                         prev_tail_steps = self._pairs_to_steps(uncovered)
 
-                curr_kept_steps = list(curr_steps)
+                # --------------- Current phase ---------------
+                curr_kept_steps: List[MemoryStep] = list(curr_steps)
+
                 if curr_steps:
                     curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
                     curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
-                    if curr_action_steps:
+
+                    if compress_curr and curr_action_steps:
+                        keep_n = min(self.config.keep_recent_steps, len(curr_action_steps))
+                        if keep_n > 0 and keep_n < len(curr_action_steps):
+                            boundary = curr_action_steps[-keep_n]
+                            prev_a = curr_action_steps[-keep_n - 1]
+                            if (getattr(boundary, "observations", None) is not None
+                                    and getattr(prev_a, "tool_calls", None) is not None):
+                                keep_n += 1
+
+                        actions_to_compress = (
+                            curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
+                        )
+                        actions_to_keep = (
+                            curr_action_steps[-keep_n:] if keep_n > 0 else []
+                        )
+                        if actions_to_compress:
+                            curr_summary_text = self._compress_current_with_cache(
+                                curr_task, actions_to_compress, model
+                            )
+                            if curr_summary_text:
+                                if "[CONTEXT COMPACTION" in curr_summary_text:
+                                    curr_summary_step = SummaryTaskStep(task=curr_summary_text, prefix="Truncated recent action steps:")
+                                else:
+                                    curr_summary_step = SummaryTaskStep(task=curr_summary_text)
+                                curr_kept_steps = (
+                                    ([curr_task] if curr_task else [])
+                                    + [curr_summary_step]
+                                    + list(actions_to_keep)
+                                )
+                    elif curr_action_steps:
                         is_valid, covered_idx = self._is_curr_cache_valid(curr_action_steps)
                         if is_valid:
                             uncovered = curr_action_steps[covered_idx:]
@@ -574,132 +687,19 @@ class ContextManager:
                                 + list(uncovered)
                             )
 
-                record = CompressionCallRecord(
-                    call_type="stable_bypass", cache_hit=True,
-                    details={"reason": "stable_period_effective_under_threshold"},
-                )
-                self.compression_calls_log.append(record)
-                self._step_local_log.append(record)
-
-                compressed_msgs = self._build_messages(
+                final_messages = self._build_messages(
                     memory, prev_summary_step, prev_tail_steps, curr_kept_steps
                 )
-                self._last_uncompressed_token_count = self._msg_token_count(original_messages)
-                self._last_compressed_token_count = self._msg_token_count(compressed_msgs)
-                return compressed_msgs
-
-            self._step_local_log.clear()
-
-            self._last_uncompressed_token_count = self._msg_token_count(original_messages)
-
-            prev_steps = memory.steps[:current_run_start_idx]
-            curr_steps = memory.steps[current_run_start_idx:]
-
-            prev_tokens = self._effective_prev_tokens(prev_steps)
-            curr_tokens = self._effective_curr_tokens(curr_steps)
-
-            compress_prev = prev_tokens > soft_history_budget_tokens * 0.6
-            compress_curr = curr_tokens > soft_history_budget_tokens * 0.4
-
-            total_effective_tokens = prev_tokens + curr_tokens + context_overhead_tokens
-            if compress_prev or compress_curr:
-                logger.info(
-                    f"Context compression triggered: total_tokens={total_effective_tokens}, "
-                    f"soft_budget={soft_input_budget_tokens}, "
-                    f"hard_budget={hard_input_budget_tokens}, "
-                    f"context_overhead_tokens={context_overhead_tokens}, "
-                    f"prev_tokens={prev_tokens} (compress={compress_prev}), "
-                    f"curr_tokens={curr_tokens} (compress={compress_curr})"
-                )
-
-            # --------------- Previous phase ---------------
-            prev_summary_step: Optional[SummaryTaskStep] = None
-            prev_tail_steps: List[MemoryStep] = list(prev_steps)
-            prev_pairs = self._extract_pairs(prev_steps)
-
-            if compress_prev and prev_pairs:
-                keep_n = min(self.config.keep_recent_pairs, len(prev_pairs))
-                pairs_to_compress = prev_pairs[:-keep_n] if keep_n > 0 else prev_pairs
-                pairs_to_keep = prev_pairs[-keep_n:] if keep_n > 0 else []
-                if pairs_to_compress:
-                    summary_text = self._compress_previous_with_cache(
-                        pairs_to_compress, model
+                final_tokens = self._msg_token_count(final_messages)
+                self._last_compressed_token_count = final_tokens
+                # This situation is unlikely to occur unless the threshold itself is set unreasonably small
+                if final_tokens > hard_history_budget_tokens:
+                    logger.warning(
+                        f"Still exceeds hard input budget after compression: {final_tokens} > {hard_input_budget_tokens}. "
+                        f"Consider reducing keep_recent_pairs ({self.config.keep_recent_pairs}) "
+                        f"or keep_recent_steps({self.config.keep_recent_steps})"
                     )
-                    if summary_text:
-                        if "[CONTEXT COMPACTION" in summary_text:
-                            prev_summary_step = SummaryTaskStep(task=summary_text, prefix="Context fallback, Truncated raw history:")
-                        else:
-                            prev_summary_step = SummaryTaskStep(task=summary_text)
-                        prev_tail_steps = self._pairs_to_steps(pairs_to_keep)
-            elif prev_pairs:
-                # if cache is valid, use cache + uncovered display
-                is_valid, covered_idx = self._is_prev_cache_valid(prev_pairs)
-                if is_valid:
-                    prev_summary_step = SummaryTaskStep(
-                        task=self._previous_summary_cache.summary_text
-                    )
-                    uncovered = prev_pairs[covered_idx:]
-                    prev_tail_steps = self._pairs_to_steps(uncovered)
-
-            # --------------- Current phase ---------------
-            curr_kept_steps: List[MemoryStep] = list(curr_steps)
-
-            if curr_steps:
-                curr_task = curr_steps[0] if isinstance(curr_steps[0], TaskStep) else None
-                curr_action_steps = [s for s in curr_steps if isinstance(s, ActionStep)]
-
-                if compress_curr and curr_action_steps:
-                    keep_n = min(self.config.keep_recent_steps, len(curr_action_steps))
-                    if keep_n > 0 and keep_n < len(curr_action_steps):
-                        boundary = curr_action_steps[-keep_n]
-                        prev_a = curr_action_steps[-keep_n - 1]
-                        if (getattr(boundary, "observations", None) is not None
-                                and getattr(prev_a, "tool_calls", None) is not None):
-                            keep_n += 1
-
-                    actions_to_compress = (
-                        curr_action_steps[:-keep_n] if keep_n > 0 else list(curr_action_steps)
-                    )
-                    actions_to_keep = (
-                        curr_action_steps[-keep_n:] if keep_n > 0 else []
-                    )
-                    if actions_to_compress:
-                        curr_summary_text = self._compress_current_with_cache(
-                            curr_task, actions_to_compress, model
-                        )
-                        if curr_summary_text:
-                            if "[CONTEXT COMPACTION" in curr_summary_text:
-                                curr_summary_step = SummaryTaskStep(task=curr_summary_text, prefix="Truncated recent action steps:")
-                            else:
-                                curr_summary_step = SummaryTaskStep(task=curr_summary_text)
-                            curr_kept_steps = (
-                                ([curr_task] if curr_task else [])
-                                + [curr_summary_step]
-                                + list(actions_to_keep)
-                            )
-                elif curr_action_steps:
-                    is_valid, covered_idx = self._is_curr_cache_valid(curr_action_steps)
-                    if is_valid:
-                        uncovered = curr_action_steps[covered_idx:]
-                        curr_kept_steps = (
-                            ([curr_task] if curr_task else [])
-                            + [SummaryTaskStep(task=self._current_summary_cache.summary_text)]
-                            + list(uncovered)
-                        )
-
-            final_messages = self._build_messages(
-                memory, prev_summary_step, prev_tail_steps, curr_kept_steps
-            )
-            final_tokens = self._msg_token_count(final_messages)
-            self._last_compressed_token_count = final_tokens
-            # This situation is unlikely to occur unless the threshold itself is set unreasonably small
-            if final_tokens > hard_history_budget_tokens:
-                logger.warning(
-                    f"Still exceeds hard input budget after compression: {final_tokens} > {hard_input_budget_tokens}. "
-                    f"Consider reducing keep_recent_pairs ({self.config.keep_recent_pairs}) "
-                    f"or keep_recent_steps({self.config.keep_recent_steps})"
-                )
-            return final_messages
+                return final_messages
 
     # ============================================================
     #  Previous Compression
@@ -1486,7 +1486,7 @@ class ContextManager:
                 "context.use_context_items": self.config.use_context_items,
                 "context.current_run_start_idx": current_run_start_idx,
             },
-        ) as span:
+        ):
             if run_context is None:
                 run_context = self.prepare_run_context(memory, fallback_system_prompt="")
 
@@ -1901,14 +1901,18 @@ class ContextManager:
             List of ContextItem instances ready for policy-driven selection.
         """
         monitoring_manager = get_monitoring_manager()
+        _ensure_handlers_registered()
+        from .context.projector import ContextProjector
+
+        source_components = self._component_source(components)
+        
         with monitoring_manager.trace_operation(
             "context.project_items",
             OPENINFERENCE_SPAN_KIND_CHAIN,
+            **{
+                "context.component_count": len(source_components),
+            },
         ):
-            _ensure_handlers_registered()
-            from .context.projector import ContextProjector
-
-            source_components = self._component_source(components)
             projector = ContextProjector()
             items = projector.project(list(source_components))
             
@@ -1916,7 +1920,6 @@ class ContextManager:
                 monitoring_manager.add_span_event(
                     "context.project_items.completed",
                     {
-                        "context.component_count": len(source_components),
                         "context.item_count": len(items),
                     },
                 )
