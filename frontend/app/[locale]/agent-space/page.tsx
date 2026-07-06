@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   App,
   Button,
@@ -62,10 +63,17 @@ const agentRepositoryTheme = {
 export default function AgentRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
+  const searchParams = useSearchParams();
   const { user } = useAuthorizationContext();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
 
-  const [tab, setTab] = useState<AgentRepositoryTab>(AgentRepositoryTab.REPOSITORY);
+  const [tab, setTab] = useState<AgentRepositoryTab>(() => {
+    const backTab = searchParams.get("back_tab");
+    if (backTab === "mine") return AgentRepositoryTab.MINE;
+    if (backTab === "repository") return AgentRepositoryTab.REPOSITORY;
+    if (backTab === "review") return AgentRepositoryTab.REVIEW;
+    return AgentRepositoryTab.REPOSITORY;
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);

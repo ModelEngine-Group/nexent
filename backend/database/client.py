@@ -330,8 +330,12 @@ def as_dict(obj):
         for c in class_mapper(obj.__class__).columns:
             value = getattr(obj, c.key)
             # Convert datetime to ISO format string for JSON serialization
+            # Naive datetime (TIMESTAMP WITHOUT TIME ZONE) is treated as local time.
+            # Append 'Z' so browsers interpret it as UTC-equivalent local time
+            # without shifting.
             if isinstance(value, datetime):
-                result[c.key] = value.isoformat()
+                iso = value.isoformat()
+                result[c.key] = iso if value.tzinfo else iso + "Z"
             else:
                 result[c.key] = value
         return result

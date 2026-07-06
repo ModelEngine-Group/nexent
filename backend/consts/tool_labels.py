@@ -53,3 +53,5 @@ BUILTIN_LABEL_MAP.update(_category_multimodal)
 BUILTIN_LABEL_MAP.update(_category_email)
 BUILTIN_LABEL_MAP.update(_category_memory)
 BUILTIN_LABEL_MAP.update(_category_terminal)
+
+SYSTEM_MANAGED_TOOL_NAMES = frozenset({"store_memory", "search_memory"})

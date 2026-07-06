@@ -15,6 +15,7 @@ from pydantic_core import PydanticUndefined
 from consts.const import DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from database.outer_api_tool_db import (
     upsert_openapi_service,
     query_openapi_services_by_tenant,
@@ -508,6 +509,9 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
     formatted_tools = []
     for tool in tools_info:
         tool_name = tool.get("name")
+
+        if tool_name in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
 
         # Always use SDK inputs for local tools to stay in sync with current tool code
         is_local = tool.get("source") == "local"
