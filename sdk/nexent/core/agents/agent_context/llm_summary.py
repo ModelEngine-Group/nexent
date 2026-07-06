@@ -94,10 +94,10 @@ class LLMSummary:
                 try:
                     return self._do_generate_summary(shrunk, model, call_type + "_retry", prompt_type)
                 except Exception as e2:
-                    logger.error(f"Retry still failed: {e2}", exc_info=True)
+                    logger.exception(f"Retry still failed: {e2}")
                     record = self._record_failed_compression(call_type + "_retry_failed", str(e2))
                     return SummaryResult(summary_text=None, records=[record])
-            logger.error(f"Summary generation exception: {e}", exc_info=True)
+            logger.exception(f"Summary generation exception: {e}")
             record = self._record_failed_compression(call_type + "_failed", str(e))
             return SummaryResult(summary_text=None, records=[record])
 
