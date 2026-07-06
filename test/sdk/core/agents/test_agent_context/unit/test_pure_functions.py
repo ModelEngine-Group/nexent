@@ -6,7 +6,10 @@ from loader import (
     ContextManager, SummaryTaskStep, TaskStep, ActionStep,
     extract_pairs, pair_fingerprint, action_fingerprint,
     format_summary_output,
+    has_invoked_tools, message_role,
+    trim_pairs_to_budget,
 )
+from sdk.nexent.core.agents.agent_context.budget import _is_context_length_error
 
 
 class TestPureFunctions:
@@ -96,3 +99,53 @@ class TestPureFunctions:
         pair2 = make_pair("question2", "answer2", 2)
         text = cm._renderer.pairs_to_text([pair1, pair2])
         assert "\n\n" in text
+
+    # ── _is_context_length_error ──────────────────────────────
+
+    def test_context_length_error_detected(self):
+        assert _is_context_length_error(Exception("context_length exceeded"))
+        assert _is_context_length_error(Exception("maximum context length reached"))
+        assert _is_context_length_error(Exception("prompt is too long"))
+        assert _is_context_length_error(Exception("token limit exceeded"))
+
+    def test_context_length_error_not_detected(self):
+        assert not _is_context_length_error(Exception("connection timeout"))
+        assert not _is_context_length_error(Exception("out of memory"))
+
+    # ── has_invoked_tools ─────────────────────────────────────
+
+    def test_has_invoked_tools_with_none(self):
+        assert not has_invoked_tools(None)
+
+    # ── message_role ──────────────────────────────────────────
+
+    def test_message_role_from_dict(self):
+        assert message_role({"role": "user", "content": "hi"}) == "user"
+
+    def test_message_role_from_object(self):
+        from smolagents.models import ChatMessage
+        msg = ChatMessage(role="assistant", content=[{"type": "text", "text": "ok"}])
+        role = message_role(msg)
+        assert role is not None
+
+    # ── trim_pairs_to_budget keep_first ───────────────────────
+
+    def test_trim_pairs_to_budget_keep_first(self):
+        cm = make_cm()
+        pairs = [make_pair(f"task {i}", f"ans {i}", i) for i in range(1, 6)]
+        # 5 pairs, keep_first=True, budget small enough to trim
+        result = trim_pairs_to_budget(
+            pairs, max_tokens=100, render_fn=cm._renderer.pairs_to_text,
+            keep_first=True,
+        )
+        assert len(result) >= 1
+        assert result[0] == pairs[0]  # first pair always kept
+
+    def test_trim_pairs_to_budget_drops_overflow(self):
+        cm = make_cm()
+        pairs = [make_pair(f"task {i}", f"ans {i}", i) for i in range(1, 4)]
+        result = trim_pairs_to_budget(
+            pairs, max_tokens=100, render_fn=cm._renderer.pairs_to_text,
+            keep_first=False,
+        )
+        assert len(result) >= 1
