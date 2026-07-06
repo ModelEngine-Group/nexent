@@ -1,4 +1,4 @@
-﻿{
+{
   "assistant.name": "Nexent",
 
   "mainPage.layout.title": "Nexent | 智能问答",
@@ -76,6 +76,16 @@
   "chatInterface.stopConversationFailedButFrontendStopped": "停止对话失败，但前端已停止显示",
   "chatInterface.updateOpinionFailed": "更新点赞/点踩失败:",
   "chatInterface.aiGeneratedContentWarning": "内容由 AI 生成，请仔细甄别",
+  "chatInterface.copyShareLink": "复制链接",
+  "chatInterface.noConversationSelected": "请先选择一个对话",
+  "chatInterface.selectShareMessages": "请至少选择一组问答",
+  "chatInterface.selectedShareCount": "已选择 {{count}}",
+  "chatInterface.shareCreateFailed": "创建分享链接失败",
+  "chatInterface.shareLinkCopied": "分享链接已复制",
+  "chatInterface.shareCreatedCopyFailed": "分享链接已创建，但当前环境无法自动复制",
+  "chatInterface.shareLinkReady": "分享链接已生成",
+  "chatInterface.shareManualCopyHint": "分享链接已创建，请从下方输入框复制。",
+  "chatInterface.shareManualCopyRequired": "请手动复制链接",
   "chatInterface.stopGenerating": "停止生成",
   "chatInterface.imagePreview": "图片预览",
   "chatInterface.close": "关闭",
