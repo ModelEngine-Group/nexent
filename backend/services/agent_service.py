@@ -22,7 +22,8 @@ from agents.preprocess_manager import preprocess_manager
 from services.agent_version_service import publish_version_impl
 from utils.prompt_template_utils import normalize_prompt_generate_template_content
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
-    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT
+    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
+    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.exceptions import AppException, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -88,6 +89,8 @@ from services.prompt_template_service import (
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
+    create_new_conversation,
+    generate_conversation_title_service,
     get_latest_assistant_message,
     get_last_unit_for_message,
     save_conversation_user,
@@ -2932,6 +2935,29 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
 
+    # Auto-create conversation when conversation_id is not provided.
+    # Skip in debug mode: debug runs are ephemeral and must not persist
+    # conversations, titles, or messages to the user's history.
+    is_new_conversation = False
+    if agent_request.is_debug:
+        logger.info(
+            "Skipping conversation auto-create: is_debug=True (conversation_id=%s)",
+            agent_request.conversation_id,
+        )
+    elif agent_request.conversation_id is None:
+        default_title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
+        conversation_data = create_new_conversation(
+            title=default_title,
+            user_id=resolved_user_id,
+        )
+        agent_request.conversation_id = conversation_data["conversation_id"]
+        is_new_conversation = True
+        logger.info(
+            "Auto-created conversation_id=%s for user=%s (new conversation)",
+            agent_request.conversation_id,
+            resolved_user_id,
+        )
+
     # Resume mode: check for existing streaming message
     if resume:
         resume_info = _detect_resume_position(
@@ -3078,6 +3104,10 @@ async def run_agent_stream(
 
     async def stream_with_agent_context():
         try:
+            # Emit conversation_created event for new conversations
+            if is_new_conversation:
+                yield f'data: {{"type": "conversation_created", "content": {{"conversation_id": {agent_request.conversation_id}}}}}\n\n'
+
             with agent_monitoring_context(agent_metadata):
                 async for data_chunk in stream_gen:
                     yield data_chunk
@@ -3088,6 +3118,23 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk()
+        finally:
+            # Auto-generate title for new conversations after stream completes
+            if is_new_conversation:
+                try:
+                    await generate_conversation_title_service(
+                        conversation_id=agent_request.conversation_id,
+                        question=agent_request.query,
+                        user_id=resolved_user_id,
+                        tenant_id=resolved_tenant_id,
+                        language=language,
+                    )
+                except Exception as title_exc:
+                    logger.warning(
+                        "Failed to auto-generate title for conversation_id=%s: %r",
+                        agent_request.conversation_id,
+                        title_exc,
+                    )
 
     return StreamingResponse(
         stream_with_agent_context(),
