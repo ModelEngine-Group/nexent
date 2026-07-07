@@ -139,7 +139,7 @@ export default function LabelManagementModal({
       title={t("toolConfig.title.manageLabels")}
       open={open}
       onCancel={onClose}
-      maskClosable={true}
+      mask={{ closable: true }}
       footer={null}
       width={1100}
       zIndex={1100}
