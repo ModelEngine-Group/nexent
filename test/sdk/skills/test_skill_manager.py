@@ -2668,6 +2668,144 @@ description: Unsupported
             with pytest.raises(ValueError, match="Unsupported script type"):
                 manager.run_skill_script("unsupported-skill", "scripts/script.js")
 
+    def _create_run_script_skill(self, temp):
+        """Helper to build a skill that hosts a Python script under scripts/."""
+        temp.create_skill(
+            "rel-path-skill",
+            """---
+name: rel-path-skill
+description: Relative-path resolution test
+---
+# Content
+""",
+            subdirs={
+                "scripts": [{"name": "hello.py", "content": "print('hi')"}],
+            },
+        )
+
+    def test_run_skill_script_resolves_relative_to_skill_root(self, mocker):
+        """The script_path must resolve relative to the skill root, not CWD."""
+        with TempSkillDir() as temp:
+            self._create_run_script_skill(temp)
+
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "ok"
+            mock_result.stderr = ""
+            mock_sleep = mocker.patch("subprocess.run", return_value=mock_result)
+
+            cwd = os.path.join(temp.skills_dir, "rel-path-skill", "scripts")
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(cwd)
+                manager = SkillManager(base_skills_dir=temp.skills_dir)
+                # Bare relative path from the SKILL.md body, no extension.
+                result = manager.run_skill_script("rel-path-skill", "scripts/hello")
+            finally:
+                os.chdir(old_cwd)
+
+            assert result == "ok"
+            # subprocess.run should have been invoked against the skill-root
+            # path, regardless of the caller's CWD.
+            called_script = mock_sleep.call_args[0][0][1]
+            assert called_script.endswith(os.path.join("rel-path-skill", "scripts", "hello.py"))
+            # And we are not pointing into the changed cwd.
+            assert not called_script.startswith(cwd)
+
+    def test_run_skill_script_accepts_dot_slash_prefix(self, mocker):
+        """Paths beginning with './' should resolve identically to bare paths."""
+        with TempSkillDir() as temp:
+            self._create_run_script_skill(temp)
+
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "out"
+            mock_result.stderr = ""
+            mock_sleep = mocker.patch("subprocess.run", return_value=mock_result)
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.run_skill_script(
+                "rel-path-skill", "./scripts/hello.py"
+            )
+
+            assert result == "out"
+            called_script = mock_sleep.call_args[0][0][1]
+            assert called_script.endswith(os.path.join("rel-path-skill", "scripts", "hello.py"))
+
+    def test_run_skill_script_strips_surrounding_quotes(self, mocker):
+        """Paths pulled from backticks/fences may arrive wrapped in quotes."""
+        with TempSkillDir() as temp:
+            self._create_run_script_skill(temp)
+
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "out"
+            mock_result.stderr = ""
+            mock_sleep = mocker.patch("subprocess.run", return_value=mock_result)
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.run_skill_script(
+                "rel-path-skill", '"scripts/hello.py"'
+            )
+
+            assert result == "out"
+            called_script = mock_sleep.call_args[0][0][1]
+            assert called_script.endswith(os.path.join("rel-path-skill", "scripts", "hello.py"))
+
+    def test_run_skill_script_falls_back_to_extension(self, mocker):
+        """When no extension is supplied, try .py then .sh fall-back."""
+        with TempSkillDir() as temp:
+            self._create_run_script_skill(temp)
+
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = "shell-out"
+            mock_result.stderr = ""
+            # Also create a .sh script to verify ordering: .py wins when both exist.
+            sh_dir = os.path.join(temp.skills_dir, "rel-path-skill", "scripts")
+            with open(os.path.join(sh_dir, "hello.sh"), "w") as fh:
+                fh.write("echo hi")
+            mock_sleep = mocker.patch("subprocess.run", return_value=mock_result)
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            result = manager.run_skill_script("rel-path-skill", "scripts/hello")
+
+            assert result == "shell-out"
+            called_script = mock_sleep.call_args[0][0][1]
+            # .py takes precedence over .sh when both exist.
+            assert called_script.endswith(os.path.join("rel-path-skill", "scripts", "hello.py"))
+
+    def test_run_skill_script_missing_script_message_lists_available(self):
+        """When the script cannot be found, the error message lists available scripts."""
+        with TempSkillDir() as temp:
+            self._create_run_script_skill(temp)
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(SkillScriptNotFoundError) as excinfo:
+                manager.run_skill_script("rel-path-skill", "scripts/missing.py")
+
+            message = excinfo.value.message
+            # The error message must explain what the platform tried to do.
+            assert "scripts/missing.py" in message
+            assert "skill root" in message
+            assert "tried" in message
+            # And list the script we *did* create so the caller can correct itself.
+            assert "scripts/hello.py" in message
+
+    def test_run_skill_script_rejects_path_traversal(self):
+        """A path that escapes the skill root must be rejected, not silently run."""
+        with TempSkillDir() as temp:
+            self._create_run_script_skill(temp)
+
+            manager = SkillManager(base_skills_dir=temp.skills_dir)
+            with pytest.raises(SkillScriptNotFoundError) as excinfo:
+                manager.run_skill_script(
+                    "rel-path-skill",
+                    "../../../etc/passwd",
+                )
+
+            assert "outside" in excinfo.value.message.lower() or "skill root" in excinfo.value.message.lower()
+
 
 class TestSkillManagerListSkillsNonExistentDir:
     """Test list_skills when directory doesn't exist."""
