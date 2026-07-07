@@ -22,6 +22,7 @@ def get_apply_local_resources_tool(
     tenant_id: Optional[str] = None,
     model_id: Optional[int] = None,
     language: Optional[str] = None,
+    draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
     """Initialize the NL2AGENT session context for the apply_local_resources tool."""
     return set_nl2agent_context(
@@ -30,6 +31,7 @@ def get_apply_local_resources_tool(
         tenant_id=tenant_id,
         model_id=model_id,
         language=language,
+        draft_agent_id=draft_agent_id,
     )
 
 
@@ -49,9 +51,16 @@ def apply_local_resources(tool_ids: str, skill_ids: str) -> str:
         JSON string with ``bound_tool_count`` and ``bound_skill_count``.
     """
     ctx = get_nl2agent_context()
-    if ctx is None or ctx.agent_id is None or ctx.tenant_id is None:
+    if ctx is None or ctx.tenant_id is None:
         return json.dumps(
             {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
+        )
+    # apply_local_resources binds resources to the draft target. Use
+    # draft_agent_id when present; fall back to agent_id (older callers).
+    target_agent_id = ctx.draft_agent_id or ctx.agent_id
+    if target_agent_id is None:
+        return json.dumps(
+            {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )
 
     try:
@@ -68,7 +77,7 @@ def apply_local_resources(tool_ids: str, skill_ids: str) -> str:
 
         result = asyncio.run(
             apply_local_resources_batch(
-                agent_id=ctx.agent_id,
+                agent_id=target_agent_id,
                 tool_ids=parsed_tool_ids,
                 skill_ids=parsed_skill_ids,
                 tenant_id=ctx.tenant_id,

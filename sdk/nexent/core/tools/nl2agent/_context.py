@@ -18,13 +18,18 @@ class Nl2AgentContext:
     """Session context for an NL2AGENT tool.
 
     Attributes:
-        agent_id: The draft target agent_id being built.
+        agent_id: The running NL2AGENT default agent's id (the chat agent).
+        draft_agent_id: The target draft agent being built. Tools that operate
+            on the draft (apply_local_resources, finalize_agent,
+            search_local_resources) read this field. Falls back to agent_id
+            when not set (backward-compat).
         user_id: The user initiating the session.
         tenant_id: The tenant ID.
         model_id: The model ID used for LLM scoring.
         language: The language code ("zh" or "en").
     """
     agent_id: Optional[int] = None
+    draft_agent_id: Optional[int] = None
     user_id: Optional[str] = None
     tenant_id: Optional[str] = None
     model_id: Optional[int] = None
@@ -41,11 +46,13 @@ def set_nl2agent_context(
     tenant_id: Optional[str] = None,
     model_id: Optional[int] = None,
     language: Optional[str] = None,
+    draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
     """Set the global NL2AGENT session context. Idempotent; overwrites prior values."""
     global _context
     _context = Nl2AgentContext(
         agent_id=agent_id,
+        draft_agent_id=draft_agent_id,
         user_id=user_id,
         tenant_id=tenant_id,
         model_id=model_id,

@@ -361,8 +361,10 @@ class NexentAgent:
                 get_search_local_resources_tool,
             )
             metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
             get_search_local_resources_tool(
                 agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
                 model_id=metadata.get("model_id"),
@@ -377,8 +379,10 @@ class NexentAgent:
                 get_search_web_mcps_tool,
             )
             metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
             get_search_web_mcps_tool(
                 agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
                 model_id=metadata.get("model_id"),
@@ -391,8 +395,10 @@ class NexentAgent:
                 get_search_web_skills_tool,
             )
             metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
             get_search_web_skills_tool(
                 agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
                 model_id=metadata.get("model_id"),
@@ -407,8 +413,10 @@ class NexentAgent:
                 get_apply_local_resources_tool,
             )
             metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
             get_apply_local_resources_tool(
                 agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
                 model_id=metadata.get("model_id"),
@@ -423,8 +431,10 @@ class NexentAgent:
                 get_install_web_skill_tool,
             )
             metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
             get_install_web_skill_tool(
                 agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
                 model_id=metadata.get("model_id"),
@@ -439,8 +449,10 @@ class NexentAgent:
                 get_finalize_agent_tool,
             )
             metadata = tool_config.metadata or {}
+            draft_agent_id = metadata.get("draft_agent_id") or metadata.get("agent_id")
             get_finalize_agent_tool(
                 agent_id=metadata.get("agent_id"),
+                draft_agent_id=draft_agent_id,
                 user_id=metadata.get("user_id"),
                 tenant_id=metadata.get("tenant_id"),
                 model_id=metadata.get("model_id"),

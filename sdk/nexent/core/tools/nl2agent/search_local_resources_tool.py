@@ -22,6 +22,7 @@ def get_search_local_resources_tool(
     tenant_id: Optional[str] = None,
     model_id: Optional[int] = None,
     language: Optional[str] = None,
+    draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
     """Initialize the NL2AGENT session context for the search_local_resources tool."""
     return set_nl2agent_context(
@@ -30,6 +31,7 @@ def get_search_local_resources_tool(
         tenant_id=tenant_id,
         model_id=model_id,
         language=language,
+        draft_agent_id=draft_agent_id,
     )
 
 
@@ -52,9 +54,16 @@ def search_local_resources(query: str) -> str:
         with an "Apply All" button.
     """
     ctx = get_nl2agent_context()
-    if ctx is None or ctx.agent_id is None or ctx.tenant_id is None:
+    if ctx is None or ctx.tenant_id is None:
         return json.dumps(
             {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
+        )
+    # search_local_resources scores resources for the draft target. Use
+    # draft_agent_id when present; fall back to agent_id (older callers).
+    target_agent_id = ctx.draft_agent_id or ctx.agent_id
+    if target_agent_id is None:
+        return json.dumps(
+            {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )
 
     try:
@@ -63,7 +72,7 @@ def search_local_resources(query: str) -> str:
         result = asyncio.run(
             recommend_local_resources(
                 query=query,
-                agent_id=ctx.agent_id,
+                agent_id=target_agent_id,
                 tenant_id=ctx.tenant_id,
                 model_id=ctx.model_id or 0,
                 top_n=5,

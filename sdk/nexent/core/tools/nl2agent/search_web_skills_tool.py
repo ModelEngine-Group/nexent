@@ -22,10 +22,12 @@ def get_search_web_skills_tool(
     tenant_id: Optional[str] = None,
     model_id: Optional[int] = None,
     language: Optional[str] = None,
+    draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
     """Initialize the NL2AGENT session context for the search_web_skills tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
+        draft_agent_id=draft_agent_id,
         user_id=user_id,
         tenant_id=tenant_id,
         model_id=model_id,

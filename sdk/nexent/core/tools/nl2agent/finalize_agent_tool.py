@@ -22,6 +22,7 @@ def get_finalize_agent_tool(
     tenant_id: Optional[str] = None,
     model_id: Optional[int] = None,
     language: Optional[str] = None,
+    draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
     """Initialize the NL2AGENT session context for the finalize_agent tool."""
     return set_nl2agent_context(
@@ -30,6 +31,7 @@ def get_finalize_agent_tool(
         tenant_id=tenant_id,
         model_id=model_id,
         language=language,
+        draft_agent_id=draft_agent_id,
     )
 
 
@@ -60,9 +62,16 @@ def finalize_agent(
         JSON string with ``agent_id`` and ``status`` ("draft_ready").
     """
     ctx = get_nl2agent_context()
-    if ctx is None or ctx.agent_id is None or ctx.tenant_id is None:
+    if ctx is None or ctx.tenant_id is None:
         return json.dumps(
             {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
+        )
+    # finalize_agent writes generated prompts to the draft target. Use
+    # draft_agent_id when present; fall back to agent_id (older callers).
+    target_agent_id = ctx.draft_agent_id or ctx.agent_id
+    if target_agent_id is None:
+        return json.dumps(
+            {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )
 
     try:
@@ -80,7 +89,7 @@ def finalize_agent(
 
         result = asyncio.run(
             _finalize(
-                agent_id=ctx.agent_id,
+                agent_id=target_agent_id,
                 model_id=ctx.model_id or 0,
                 task_description=task_description,
                 tool_ids=parsed_tool_ids,

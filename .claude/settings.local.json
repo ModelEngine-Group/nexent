@@ -1,5 +1,12 @@
 {
   "permissions": {
-    "allow": []
+    "allow": [
+      "Bash(jj status:*)",
+      "Bash(jj log:*)",
+      "Bash(jj describe:*)",
+      "Bash(jj split:*)",
+      "Bash(jj commit:*)",
+      "Bash(jj diff:*)"
+    ]
   }
 }
