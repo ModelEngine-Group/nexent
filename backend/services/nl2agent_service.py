@@ -76,6 +76,25 @@ _NL2AGENT_SEED_PROMPT_FALLBACK = (
     "a custom agent through multi-turn natural-language dialogue."
 )
 
+_NL2AGENT_VERIFICATION_CONFIG = {
+    "enabled": True,
+    "step_verification_enabled": True,
+    "final_verification_enabled": True,
+    "llm_verification_enabled": False,
+    "max_final_rounds": 2,
+    "strictness": "balanced",
+    "fail_policy": "repair_then_controlled_summary",
+    "pass_score": 0.75,
+    "critical_events": [
+        "tool_precheck",
+        "tool_result",
+        "retrieval",
+        "code_execution",
+        "handoff",
+        "final_answer",
+    ],
+}
+
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
@@ -153,6 +172,7 @@ def _build_nl2agent_seed_defaults(tenant_id: str) -> Dict[str, Any]:
         "duty_prompt": _load_nl2agent_seed_system_prompt(),
         "constraint_prompt": "",
         "few_shots_prompt": "",
+        "verification_config": _NL2AGENT_VERIFICATION_CONFIG,
     }
     if model_ids:
         defaults["model_ids"] = model_ids
@@ -177,6 +197,7 @@ def _ensure_nl2agent_seed_defaults(
         "duty_prompt",
         "constraint_prompt",
         "few_shots_prompt",
+        "verification_config",
     ):
         if agent.get(field) != defaults[field]:
             update_values[field] = defaults[field]

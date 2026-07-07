@@ -33,6 +33,7 @@ def _seeded_nl2agent_info(agent_id: int = 101):
         "duty_prompt": "NL2AGENT seed prompt",
         "constraint_prompt": "",
         "few_shots_prompt": "",
+        "verification_config": nl2agent_service._NL2AGENT_VERIFICATION_CONFIG,
         "model_ids": [],
     }
 
@@ -301,6 +302,9 @@ def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatc
     assert payload["duty_prompt"] == "NL2AGENT seed prompt"
     assert payload["constraint_prompt"] == ""
     assert payload["few_shots_prompt"] == ""
+    assert payload["verification_config"]["enabled"] is True
+    assert payload["verification_config"]["final_verification_enabled"] is True
+    assert payload["verification_config"]["llm_verification_enabled"] is False
     assert payload["model_ids"] == [7, 8]
     assert payload["business_logic_model_id"] == 7
 
@@ -319,6 +323,7 @@ def test_seed_nl2agent_default_agent_backfills_existing_seed_defaults(
                 "duty_prompt": "placeholder prompt",
                 "constraint_prompt": "placeholder constraint",
                 "few_shots_prompt": "placeholder few shots",
+                "verification_config": None,
                 "model_ids": [],
                 "business_logic_model_id": None,
             }
@@ -353,6 +358,9 @@ def test_seed_nl2agent_default_agent_backfills_existing_seed_defaults(
     assert request.duty_prompt == "NL2AGENT seed prompt"
     assert request.constraint_prompt == ""
     assert request.few_shots_prompt == ""
+    assert request.verification_config["enabled"] is True
+    assert request.verification_config["final_verification_enabled"] is True
+    assert request.verification_config["llm_verification_enabled"] is False
     assert request.model_ids == [7, 8]
     assert request.business_logic_model_id == 7
     update_agent.assert_called_once_with(

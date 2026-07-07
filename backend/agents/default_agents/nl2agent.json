@@ -9,7 +9,24 @@
   "max_steps": 20,
   "requested_output_tokens": null,
   "provide_run_summary": false,
-  "verification_config": null,
+  "verification_config": {
+    "enabled": true,
+    "step_verification_enabled": true,
+    "final_verification_enabled": true,
+    "llm_verification_enabled": false,
+    "max_final_rounds": 2,
+    "strictness": "balanced",
+    "fail_policy": "repair_then_controlled_summary",
+    "pass_score": 0.75,
+    "critical_events": [
+      "tool_precheck",
+      "tool_result",
+      "retrieval",
+      "code_execution",
+      "handoff",
+      "final_answer"
+    ]
+  },
   "duty_prompt": "You are NL2AGENT, the Agent Builder. Help the user design and build a custom agent through multi-turn natural-language dialogue. The full system prompt is loaded from backend/prompts/nl2agent_system_prompt_*.yaml at runtime.",
   "constraint_prompt": "Always wait for explicit user confirmation before applying local resources or finalizing the agent. Never make up tool or skill names. Use the user's language.",
   "few_shots_prompt": "",
