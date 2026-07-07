@@ -32,7 +32,7 @@ Docker 部署脚本通过 `--monitoring-provider` 支持多种形态，均以 Op
 | `grafana` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana` | Collector + Grafana + Tempo | 本地 Tempo trace 查询 |
 | `zipkin` | `bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider zipkin` | Collector + Zipkin | 本地 trace 查询 |
 
-也可以在 `deploy/docker/assets/monitoring/monitoring.env` 中设置默认形态：
+也可以在 `deploy/env/monitoring.env` 中设置默认形态：
 
 ```bash
 MONITORING_PROVIDER=phoenix
@@ -87,8 +87,8 @@ LangSmith 支持通过在线 OTLP endpoint 摄取 traces。Nexent 可以先把 O
 
 ```bash
 cd deploy
-[ -f docker/assets/monitoring/monitoring.env ] || cp docker/assets/monitoring/monitoring.env.example docker/assets/monitoring/monitoring.env
-vim docker/assets/monitoring/monitoring.env
+[ -f env/monitoring.env ] || cp env/monitoring.env.example env/monitoring.env
+vim env/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx

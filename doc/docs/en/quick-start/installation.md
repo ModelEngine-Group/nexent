@@ -187,7 +187,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env` or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
+The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
 On the target host, keep the deployment options consistent with the package manifest:
 
@@ -217,7 +217,7 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, and `MONITORING_DASHBOARD_URL` in `deploy/env/.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
 
 ```bash
 cd nexent
@@ -240,7 +240,7 @@ Supported providers:
 To change ports, image versions, or local Langfuse bootstrap credentials, copy and edit the monitoring environment file first:
 
 ```bash
-cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
+cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 ```
 
 Common variables:
@@ -253,7 +253,7 @@ Common variables:
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Local Grafana admin |
 
-Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/docker/assets/monitoring/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/.env`:
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` in `deploy/env/monitoring.env`. If you only need to connect to an existing external Collector, adjust the OTLP target in `deploy/env/monitoring.env`:
 
 ```bash
 ENABLE_TELEMETRY=true

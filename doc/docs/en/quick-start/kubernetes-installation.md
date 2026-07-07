@@ -200,7 +200,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `manifest.yaml`, and `checksums.txt`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory. On a single-node Docker-backed cluster, you can load and deploy directly:
+The package includes image tar files, `load-images.sh`, root deploy/uninstall entrypoints, Kubernetes Helm assets, SQL files, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, `manifest.yaml`, and `checksums.txt`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or generated Helm values. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory. On a single-node Docker-backed cluster, you can load and deploy directly:
 
 ```bash
 cd offline-package
@@ -250,7 +250,7 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 ### Monitoring Configuration
 
-Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script renders runtime Helm values for `global.monitoring.enabled`, `global.monitoring.provider`, and `global.monitoring.dashboardUrl`, and enables the `nexent-monitoring` subchart.
+Kubernetes deployments enable monitoring through the `monitoring` component in the deployment script UI. The deployment script synchronizes provider settings in `deploy/env/monitoring.env`, renders runtime Helm values for `global.monitoring.*` and `nexent-monitoring.*`, and enables the `nexent-monitoring` subchart.
 
 ```bash
 cd nexent
@@ -270,9 +270,9 @@ Supported providers:
 | `grafana` | Local Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | Local Zipkin | `http://localhost:30011` |
 
-Before choosing the `langsmith` provider, configure `global.monitoring.langsmithApiKey` and `global.monitoring.langsmithProject` in `deploy/deploy/k8s/helm/nexent/values.yaml`. To change local Grafana, Langfuse, or dashboard ports, adjust the values file first, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
+Before choosing the `langsmith` provider, configure `LANGSMITH_API_KEY` and optionally `LANGSMITH_PROJECT` in `deploy/env/monitoring.env`. To change local Grafana, Langfuse, or dashboard ports, adjust the related `K8S_*_NODE_PORT` or service variables in `deploy/env/monitoring.env`, then re-run the deployment script, choose to reconfigure, and manually select `monitoring`.
 
-Common Helm values:
+Common generated Helm values:
 
 | Value | Description |
 |-------|-------------|
@@ -284,6 +284,14 @@ Common Helm values:
 | `nexent-monitoring.<provider>.service.nodePort` | NodePort override for provider dashboards |
 | `nexent-monitoring.langfuse.init.*` | Local Langfuse bootstrap organization, project, and admin account |
 | `nexent-monitoring.grafana.adminUser` / `adminPassword` | Local Grafana admin credentials |
+
+Common `deploy/env/monitoring.env` variables:
+
+| Variable | Description |
+|----------|-------------|
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
+| `K8S_PHOENIX_NODE_PORT` / `K8S_LANGFUSE_NODE_PORT` / `K8S_GRAFANA_NODE_PORT` / `K8S_ZIPKIN_NODE_PORT` | NodePort overrides for local dashboards |
+| `K8S_LANGFUSE_NEXTAUTH_URL` | Browser-accessible Langfuse URL used by the K8s Langfuse stack |
 
 Check monitoring status:
 

@@ -183,7 +183,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
 
 在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
 
@@ -213,7 +213,7 @@ bash deploy.sh --load-images docker
 
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会同步更新 `deploy/env/.env` 中的 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER` 和 `MONITORING_DASHBOARD_URL`，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
 
 ```bash
 cd nexent
@@ -236,7 +236,7 @@ bash deploy.sh docker
 如需调整端口、镜像版本或 Langfuse 初始账号，请先复制并编辑监控环境变量：
 
 ```bash
-cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/monitoring/monitoring.env
+cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 ```
 
 常用变量：
@@ -249,7 +249,7 @@ cp deploy/docker/assets/monitoring/monitoring.env.example deploy/docker/assets/m
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | 本地 Langfuse 初始管理员账号 |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | 本地 Grafana 管理员账号 |
 
-选择 `langsmith` provider 前，请先在 `deploy/docker/assets/monitoring/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/.env` 中调整 OTLP 目标地址：
+选择 `langsmith` provider 前，请先在 `deploy/env/monitoring.env` 中配置 `LANGSMITH_API_KEY`。如果只需要连接已有外部 Collector，也可以在 `deploy/env/monitoring.env` 中调整 OTLP 目标地址：
 
 ```bash
 ENABLE_TELEMETRY=true

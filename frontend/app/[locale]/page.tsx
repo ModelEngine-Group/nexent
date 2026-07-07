@@ -50,8 +50,8 @@ export default function Homepage() {
   };
 
   const navigateToChat = () => navigateWithPermissionCheck("/chat");
-  const navigateToSetup = () => navigateWithPermissionCheck("/setup");
-  const navigateToSpace = () => navigateWithPermissionCheck("/space");
+  const navigateToAgent = () => navigateWithPermissionCheck("/agents");
+  const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
@@ -97,7 +97,7 @@ export default function Homepage() {
             </Col>
             <Col xs={24} sm={24} md={8}>
               <Button
-                onClick={navigateToSetup}
+                onClick={navigateToAgent}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
               >
                 <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
@@ -106,11 +106,11 @@ export default function Homepage() {
             </Col>
             <Col xs={24} sm={24} md={8}>
               <Button
-                onClick={navigateToSpace}
+                onClick={navigateToRepository}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
               >
                 <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
-                {t("page.agentSpace")}
+                {t("sidebar.agentRepository")}
               </Button>
             </Col>
           </Row>

@@ -200,7 +200,7 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`manifest.yaml` 和 `checksums.txt`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
+包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`deploy/env/.env.example`、`deploy/env/monitoring.env.example`、`manifest.yaml` 和 `checksums.txt`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或生成的 Helm values。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
 
 ```bash
 cd offline-package
@@ -253,7 +253,7 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 ### 监控配置
 
-Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会生成运行时 Helm values，设置 `global.monitoring.enabled`、`global.monitoring.provider`、`global.monitoring.dashboardUrl`，并启用 `nexent-monitoring` 子 Chart。
+Kubernetes 部署通过脚本交互界面中的 `monitoring` 组件启用监控。部署脚本会在 `deploy/env/monitoring.env` 中同步 provider 配置，生成 `global.monitoring.*` 和 `nexent-monitoring.*` 运行时 Helm values，并启用 `nexent-monitoring` 子 Chart。
 
 ```bash
 cd nexent
@@ -273,9 +273,9 @@ bash deploy.sh k8s
 | `grafana` | 本地 Grafana + Tempo | `http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1` |
 | `zipkin` | 本地 Zipkin | `http://localhost:30011` |
 
-选择 `langsmith` provider 前，请先在 `deploy/deploy/k8s/helm/nexent/values.yaml` 中配置 `global.monitoring.langsmithApiKey` 和 `global.monitoring.langsmithProject`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，也建议先在 values 文件中调整，再通过部署脚本重新配置并手动选择 `monitoring`。
+选择 `langsmith` provider 前，请先在 `deploy/env/monitoring.env` 中配置 `LANGSMITH_API_KEY`，必要时配置 `LANGSMITH_PROJECT`。如需修改本地 Grafana、Langfuse 或各 Dashboard 的端口，请调整 `deploy/env/monitoring.env` 中对应的 `K8S_*_NODE_PORT` 或服务变量，再通过部署脚本重新配置并手动选择 `monitoring`。
 
-常用 Helm values：
+常用生成的 Helm values：
 
 | Values | 说明 |
 |--------|------|
@@ -287,6 +287,14 @@ bash deploy.sh k8s
 | `nexent-monitoring.<provider>.service.nodePort` | 调整各 Dashboard 的 NodePort |
 | `nexent-monitoring.langfuse.init.*` | 本地 Langfuse 初始组织、项目和管理员账号 |
 | `nexent-monitoring.grafana.adminUser` / `adminPassword` | 本地 Grafana 管理员账号 |
+
+常用 `deploy/env/monitoring.env` 变量：
+
+| 变量 | 说明 |
+|------|------|
+| `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith 转发配置 |
+| `K8S_PHOENIX_NODE_PORT` / `K8S_LANGFUSE_NODE_PORT` / `K8S_GRAFANA_NODE_PORT` / `K8S_ZIPKIN_NODE_PORT` | 本地 Dashboard 的 NodePort 覆盖值 |
+| `K8S_LANGFUSE_NEXTAUTH_URL` | K8s Langfuse 栈使用的浏览器可访问地址 |
 
 查看监控组件状态：
 
