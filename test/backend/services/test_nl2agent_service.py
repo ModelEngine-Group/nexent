@@ -53,6 +53,41 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_start_session_seeds_nl2agent_for_current_tenant_when_missing(
+    monkeypatch,
+):
+    search_builder = MagicMock(side_effect=Exception("agent not found"))
+    seed_builder = MagicMock(return_value=101)
+    create_draft = MagicMock(return_value={"agent_id": 202})
+    create_conversation = MagicMock(return_value={"conversation_id": 303})
+
+    monkeypatch.setattr(
+        nl2agent_service, "search_agent_id_by_agent_name", search_builder
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "seed_nl2agent_default_agent", seed_builder
+    )
+    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+    monkeypatch.setattr(
+        nl2agent_service, "create_conversation", create_conversation
+    )
+    monkeypatch.setattr(
+        nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
+    )
+
+    result = await nl2agent_service.start_session(
+        user_id="user_1", tenant_id="tenant_1", language="en"
+    )
+
+    assert result["nl2agent_agent_id"] == 101
+    assert result["draft_agent_id"] == 202
+    search_builder.assert_called_once_with("nl2agent", "tenant_1")
+    seed_builder.assert_called_once_with(tenant_id="tenant_1", user_id="user_1")
+    draft_payload = create_draft.call_args.args[0]
+    assert draft_payload["name"] == "draft_abcdef12"
+
+
+@pytest.mark.asyncio
 async def test_recommend_local_resources_awaits_tool_list_and_filters_sources(monkeypatch):
     list_tools = AsyncMock(
         return_value=[

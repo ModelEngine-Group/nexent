@@ -88,12 +88,18 @@ async def start_session(
             NL2AGENT_AGENT_NAME, tenant_id
         )
     except Exception as exc:
-        logger.error(
-            f"NL2AGENT default agent not seeded for tenant {tenant_id}: {exc}"
+        logger.warning(
+            f"NL2AGENT default agent missing for tenant {tenant_id}; "
+            f"attempting tenant seed: {exc}"
         )
+        nl2agent_agent_id = seed_nl2agent_default_agent(
+            tenant_id=tenant_id, user_id=user_id
+        )
+
+    if not nl2agent_agent_id:
         raise AgentRunException(
-            "NL2AGENT default agent is not seeded. Start the config app first."
-        ) from exc
+            f"Failed to seed NL2AGENT default agent for tenant {tenant_id}."
+        )
 
     draft_name = f"{DRAFT_AGENT_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
     draft_display_name = "Draft Agent (NL2AGENT)"
