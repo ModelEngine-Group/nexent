@@ -557,101 +557,18 @@ LOADSCRIPT
 create_offline_deploy_entrypoint() {
   local deploy_script="$OUTPUT_DIR/deploy.sh"
 
-  cat > "$deploy_script" << 'DEPLOYSCRIPT'
-#!/usr/bin/env bash
-
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOYMENT_COMMON="$SCRIPT_DIR/deploy/common/common.sh"
-
-if [ -f "$DEPLOYMENT_COMMON" ]; then
-  # shellcheck source=/dev/null
-  source "$DEPLOYMENT_COMMON"
-fi
-[ -n "${DEPLOYMENT_LANGUAGE:-}" ] || DEPLOYMENT_LANGUAGE="en"
-
-usage() {
-  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-    cat <<'USAGE'
-用法：
-  bash deploy.sh [--load-images] [--config] docker [Docker 部署选项]
-  bash deploy.sh [--load-images] [--config] k8s [K8s 部署选项]
-
-此离线包入口默认复用保存配置或内置默认值部署，不进入交互界面。
-添加 --config 可进入交互式部署配置界面。
-实现：deploy/deploy.sh
-
-选项：
-  --load-images    部署前从 ./images 加载 Docker 镜像 tar 文件。
-                   默认关闭。
-  --config         进入交互式部署配置界面。
-USAGE
-    return
+  if [ ! -f "$deploy_script" ]; then
+    echo "❌ deploy.sh not found in offline package: $deploy_script"
+    return 1
+  fi
+  if ! grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE=""$' "$deploy_script"; then
+    echo "❌ deploy.sh does not contain the offline mode marker: $deploy_script"
+    return 1
   fi
 
-  cat <<'USAGE'
-Usage:
-  bash deploy.sh [--load-images] [--config] docker [docker deploy options]
-  bash deploy.sh [--load-images] [--config] k8s [k8s deploy options]
-
-This offline entrypoint deploys with saved configuration or built-in defaults by default.
-Add --config to open the interactive deployment configuration.
-Implementation: deploy/deploy.sh
-
-Options:
-  --load-images    Load Docker image tar files from ./images before deploying.
-                   Defaults to off.
-  --config         Open the interactive deployment configuration.
-USAGE
-}
-
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] || [ $# -eq 0 ]; then
-  usage
-  exit 0
-fi
-
-LOAD_IMAGES="false"
-DEPLOY_CONFIG_MODE="defaults"
-FORWARD_ARGS=()
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --load-images)
-      LOAD_IMAGES="true"
-      shift
-      ;;
-    --config)
-      DEPLOY_CONFIG_MODE="tui"
-      shift
-      ;;
-    *)
-      FORWARD_ARGS+=("$1")
-      shift
-      ;;
-  esac
-done
-
-if [ "${#FORWARD_ARGS[@]}" -eq 0 ]; then
-  usage
-  exit 0
-fi
-
-if [ "$LOAD_IMAGES" = "true" ]; then
-  LOAD_SCRIPT="$SCRIPT_DIR/load-images.sh"
-  if [ ! -f "$LOAD_SCRIPT" ]; then
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "错误：--load-images 需要 $LOAD_SCRIPT" >&2
-    else
-      echo "Error: --load-images requires $LOAD_SCRIPT" >&2
-    fi
-    exit 1
-  fi
-  bash "$LOAD_SCRIPT"
-fi
-
-NEXENT_DEPLOY_CONFIG_MODE="$DEPLOY_CONFIG_MODE" exec bash "$SCRIPT_DIR/deploy/deploy.sh" "${FORWARD_ARGS[@]}"
-DEPLOYSCRIPT
+  local tmp_script="${deploy_script}.tmp"
+  sed 's/^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE=""$/DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"/' "$deploy_script" > "$tmp_script"
+  mv "$tmp_script" "$deploy_script"
 }
 
 copy_deployment_bundle() {
