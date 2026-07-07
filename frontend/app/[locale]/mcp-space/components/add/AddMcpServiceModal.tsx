@@ -8,22 +8,26 @@ import {
 import AddMcpServiceLocalSection from "./local/AddMcpServiceLocalSection";
 import AddMcpServiceRegistrySection from "./registry/AddMcpServiceRegistrySection";
 import AddMcpServiceCommunitySection from "./community/AddMcpServiceCommunitySection";
+import type { LocalAddMcpDraft } from "@/types/mcpTools";
 
 interface AddMcpServiceModalProps {
   open: boolean;
   onClose: () => void;
+  initialDraft?: Partial<LocalAddMcpDraft>;
 }
 
 export default function AddMcpServiceModal({
   open,
   onClose,
+  initialDraft,
 }: AddMcpServiceModalProps) {
   const { t } = useTranslation("common");
   const [tab, setTab] = useState<McpSource>(McpSource.LOCAL);
 
   useEffect(() => {
     if (!open) setTab(McpSource.LOCAL);
-  }, [open]);
+    if (open && initialDraft) setTab(McpSource.LOCAL);
+  }, [initialDraft, open]);
 
   if (!open) return null;
 
@@ -83,6 +87,7 @@ export default function AddMcpServiceModal({
           <AddMcpServiceLocalSection
             active={tab === McpSource.LOCAL}
             onAdded={onClose}
+            initialDraft={initialDraft}
           />
           <AddMcpServiceRegistrySection
             active={tab === McpSource.REGISTRY}

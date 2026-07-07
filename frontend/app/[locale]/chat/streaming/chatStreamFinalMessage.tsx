@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
 
 /**
  * Convert custom code tags to standard markdown code fences
@@ -55,6 +56,7 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
+  onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
 }
 
 // TTS playback status
@@ -74,6 +76,7 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
+  onInstallNl2AgentMcp,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
 
@@ -350,6 +353,7 @@ function ChatStreamFinalMessageInner({
                 )}
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
+                onInstallNl2AgentMcp={onInstallNl2AgentMcp}
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}

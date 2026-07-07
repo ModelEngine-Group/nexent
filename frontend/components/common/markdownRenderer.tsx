@@ -19,6 +19,7 @@ import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/common/copyButton";
 import { Diagram } from "@/components/common/Diagram";
 import { tryRenderNl2AgentCard } from "@/components/nl2agent";
+import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
 
 interface MarkdownRendererProps {
   content: string;
@@ -33,6 +34,7 @@ interface MarkdownRendererProps {
    * the original S3 URL is not directly accessible by the browser.
    */
   resolveS3Media?: boolean;
+  onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
 }
 
 export interface MarkdownHeading {
@@ -1045,6 +1047,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   onCitationHover,
   enableMultimodal = true,
   resolveS3Media = false,
+  onInstallNl2AgentMcp,
 }) => {
   const { t } = useTranslation("common");
 
@@ -1367,7 +1370,11 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     // of a plain code block when the fenced language tag is an
                     // nl2agent-* tag.
                     if (match[1].startsWith("nl2agent-")) {
-                      const node = tryRenderNl2AgentCard(match[1], codeContent);
+                      const node = tryRenderNl2AgentCard(
+                        match[1],
+                        codeContent,
+                        onInstallNl2AgentMcp
+                      );
                       if (node) {
                         return <>{node}</>;
                       }

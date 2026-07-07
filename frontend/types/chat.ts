@@ -1,5 +1,6 @@
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
 
 export type MessageRole = (typeof MESSAGE_ROLES)[keyof typeof MESSAGE_ROLES];
 
@@ -243,6 +244,7 @@ export interface ChatStreamMainProps {
     modelNames?: string[]
   ) => void;
   onCitationHover?: () => void;
+  onInstallNl2AgentMcp?: (item: WebMcpCardItem) => void;
   onScroll?: () => void;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];

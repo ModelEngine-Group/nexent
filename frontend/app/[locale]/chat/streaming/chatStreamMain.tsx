@@ -43,6 +43,7 @@ export function ChatStreamMain({
   selectedAgentId,
   onAgentSelect,
   onCitationHover,
+  onInstallNl2AgentMcp,
   onScroll,
   agentGreeting,
   agentExampleQuestions,
@@ -424,6 +425,7 @@ export function ChatStreamMain({
                     index={index}
                     currentConversationId={currentConversationId}
                     onCitationHover={onCitationHover}
+                    onInstallNl2AgentMcp={onInstallNl2AgentMcp}
                   />
                   {message.role === MESSAGE_ROLES.USER &&
                     processedMessages.conversationGroups.has(message.id!) && (

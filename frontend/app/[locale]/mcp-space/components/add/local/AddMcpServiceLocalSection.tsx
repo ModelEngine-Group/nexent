@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { McpTransportType } from "@/const/mcpTools";
@@ -8,7 +8,9 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import ContainerPortField from "../../shared/ContainerPortField";
 import TagEditor from "../../shared/TagEditor";
 
-const createInitialDraft = (): LocalAddMcpDraft => ({
+const createInitialDraft = (
+  initialDraft?: Partial<LocalAddMcpDraft>
+): LocalAddMcpDraft => ({
   name: "",
   description: "",
   transportType: McpTransportType.URL,
@@ -17,22 +19,27 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   customHeaders: "",
   containerConfigJson: "",
   containerPort: undefined,
-  tags: [],
+  ...initialDraft,
+  tags: initialDraft?.tags ?? [],
 });
 
 interface AddMcpServiceLocalSectionProps {
   active: boolean;
   onAdded: () => void;
+  initialDraft?: Partial<LocalAddMcpDraft>;
 }
 
 export default function AddMcpServiceLocalSection({
   active,
   onAdded,
+  initialDraft,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
-  const [draft, setDraft] = useState<LocalAddMcpDraft>(() => createInitialDraft());
+  const [draft, setDraft] = useState<LocalAddMcpDraft>(() =>
+    createInitialDraft(initialDraft)
+  );
   const { submit, submitting } = useMcpAddLocal({
     onSuccess: () => {
       setDraft(createInitialDraft());
@@ -44,6 +51,13 @@ export default function AddMcpServiceLocalSection({
   const patchDraft = (patch: Partial<LocalAddMcpDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
   };
+
+  useEffect(() => {
+    if (!active || !initialDraft) return;
+    const nextDraft = createInitialDraft(initialDraft);
+    setDraft(nextDraft);
+    form.setFieldsValue(nextDraft);
+  }, [active, form, initialDraft]);
 
   // Syncs external `draft` into AntD Form state so validation sees the value.
   const bindField = <K extends keyof LocalAddMcpDraft>(key: K) => ({

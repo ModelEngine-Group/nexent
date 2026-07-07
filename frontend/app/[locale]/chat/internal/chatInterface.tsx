@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { McpTransportType } from "@/const/mcpTools";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -25,6 +26,7 @@ import { FilePreview } from "@/types/chat";
 import { ChatHeader } from "../components/chatHeader";
 import { ChatRightPanel } from "../components/chatRightPanel";
 import { ChatStreamMain } from "../streaming/chatStreamMain";
+import AddMcpServiceModal from "../../mcp-space/components/add/AddMcpServiceModal";
 
 import {
   preprocessAttachments,
@@ -40,6 +42,8 @@ import {
   HistoryItem,
 } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
+import type { LocalAddMcpDraft } from "@/types/mcpTools";
+import type { WebMcpCardItem } from "@/components/nl2agent/WebMcpCard";
 import { handleStreamResponse, ResumeConfig, StreamingMessage } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
 
@@ -81,6 +85,22 @@ const getNl2AgentDraftForConversation = (
 ): number | null => {
   if (conversationId == null) return null;
   return readNl2AgentDraftMap()[String(conversationId)] ?? null;
+};
+
+const createNl2AgentMcpDraft = (
+  item: WebMcpCardItem
+): Partial<LocalAddMcpDraft> => {
+  const tags = ["nl2agent", item.source].filter(
+    (tag): tag is string => Boolean(tag)
+  );
+
+  return {
+    name: item.name,
+    description: item.description || item.reason || "",
+    transportType: McpTransportType.URL,
+    serverUrl: item.url || "",
+    tags,
+  };
 };
 
 // Get internationalization key based on message type
@@ -174,6 +194,10 @@ export function ChatInterface() {
   const [nl2agentConversationId, setNl2agentConversationId] = useState<
     number | null
   >(null);
+  const [mcpInstallModalOpen, setMcpInstallModalOpen] = useState(false);
+  const [mcpInstallInitialDraft, setMcpInstallInitialDraft] = useState<
+    Partial<LocalAddMcpDraft> | undefined
+  >();
   const [agentGreeting, setAgentGreeting] = useState<string | null>(null);
   const [agentExampleQuestions, setAgentExampleQuestions] = useState<string[]>(
     []
@@ -319,6 +343,15 @@ export function ChatInterface() {
       });
     }
   }, [conversationManagement.selectedConversationId]);
+
+  const handleInstallNl2AgentMcp = useCallback((item: WebMcpCardItem) => {
+    setMcpInstallInitialDraft(createNl2AgentMcpDraft(item));
+    setMcpInstallModalOpen(true);
+  }, []);
+
+  const handleCloseNl2AgentMcpModal = useCallback(() => {
+    setMcpInstallModalOpen(false);
+  }, []);
 
   // Add useEffect to clear completed conversation indicator when user is viewing the current conversation
   useEffect(() => {
@@ -1782,6 +1815,7 @@ export function ChatInterface() {
   };
 
   return (
+    <>
     <Layout hasSider className="flex h-full">
       <ChatSidebar
         streamingConversations={streamingConversations}
@@ -1867,6 +1901,7 @@ export function ChatInterface() {
               selectedAgentId={selectedAgentId}
               onAgentSelect={handleAgentSelectWithGreeting}
               onCitationHover={clearCompletedIndicator}
+              onInstallNl2AgentMcp={handleInstallNl2AgentMcp}
               onScroll={clearCompletedIndicator}
               agentGreeting={agentGreeting}
               agentExampleQuestions={agentExampleQuestions}
@@ -1892,5 +1927,11 @@ export function ChatInterface() {
         </div>
       </Layout>
     </Layout>
+    <AddMcpServiceModal
+      open={mcpInstallModalOpen}
+      onClose={handleCloseNl2AgentMcpModal}
+      initialDraft={mcpInstallInitialDraft}
+    />
+    </>
   );
 }
