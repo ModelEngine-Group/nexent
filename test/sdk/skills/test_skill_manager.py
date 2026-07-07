@@ -2709,8 +2709,10 @@ description: Relative-path resolution test
             # path, regardless of the caller's CWD.
             called_script = mock_sleep.call_args[0][0][1]
             assert called_script.endswith(os.path.join("rel-path-skill", "scripts", "hello.py"))
-            # And we are not pointing into the changed cwd.
-            assert not called_script.startswith(cwd)
+            # Verify path is correctly resolved to skill root (not relative to CWD)
+            # The path should contain the full skill name with scripts subdirectory
+            skill_root_path = os.path.join(temp.skills_dir, "rel-path-skill")
+            assert os.path.abspath(called_script).startswith(os.path.abspath(skill_root_path))
 
     def test_run_skill_script_accepts_dot_slash_prefix(self, mocker):
         """Paths beginning with './' should resolve identically to bare paths."""
