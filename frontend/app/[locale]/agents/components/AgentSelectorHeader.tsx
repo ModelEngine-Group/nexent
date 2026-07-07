@@ -209,8 +209,10 @@ export default function AgentSelectorHeader({
     setAgentBuilderLoading(true);
     try {
       const res = await startNl2AgentSession();
-      if (res?.agent_id != null) {
-        sessionStorage.setItem("selectedAgentId", String(res.agent_id));
+      if (res?.nl2agent_agent_id != null && res?.draft_agent_id != null) {
+        sessionStorage.setItem("selectedAgentId", String(res.nl2agent_agent_id));
+        sessionStorage.setItem("nl2agent_draft_agent_id", String(res.draft_agent_id));
+        sessionStorage.setItem("nl2agent_conversation_id", String(res.conversation_id));
         router.push(`/${locale}/chat`);
       }
     } catch (error) {

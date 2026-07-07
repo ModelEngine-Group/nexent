@@ -12,9 +12,12 @@ import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
 
 export interface Nl2AgentSessionStartResponse {
-  agent_id: number;
+  nl2agent_agent_id: number;
+  draft_agent_id: number;
   conversation_id: number;
   draft_name: string;
+  /** Backward-compatible alias if older deployments still return it. */
+  agent_id?: number;
 }
 
 export interface Nl2AgentApplyLocalResourcesPayload {
