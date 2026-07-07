@@ -1,5 +1,32 @@
 from factories import make_cm, make_pair, make_model
-from loader import ActionStep, PreviousSummaryCache, ContextManager, CurrentSummaryCache, TaskStep
+from loader import (
+    ActionStep, PreviousSummaryCache, ContextManager, CurrentSummaryCache, TaskStep,
+    pair_fingerprint, action_fingerprint,
+)
+
+
+def _compress_previous_with_cache(cm, pairs, model):
+    """Helper that mimics old cm._compress_previous_with_cache(pairs, model) behavior.
+
+    Calls cm._prev_compressor.compress(), applies cache update, and returns
+    summary_text (str or None) -- the same return type as the old method.
+    """
+    result = cm._prev_compressor.compress(pairs, cm._previous_summary_cache, model)
+    if result.new_cache is not None:
+        cm._previous_summary_cache = result.new_cache
+    return result.summary_text
+
+
+def _compress_current_with_cache(cm, task, actions, model):
+    """Helper that mimics old cm._compress_current_with_cache(task, actions, model) behavior.
+
+    Calls cm._curr_compressor.compress(), applies cache update, and returns
+    summary_text (str or None) -- the same return type as the old method.
+    """
+    result = cm._curr_compressor.compress(task, actions, cm._current_summary_cache, model)
+    if result.new_cache is not None:
+        cm._current_summary_cache = result.new_cache
+    return result.summary_text
 
 
 class TestCompressPreviousWithCache:
@@ -9,7 +36,7 @@ class TestCompressPreviousWithCache:
         cm = make_cm()
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(n)]
         last_t, last_a = pairs[-1]
-        fp = cm._pair_fingerprint(last_t.task, last_a.action_output)
+        fp = pair_fingerprint(last_t.task, last_a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache(
             summary_text="existing summary", covered_pairs=n, anchor_fingerprint=fp
         )
@@ -18,7 +45,7 @@ class TestCompressPreviousWithCache:
     def test_previous_full_cache_hit_no_llm_call(self):
         cm, pairs = self._make_pairs_with_cache(n=2)
         model = make_model()
-        result = cm._compress_previous_with_cache(pairs, model)
+        result = _compress_previous_with_cache(cm, pairs, model)
         assert result == "existing summary"
         model.assert_not_called()
 
@@ -26,12 +53,12 @@ class TestCompressPreviousWithCache:
         cm = make_cm()
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(3)]
         anchor_t, anchor_a = pairs[1]
-        fp = cm._pair_fingerprint(anchor_t.task, anchor_a.action_output)
+        fp = pair_fingerprint(anchor_t.task, anchor_a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache(
             summary_text="old summary", covered_pairs=2, anchor_fingerprint=fp
         )
         model = make_model('{"task_overview": "incremental summary"}')
-        result = cm._compress_previous_with_cache(pairs, model)
+        result = _compress_previous_with_cache(cm, pairs, model)
         assert result is not None
         model.assert_called_once()
         call_args = model.call_args[0][0]
@@ -44,7 +71,7 @@ class TestCompressPreviousWithCache:
         cm = make_cm()
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(2)]
         model = make_model('{"task_overview": "full summary"}')
-        result = cm._compress_previous_with_cache(pairs, model)
+        result = _compress_previous_with_cache(cm, pairs, model)
         assert result is not None
         assert cm._previous_summary_cache is not None
         assert cm._previous_summary_cache.covered_pairs == 2
@@ -53,10 +80,10 @@ class TestCompressPreviousWithCache:
         cm = make_cm()
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(3)]
         anchor_t, anchor_a = pairs[1]
-        fp = cm._pair_fingerprint(anchor_t.task, anchor_a.action_output)
+        fp = pair_fingerprint(anchor_t.task, anchor_a.action_output)
         cm._previous_summary_cache = PreviousSummaryCache("old summary", 2, fp)
         model = make_model('{"task_overview": "new summary"}')
-        cm._compress_previous_with_cache(pairs, model)
+        _compress_previous_with_cache(cm, pairs, model)
         assert cm._previous_summary_cache.covered_pairs == 3
         assert "new summary" in cm._previous_summary_cache.summary_text
 
@@ -65,7 +92,7 @@ class TestCompressPreviousWithCache:
         pairs = [make_pair(f"task{i}", f"action{i}", i) for i in range(3)]
         cm._previous_summary_cache = PreviousSummaryCache("old summary", 2, "wrong_fp")
         model = make_model('{"task_overview": "fresh summary"}')
-        result = cm._compress_previous_with_cache(pairs, model)
+        result = _compress_previous_with_cache(cm, pairs, model)
         assert result is not None
         call_args = model.call_args[0][0]
         full_text = " ".join(
@@ -77,7 +104,7 @@ class TestCompressPreviousWithCache:
     def test_previous_empty_pairs_returns_none(self):
         cm = make_cm()
         model = make_model()
-        assert cm._compress_previous_with_cache([], model) is None
+        assert _compress_previous_with_cache(cm, [], model) is None
         model.assert_not_called()
 
 
@@ -86,7 +113,7 @@ class TestCompressCurrentWithCache:
     def _make_actions_with_cache(self, n=2):
         cm = make_cm()
         actions = [ActionStep(step_number=i, model_output=f"output{i}", action_output=f"result{i}") for i in range(n)]
-        fp = ContextManager._action_fingerprint(actions[-1])
+        fp = action_fingerprint(actions[-1])
         cm._current_summary_cache = CurrentSummaryCache("existing step summary", n, fp)
         return cm, actions
 
@@ -94,18 +121,18 @@ class TestCompressCurrentWithCache:
         cm, actions = self._make_actions_with_cache(n=2)
         model = make_model()
         task = TaskStep(task="current task")
-        result = cm._compress_current_with_cache(task, actions, model)
+        result = _compress_current_with_cache(cm, task, actions, model)
         assert result == "existing step summary"
         model.assert_not_called()
 
     def test_current_incremental_calls_llm(self):
         cm = make_cm()
         actions = [ActionStep(step_number=i, model_output=f"output{i}", action_output=f"result{i}") for i in range(3)]
-        fp = ContextManager._action_fingerprint(actions[1])
+        fp = action_fingerprint(actions[1])
         cm._current_summary_cache = CurrentSummaryCache("old step summary", 2, fp)
         model = make_model('{"task_overview": "incremental step summary"}')
         task = TaskStep(task="task")
-        result = cm._compress_current_with_cache(task, actions, model)
+        result = _compress_current_with_cache(cm, task, actions, model)
         assert "incremental step" in result
         assert "old step" not in result
         assert cm._current_summary_cache.end_steps == 3
@@ -116,7 +143,7 @@ class TestCompressCurrentWithCache:
         actions = [ActionStep(step_number=i, model_output=f"output{i}", action_output=f"result{i}") for i in range(2)]
         model = make_model('{"task_overview": "fresh step summary"}')
         task = TaskStep(task="task")
-        cm._compress_current_with_cache(task, actions, model)
+        _compress_current_with_cache(cm, task, actions, model)
         assert cm._current_summary_cache is not None
         assert cm._current_summary_cache.end_steps == 2
 
@@ -124,21 +151,21 @@ class TestCompressCurrentWithCache:
         cm = make_cm()
         actions = [ActionStep(step_number=1, model_output="output", action_output="result")]
         model = make_model('{"task_overview": "summary"}')
-        result = cm._compress_current_with_cache(None, actions, model)
+        result = _compress_current_with_cache(cm, None, actions, model)
         assert result is not None
 
     def test_current_empty_actions_returns_none(self):
         cm = make_cm()
         model = make_model()
-        assert cm._compress_current_with_cache(TaskStep(task="t"), [], model) is None
+        assert _compress_current_with_cache(cm, TaskStep(task="t"), [], model) is None
         model.assert_not_called()
 
     def test_current_incremental_updates_anchor_fingerprint(self):
         cm = make_cm()
         actions = [ActionStep(step_number=i, model_output=f"o{i}", action_output=f"r{i}") for i in range(3)]
-        fp_old = ContextManager._action_fingerprint(actions[1])
+        fp_old = action_fingerprint(actions[1])
         cm._current_summary_cache = CurrentSummaryCache("old summary", 2, fp_old)
         model = make_model('{"task_overview": "new summary"}')
-        cm._compress_current_with_cache(TaskStep(task="t"), actions, model)
-        fp_new = ContextManager._action_fingerprint(actions[2])
+        _compress_current_with_cache(cm, TaskStep(task="t"), actions, model)
+        fp_new = action_fingerprint(actions[2])
         assert cm._current_summary_cache.anchor_fingerprint == fp_new
