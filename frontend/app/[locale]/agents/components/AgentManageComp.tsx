@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { App, Row, Col, Flex, Tooltip, Badge, Divider } from "antd";
-import { FileInput, Plus, X } from "lucide-react";
+import { FileInput, Plus, X, Sparkles } from "lucide-react";
 
 import AgentList from "./agentManage/AgentList";
 
@@ -17,6 +17,8 @@ import {
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import { startNl2AgentSession } from "@/services/nl2agentService";
+import { useRouter, useParams } from "next/navigation";
 
 
 export default function AgentManageComp() {
@@ -36,6 +38,24 @@ export default function AgentManageComp() {
 
   // Always resolve tenant from auth on the agent dev page (matches published_list; avoids stale/wrong tenant_id query params)
   const { agents: agentList, isLoading: loading, refetch } = useAgentList("");
+
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale || "en";
+
+  // Start NL2AGENT conversational builder session, then navigate to chat
+  const handleStartAgentBuilder = async () => {
+    try {
+      const res = await startNl2AgentSession();
+      if (res?.agent_id != null) {
+        sessionStorage.setItem("selectedAgentId", String(res.agent_id));
+        router.push(`/${locale}/chat`);
+      }
+    } catch (error) {
+      log.error("Failed to start NL2AGENT session:", error);
+      message.error(t("subAgentPool.message.agentBuilderStartFailed"));
+    }
+  };
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = async () => {
@@ -157,6 +177,36 @@ export default function AgentManageComp() {
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
                       {t("subAgentPool.description.importAgent")}
+                    </div>
+                  </Flex>
+                </Flex>
+              </div>
+            </Tooltip>
+          </Col>
+
+          <Col xs={24} sm={12}>
+            <Tooltip title={t("subAgentPool.tooltip.agentBuilder")}>
+              <div
+                className="rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-purple-50 hover:shadow-sm"
+                onClick={() => void handleStartAgentBuilder()}
+              >
+                <Flex align="center" gap={12} className="text-purple-600">
+                  <Flex
+                    align="center"
+                    justify="center"
+                    className="w-8 h-8 rounded-full bg-purple-100 flex-shrink-0"
+                  >
+                    <Sparkles
+                      className="w-4 h-4 text-purple-600"
+                      aria-hidden="true"
+                    />
+                  </Flex>
+                  <Flex vertical style={{ flex: 1 }}>
+                    <div className="font-medium text-sm">
+                      {t("subAgentPool.button.agentBuilder")}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {t("subAgentPool.description.agentBuilder")}
                     </div>
                   </Flex>
                 </Flex>

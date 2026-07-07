@@ -3,9 +3,24 @@
 import { useTranslation } from "react-i18next";
 import { App, Flex, Button, Badge, Dropdown, Tooltip, Col, Row, Modal, Spin, Tag, theme } from "antd";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, FileInput, Settings, ChevronDown, Bot, Copy, Network, FileOutput, Trash2, Globe, GitBranch, History } from "lucide-react";
+import {
+  Plus,
+  FileInput,
+  Settings,
+  ChevronDown,
+  Bot,
+  Copy,
+  Network,
+  FileOutput,
+  Trash2,
+  Globe,
+  GitBranch,
+  History,
+  Sparkles,
+} from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
@@ -33,6 +48,7 @@ import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { startNl2AgentSession } from "@/services/nl2agentService";
 
 interface AgentSelectorHeaderProps {
   onOpenVersionManage: () => void;
@@ -47,6 +63,9 @@ export default function AgentSelectorHeader({
 }: AgentSelectorHeaderProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale || "en";
   const queryClient = useQueryClient();
   const checkUnsavedChanges = useSaveGuard();
   const confirm = useConfirmModal();
@@ -78,6 +97,7 @@ export default function AgentSelectorHeader({
 
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [agentBuilderLoading, setAgentBuilderLoading] = useState(false);
 
   // Mutations
   const updateAgentMutation = useMutation({
@@ -177,6 +197,28 @@ export default function AgentSelectorHeader({
     };
 
     fileInput.click();
+  };
+
+  // Start NL2AGENT conversational builder session, then navigate to chat.
+  const handleStartAgentBuilder = async () => {
+    if (currentAgentId !== null || isCreatingMode) {
+      const canSwitch = await checkUnsavedChanges.saveWithModal();
+      if (!canSwitch) return;
+    }
+
+    setAgentBuilderLoading(true);
+    try {
+      const res = await startNl2AgentSession();
+      if (res?.agent_id != null) {
+        sessionStorage.setItem("selectedAgentId", String(res.agent_id));
+        router.push(`/${locale}/chat`);
+      }
+    } catch (error) {
+      log.error("Failed to start NL2AGENT session:", error);
+      message.error(t("subAgentPool.message.agentBuilderStartFailed"));
+    } finally {
+      setAgentBuilderLoading(false);
+    }
   };
 
   // Handle view call relationship
@@ -683,6 +725,21 @@ export default function AgentSelectorHeader({
                 <FileInput className="w-4 h-4" />
                 <span>{t("agentConfig.button.import")}</span>
               </Button>
+              <Tooltip title={t("subAgentPool.tooltip.agentBuilder")}>
+                <Button
+                  size="middle"
+                  onClick={() => void handleStartAgentBuilder()}
+                  loading={agentBuilderLoading}
+                  icon={
+                    !agentBuilderLoading ? (
+                      <Sparkles className="w-4 h-4" />
+                    ) : undefined
+                  }
+                  className="flex items-center gap-1 !border-purple-200 !text-purple-600 hover:!border-purple-400 hover:!text-purple-700 hover:!bg-purple-50"
+                >
+                  <span>{t("subAgentPool.button.agentBuilder")}</span>
+                </Button>
+              </Tooltip>
             </Flex>
 
             <Button
