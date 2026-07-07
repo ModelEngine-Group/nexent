@@ -2932,6 +2932,79 @@ async def test_list_all_agent_info_impl_disabled_agents_filtered(
 @patch("backend.services.agent_service.get_user_tenant_by_user_id")
 @patch("backend.services.agent_service.query_group_ids_by_user")
 @patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_hides_nl2agent_internal_agents_by_default(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that NL2AGENT runner and drafts are hidden unless explicitly requested."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "customer_agent",
+            "display_name": "Customer Agent",
+            "description": "Visible agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "draft_abcdef12",
+            "display_name": "Draft Agent",
+            "description": "NL2AGENT draft",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 2,
+        },
+        {
+            "agent_id": 3,
+            "name": "nl2agent",
+            "display_name": "NL2AGENT",
+            "description": "Internal runner",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 3,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(
+        tenant_id="test_tenant", user_id="admin_user"
+    )
+
+    assert [agent["name"] for agent in result] == ["customer_agent"]
+
+    result_with_internal = await list_all_agent_info_impl(
+        tenant_id="test_tenant", user_id="admin_user", include_drafts=True
+    )
+
+    assert [agent["name"] for agent in result_with_internal] == [
+        "customer_agent",
+        "draft_abcdef12",
+        "nl2agent",
+    ]
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_group_query_error_handled(
     mock_query_agents,
     mock_query_groups,
@@ -13532,7 +13605,6 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
 
     assert result["should_resume"] is True
     assert result["resume_from_unit_index"] == 0
-
 
 
 
