@@ -59,7 +59,7 @@ show_help() {
     echo "  --components LIST       用于镜像选择的部署组件"
     echo "  --image-source SOURCE   general、mainland 或 local-latest"
     echo "  --registry-profile NAME 兼容旧参数，映射到 --image-source general|mainland"
-    echo "  --config FILE           包含组件和镜像源的部署配置"
+    echo "  --config                进入交互式部署配置界面"
     echo "  --dry-run               只展示执行计划，不执行实际操作"
     echo "  --help                  显示帮助信息"
     echo ""
@@ -90,7 +90,7 @@ show_help() {
   echo "  --components LIST       Deployment components for image selection"
   echo "  --image-source SOURCE   general, mainland, or local-latest"
   echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
-  echo "  --config FILE           Deployment config with components and image source"
+  echo "  --config                Open the interactive deployment configuration"
   echo "  --dry-run               Show execution plan without actual operations"
   echo "  --help                  Show this help message"
   echo ""
@@ -133,11 +133,11 @@ parse_args() {
         DRY_RUN="true"
         shift
         ;;
-      --components|--image-source|--registry-profile|--app-version|--monitoring-provider|--port-policy|--config|--local-config)
+      --components|--image-source|--registry-profile|--app-version|--monitoring-provider|--port-policy|--local-config)
         COMMON_ARGS+=("$1" "$2")
         shift 2
         ;;
-      --use-local-config|--reconfigure)
+      --config|--use-local-config|--reconfigure)
         COMMON_ARGS+=("$1")
         shift
         ;;
@@ -554,6 +554,106 @@ LOADSCRIPT
   echo "✅ Created: $load_script"
 }
 
+create_offline_deploy_entrypoint() {
+  local deploy_script="$OUTPUT_DIR/deploy.sh"
+
+  cat > "$deploy_script" << 'DEPLOYSCRIPT'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOYMENT_COMMON="$SCRIPT_DIR/deploy/common/common.sh"
+
+if [ -f "$DEPLOYMENT_COMMON" ]; then
+  # shellcheck source=/dev/null
+  source "$DEPLOYMENT_COMMON"
+fi
+[ -n "${DEPLOYMENT_LANGUAGE:-}" ] || DEPLOYMENT_LANGUAGE="en"
+
+usage() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    cat <<'USAGE'
+用法：
+  bash deploy.sh [--load-images] [--config] docker [Docker 部署选项]
+  bash deploy.sh [--load-images] [--config] k8s [K8s 部署选项]
+
+此离线包入口默认复用保存配置或内置默认值部署，不进入交互界面。
+添加 --config 可进入交互式部署配置界面。
+实现：deploy/deploy.sh
+
+选项：
+  --load-images    部署前从 ./images 加载 Docker 镜像 tar 文件。
+                   默认关闭。
+  --config         进入交互式部署配置界面。
+USAGE
+    return
+  fi
+
+  cat <<'USAGE'
+Usage:
+  bash deploy.sh [--load-images] [--config] docker [docker deploy options]
+  bash deploy.sh [--load-images] [--config] k8s [k8s deploy options]
+
+This offline entrypoint deploys with saved configuration or built-in defaults by default.
+Add --config to open the interactive deployment configuration.
+Implementation: deploy/deploy.sh
+
+Options:
+  --load-images    Load Docker image tar files from ./images before deploying.
+                   Defaults to off.
+  --config         Open the interactive deployment configuration.
+USAGE
+}
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] || [ $# -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+LOAD_IMAGES="false"
+DEPLOY_CONFIG_MODE="defaults"
+FORWARD_ARGS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --load-images)
+      LOAD_IMAGES="true"
+      shift
+      ;;
+    --config)
+      DEPLOY_CONFIG_MODE="tui"
+      shift
+      ;;
+    *)
+      FORWARD_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ "${#FORWARD_ARGS[@]}" -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+if [ "$LOAD_IMAGES" = "true" ]; then
+  LOAD_SCRIPT="$SCRIPT_DIR/load-images.sh"
+  if [ ! -f "$LOAD_SCRIPT" ]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：--load-images 需要 $LOAD_SCRIPT" >&2
+    else
+      echo "Error: --load-images requires $LOAD_SCRIPT" >&2
+    fi
+    exit 1
+  fi
+  bash "$LOAD_SCRIPT"
+fi
+
+NEXENT_DEPLOY_CONFIG_MODE="$DEPLOY_CONFIG_MODE" exec bash "$SCRIPT_DIR/deploy/deploy.sh" "${FORWARD_ARGS[@]}"
+DEPLOYSCRIPT
+}
+
 copy_deployment_bundle() {
   echo ""
   echo "========================================"
@@ -589,6 +689,7 @@ copy_deployment_bundle() {
     k8s) rm -rf "$OUTPUT_DIR/deploy/docker" ;;
   esac
 
+  create_offline_deploy_entrypoint
   find "$OUTPUT_DIR" -name '.git' -type d -prune -exec rm -rf {} + 2>/dev/null || true
   chmod +x "$OUTPUT_DIR/deploy.sh" "$OUTPUT_DIR/uninstall.sh" "$OUTPUT_DIR/load-images.sh" 2>/dev/null || true
   find "$OUTPUT_DIR/deploy" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true

@@ -176,6 +176,36 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
+offline_help="$(DEPLOYMENT_LANG=en bash "$latest_package_dir/deploy.sh" --help)"
+echo "$offline_help" | grep -q "deploys with saved configuration or built-in defaults" || fail "offline deploy help should explain default non-interactive mode"
+
+cat > "$latest_package_dir/load-images.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
+SH
+chmod +x "$latest_package_dir/load-images.sh"
+cat > "$latest_package_dir/deploy/deploy.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
+SH
+chmod +x "$latest_package_dir/deploy/deploy.sh"
+
+offline_deploy_log="$TMP_DIR/offline-deploy-wrapper.log"
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh should default to non-interactive defaults mode"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --config --foo bar
+grep -q '^deploy:tui:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and consume the flag"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --load-images docker --foo bar
+first_line="$(sed -n '1p' "$offline_deploy_log")"
+second_line="$(sed -n '2p' "$offline_deploy_log")"
+[ "$first_line" = "load-images" ] || fail "offline deploy.sh --load-images should load images before deploy"
+[ "$second_line" = "deploy:defaults:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
+
 [ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
 ! grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should not be pulled"

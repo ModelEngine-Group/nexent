@@ -15,8 +15,8 @@ usage() {
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     cat <<'USAGE'
 用法：
-  bash deploy.sh [--load-images] docker [Docker 部署选项]
-  bash deploy.sh [--load-images] k8s [K8s 部署选项]
+  bash deploy.sh [--load-images] [--config] docker [Docker 部署选项]
+  bash deploy.sh [--load-images] [--config] k8s [K8s 部署选项]
 
 此根入口只转发到目标专用部署脚本。
 实现：deploy/deploy.sh
@@ -24,14 +24,15 @@ usage() {
 选项：
   --load-images    部署前从 ./images 加载 Docker 镜像 tar 文件。
                    默认关闭。
+  --config         进入交互式部署配置界面。
 USAGE
     return
   fi
 
   cat <<'USAGE'
 Usage:
-  bash deploy.sh [--load-images] docker [docker deploy options]
-  bash deploy.sh [--load-images] k8s [k8s deploy options]
+  bash deploy.sh [--load-images] [--config] docker [docker deploy options]
+  bash deploy.sh [--load-images] [--config] k8s [k8s deploy options]
 
 This root entrypoint only forwards to the target-specific deploy script.
 Implementation: deploy/deploy.sh
@@ -39,6 +40,7 @@ Implementation: deploy/deploy.sh
 Options:
   --load-images    Load Docker image tar files from ./images before deploying.
                    Defaults to off.
+  --config         Open the interactive deployment configuration.
 USAGE
 }
 

@@ -184,10 +184,25 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 
 FULL_CONFIG="$TMP_DIR/full.yaml"
 write_full_config "$FULL_CONFIG"
-deployment_prepare_config --config "$FULL_CONFIG"
+NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --app-version latest
 deployment_apply_image_source
 assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be applied"
 assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
+
+NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$TMP_DIR/missing.yaml" --app-version latest
+assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
+assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "defaults mode should use built-in image source when local config is absent"
+
+if deployment_prepare_config --config "$FULL_CONFIG" --app-version latest 2>"$TMP_DIR/config-tui-error.log"; then
+  echo "FAIL: --config should request interactive TUI and fail without a TTY"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/config-tui-error.log")" "Interactive deployment configuration requires a TTY." "--config should no longer load a config file path"
+if NEXENT_DEPLOY_CONFIG_MODE=tui deployment_prepare_config --app-version latest 2>"$TMP_DIR/mode-tui-error.log"; then
+  echo "FAIL: NEXENT_DEPLOY_CONFIG_MODE=tui should fail without a TTY"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/mode-tui-error.log")" "Interactive deployment configuration requires a TTY." "tui mode should require a TTY"
 
 DEPLOYMENT_VERSION="speed"
 DEPLOYMENT_MODE="production"
@@ -422,11 +437,16 @@ assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SITE_URL' "supabase secret che
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    web:" "k8s deploy should not render component-named env checksum keys"
 
 DEPLOYMENT_VERSION="speed"
-deployment_prepare_config --local-config "$FULL_CONFIG" --reconfigure --image-source general --app-version latest
-assert_eq "false" "$DEPLOYMENT_CONFIG_FILE_LOADED" "reconfigure should use local config as defaults without skipping configuration"
-assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "reconfigure defaults should include saved components"
-assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "reconfigure defaults should include saved port policy"
-assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit image source should override reconfigure defaults"
+if deployment_prepare_config --local-config "$FULL_CONFIG" --reconfigure --image-source general --app-version latest 2>"$TMP_DIR/reconfigure-tui-error.log"; then
+  echo "FAIL: --reconfigure should request interactive TUI and fail without a TTY"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/reconfigure-tui-error.log")" "Interactive deployment configuration requires a TTY." "--reconfigure should require a TTY"
+NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --image-source general --app-version latest
+assert_eq "true" "$DEPLOYMENT_CONFIG_FILE_LOADED" "defaults mode should load local config without entering TUI"
+assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "defaults mode should include saved components"
+assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "defaults mode should include saved port policy"
+assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit image source should override defaults mode local config"
 unset DEPLOYMENT_VERSION
 
 HELM_VALUES="$TMP_DIR/generated-values.yaml"

@@ -17,7 +17,6 @@ DEPLOYMENT_IMAGE_SOURCE=""
 DEPLOYMENT_REGISTRY_PROFILE=""
 DEPLOYMENT_APP_VERSION=""
 DEPLOYMENT_MONITORING_PROVIDER=""
-DEPLOYMENT_CONFIG_PATH=""
 DEPLOYMENT_USE_LOCAL_CONFIG="false"
 DEPLOYMENT_RECONFIGURE="false"
 DEPLOYMENT_LOCAL_CONFIG_PATH=""
@@ -696,7 +695,6 @@ deployment_init_defaults() {
   DEPLOYMENT_REGISTRY_PROFILE="$DEPLOYMENT_REGISTRY_PROFILE_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
   DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
-  DEPLOYMENT_CONFIG_PATH=""
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
   DEPLOYMENT_RECONFIGURE="false"
   DEPLOYMENT_ROTATE_SECRETS="false"
@@ -755,8 +753,8 @@ deployment_parse_common_args() {
         shift
         ;;
       --config)
-        DEPLOYMENT_CONFIG_PATH="$2"
-        shift 2
+        DEPLOYMENT_RECONFIGURE="true"
+        shift
         ;;
       --local-config)
         DEPLOYMENT_LOCAL_CONFIG_PATH="$2"
@@ -1397,6 +1395,16 @@ deployment_tui_previous_step() {
 deployment_run_tui_configuration() {
   local step=0
   local result=0
+  local config_mode="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
+  if [ "$config_mode" = "defaults" ]; then
+    return 0
+  fi
+
+  if { [ "$config_mode" = "tui" ] || [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; } && [ ! -t 0 ]; then
+    deployment_error "Interactive deployment configuration requires a TTY."
+    return 1
+  fi
 
   if ! deployment_tui_step_should_run "$step"; then
     step="$(deployment_tui_next_step "$step")"
@@ -1445,13 +1453,24 @@ deployment_run_tui_configuration() {
 }
 
 deployment_maybe_select_local_config() {
+  local config_mode="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
+  case "$config_mode" in
+    ""|defaults|tui)
+      ;;
+    *)
+      deployment_error "Unsupported NEXENT_DEPLOY_CONFIG_MODE: $config_mode. Use defaults or tui."
+      return 1
+      ;;
+  esac
+
   [ -f "$DEPLOYMENT_LOCAL_CONFIG_PATH" ] || return 0
-  if [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
-    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
+  if [ "$config_mode" = "defaults" ] || [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
     return 0
   fi
-  if [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
-    DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
+  if [ "$config_mode" = "tui" ] || [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
     return 0
   fi
   [ -t 0 ] || return 0
@@ -1464,7 +1483,7 @@ deployment_maybe_select_local_config() {
   local input
   read -r -p "$(deployment_prompt prompt.choose_1_2)" input
   if [ "${input:-1}" = "1" ]; then
-    DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
   else
     DEPLOYMENT_RECONFIGURE="true"
     deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
@@ -2033,6 +2052,8 @@ deployment_prepare_config() {
       --registry-profile) DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT="true" ;;
       --app-version|--version) DEPLOYMENT_APP_VERSION_EXPLICIT="true" ;;
       --monitoring-provider) DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT="true" ;;
+      --config) DEPLOYMENT_RECONFIGURE="true" ;;
+      --reconfigure) DEPLOYMENT_RECONFIGURE="true" ;;
       --rotate-secrets) DEPLOYMENT_ROTATE_SECRETS="true" ;;
       --refresh-es-key) DEPLOYMENT_REFRESH_ES_KEY="true" ;;
     esac
@@ -2042,10 +2063,7 @@ deployment_prepare_config() {
   if [ -n "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ]; then
     DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_REGISTRY_PROFILE"
   fi
-  deployment_maybe_select_local_config
-  if [ -n "$DEPLOYMENT_CONFIG_PATH" ] && [ "$DEPLOYMENT_RECONFIGURE" != "true" ]; then
-    deployment_load_config_file "$DEPLOYMENT_CONFIG_PATH" || return 1
-  fi
+  deployment_maybe_select_local_config || return 1
   deployment_apply_legacy_inputs
   deployment_parse_common_args "$@"
   if [ -n "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ]; then
