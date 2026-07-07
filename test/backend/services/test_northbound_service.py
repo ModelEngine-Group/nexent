@@ -41,6 +41,16 @@ sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
 consts_const_mod.ASSET_OWNER_TENANT_ID = "asset-owner-tenant"
+consts_const_mod.MULTI_REPLICA_MODE = False
+consts_const_mod.RUNTIME_STATE_REDIS_URL = ""
+consts_const_mod.RUNTIME_STREAM_TTL_SECONDS = 86400
+consts_const_mod.RUNTIME_STREAM_MAX_LEN = 10000
+consts_const_mod.RUNTIME_RUN_TTL_SECONDS = 86400
+consts_const_mod.RUNTIME_CANCEL_TTL_SECONDS = 86400
+consts_const_mod.RUNTIME_COMPLETED_TTL_SECONDS = 300
+consts_const_mod.NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = 600
+consts_const_mod.NORTHBOUND_RATE_LIMIT_ENABLED = True
+consts_const_mod.NORTHBOUND_RATE_LIMIT_PER_MINUTE = 120
 sys.modules["consts.const"] = consts_const_mod
 
 # Mock consts package
@@ -92,6 +102,15 @@ sys.modules["nexent.multi_modal.utils"] = nexent_utils_mod
 # Mock services modules
 services_package = types.ModuleType("services")
 
+# Mock runtime_state_service
+runtime_state_service_mod = types.ModuleType("services.runtime_state_service")
+runtime_state_service_mod.runtime_state_service = MagicMock()
+runtime_state_service_mod.runtime_state_service.enabled = False
+runtime_state_service_mod.runtime_state_service.acquire_idempotency_async = AsyncMock(return_value=True)
+runtime_state_service_mod.runtime_state_service.release_idempotency_async = AsyncMock()
+runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = AsyncMock(return_value=1)
+sys.modules["services.runtime_state_service"] = runtime_state_service_mod
+
 # Mock agent_service
 agent_service_mod = types.ModuleType("services.agent_service")
 agent_service_mod.run_agent_stream = AsyncMock()
@@ -128,6 +147,7 @@ services_package.agent_service = agent_service_mod
 services_package.agent_version_service = agent_version_mod
 services_package.conversation_management_service = conv_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
+services_package.runtime_state_service = runtime_state_service_mod
 sys.modules["services"] = services_package
 
 # Mock consts.model - create stub classes
@@ -301,6 +321,21 @@ class TestIdempotencyStartEnd:
         # Should be able to start again with same key
         await ns.idempotency_start("expire-key", ttl_seconds=1)
 
+    @pytest.mark.asyncio
+    async def test_idempotency_uses_redis_when_enabled(self):
+        """Test Redis-backed idempotency path."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.acquire_idempotency_async = AsyncMock(return_value=True)
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            await ns.idempotency_start("redis-key")
+
+        fake_runtime_state.acquire_idempotency_async.assert_awaited_once_with(
+            "redis-key",
+            ns.NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
+        )
+
 
 class TestRateLimiting:
     """Tests for rate limiting functionality."""
@@ -322,10 +357,25 @@ class TestRateLimiting:
     async def test_rate_limit_exceeded_raises(self):
         """Test that exceeding limit raises LimitExceededError."""
         # Fill up to limit
-        for _ in range(ns._RATE_LIMIT_PER_MINUTE):
+        for _ in range(ns.NORTHBOUND_RATE_LIMIT_PER_MINUTE):
             await ns.check_and_consume_rate_limit("tenant-limit")
         with pytest.raises(LimitExceededError):
             await ns.check_and_consume_rate_limit("tenant-limit")
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_uses_redis_when_enabled(self):
+        """Test Redis-backed rate limit path."""
+        fake_runtime_state = MagicMock()
+        fake_runtime_state.enabled = True
+        fake_runtime_state.consume_rate_limit_async = AsyncMock(return_value=1)
+
+        with patch.object(ns, "runtime_state_service", fake_runtime_state):
+            await ns.check_and_consume_rate_limit("tenant-redis")
+
+        fake_runtime_state.consume_rate_limit_async.assert_awaited_once_with(
+            tenant_id="tenant-redis",
+            limit_per_minute=ns.NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+        )
 
     @pytest.mark.asyncio
     async def test_rate_limit_different_tenants(self):

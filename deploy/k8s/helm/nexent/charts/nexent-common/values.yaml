@@ -38,6 +38,20 @@ config:
     url: "redis://nexent-redis:6379/0"
     backendUrl: "redis://nexent-redis:6379/1"
     port: "6379"
+  multiReplica:
+    enabled: "false"
+  runtimeState:
+    redisUrl: ""
+    streamTtlSeconds: "86400"
+    streamMaxLen: "10000"
+    runTtlSeconds: "86400"
+    cancelTtlSeconds: "86400"
+    completedTtlSeconds: "300"
+    cancelPollIntervalSeconds: "1.0"
+  northbound:
+    idempotencyTtlSeconds: "600"
+    rateLimitEnabled: "true"
+    rateLimitPerMinute: "120"
   minio:
     endpoint: "http://nexent-minio:9000"
     region: "cn-north-1"
