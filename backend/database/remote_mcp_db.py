@@ -19,7 +19,7 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
     """
     allowed_fields = {
         'mcp_name', 'mcp_server', 'status', 'container_id', 'container_port',
-        'authorization_token', 'custom_headers', 'source', 'version', 'market_id',
+        'authorization_token', 'custom_headers', 'source', 'market_id',
         'registry_json', 'config_json', 'enabled', 'tags', 'description'
     }
 
@@ -138,7 +138,6 @@ def update_mcp_record_manage_fields_by_id(
     authorization_token: str | None,
     custom_headers: Dict[str, Any] | None,
     config_json: Dict[str, Any] | None,
-    version: str | None,
     market_id: int | None,
 ) -> None:
     with get_db_session() as session:
@@ -156,7 +155,6 @@ def update_mcp_record_manage_fields_by_id(
                 "authorization_token": authorization_token,
                 "custom_headers": custom_headers,
                 "config_json": config_json,
-                "version": version,
                 "market_id": market_id,
                 "updated_by": user_id,
             }

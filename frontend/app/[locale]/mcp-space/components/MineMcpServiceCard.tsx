@@ -2,6 +2,7 @@ import { Button, Dropdown, Tag, type MenuProps } from "antd";
 import { ArrowDownFromLine, Clock, Cloud, Edit3, Hourglass, MoreHorizontal, Power, RefreshCw, Trash2, Upload, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpSource } from "@/const/mcpTools";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import {
   formatRegistryDate,
@@ -54,6 +55,7 @@ export default function MineMcpServiceCard({
   onRefreshToolCount,
 }: MineMcpServiceCardProps) {
   const { t } = useTranslation("common");
+  const { user } = useAuthorizationContext();
   const service = item.service;
   const tags = service.tags || [];
   const deploymentType = resolveDeploymentType(service);
@@ -239,7 +241,7 @@ export default function MineMcpServiceCard({
       <p className="mt-2 text-xs text-slate-400">
         <User className="mr-0.5 inline h-3 w-3" />
         {isLocal && localService?.source === McpSource.LOCAL && !authorName
-          ? t("mcpTools.mine.createdByMe")
+          ? user?.email || "-"
           : authorName || "-"}
       </p>
 

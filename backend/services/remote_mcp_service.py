@@ -316,7 +316,6 @@ async def add_mcp_service(
     container_config: dict | None,
     registry_json: dict | None,
     config_json: dict | None = None,
-    version: str | None = None,
     market_id: int | None = None,
     enabled: bool = False,
     container_id: str | None = None,
@@ -337,7 +336,6 @@ async def add_mcp_service(
         container_config: Container configuration
         registry_json: Registry metadata JSON
         config_json: MCP configuration JSON (e.g. OpenAPI spec for API-type MCP)
-        version: MCP version
         market_id: Linked market record ID
         enabled: Whether the MCP is enabled
         container_id: Docker container ID
@@ -388,7 +386,6 @@ async def add_mcp_service(
             "custom_headers": custom_headers,
             "source": source,
             "registry_json": resolved_registry_json,
-            "version": version,
             "market_id": market_id,
             "enabled": enabled,
             "tags": tags,
@@ -575,7 +572,6 @@ def update_mcp_service(
     custom_headers: dict | None,
     config_json: dict | None,
     tags: list | None,
-    version: str | None,
     market_id: int | None,
 ) -> None:
     """Update an MCP service record by ID.
@@ -591,7 +587,6 @@ def update_mcp_service(
         custom_headers: Custom HTTP headers
         config_json: MCP configuration JSON
         tags: MCP tags
-        version: MCP version
         market_id: Linked market record ID
 
     Raises:
@@ -604,7 +599,6 @@ def update_mcp_service(
     current_config_json = current_record.get("config_json") if isinstance(current_record.get("config_json"), dict) else None
     next_config_json = config_json if config_json is not None else current_config_json
 
-    next_version = version if version is not None else current_record.get("version")
     next_market_id = market_id if market_id is not None else current_record.get("market_id")
 
     update_mcp_record_manage_fields_by_id(
@@ -619,7 +613,6 @@ def update_mcp_service(
         custom_headers=custom_headers,
         config_json=next_config_json,
         tags=tags,
-        version=next_version,
         market_id=next_market_id,
     )
 
