@@ -9,6 +9,7 @@ from utils.prompt_template_utils import (
     get_document_summary_prompt_template,
     get_cluster_summary_reduce_prompt_template,
     get_skill_creation_simple_prompt_template,
+    get_nl2agent_system_prompt_template,
     get_prompt_template,
 )
 
@@ -149,6 +150,36 @@ class TestPromptTemplateUtils:
         assert mock_file.call_args[1]['encoding'] == 'utf-8'
         mock_yaml_load.assert_called_once()
         assert result == {"test": "data"}
+
+    def test_get_nl2agent_system_prompt_template_zh(self, mocker):
+        """Test get_nl2agent_system_prompt_template for Chinese."""
+        mock_yaml_load = mocker.patch('yaml.safe_load')
+        mock_file = mocker.patch('builtins.open', mock_open(read_data='system_prompt: "builder"'))
+
+        mock_yaml_load.return_value = {"system_prompt": "builder"}
+        result = get_nl2agent_system_prompt_template(language='zh')
+
+        call_args = mock_file.call_args[0]
+        assert 'backend/prompts/nl2agent_system_prompt_zh.yaml' in call_args[0].replace('\\', '/')
+        assert call_args[1] == 'r'
+        assert mock_file.call_args[1]['encoding'] == 'utf-8'
+        mock_yaml_load.assert_called_once()
+        assert result == {"system_prompt": "builder"}
+
+    def test_get_nl2agent_system_prompt_template_en(self, mocker):
+        """Test get_nl2agent_system_prompt_template for English."""
+        mock_yaml_load = mocker.patch('yaml.safe_load')
+        mock_file = mocker.patch('builtins.open', mock_open(read_data='system_prompt: "builder"'))
+
+        mock_yaml_load.return_value = {"system_prompt": "builder"}
+        result = get_nl2agent_system_prompt_template(language='en')
+
+        call_args = mock_file.call_args[0]
+        assert 'backend/prompts/nl2agent_system_prompt_en.yaml' in call_args[0].replace('\\', '/')
+        assert call_args[1] == 'r'
+        assert mock_file.call_args[1]['encoding'] == 'utf-8'
+        mock_yaml_load.assert_called_once()
+        assert result == {"system_prompt": "builder"}
 
 
 class TestGetPromptTemplate:

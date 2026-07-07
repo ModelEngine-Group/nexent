@@ -729,6 +729,14 @@ async def create_agent_config(
     duty_prompt = agent_info.get("duty_prompt", "")
     constraint_prompt = agent_info.get("constraint_prompt", "")
     few_shots_prompt = agent_info.get("few_shots_prompt", "")
+    is_nl2agent_agent = agent_info.get("name") == "nl2agent"
+    nl2agent_system_prompt = (
+        _load_nl2agent_system_prompt(language) if is_nl2agent_agent else None
+    )
+    if nl2agent_system_prompt:
+        duty_prompt = nl2agent_system_prompt
+        constraint_prompt = ""
+        few_shots_prompt = ""
 
     # Get template content (use manager template if has any sub-agents)
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
@@ -894,13 +902,12 @@ async def create_agent_config(
     }
     system_prompt = ""
     if not enable_context_manager:
-        system_prompt = Template(
-            prompt_template["system_prompt"], undefined=StrictUndefined
-        ).render(render_kwargs)
-    if agent_info.get("name") == "nl2agent":
-        nl2agent_system_prompt = _load_nl2agent_system_prompt(language)
         if nl2agent_system_prompt:
             system_prompt = nl2agent_system_prompt
+        else:
+            system_prompt = Template(
+                prompt_template["system_prompt"], undefined=StrictUndefined
+            ).render(render_kwargs)
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None
