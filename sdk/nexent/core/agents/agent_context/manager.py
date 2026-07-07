@@ -73,6 +73,7 @@ def _ensure_handlers_registered():
         _handlers_registered = True
 
 
+
 class ContextManager:
     def __init__(self, config: Optional[ContextManagerConfig] = None, max_steps: Optional[int] = None):
         self.config = config or ContextManagerConfig()
@@ -928,6 +929,7 @@ class ContextManager:
                 })
 
             return items
+
 
     def build_system_prompt(self, token_budget: Optional[int] = None) -> List:
         return self.build_context_messages(token_budget)
