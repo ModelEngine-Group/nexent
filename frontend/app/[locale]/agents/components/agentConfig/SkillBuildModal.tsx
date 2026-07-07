@@ -59,6 +59,7 @@ import {
   SkillFilesAccessDeniedError,
   type SkillFileNode,
 } from "@/services/agentConfigService";
+import type { MyEditableSkillItem } from "@/types/skillRepository";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
 
@@ -68,15 +69,18 @@ interface SkillBuildModalProps {
   isOpen: boolean;
   onCancel: () => void;
   onSuccess: () => void;
+  editingSkill?: MyEditableSkillItem | null;
 }
 
 export default function SkillBuildModal({
   isOpen,
   onCancel,
   onSuccess,
+  editingSkill,
 }: SkillBuildModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
+  const isEditMode = Boolean(editingSkill);
   const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
@@ -272,6 +276,10 @@ export default function SkillBuildModal({
   // Detect create/update mode when skill name changes
   useEffect(() => {
     const nameValue = interactiveSkillName.trim();
+    if (isEditMode) {
+      setIsCreateMode(false);
+      return;
+    }
     if (nameValue) {
       const matchedSkill = findSkillByName(nameValue, allSkills);
       setIsCreateMode(!matchedSkill);
@@ -284,7 +292,7 @@ export default function SkillBuildModal({
       setIsCreateMode(true);
       setSelectedSkillName("");
     }
-  }, [interactiveSkillName, allSkills, form]);
+  }, [interactiveSkillName, allSkills, form, isEditMode]);
 
   // Detect create/update mode when extracted skill name changes (upload tab)
   const [uploadIsCreateMode, setUploadIsCreateMode] = useState(true);
@@ -357,6 +365,24 @@ export default function SkillBuildModal({
 
     await loadSkillFiles(skillName);
   };
+
+  useEffect(() => {
+    if (!isOpen || !editingSkill) return;
+    const skillName = editingSkill.name?.trim() || "";
+    setActiveTab("interactive");
+    setSelectedSkillName(skillName);
+    setInteractiveSkillName(skillName);
+    setIsCreateMode(false);
+    form.setFieldsValue({
+      name: skillName,
+      description: editingSkill.description || "",
+      source: editingSkill.source || "custom",
+      tags: editingSkill.tags || [],
+    });
+    if (skillName && allSkills.length > 0) {
+      void loadSkillData(skillName);
+    }
+  }, [isOpen, editingSkill?.skill_id, allSkills.length]);
 
   const handleNameChange = (value: string) => {
     setInteractiveSkillName(value);
@@ -547,7 +573,7 @@ export default function SkillBuildModal({
         const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
         const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
 
-        if (name) {
+        if (name && !isEditMode) {
           form.setFieldsValue({ name });
           setInteractiveSkillName(name);
           const existingSkill = allSkills.find(
@@ -666,7 +692,7 @@ export default function SkillBuildModal({
                 const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
                 const tags = Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === "string") : [];
 
-                if (name) {
+                if (name && !isEditMode) {
                   form.setFieldsValue({ name });
                   setInteractiveSkillName(name);
                 }
@@ -753,7 +779,7 @@ export default function SkillBuildModal({
               setSkillTabs(finalTabs);
 
               // Update form fields from parsed skill info
-              if (skillInfo && skillInfo.name) {
+              if (skillInfo && skillInfo.name && !isEditMode) {
                 form.setFieldsValue({ name: skillInfo.name });
                 setInteractiveSkillName(skillInfo.name);
                 const existingSkill = allSkills.find(
@@ -848,6 +874,7 @@ export default function SkillBuildModal({
   }, [chatMessages]);
 
   const modalBodyFrame = "min(92vh, 760px)";
+  const editingSkillName = editingSkill?.name?.trim() || interactiveSkillName.trim();
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
@@ -1005,12 +1032,25 @@ export default function SkillBuildModal({
               <Bot size={16} />
             </div>
             <div className="max-w-[88%] rounded-2xl bg-blue-50 px-5 py-3 text-sm leading-6 text-slate-700">
-              <p>
-                你好！我是 Skill 构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill 的结构和代码。
-              </p>
-              <p className="mt-3">
-                例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」
-              </p>
+              {isEditMode ? (
+                <>
+                  <p>
+                    你好！我是 Skill 构建助手，当前正在编辑「{editingSkillName}」。
+                  </p>
+                  <p className="mt-3">
+                    你可以告诉我需要优化或调整的地方，我会帮你更新对应的文件内容。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    你好！我是 Skill 构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill 的结构和代码。
+                  </p>
+                  <p className="mt-3">
+                    例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」
+                  </p>
+                </>
+              )}
             </div>
           </div>
         ) : null}
@@ -1063,7 +1103,7 @@ export default function SkillBuildModal({
                   }
                 }
               }}
-              placeholder="描述你想要的技能..."
+              placeholder={isEditMode ? "告诉我需要如何优化这个技能..." : "描述你想要的技能..."}
               disabled={isChatLoading || isStreaming}
               autoSize={{ minRows: 1, maxRows: 3 }}
               className="resize-none rounded-xl"
@@ -1486,8 +1526,12 @@ export default function SkillBuildModal({
       ),
     },
   ];
+  const visibleTabItems = isEditMode ? [tabItems[0]] : tabItems;
 
   const getConfirmButtonText = () => {
+    if (isEditMode) {
+      return "保存更改";
+    }
     if (activeTab === "interactive") {
       return isCreateMode
         ? t("skillManagement.mode.create")
@@ -1503,10 +1547,10 @@ export default function SkillBuildModal({
       title={
         <div>
           <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {t("skillManagement.title")}
+            {isEditMode ? "编辑技能" : t("skillManagement.title")}
           </div>
           <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
-            创建、编辑并发布你的 Skill。
+            {isEditMode ? `正在编辑：${editingSkillName}` : "创建、编辑并发布你的 Skill。"}
           </div>
         </div>
       }
@@ -1530,7 +1574,7 @@ export default function SkillBuildModal({
         >
           {t("common.cancel")}
         </Button>,
-        activeTab === "interactive" ? (
+        isEditMode || activeTab === "interactive" ? (
           <Button
             key="submit"
             type="primary"
@@ -1553,12 +1597,16 @@ export default function SkillBuildModal({
       ]}
     >
       <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={tabItems}
+        activeKey={isEditMode ? "interactive" : activeTab}
+        onChange={(key) => {
+          if (!isEditMode) {
+            setActiveTab(key);
+          }
+        }}
+        items={visibleTabItems}
         className="skill-build-tabs shrink-0"
       />
-      {activeTab === "interactive" ? (
+      {isEditMode || activeTab === "interactive" ? (
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {renderChatPanel()}
           {renderDraftPanel()}

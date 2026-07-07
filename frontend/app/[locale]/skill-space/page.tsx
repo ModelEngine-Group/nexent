@@ -21,6 +21,7 @@ import { ApiError } from "@/services/api";
 import { deleteSkillByName } from "@/services/skillService";
 import { cn } from "@/lib/utils";
 import type {
+  MyEditableSkillItem,
   MySkillRepositoryInfoItem,
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
@@ -65,6 +66,7 @@ export default function SkillRepositoryPage() {
     null
   );
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(null);
 
   const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
   const isMineTab = tab === SkillRepositoryTab.MINE;
@@ -364,8 +366,14 @@ export default function SkillRepositoryPage() {
                   total={mineTotal}
                   onPageChange={setMinePage}
                   onRetry={() => refetchMine()}
-                  onCreateSkill={() => setSkillBuildOpen(true)}
-                  onEditSkill={() => setSkillBuildOpen(true)}
+                  onCreateSkill={() => {
+                    setEditingSkill(null);
+                    setSkillBuildOpen(true);
+                  }}
+                  onEditSkill={(skill) => {
+                    setEditingSkill(skill);
+                    setSkillBuildOpen(true);
+                  }}
                   onDeleteSkill={async (skill) => {
                     const name = skill.name?.trim();
                     if (!name) {
@@ -435,9 +443,14 @@ export default function SkillRepositoryPage() {
       />
       <SkillBuildModal
         isOpen={skillBuildOpen}
-        onCancel={() => setSkillBuildOpen(false)}
+        editingSkill={editingSkill}
+        onCancel={() => {
+          setSkillBuildOpen(false);
+          setEditingSkill(null);
+        }}
         onSuccess={() => {
           refetchMine().catch(() => {});
+          setEditingSkill(null);
         }}
       />
     </ConfigProvider>
