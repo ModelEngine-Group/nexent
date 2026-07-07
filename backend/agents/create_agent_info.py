@@ -667,6 +667,7 @@ async def create_agent_config(
     override_model_id: int | None = None,
     request_requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    draft_agent_id: Optional[int] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -705,6 +706,7 @@ async def create_agent_config(
         user_id,
         version_no=version_no,
         tool_params=normalized_tool_params,
+        draft_agent_id=draft_agent_id,
     )
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
@@ -925,13 +927,11 @@ async def create_agent_config(
     # Inject session context metadata into NL2AGENT builtin tools. The 6 NL2AGENT
     # builtin tools read agent_id/user_id/tenant_id/model_id/language from
     # ToolConfig.metadata at runtime (see sdk/nexent/core/tools/nl2agent/_context.py).
-    # The draft agent_id is NOT the NL2AGENT agent's own id; it is the target agent
-    # being built. For the NL2AGENT default agent, the draft agent_id is passed via
-    # the request context (agent_id here is the NL2AGENT agent itself). The actual
-    # draft target agent_id is stored in the conversation metadata by the frontend
-    # after POST /nl2agent/session/start. For tool runtime, we pass the NL2AGENT's
-    # own agent_id here as a fallback; the frontend also sets the draft agent_id via
-    # the apply-local-resources/finalize endpoints which take agent_id from the URL.
+    # `agent_id` here is the NL2AGENT default agent running the chat. The draft
+    # target agent_id is passed separately via `draft_agent_id` (populated from
+    # AgentRequest.draft_agent_id by create_agent_run_info). Tools that operate
+    # on the draft (apply_local_resources, finalize_agent, search_local_resources)
+    # read `draft_agent_id` from metadata and act on that target.
     _NL2AGENT_TOOL_CLASS_NAMES = {
         "NL2AgentSearchLocalResourcesTool",
         "NL2AgentSearchWebMcpsTool",
@@ -948,6 +948,7 @@ async def create_agent_config(
                 "tenant_id": tenant_id,
                 "model_id": model_id_to_use,
                 "language": language,
+                "draft_agent_id": draft_agent_id,
             }
 
     # Managed context assembly starts from raw sources.  No legacy rendered
@@ -1015,6 +1016,7 @@ async def create_tool_config_list(
     user_id,
     version_no: int = 0,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    draft_agent_id: Optional[int] = None,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -1418,6 +1420,7 @@ async def create_agent_run_info(
     override_model_id: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    draft_agent_id: Optional[int] = None,
 ):
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -1451,6 +1454,8 @@ async def create_agent_run_info(
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
         create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
+    if draft_agent_id is not None:
+        create_config_kwargs["draft_agent_id"] = draft_agent_id
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
