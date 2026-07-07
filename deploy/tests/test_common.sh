@@ -139,6 +139,11 @@ assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components shou
 assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "image source should come from CLI"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-web" "application services should include web"
+DOCKER_SUMMARY="$(deployment_print_summary docker)"
+assert_contains "$DOCKER_SUMMARY" "Deployment components: infrastructure,application" "docker summary should include selected components"
+assert_contains "$DOCKER_SUMMARY" "Port policy: production" "docker summary should include selected port policy"
+assert_contains "$DOCKER_SUMMARY" "Image source: general" "docker summary should include selected image source"
+assert_contains "$DOCKER_SUMMARY" "Docker services: " "docker summary should include selected services"
 if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
   echo "FAIL: application should not include data-process"
   exit 1
@@ -184,6 +189,15 @@ unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
 
 FULL_CONFIG="$TMP_DIR/full.yaml"
 write_full_config "$FULL_CONFIG"
+
+APP_VERSION="v2.2.2"
+NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG"
+assert_eq "v2.2.2" "$DEPLOYMENT_APP_VERSION" "local config appVersion should not override current VERSION"
+assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "local config should still load saved components while ignoring appVersion"
+NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --version v2.2.3
+assert_eq "v2.2.3" "$DEPLOYMENT_APP_VERSION" "explicit --version should override current VERSION"
+APP_VERSION="latest"
+
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --app-version latest
 deployment_apply_image_source
 assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be applied"
@@ -602,6 +616,10 @@ if grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY' "$LOCAL_CONFIG"; then
 fi
 if grep -q 'registryProfile' "$LOCAL_CONFIG"; then
   echo "FAIL: persisted local config should not contain registryProfile"
+  exit 1
+fi
+if grep -q 'appVersion' "$LOCAL_CONFIG"; then
+  echo "FAIL: persisted local config should not contain appVersion"
   exit 1
 fi
 

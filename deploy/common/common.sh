@@ -23,7 +23,6 @@ DEPLOYMENT_LOCAL_CONFIG_PATH=""
 DEPLOYMENT_SELECTED_DOCKER_SERVICES=""
 DEPLOYMENT_SELECTED_HELM_CHARTS=""
 DEPLOYMENT_LOADED_SCHEMA_VERSION=""
-DEPLOYMENT_LOADED_APP_VERSION=""
 DEPLOYMENT_CONFIG_FILE_LOADED="false"
 DEPLOYMENT_DOCKER_PORTS=""
 DEPLOYMENT_ROOT_ENV=""
@@ -109,12 +108,12 @@ deployment_i18n_format() {
       env.created_from_docker) printf '✅ 已从 docker/.env 创建 deploy/env/.env' ;;
       env.created_from_example) printf '✅ 已从 deploy/env/.env.example 创建 deploy/env/.env' ;;
       env.root_missing) printf '未找到 deploy/env/.env，且没有可用的 docker/.env 或 deploy/env/.env.example 模板' ;;
-      validation.local_config_schema) printf '本地配置 schemaVersion %s 与 %s 不兼容。请使用 --reconfigure 重新配置。' ;;
-      validation.unknown_component) printf '未知部署组件：%s' ;;
-      validation.unsupported_port_policy) printf '不支持的端口策略：%s。可用值：development 或 production。' ;;
-      validation.unsupported_image_source) printf '不支持的镜像源：%s。可用值：general、mainland 或 local-latest。' ;;
-      validation.unsupported_registry_profile) printf '不支持的 registry profile：%s' ;;
-      validation.unsupported_monitoring_provider) printf '不支持的监控 provider：%s' ;;
+      validation.local_config_schema) printf '%s' '本地配置 schemaVersion %s 与 %s 不兼容。请使用 --reconfigure 重新配置。' ;;
+      validation.unknown_component) printf '%s' '未知部署组件：%s' ;;
+      validation.unsupported_port_policy) printf '%s' '不支持的端口策略：%s。可用值：development 或 production。' ;;
+      validation.unsupported_image_source) printf '%s' '不支持的镜像源：%s。可用值：general、mainland 或 local-latest。' ;;
+      validation.unsupported_registry_profile) printf '%s' '不支持的 registry profile：%s' ;;
+      validation.unsupported_monitoring_provider) printf '%s' '不支持的监控 provider：%s' ;;
       tui.cancelled) printf '已取消部署配置。' ;;
       tui.components.title) printf '选择部署组件' ;;
       tui.components.subtitle) printf '选择要安装的服务组。infrastructure 为必选项，不能禁用。' ;;
@@ -148,19 +147,19 @@ deployment_i18n_format() {
       image_build.detail.mcp) printf 'MCP 代理镜像' ;;
       image_build.detail.terminal) printf 'OpenSSH 终端工具镜像' ;;
       image_build.detail.docs) printf 'VitePress 文档站点' ;;
-      local_config.found) printf '发现已有部署配置：%s' ;;
+      local_config.found) printf '%s' '发现已有部署配置：%s' ;;
       local_config.choose) printf '请选择如何处理已保存的部署选项：' ;;
       local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源和监控 provider。' ;;
       local_config.reconfigure) printf '  2) 重新配置 - 将已保存的值作为默认值，并显示菜单供修改。' ;;
       local_config.reconfigure_hint) printf '     启用/禁用监控、切换 provider 或调整部署范围时请选择此项。' ;;
       prompt.choose_1_2) printf '请选择 [1/2]（默认：1）：' ;;
-      summary.components) printf '部署组件：%s' ;;
-      summary.port_policy) printf '端口策略：%s' ;;
-      summary.image_source) printf '镜像源：%s' ;;
-      summary.monitoring_provider) printf '监控 provider：%s' ;;
-      summary.docker_services) printf 'Docker 服务：%s' ;;
-      summary.docker_ports) printf 'Docker 暴露端口：%s' ;;
-      summary.helm_charts) printf 'Helm charts：%s' ;;
+      summary.components) printf '%s' '部署组件：%s' ;;
+      summary.port_policy) printf '%s' '端口策略：%s' ;;
+      summary.image_source) printf '%s' '镜像源：%s' ;;
+      summary.monitoring_provider) printf '%s' '监控 provider：%s' ;;
+      summary.docker_services) printf '%s' 'Docker 服务：%s' ;;
+      summary.docker_ports) printf '%s' 'Docker 暴露端口：%s' ;;
+      summary.helm_charts) printf '%s' 'Helm charts：%s' ;;
       *) return 1 ;;
     esac
   else
@@ -169,12 +168,12 @@ deployment_i18n_format() {
       env.created_from_docker) printf '✅ Created deploy/env/.env from docker/.env' ;;
       env.created_from_example) printf '✅ Created deploy/env/.env from deploy/env/.env.example' ;;
       env.root_missing) printf 'deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available' ;;
-      validation.local_config_schema) printf 'Local config schemaVersion %s is incompatible with %s. Re-run with --reconfigure.' ;;
-      validation.unknown_component) printf 'Unknown deployment component: %s' ;;
-      validation.unsupported_port_policy) printf 'Unsupported port policy: %s. Use development or production.' ;;
-      validation.unsupported_image_source) printf 'Unsupported image source: %s. Use general, mainland, or local-latest.' ;;
-      validation.unsupported_registry_profile) printf 'Unsupported registry profile: %s' ;;
-      validation.unsupported_monitoring_provider) printf 'Unsupported monitoring provider: %s' ;;
+      validation.local_config_schema) printf '%s' 'Local config schemaVersion %s is incompatible with %s. Re-run with --reconfigure.' ;;
+      validation.unknown_component) printf '%s' 'Unknown deployment component: %s' ;;
+      validation.unsupported_port_policy) printf '%s' 'Unsupported port policy: %s. Use development or production.' ;;
+      validation.unsupported_image_source) printf '%s' 'Unsupported image source: %s. Use general, mainland, or local-latest.' ;;
+      validation.unsupported_registry_profile) printf '%s' 'Unsupported registry profile: %s' ;;
+      validation.unsupported_monitoring_provider) printf '%s' 'Unsupported monitoring provider: %s' ;;
       tui.cancelled) printf 'Deployment configuration cancelled.' ;;
       tui.components.title) printf 'Select deployment components' ;;
       tui.components.subtitle) printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.' ;;
@@ -208,19 +207,19 @@ deployment_i18n_format() {
       image_build.detail.mcp) printf 'MCP proxy image' ;;
       image_build.detail.terminal) printf 'OpenSSH terminal tool image' ;;
       image_build.detail.docs) printf 'VitePress documentation site' ;;
-      local_config.found) printf 'Existing deployment config found: %s' ;;
+      local_config.found) printf '%s' 'Existing deployment config found: %s' ;;
       local_config.choose) printf 'Choose how to handle saved deployment options:' ;;
       local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, and monitoring provider.' ;;
       local_config.reconfigure) printf '  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them.' ;;
       local_config.reconfigure_hint) printf '     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope.' ;;
       prompt.choose_1_2) printf 'Choose [1/2] (default: 1): ' ;;
-      summary.components) printf 'Deployment components: %s' ;;
-      summary.port_policy) printf 'Port policy: %s' ;;
-      summary.image_source) printf 'Image source: %s' ;;
-      summary.monitoring_provider) printf 'Monitoring provider: %s' ;;
-      summary.docker_services) printf 'Docker services: %s' ;;
-      summary.docker_ports) printf 'Docker published ports: %s' ;;
-      summary.helm_charts) printf 'Helm charts: %s' ;;
+      summary.components) printf '%s' 'Deployment components: %s' ;;
+      summary.port_policy) printf '%s' 'Port policy: %s' ;;
+      summary.image_source) printf '%s' 'Image source: %s' ;;
+      summary.monitoring_provider) printf '%s' 'Monitoring provider: %s' ;;
+      summary.docker_services) printf '%s' 'Docker services: %s' ;;
+      summary.docker_ports) printf '%s' 'Docker published ports: %s' ;;
+      summary.helm_charts) printf '%s' 'Helm charts: %s' ;;
       *) return 1 ;;
     esac
   fi
@@ -701,7 +700,6 @@ deployment_init_defaults() {
   DEPLOYMENT_REFRESH_ES_KEY="false"
   DEPLOYMENT_LOCAL_CONFIG_PATH="$(deployment_default_local_config_path)"
   DEPLOYMENT_LOADED_SCHEMA_VERSION=""
-  DEPLOYMENT_LOADED_APP_VERSION=""
   DEPLOYMENT_CONFIG_FILE_LOADED="false"
   DEPLOYMENT_CONFIG_VALUES_LOADED="false"
   DEPLOYMENT_DOCKER_PORTS=""
@@ -818,11 +816,6 @@ deployment_load_config_file() {
           ;;
         registryProfile)
           DEPLOYMENT_REGISTRY_PROFILE="$value"
-          loaded_config_value="true"
-          ;;
-        appVersion)
-          DEPLOYMENT_APP_VERSION="$value"
-          [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_APP_VERSION="$value"
           loaded_config_value="true"
           ;;
         monitoringProvider)
@@ -1998,7 +1991,6 @@ deployment_persist_local_config() {
   mkdir -p "$(dirname "$output_file")"
   {
     printf 'schemaVersion: "%s"\n' "$DEPLOYMENT_SCHEMA_VERSION"
-    printf 'appVersion: "%s"\n' "$DEPLOYMENT_APP_VERSION"
     printf 'components:\n'
     local old_ifs="$IFS"
     IFS=','
