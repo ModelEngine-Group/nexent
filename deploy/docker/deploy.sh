@@ -20,6 +20,7 @@ ORIGINAL_ARGS=("$@")
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
+MONITORING_ENV_FILE="$DEPLOY_ROOT/env/monitoring.env"
 SQL_DIR="$DEPLOY_ROOT/sql"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then
@@ -57,28 +58,63 @@ ROOT_DIR_PARAM=""
 # Suppress the orphan warning
 export COMPOSE_IGNORE_ORPHANS=True
 
+print_docker_deploy_usage() {
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "用法：$0 [选项]"
+    echo ""
+    echo "部署选项："
+    echo "  --components LIST          要部署的组件列表"
+    echo "  --port-policy POLICY       development 或 production"
+    echo "  --image-source SOURCE      general、mainland 或 local-latest"
+    echo "  --registry-profile NAME    兼容旧参数，映射为 general/mainland 镜像源"
+    echo "  --monitoring-provider NAME 选中 monitoring 组件时使用的监控 provider"
+    echo "  --version VERSION          指定应用版本（未设置时自动检测）"
+    echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
+    echo "  --use-local-config         复用保存的本地部署配置并跳过交互界面"
+    echo "  --reconfigure              使用保存配置作为默认值并进入交互式配置界面"
+    echo "  --rotate-secrets           强制轮换部署密钥"
+    echo "  --refresh-es-key           强制重新创建 ELASTICSEARCH_API_KEY"
+    echo "  --config                   进入交互式部署配置界面"
+    echo "  --root-dir PATH            Docker 数据和运行文件根目录"
+    echo "  --help, -h                 显示帮助信息"
+    echo ""
+    echo "卸载：bash uninstall.sh"
+    return
+  fi
+
+  echo "Usage: $0 [options]"
+  echo ""
+  echo "Deploy options:"
+  echo "  --components LIST          Components to deploy"
+  echo "  --port-policy POLICY       development or production"
+  echo "  --image-source SOURCE      general, mainland, or local-latest"
+  echo "  --registry-profile NAME    Legacy alias for image source general/mainland"
+  echo "  --monitoring-provider NAME Monitoring provider when monitoring is selected"
+  echo "  --version VERSION          Specify app version (auto-detected if not set)"
+  echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
+  echo "  --use-local-config         Reuse saved local deployment config and skip TUI"
+  echo "  --reconfigure              Open TUI using saved local config as defaults"
+  echo "  --rotate-secrets           Force rotation of deployment secrets"
+  echo "  --refresh-es-key           Force recreation of ELASTICSEARCH_API_KEY"
+  echo "  --config                   Open the interactive deployment configuration"
+  echo "  --root-dir PATH            Root directory for Docker data and runtime files"
+  echo "  --help, -h                 Show this help message"
+  echo ""
+  echo "Uninstall: bash uninstall.sh"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     delete|delete-all|--delete-volumes|--remove-volumes|--keep-volumes)
-      echo "❌ Docker uninstall has moved to uninstall.sh. Use: bash uninstall.sh"
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ Docker 卸载已迁移到 uninstall.sh。请使用：bash uninstall.sh"
+      else
+        echo "❌ Docker uninstall has moved to uninstall.sh. Use: bash uninstall.sh"
+      fi
       exit 1
       ;;
     --help|-h)
-      echo "Usage: $0 [options]"
-      echo ""
-      echo "Deploy options:"
-      echo "  --components LIST"
-      echo "  --port-policy development|production"
-      echo "  --image-source general|mainland|local-latest"
-      echo "  --version VERSION"
-      echo "  --use-local-config"
-      echo "  --reconfigure"
-      echo "  --rotate-secrets"
-      echo "  --refresh-es-key"
-      echo "  --config PATH"
-      echo "  --root-dir PATH"
-      echo ""
-      echo "Uninstall: bash uninstall.sh"
+      print_docker_deploy_usage
       exit 0
       ;;
     --mode)
@@ -656,10 +692,107 @@ disable_dashboard() {
   update_env_var "DISABLE_CELERY_FLOWER" "true"
 }
 
+docker_monitoring_active_services() {
+  printf '%s\n' otel-collector
+
+  case "$DEPLOYMENT_MONITORING_PROVIDER" in
+    phoenix)
+      printf '%s\n' phoenix
+      ;;
+    grafana)
+      printf '%s\n' tempo grafana
+      ;;
+    zipkin)
+      printf '%s\n' zipkin
+      ;;
+    langfuse)
+      printf '%s\n' langfuse-worker langfuse-web langfuse-clickhouse langfuse-minio langfuse-redis langfuse-postgres
+      ;;
+  esac
+}
+
+docker_monitoring_profile_services() {
+  printf '%s\n' \
+    phoenix \
+    tempo \
+    grafana \
+    zipkin \
+    langfuse-worker \
+    langfuse-web \
+    langfuse-clickhouse \
+    langfuse-minio \
+    langfuse-redis \
+    langfuse-postgres
+}
+
+docker_monitoring_container_names() {
+  printf '%s\n' \
+    nexent-otel-collector \
+    nexent-phoenix \
+    nexent-tempo \
+    nexent-grafana \
+    nexent-zipkin \
+    nexent-langfuse-worker \
+    nexent-langfuse-web \
+    nexent-langfuse-clickhouse \
+    nexent-langfuse-minio \
+    nexent-langfuse-redis \
+    nexent-langfuse-postgres
+}
+
+docker_monitoring_containers_exist() {
+  command -v docker >/dev/null 2>&1 || return 1
+
+  local container
+  while IFS= read -r container; do
+    [ -n "$container" ] || continue
+    if docker container inspect "$container" >/dev/null 2>&1; then
+      return 0
+    fi
+  done < <(docker_monitoring_container_names)
+
+  return 1
+}
+
+stop_monitoring_services() {
+  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+
+  [ -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ] || return 0
+  docker_monitoring_containers_exist || return 0
+
+  echo "🔭 Stopping monitoring services..."
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" down --remove-orphans; then
+    echo "   ❌ ERROR Failed to stop monitoring services"
+    return 1
+  fi
+}
+
+cleanup_stale_monitoring_services() {
+  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local active_services
+  local service
+  local stale_services=()
+
+  active_services="$(docker_monitoring_active_services)"
+  while IFS= read -r service; do
+    [ -n "$service" ] || continue
+    if ! printf '%s\n' "$active_services" | grep -Fxq "$service"; then
+      stale_services+=("$service")
+    fi
+  done < <(docker_monitoring_profile_services)
+
+  [ "${#stale_services[@]}" -gt 0 ] || return 0
+
+  echo "   🧹 Removing stale monitoring provider services..."
+  ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" stop "${stale_services[@]}" >/dev/null 2>&1 || true
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${all_profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" rm -f "${stale_services[@]}"; then
+    echo "   ❌ ERROR Failed to remove stale monitoring services"
+    return 1
+  fi
+}
+
 sync_monitoring_env_vars() {
-  update_env_var "ENABLE_TELEMETRY" "$(deployment_monitoring_enabled)"
-  update_env_var "MONITORING_PROVIDER" "$DEPLOYMENT_MONITORING_PROVIDER"
-  update_env_var "MONITORING_DASHBOARD_URL" "$(deployment_monitoring_dashboard_url docker)"
+  deployment_prepare_monitoring_env docker || return 1
 }
 
 pull_mcp_image() {
@@ -976,10 +1109,18 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || return 0
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    stop_monitoring_services || return 1
+    return 0
+  fi
 
   if [ ! -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ]; then
     echo "   ❌ ERROR Monitoring compose file not found: $COMPOSE_DIR/docker-compose-monitoring.yml"
+    return 1
+  fi
+
+  if [ "$DEPLOYMENT_MONITORING_PROVIDER" = "langsmith" ] && [ -z "${LANGSMITH_API_KEY:-}" ]; then
+    echo "   ❌ ERROR LANGSMITH_API_KEY is required when --monitoring-provider langsmith is selected"
     return 1
   fi
 
@@ -991,7 +1132,8 @@ deploy_monitoring() {
   esac
 
   echo "🔭 Starting monitoring services..."
-  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
+  cleanup_stale_monitoring_services || return 1
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" --env-file "$MONITORING_ENV_FILE" "${profile_args[@]}" -f "$COMPOSE_DIR/docker-compose-monitoring.yml" up -d; then
     echo "   ❌ ERROR Failed to start monitoring services"
     return 1
   fi
@@ -1428,54 +1570,137 @@ choose_image_env() {
 
 main_deploy() {
   # Main deployment function
-  echo  "🚀 Nexent Deployment Script 🚀"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🚀 Nexent 部署脚本 🚀"
+  else
+    echo "🚀 Nexent Deployment Script 🚀"
+  fi
   echo ""
   echo "--------------------------------"
   echo ""
 
   APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
-    echo "❌ Failed to get app version, please check VERSION or backend/consts/const.py"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 获取应用版本失败，请检查 VERSION 或 backend/consts/const.py"
+    else
+      echo "❌ Failed to get app version, please check VERSION or backend/consts/const.py"
+    fi
     exit 1
   fi
-  echo "🌐 App version: $APP_VERSION"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🌐 应用版本：$APP_VERSION"
+  else
+    echo "🌐 App version: $APP_VERSION"
+  fi
 
   # Select deployment components, port policy and image source via shared config.
-  apply_deployment_common_config || { echo "❌ Deployment configuration failed"; exit 1; }
+  apply_deployment_common_config || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 部署配置失败"
+    else
+      echo "❌ Deployment configuration failed"
+    fi
+    exit 1
+  }
 
   deployment_persist_local_config
 
   # Check only the ports published by the selected deployment configuration.
   check_deployment_ports
 
-  configure_root_dir_from_env || { echo "❌ ROOT_DIR configuration failed"; exit 1; }
+  configure_root_dir_from_env || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ ROOT_DIR 配置失败"
+    else
+      echo "❌ ROOT_DIR configuration failed"
+    fi
+    exit 1
+  }
 
   # Set NEXENT_MCP_DOCKER_IMAGE in .env file
   if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
     update_env_var "NEXENT_MCP_DOCKER_IMAGE" "${NEXENT_MCP_DOCKER_IMAGE}"
-    echo "🔧 NEXENT_MCP_DOCKER_IMAGE set to: ${NEXENT_MCP_DOCKER_IMAGE}"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "🔧 NEXENT_MCP_DOCKER_IMAGE 已设置为：${NEXENT_MCP_DOCKER_IMAGE}"
+    else
+      echo "🔧 NEXENT_MCP_DOCKER_IMAGE set to: ${NEXENT_MCP_DOCKER_IMAGE}"
+    fi
   else
-    echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "⚠️  环境中未找到 NEXENT_MCP_DOCKER_IMAGE，将使用代码默认值"
+    else
+      echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
+    fi
   fi
 
   # Add permission
-  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
-  update_sql_files_checksum || { echo "ERROR SQL checksum update failed"; exit 1; }
-  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
+  prepare_directory_and_data || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 权限设置失败"
+    else
+      echo "❌ Permission setup failed"
+    fi
+    exit 1
+  }
+  update_sql_files_checksum || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "ERROR SQL checksum 更新失败"
+    else
+      echo "ERROR SQL checksum update failed"
+    fi
+    exit 1
+  }
+  generate_minio_ak_sk || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ MinIO key 生成失败"
+    else
+      echo "❌ MinIO key generation failed"
+    fi
+    exit 1
+  }
 
 
   # Generate Supabase secrets
-  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 1; }
+  generate_supabase_keys || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ Supabase secrets 生成失败"
+    else
+      echo "❌ Supabase secrets generation failed"
+    fi
+    exit 1
+  }
 
   # Deploy infrastructure services
-  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
+  deploy_infrastructure || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 基础设施部署失败"
+    else
+      echo "❌ Infrastructure deployment failed"
+    fi
+    exit 1
+  }
 
-  deploy_monitoring || { echo "❌ Monitoring deployment failed"; exit 1; }
+  deploy_monitoring || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 监控部署失败"
+    else
+      echo "❌ Monitoring deployment failed"
+    fi
+    exit 1
+  }
 
   stop_unselected_data_process_service
 
   # Generate Elasticsearch API key
-  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
+  generate_elasticsearch_api_key || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ Elasticsearch API key 生成失败"
+    else
+      echo "❌ Elasticsearch API key generation failed"
+    fi
+    exit 1
+  }
 
   echo ""
   echo "--------------------------------"
@@ -1483,17 +1708,38 @@ main_deploy() {
 
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
-    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
+    generate_env_for_infrastructure || {
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ 环境变量生成失败"
+      else
+        echo "❌ Environment generation failed"
+      fi
+      exit 1
+    }
 
     # Create default super admin user (only for full version)
     if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-      create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+      create_default_super_admin_user || {
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+          echo "❌ 默认超级管理员创建失败"
+        else
+          echo "❌ Default super admin user creation failed"
+        fi
+        exit 1
+      }
     fi
 
-    echo "🎉 Infrastructure deployment completed successfully!"
-    echo "     You can now start the core services manually using dev containers"
-    echo "     Environment file available at: $ROOT_ENV_FILE"
-    echo "💡 Use 'source deploy/env/.env' from the project root to load environment variables"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "🎉 基础设施部署完成！"
+      echo "     现在可以使用 dev containers 手动启动核心服务"
+      echo "     环境变量文件：$ROOT_ENV_FILE"
+      echo "💡 在项目根目录执行 'source deploy/env/.env' 可加载环境变量"
+    else
+      echo "🎉 Infrastructure deployment completed successfully!"
+      echo "     You can now start the core services manually using dev containers"
+      echo "     Environment file available at: $ROOT_ENV_FILE"
+      echo "💡 Use 'source deploy/env/.env' from the project root to load environment variables"
+    fi
 
     # Pull MCP image for later use
     pull_mcp_image
@@ -1504,16 +1750,34 @@ main_deploy() {
   fi
 
   # Start core services
-  deploy_core_services || { echo "❌ Core services deployment failed"; exit 1; }
+  deploy_core_services || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 核心服务部署失败"
+    else
+      echo "❌ Core services deployment failed"
+    fi
+    exit 1
+  }
 
-  echo "   ✅ Core services started successfully"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "   ✅ 核心服务启动成功"
+  else
+    echo "   ✅ Core services started successfully"
+  fi
   echo ""
   echo "--------------------------------"
   echo ""
 
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+    create_default_super_admin_user || {
+      if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "❌ 默认超级管理员创建失败"
+      else
+        echo "❌ Default super admin user creation failed"
+      fi
+      exit 1
+    }
   fi
 
   persist_deploy_options
@@ -1522,14 +1786,23 @@ main_deploy() {
   # Pull MCP image for later use
   pull_mcp_image
 
-  echo "🎉  Deployment completed successfully!"
-  echo "🌐  You can now access the application at http://localhost:3000"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🎉  部署完成！"
+    echo "🌐  现在可以访问应用：http://localhost:3000"
+  else
+    echo "🎉  Deployment completed successfully!"
+    echo "🌐  You can now access the application at http://localhost:3000"
+  fi
 }
 
 # get docker compose version
 version_info=$(get_compose_version)
 if [[ $version_info == "unknown" ]]; then
-    echo "Error: Docker Compose not found or version detection failed"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "错误：未找到 Docker Compose 或版本检测失败"
+    else
+        echo "Error: Docker Compose not found or version detection failed"
+    fi
     exit 1
 fi
 
@@ -1541,27 +1814,47 @@ version_number=$(echo "$version_info" | awk '{print $2}')
 docker_compose_command=""
 case $version_type in
     "v1")
-        echo "Detected Docker Compose V1, version: $version_number"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "检测到 Docker Compose V1，版本：$version_number"
+        else
+            echo "Detected Docker Compose V1, version: $version_number"
+        fi
         # The version 1.28.0 is the minimum requirement in Docker Compose v1 for default interpolation syntax.
         if [[ $version_number < "1.28.0" ]]; then
-            echo "Warning: V1 version is too old, consider upgrading to V2"
+            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                echo "警告：V1 版本过旧，建议升级到 V2"
+            else
+                echo "Warning: V1 version is too old, consider upgrading to V2"
+            fi
             exit 1
         fi
         docker_compose_command="docker-compose"
         ;;
     "v2")
-        echo "Detected Docker Compose V2, version: $version_number"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "检测到 Docker Compose V2，版本：$version_number"
+        else
+            echo "Detected Docker Compose V2, version: $version_number"
+        fi
         docker_compose_command="docker compose"
         ;;
     *)
-        echo "Error: Unknown docker compose version type."
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "错误：未知 Docker Compose 版本类型。"
+        else
+            echo "Error: Unknown docker compose version type."
+        fi
         exit 1
         ;;
 esac
 
 # Execute main deployment with error handling
 if ! main_deploy; then
-  echo "❌ Deployment failed. Please check the error messages above and try again."
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "❌ 部署失败。请检查上面的错误信息后重试。"
+  else
+    echo "❌ Deployment failed. Please check the error messages above and try again."
+  fi
   exit 1
 fi
 
