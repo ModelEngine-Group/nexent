@@ -899,12 +899,14 @@ export const conversationService = {
         presigned_url?: string;
         description?: string;
       }>;
-    agent_id?: number; // Add agent_id parameter
-    model_id?: number; // Optional model override
-    version_no?: number; // Optional version override
-    is_debug?: boolean; // Add debug mode parameter
-    is_resume?: boolean; // Add resume mode parameter for streaming recovery
-  }, signal?: AbortSignal) {
+      agent_id?: number; // Add agent_id parameter
+      model_id?: number; // Optional model override
+      version_no?: number; // Optional version override
+      is_debug?: boolean; // Add debug mode parameter
+      is_resume?: boolean; // Add resume mode parameter for streaming recovery
+    },
+    signal?: AbortSignal
+  ) {
     try {
       // Construct request parameters
       const requestParams: any = {
@@ -930,7 +932,7 @@ export const conversationService = {
       let url = API_ENDPOINTS.agent.run;
       const queryParams = new URLSearchParams();
       if (params.is_resume) {
-        queryParams.append('resume', 'true');
+        queryParams.append("resume", "true");
       }
       if (queryParams.toString()) {
         url = `${url}?${queryParams.toString()}`;
@@ -948,11 +950,11 @@ export const conversationService = {
       }
 
       // Check content-type to distinguish JSON response from SSE stream
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
         // JSON response (e.g., from resume mode when agent finished)
         const data = await response.json();
-        return { type: 'json', data };
+        return { type: "json", data };
       }
 
       return response.body.getReader();
