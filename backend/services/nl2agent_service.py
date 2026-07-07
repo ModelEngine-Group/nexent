@@ -22,6 +22,7 @@ from consts.model import ToolInstanceInfoRequest
 from database.agent_db import (
     create_agent,
     query_all_agent_info_by_tenant_id,
+    search_agent_id_by_agent_name,
     search_agent_info_by_agent_id,
     update_agent,
 )
@@ -67,7 +68,29 @@ async def start_session(
 
     The draft agent is created with version_no=0 (draft). Its name uses the
     `draft_<uuid8>` convention so it can be hidden from the main agent list.
+
+    Returns explicit IDs:
+        - ``nl2agent_agent_id``: the seeded default NL2AGENT agent that runs the chat.
+        - ``draft_agent_id``: the target draft agent being built.
+        - ``conversation_id``: the conversation created for this session.
+        - ``draft_name``: the draft agent's name (for display/debug).
     """
+    # Resolve the seeded NL2AGENT default agent. It is created at config_app
+    # startup via seed_nl2agent_default_agent(); querying by name keeps the
+    # contract explicit so callers never confuse the builder agent with the
+    # draft target.
+    try:
+        nl2agent_agent_id = search_agent_id_by_agent_name(
+            NL2AGENT_AGENT_NAME, tenant_id
+        )
+    except Exception as exc:
+        logger.error(
+            f"NL2AGENT default agent not seeded for tenant {tenant_id}: {exc}"
+        )
+        raise AgentRunException(
+            "NL2AGENT default agent is not seeded. Start the config app first."
+        ) from exc
+
     draft_name = f"{DRAFT_AGENT_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
     draft_display_name = "Draft Agent (NL2AGENT)"
 
@@ -86,8 +109,8 @@ async def start_session(
         logger.error(f"Failed to create draft agent for NL2AGENT session: {exc}")
         raise AgentRunException("Failed to create draft agent.") from exc
 
-    agent_id = created.get("agent_id")
-    if not agent_id:
+    draft_agent_id = created.get("agent_id")
+    if not draft_agent_id:
         raise AgentRunException("Draft agent creation returned no agent_id.")
 
     conversation_title = f"NL2AGENT - {draft_name}"
@@ -100,7 +123,8 @@ async def start_session(
         raise AgentRunException("Failed to create conversation.") from exc
 
     return {
-        "agent_id": agent_id,
+        "nl2agent_agent_id": nl2agent_agent_id,
+        "draft_agent_id": draft_agent_id,
         "conversation_id": conversation.get("conversation_id"),
         "draft_name": draft_name,
     }
