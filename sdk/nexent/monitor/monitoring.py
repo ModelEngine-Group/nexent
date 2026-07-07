@@ -1945,7 +1945,7 @@ def _dominant_capacity_source(field_sources: Any) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
         return None
-    for preferred in ("operator", "profile", "provider_candidate", "legacy", "unknown"):
+    for preferred in ("operator", "profile", "provider_candidate", "legacy", "default", "unknown"):
         if preferred in values:
             return preferred
     return str(values[0])

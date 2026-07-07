@@ -110,10 +110,16 @@ def _setup_stubs():
     sys.modules["smolagents.models"] = sa_mod
 
 _setup_stubs()
-# Do not execute the module here.  The import below runs after the full mock
-# graph is installed; importing it twice can initialise the real monitoring
-# stack during collection and exhaust local resources.
-OpenAIModel = None
+# Now that stubs are in place, attempt to execute the module so imports resolve to our stubs.
+# If this early import fails, clean up the partial module so the later, properly-patched import can run.
+try:
+    spec.loader.exec_module(openai_llm_module)
+    OpenAIModel = getattr(openai_llm_module, "OpenAIModel", None)
+except Exception:
+    # Remove any partially-imported module to avoid interfering with later imports
+    if MODULE_NAME in sys.modules:
+        del sys.modules[MODULE_NAME]
+    OpenAIModel = None
 
 
 def make_chunk(content, reasoning=None, role=None):

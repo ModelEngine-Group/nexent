@@ -17,7 +17,10 @@ import {
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button, message as antdMessage } from "antd";
-import { MarkdownRenderer, CodeBlock } from "@/components/common/markdownRenderer";
+import {
+  MarkdownRenderer,
+  CodeBlock,
+} from "@/components/common/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
   ChatMessageType,
@@ -335,6 +338,7 @@ type KnowledgeSiteInfo = {
   datamateFileId?: string;
   datamateBaseUrl?: string;
   objectName?: string;
+  downloadUrl?: string;
   canOpenWeb: boolean;
 };
 
@@ -380,9 +384,7 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) =>
       message.type === chatConfig.messageTypes.AGENT_NEW_RUN ||
       message.type === chatConfig.messageTypes.GENERATING_CODE ||
-      message.type === chatConfig.messageTypes.EXECUTING ||
-      message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
-      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+      message.type === chatConfig.messageTypes.EXECUTING,
     render: (message, _t) => (
       <div
         style={{
@@ -397,6 +399,25 @@ const messageHandlers: MessageHandler[] = [
         }}
       >
         <span>{message.content}</span>
+      </div>
+    ),
+  },
+
+  // Thinking types processor - render through MarkdownRenderer for proper formatting
+  {
+    canHandle: (message) =>
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+    render: (message, _t) => (
+      <div
+        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+      >
+        <MarkdownRenderer
+          content={convertToMarkdownCodeFences(message.content)}
+          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
+          showDiagramToggle={false}
+          enableMultimodal={false}
+        />
       </div>
     ),
   },
@@ -527,6 +548,7 @@ const messageHandlers: MessageHandler[] = [
             datamateFileId,
             datamateBaseUrl,
             objectName,
+            downloadUrl: result.download_url,
             canOpenWeb,
           };
         }
@@ -565,6 +587,22 @@ const messageHandlers: MessageHandler[] = [
               filename: site.filename || undefined,
             });
           } else {
+            if (site.downloadUrl) {
+              const link = document.createElement("a");
+              link.href = site.downloadUrl;
+              link.download = site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
+              antdMessage.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            }
+
             // Check if URL is a direct http/https URL that can be accessed directly
             // Exclude backend API endpoints (containing /api/file/download/)
             if (
@@ -972,7 +1010,8 @@ const messageHandlers: MessageHandler[] = [
           useDefaultIcon,
           isKnowledgeBase,
           filename,
-          canClick,
+          downloadUrl: result.download_url,
+          canClick: canClick || Boolean(result.download_url),
         };
       });
 
@@ -1033,7 +1072,12 @@ const messageHandlers: MessageHandler[] = [
                       : "none",
                   }}
                   onClick={() => {
-                    if (site.canClick && site.url) {
+                    if (site.downloadUrl) {
+                      const link = document.createElement("a");
+                      link.href = site.downloadUrl;
+                      link.download = site.filename || "download";
+                      link.click();
+                    } else if (site.canClick && site.url) {
                       window.open(site.url, "_blank", "noopener,noreferrer");
                     }
                   }}
@@ -1107,18 +1151,11 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) => message.type === "model_output",
     render: (message, _t) => (
       <div
-        style={{
-          fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-          fontSize: "0.875rem",
-          lineHeight: 1.5,
-          color: message.subType === "deep_thinking" ? "#6b7280" : "#1f2937",
-          fontWeight: 400,
-        }}
+        className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
       >
         <MarkdownRenderer
           content={convertToMarkdownCodeFences(message.content)}
-          className="task-message-content"
+          className={message.subType === "deep_thinking" ? "deep-thinking-content" : "task-message-content"}
           showDiagramToggle={false}
           enableMultimodal={false}
         />

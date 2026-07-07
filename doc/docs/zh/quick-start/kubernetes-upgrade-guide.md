@@ -28,15 +28,14 @@ git pull
 **zip 包等方式下载的代码**
 
 1. 需要去 GitHub 上重新下载一份最新代码，并解压缩。
-2. 将之前执行部署脚本目录下 `k8s/helm` 目录中的 `deploy.options` 文件拷贝到新代码目录的 `k8s/helm` 目录中。（如果不存在该文件则忽略此步骤）。
+2. 将之前部署目录 `deploy/k8s` 下的 `deploy.options` 文件拷贝到新代码目录的 `deploy/k8s` 目录中。（如果不存在该文件则忽略此步骤）。
 
 ## 🔄 步骤二：执行升级
 
-进入更新后代码目录的 `k8s/helm` 目录，执行部署脚本：
+在更新后的代码仓库根目录执行 Kubernetes 部署入口：
 
 ```bash
-cd deploy/k8s
-./deploy.sh
+bash deploy.sh k8s
 ```
 
 脚本会自动检测您之前保存的部署设置（组件组合、端口策略、镜像来源等）。如果 `deploy.options` 文件不存在，系统会提示您输入配置信息。
@@ -57,9 +56,9 @@ cd deploy/k8s
 
 ## 🗄️ 数据库迁移
 
-SQL 增量不再手动执行。Kubernetes 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动检查并执行 `deploy/sql/migrations/` 下的合并迁移文件，例如 `v1_merged_migrations.sql`、`v2.0_merged_migrations.sql`、`v2.1_merged_migrations.sql`、`v2.2_merged_migrations.sql`；其他后端服务只等待迁移记录达到目标状态。
+SQL 增量不再手动执行。Kubernetes 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端服务只等待迁移记录达到目标状态。部署脚本会将 `deploy/sql` 渲染到共享 SQL ConfigMap，并挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
 
-迁移脚本会按合并文件中的源片段写入 `nexent.schema_migrations`。如果历史记录缺失但业务表已存在，会通过每个片段的 probe 安全补齐 `baselined` 记录；无法判断时会失败退出。
+迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
 
 > 💡 提示
 > - 执行前建议先备份数据库：
@@ -99,6 +98,5 @@ kubectl rollout restart deployment/nexent-runtime -n nexent
 ### 重新初始化 Elasticsearch（如需要）
 
 ```bash
-cd deploy/k8s
-bash init-elasticsearch.sh
+bash deploy/k8s/init-elasticsearch.sh
 ```

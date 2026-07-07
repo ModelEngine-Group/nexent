@@ -17,23 +17,241 @@ DEPLOYMENT_IMAGE_SOURCE=""
 DEPLOYMENT_REGISTRY_PROFILE=""
 DEPLOYMENT_APP_VERSION=""
 DEPLOYMENT_MONITORING_PROVIDER=""
-DEPLOYMENT_CONFIG_PATH=""
 DEPLOYMENT_USE_LOCAL_CONFIG="false"
 DEPLOYMENT_RECONFIGURE="false"
 DEPLOYMENT_LOCAL_CONFIG_PATH=""
 DEPLOYMENT_SELECTED_DOCKER_SERVICES=""
 DEPLOYMENT_SELECTED_HELM_CHARTS=""
 DEPLOYMENT_LOADED_SCHEMA_VERSION=""
-DEPLOYMENT_LOADED_APP_VERSION=""
 DEPLOYMENT_CONFIG_FILE_LOADED="false"
 DEPLOYMENT_DOCKER_PORTS=""
 DEPLOYMENT_ROOT_ENV=""
+DEPLOYMENT_LANGUAGE="${DEPLOYMENT_LANGUAGE:-}"
 
 deployment_component_list="infrastructure application data-process supabase terminal monitoring"
 deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
 deployment_registry_profile_list="general mainland"
 deployment_monitoring_provider_list="otlp phoenix langfuse langsmith grafana zipkin"
+
+deployment_locale_value_is_zh() {
+  local value="$1"
+  value="${value%%:*}"
+  value="${value%%.*}"
+  value="${value//-/_}"
+  value="$(printf '%s' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+
+  case "$value" in
+    zh|zh_*|cn|chinese)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+deployment_detect_language() {
+  local explicit="${DEPLOYMENT_LANG:-}"
+  explicit="$(printf '%s' "$explicit" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  case "$explicit" in
+    zh|zh_*|zh-*|cn|chinese)
+      printf 'zh\n'
+      return 0
+      ;;
+    en|en_*|en-*|c|posix)
+      printf 'en\n'
+      return 0
+      ;;
+  esac
+
+  if deployment_locale_value_is_zh "${LC_ALL:-}"; then
+    printf 'zh\n'
+  elif deployment_locale_value_is_zh "${LC_MESSAGES:-}"; then
+    printf 'zh\n'
+  elif deployment_locale_value_is_zh "${LANGUAGE:-}"; then
+    printf 'zh\n'
+  elif deployment_locale_value_is_zh "${LANG:-}"; then
+    printf 'zh\n'
+  else
+    printf 'en\n'
+  fi
+}
+
+deployment_init_language() {
+  if [ -z "${DEPLOYMENT_LANGUAGE:-}" ]; then
+    DEPLOYMENT_LANGUAGE="$(deployment_detect_language)"
+  fi
+
+  case "$DEPLOYMENT_LANGUAGE" in
+    zh|zh_*|zh-*|cn|chinese)
+      DEPLOYMENT_LANGUAGE="zh"
+      ;;
+    *)
+      DEPLOYMENT_LANGUAGE="en"
+      ;;
+  esac
+  export -n DEPLOYMENT_LANGUAGE 2>/dev/null || true
+}
+
+deployment_language() {
+  printf '%s\n' "${DEPLOYMENT_LANGUAGE:-en}"
+}
+
+deployment_init_language
+
+deployment_i18n_format() {
+  local lang="$1"
+  local key="$2"
+
+  if [ "$lang" = "zh" ]; then
+    case "$key" in
+      password.validation) printf '密码至少 8 位，并且包含大写字母、小写字母和数字。' ;;
+      env.created_from_docker) printf '✅ 已从 docker/.env 创建 deploy/env/.env' ;;
+      env.created_from_example) printf '✅ 已从 deploy/env/.env.example 创建 deploy/env/.env' ;;
+      env.root_missing) printf '未找到 deploy/env/.env，且没有可用的 docker/.env 或 deploy/env/.env.example 模板' ;;
+      validation.local_config_schema) printf '%s' '本地配置 schemaVersion %s 与 %s 不兼容。请使用 --reconfigure 重新配置。' ;;
+      validation.unknown_component) printf '%s' '未知部署组件：%s' ;;
+      validation.unsupported_port_policy) printf '%s' '不支持的端口策略：%s。可用值：development 或 production。' ;;
+      validation.unsupported_image_source) printf '%s' '不支持的镜像源：%s。可用值：general、mainland 或 local-latest。' ;;
+      validation.unsupported_registry_profile) printf '%s' '不支持的 registry profile：%s' ;;
+      validation.unsupported_monitoring_provider) printf '%s' '不支持的监控 provider：%s' ;;
+      tui.cancelled) printf '已取消部署配置。' ;;
+      tui.components.title) printf '选择部署组件' ;;
+      tui.components.subtitle) printf '选择要安装的服务组。infrastructure 为必选项，不能禁用。' ;;
+      tui.components.help) printf '使用 Up/Down 或 j/k 移动，空格切换，Enter 确认，q 退出。' ;;
+      tui.component.infrastructure) printf '必需核心依赖：Elasticsearch、PostgreSQL、Redis、MinIO' ;;
+      tui.component.application) printf 'Nexent 应用服务：config、runtime、MCP、northbound API、web UI' ;;
+      tui.component.data_process) printf '后台文件解析、索引和知识处理 Worker' ;;
+      tui.component.supabase) printf '用户、租户、登录、邀请和权限服务' ;;
+      tui.component.terminal) printf '终端工具使用的 OpenSSH 容器' ;;
+      tui.component.monitoring) printf 'OpenTelemetry Collector 和可选链路追踪看板' ;;
+      tui.monitoring.title) printf '选择监控 provider' ;;
+      tui.monitoring.subtitle) printf '仅在选择 monitoring 组件时使用。' ;;
+      tui.monitoring.description) printf 'Provider 决定 OpenTelemetry traces 的存储和查看位置。' ;;
+      tui.radio.help) printf '使用 Up/Down 或 j/k 移动，Enter 确认，b/Backspace 返回，q 退出。' ;;
+      tui.monitoring.otlp) printf '仅 Collector；用于转发到外部 OTLP 后端' ;;
+      tui.monitoring.phoenix) printf '本地 Phoenix UI，用于查看 LLM traces 和 span' ;;
+      tui.monitoring.langfuse) printf '本地自托管 Langfuse；生产环境请替换默认密钥' ;;
+      tui.monitoring.langsmith) printf '转发 traces 到托管 LangSmith；需要 LANGSMITH_API_KEY' ;;
+      tui.monitoring.grafana) printf '本地 Grafana + Tempo traces 看板' ;;
+      tui.monitoring.zipkin) printf '本地 Zipkin trace 浏览 UI' ;;
+      tui.port.title) printf '选择端口策略' ;;
+      tui.port.subtitle) printf '控制哪些服务端口暴露到主机或集群节点。' ;;
+      tui.port.description) printf '本地调试选择 development；更小外部暴露面选择 production。' ;;
+      tui.port.development) printf '暴露 Web 和调试/内部服务端口，便于本地排查' ;;
+      tui.port.production) printf '只暴露生产入口端口，内部服务保持私有' ;;
+      tui.image.title) printf '选择镜像源' ;;
+      tui.image.description) printf '每个选项展示将使用的后端镜像 tag 示例。' ;;
+      image_build.detail.main) printf '后端 API 服务' ;;
+      image_build.detail.web) printf 'Next.js 前端' ;;
+      image_build.detail.data_process) printf '文档解析和向量化 Worker' ;;
+      image_build.detail.mcp) printf 'MCP 代理镜像' ;;
+      image_build.detail.terminal) printf 'OpenSSH 终端工具镜像' ;;
+      image_build.detail.docs) printf 'VitePress 文档站点' ;;
+      local_config.found) printf '%s' '发现已有部署配置：%s' ;;
+      local_config.choose) printf '请选择如何处理已保存的部署选项：' ;;
+      local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源和监控 provider。' ;;
+      local_config.reconfigure) printf '  2) 重新配置 - 将已保存的值作为默认值，并显示菜单供修改。' ;;
+      local_config.reconfigure_hint) printf '     启用/禁用监控、切换 provider 或调整部署范围时请选择此项。' ;;
+      prompt.choose_1_2) printf '请选择 [1/2]（默认：1）：' ;;
+      summary.components) printf '%s' '部署组件：%s' ;;
+      summary.port_policy) printf '%s' '端口策略：%s' ;;
+      summary.image_source) printf '%s' '镜像源：%s' ;;
+      summary.monitoring_provider) printf '%s' '监控 provider：%s' ;;
+      summary.docker_services) printf '%s' 'Docker 服务：%s' ;;
+      summary.docker_ports) printf '%s' 'Docker 暴露端口：%s' ;;
+      summary.helm_charts) printf '%s' 'Helm charts：%s' ;;
+      *) return 1 ;;
+    esac
+  else
+    case "$key" in
+      password.validation) printf 'Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers.' ;;
+      env.created_from_docker) printf '✅ Created deploy/env/.env from docker/.env' ;;
+      env.created_from_example) printf '✅ Created deploy/env/.env from deploy/env/.env.example' ;;
+      env.root_missing) printf 'deploy/env/.env not found and no docker/.env or deploy/env/.env.example template is available' ;;
+      validation.local_config_schema) printf '%s' 'Local config schemaVersion %s is incompatible with %s. Re-run with --reconfigure.' ;;
+      validation.unknown_component) printf '%s' 'Unknown deployment component: %s' ;;
+      validation.unsupported_port_policy) printf '%s' 'Unsupported port policy: %s. Use development or production.' ;;
+      validation.unsupported_image_source) printf '%s' 'Unsupported image source: %s. Use general, mainland, or local-latest.' ;;
+      validation.unsupported_registry_profile) printf '%s' 'Unsupported registry profile: %s' ;;
+      validation.unsupported_monitoring_provider) printf '%s' 'Unsupported monitoring provider: %s' ;;
+      tui.cancelled) printf 'Deployment configuration cancelled.' ;;
+      tui.components.title) printf 'Select deployment components' ;;
+      tui.components.subtitle) printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.' ;;
+      tui.components.help) printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.' ;;
+      tui.component.infrastructure) printf 'required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO' ;;
+      tui.component.application) printf 'Nexent app services: config, runtime, MCP, northbound API, web UI' ;;
+      tui.component.data_process) printf 'background file parsing, indexing, and knowledge processing workers' ;;
+      tui.component.supabase) printf 'user, tenant, login, invitation, and permission services' ;;
+      tui.component.terminal) printf 'OpenSSH container used by the terminal tool' ;;
+      tui.component.monitoring) printf 'OpenTelemetry collector and optional tracing dashboard' ;;
+      tui.monitoring.title) printf 'Select monitoring provider' ;;
+      tui.monitoring.subtitle) printf 'This is used only when the monitoring component is selected.' ;;
+      tui.monitoring.description) printf 'Provider controls where OpenTelemetry traces are stored and viewed.' ;;
+      tui.radio.help) printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.' ;;
+      tui.monitoring.otlp) printf 'collector only; use this when forwarding to an external OTLP backend' ;;
+      tui.monitoring.phoenix) printf 'local Phoenix UI for LLM traces and span inspection' ;;
+      tui.monitoring.langfuse) printf 'local self-hosted Langfuse stack; replace default secrets for production' ;;
+      tui.monitoring.langsmith) printf 'forward traces to hosted LangSmith; requires LANGSMITH_API_KEY' ;;
+      tui.monitoring.grafana) printf 'local Grafana + Tempo dashboard for traces' ;;
+      tui.monitoring.zipkin) printf 'local Zipkin UI for trace browsing' ;;
+      tui.port.title) printf 'Select port policy' ;;
+      tui.port.subtitle) printf 'This controls which service ports are exposed on the host or cluster node.' ;;
+      tui.port.description) printf 'Choose development for local debugging; choose production for a smaller external surface.' ;;
+      tui.port.development) printf 'publish web plus debug/internal service ports for local troubleshooting' ;;
+      tui.port.production) printf 'publish only production entry ports; keep internal services private' ;;
+      tui.image.title) printf 'Select image source' ;;
+      tui.image.description) printf 'Each option shows the backend image tag pattern that will be used.' ;;
+      image_build.detail.main) printf 'backend API service' ;;
+      image_build.detail.web) printf 'Next.js frontend' ;;
+      image_build.detail.data_process) printf 'document parsing and vectorization worker' ;;
+      image_build.detail.mcp) printf 'MCP proxy image' ;;
+      image_build.detail.terminal) printf 'OpenSSH terminal tool image' ;;
+      image_build.detail.docs) printf 'VitePress documentation site' ;;
+      local_config.found) printf '%s' 'Existing deployment config found: %s' ;;
+      local_config.choose) printf 'Choose how to handle saved deployment options:' ;;
+      local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, and monitoring provider.' ;;
+      local_config.reconfigure) printf '  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them.' ;;
+      local_config.reconfigure_hint) printf '     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope.' ;;
+      prompt.choose_1_2) printf 'Choose [1/2] (default: 1): ' ;;
+      summary.components) printf '%s' 'Deployment components: %s' ;;
+      summary.port_policy) printf '%s' 'Port policy: %s' ;;
+      summary.image_source) printf '%s' 'Image source: %s' ;;
+      summary.monitoring_provider) printf '%s' 'Monitoring provider: %s' ;;
+      summary.docker_services) printf '%s' 'Docker services: %s' ;;
+      summary.docker_ports) printf '%s' 'Docker published ports: %s' ;;
+      summary.helm_charts) printf '%s' 'Helm charts: %s' ;;
+      *) return 1 ;;
+    esac
+  fi
+}
+
+deployment_i18n() {
+  local key="$1"
+  shift || true
+  local lang
+  local format
+  lang="${DEPLOYMENT_LANGUAGE:-en}"
+  format="$(deployment_i18n_format "$lang" "$key" || true)"
+  if [ -z "$format" ]; then
+    printf '%s\n' "$key"
+    return 0
+  fi
+  printf "$format\n" "$@"
+}
+
+deployment_prompt() {
+  local key="$1"
+  shift || true
+  local lang
+  local format
+  lang="${DEPLOYMENT_LANGUAGE:-en}"
+  format="$(deployment_i18n_format "$lang" "$key" || true)"
+  if [ -z "$format" ]; then
+    printf '%s' "$key"
+    return 0
+  fi
+  printf "$format" "$@"
+}
 
 deployment_log() {
   printf '%s\n' "$*"
@@ -82,17 +300,18 @@ deployment_validate_password() {
 }
 
 deployment_password_validation_message() {
-  printf '%s\n' "Password must be at least 8 characters and include uppercase letters, lowercase letters, and numbers."
+  deployment_i18n password.validation
 }
 
 deployment_ensure_root_env() {
   local project_root="$1"
   local docker_dir="${2:-$project_root/docker}"
-  local root_env="$project_root/.env"
-  local root_example="$project_root/.env.example"
-  local legacy_docker_env="$docker_dir/.env"
-  local legacy_docker_example="$docker_dir/.env.example"
+  local env_dir="$project_root/deploy/env"
+  local root_env="$env_dir/.env"
+  local root_example="$env_dir/.env.example"
+  local docker_env="$docker_dir/.env"
 
+  mkdir -p "$env_dir"
   DEPLOYMENT_ROOT_ENV="$root_env"
   export DEPLOYMENT_ROOT_ENV
 
@@ -100,25 +319,19 @@ deployment_ensure_root_env() {
     return 0
   fi
 
-  if [ -f "$legacy_docker_env" ]; then
-    cp "$legacy_docker_env" "$root_env"
-    deployment_log "✅ Created root .env from legacy docker/.env"
+  if [ -f "$docker_env" ]; then
+    cp "$docker_env" "$root_env"
+    deployment_log "$(deployment_i18n env.created_from_docker)"
     return 0
   fi
 
   if [ -f "$root_example" ]; then
     cp "$root_example" "$root_env"
-    deployment_log "✅ Created root .env from .env.example"
+    deployment_log "$(deployment_i18n env.created_from_example)"
     return 0
   fi
 
-  if [ -f "$legacy_docker_example" ]; then
-    cp "$legacy_docker_example" "$root_env"
-    deployment_log "✅ Created root .env from legacy docker/.env.example"
-    return 0
-  fi
-
-  deployment_error ".env not found and no .env.example template is available"
+  deployment_error "$(deployment_i18n env.root_missing)"
   return 1
 }
 
@@ -132,6 +345,85 @@ deployment_source_root_env() {
   # shellcheck source=/dev/null
   source "$DEPLOYMENT_ROOT_ENV"
   set +a
+}
+
+deployment_env_dir() {
+  if [ -n "${DEPLOYMENT_ROOT_ENV:-}" ]; then
+    dirname "$DEPLOYMENT_ROOT_ENV"
+    return 0
+  fi
+
+  local common_dir
+  common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf '%s\n' "$(cd "$common_dir/../env" && pwd)"
+}
+
+deployment_monitoring_env_example_file() {
+  printf '%s/monitoring.env.example\n' "$(deployment_env_dir)"
+}
+
+deployment_monitoring_env_file() {
+  printf '%s/monitoring.env\n' "$(deployment_env_dir)"
+}
+
+deployment_legacy_monitoring_env_file() {
+  printf '%s/../docker/assets/monitoring/monitoring.env\n' "$(deployment_env_dir)"
+}
+
+deployment_source_env_file() {
+  local env_file="$1"
+  [ -f "$env_file" ] || return 0
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
+}
+
+deployment_env_values_payload() {
+  local env_file="${DEPLOYMENT_ROOT_ENV:-}"
+  local monitoring_env_file
+  local files=()
+
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    files+=("$env_file")
+  else
+    deployment_warn "deploy/env/.env is not available; environment rollout checksum will use available env files only."
+  fi
+
+  monitoring_env_file="$(deployment_monitoring_env_file)"
+  if [ -f "$monitoring_env_file" ]; then
+    files+=("$monitoring_env_file")
+  fi
+
+  [ "${#files[@]}" -gt 0 ] || return 0
+
+  awk '
+    /^[[:space:]]*($|#)/ { next }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      sub(/^[[:space:]]*/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
+      if (line !~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        next
+      }
+      key = line
+      sub(/=.*/, "", key)
+      value = line
+      sub(/^[^=]*=/, "", value)
+      values[key] = key "=" value
+    }
+    END {
+      for (key in values) {
+        print values[key]
+      }
+    }
+  ' "${files[@]}" | LC_ALL=C sort -t '=' -k1,1
+}
+
+deployment_env_values_checksum() {
+  deployment_sha256_string "$(deployment_env_values_payload)"
 }
 
 deployment_update_env_var_file() {
@@ -178,6 +470,177 @@ deployment_get_env_var_file() {
     value="${value%\'}"
   fi
   printf '%s' "$value"
+}
+
+deployment_sync_env_defaults() {
+  local example_file="$1"
+  local env_file="$2"
+  local line key value env_value
+
+  if [ ! -f "$example_file" ]; then
+    deployment_error "Monitoring env example not found: $example_file"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="$(deployment_trim "$line")"
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+    key="${line%%=*}"
+    if grep -q "^${key}=" "$env_file"; then
+      continue
+    fi
+
+    value="${line#*=}"
+    env_value="$(printenv "$key" 2>/dev/null || true)"
+    if [ -n "$env_value" ]; then
+      value="$env_value"
+    fi
+    deployment_update_env_var_file "$env_file" "$key" "$value"
+  done < "$example_file"
+}
+
+deployment_monitoring_env_value() {
+  local key="$1"
+  local default_value="${2:-}"
+  local env_file
+  local value
+
+  env_file="$(deployment_monitoring_env_file)"
+  if value="$(deployment_get_env_var_file "$env_file" "$key" 2>/dev/null)"; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if [ "${!key+x}" = "x" ]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  printf '%s' "$default_value"
+}
+
+deployment_update_monitoring_env_var() {
+  local key="$1"
+  local value="$2"
+  deployment_update_env_var_file "$(deployment_monitoring_env_file)" "$key" "$value"
+}
+
+deployment_monitoring_collector_config_file() {
+  local target="${1:-docker}"
+  local provider="${2:-${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}}"
+  local config_name
+
+  case "$provider" in
+    phoenix)
+      config_name="otel-collector-phoenix-config.yml"
+      ;;
+    langfuse)
+      config_name="otel-collector-langfuse-config.yml"
+      ;;
+    langsmith)
+      config_name="otel-collector-langsmith-config.yml"
+      ;;
+    grafana)
+      config_name="otel-collector-grafana-config.yml"
+      ;;
+    zipkin)
+      config_name="otel-collector-zipkin-config.yml"
+      ;;
+    otlp|*)
+      config_name="otel-collector-config.yml"
+      ;;
+  esac
+
+  case "$target" in
+    docker)
+      printf '../assets/monitoring/%s' "$config_name"
+      ;;
+    k8s|helm)
+      printf '%s' "$config_name"
+      ;;
+    *)
+      printf '%s' "$config_name"
+      ;;
+  esac
+}
+
+deployment_prepare_monitoring_env() {
+  local target="${1:-docker}"
+  local env_file
+  local example_file
+  local legacy_file
+  local telemetry_enabled
+  local dashboard_url
+  local provider
+  local collector_config_file
+  local otlp_endpoint
+  local langfuse_public_key
+  local langfuse_secret_key
+  local langfuse_auth_header
+  local langsmith_api_key
+
+  env_file="$(deployment_monitoring_env_file)"
+  example_file="$(deployment_monitoring_env_example_file)"
+  legacy_file="$(deployment_legacy_monitoring_env_file)"
+
+  if [ ! -f "$env_file" ] && [ -f "$legacy_file" ]; then
+    mkdir -p "$(dirname "$env_file")"
+    cp "$legacy_file" "$env_file"
+    deployment_log "✅ Migrated monitoring.env to $env_file"
+  fi
+
+  deployment_sync_env_defaults "$example_file" "$env_file" || return 1
+  deployment_source_env_file "$env_file"
+
+  telemetry_enabled="$(deployment_monitoring_enabled)"
+  provider="$DEPLOYMENT_MONITORING_PROVIDER"
+
+  deployment_update_monitoring_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
+  deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
+
+  deployment_source_env_file "$env_file"
+  dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
+  deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+
+  case "$target" in
+    k8s|helm)
+      otlp_endpoint="http://nexent-otel-collector:4318"
+      ;;
+    docker|*)
+      otlp_endpoint="http://otel-collector:4318"
+      ;;
+  esac
+  deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_ENDPOINT" "$otlp_endpoint"
+  deployment_update_monitoring_env_var "OTEL_EXPORTER_OTLP_PROTOCOL" "http"
+
+  collector_config_file="$(deployment_monitoring_collector_config_file "$target" "$provider")"
+  deployment_update_monitoring_env_var "OTEL_COLLECTOR_CONFIG_FILE" "$collector_config_file"
+
+  if [ "$provider" = "langfuse" ]; then
+    langfuse_public_key="$(deployment_monitoring_env_value "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-lf-nexent-local")"
+    langfuse_secret_key="$(deployment_monitoring_env_value "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-lf-nexent-local")"
+    langfuse_auth_header="Basic $(printf "%s:%s" "$langfuse_public_key" "$langfuse_secret_key" | base64 | tr -d '\n')"
+    deployment_update_monitoring_env_var "LANGFUSE_OTLP_AUTH_HEADER" "$langfuse_auth_header"
+  fi
+
+  if [ "$provider" = "langsmith" ]; then
+    langsmith_api_key="$(deployment_monitoring_env_value "LANGSMITH_API_KEY" "")"
+    deployment_update_monitoring_env_var "LANGSMITH_API_KEY" "$langsmith_api_key"
+    deployment_update_monitoring_env_var "LANGSMITH_PROJECT" "$(deployment_monitoring_env_value "LANGSMITH_PROJECT" "nexent")"
+    deployment_update_monitoring_env_var "LANGSMITH_OTLP_TRACES_ENDPOINT" "$(deployment_monitoring_env_value "LANGSMITH_OTLP_TRACES_ENDPOINT" "https://api.smith.langchain.com/otel/v1/traces")"
+  fi
+
+  deployment_source_env_file "$env_file"
+  DEPLOYMENT_MONITORING_PROVIDER="${MONITORING_PROVIDER:-$DEPLOYMENT_MONITORING_PROVIDER}"
+  export DEPLOYMENT_MONITORING_PROVIDER
 }
 
 deployment_sha256_string() {
@@ -231,14 +694,12 @@ deployment_init_defaults() {
   DEPLOYMENT_REGISTRY_PROFILE="$DEPLOYMENT_REGISTRY_PROFILE_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
   DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
-  DEPLOYMENT_CONFIG_PATH=""
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
   DEPLOYMENT_RECONFIGURE="false"
   DEPLOYMENT_ROTATE_SECRETS="false"
   DEPLOYMENT_REFRESH_ES_KEY="false"
   DEPLOYMENT_LOCAL_CONFIG_PATH="$(deployment_default_local_config_path)"
   DEPLOYMENT_LOADED_SCHEMA_VERSION=""
-  DEPLOYMENT_LOADED_APP_VERSION=""
   DEPLOYMENT_CONFIG_FILE_LOADED="false"
   DEPLOYMENT_CONFIG_VALUES_LOADED="false"
   DEPLOYMENT_DOCKER_PORTS=""
@@ -278,7 +739,13 @@ deployment_parse_common_args() {
         shift
         ;;
       --reconfigure)
+        NEXENT_DEPLOY_CONFIG_MODE="tui"
         DEPLOYMENT_RECONFIGURE="true"
+        shift
+        ;;
+      --defaults)
+        NEXENT_DEPLOY_CONFIG_MODE="defaults"
+        DEPLOYMENT_RECONFIGURE="false"
         shift
         ;;
       --rotate-secrets)
@@ -290,8 +757,9 @@ deployment_parse_common_args() {
         shift
         ;;
       --config)
-        DEPLOYMENT_CONFIG_PATH="$2"
-        shift 2
+        NEXENT_DEPLOY_CONFIG_MODE="tui"
+        DEPLOYMENT_RECONFIGURE="true"
+        shift
         ;;
       --local-config)
         DEPLOYMENT_LOCAL_CONFIG_PATH="$2"
@@ -355,11 +823,6 @@ deployment_load_config_file() {
           ;;
         registryProfile)
           DEPLOYMENT_REGISTRY_PROFILE="$value"
-          loaded_config_value="true"
-          ;;
-        appVersion)
-          DEPLOYMENT_APP_VERSION="$value"
-          [ "$load_mode" = "apply" ] && DEPLOYMENT_LOADED_APP_VERSION="$value"
           loaded_config_value="true"
           ;;
         monitoringProvider)
@@ -480,7 +943,7 @@ deployment_is_valid_value() {
 
 deployment_validate() {
   if [ -n "$DEPLOYMENT_LOADED_SCHEMA_VERSION" ] && [ "$DEPLOYMENT_LOADED_SCHEMA_VERSION" != "$DEPLOYMENT_SCHEMA_VERSION" ]; then
-    deployment_error "Local config schemaVersion $DEPLOYMENT_LOADED_SCHEMA_VERSION is incompatible with $DEPLOYMENT_SCHEMA_VERSION. Re-run with --reconfigure."
+    deployment_error "$(deployment_i18n validation.local_config_schema "$DEPLOYMENT_LOADED_SCHEMA_VERSION" "$DEPLOYMENT_SCHEMA_VERSION")"
     return 1
   fi
   local old_ifs="$IFS"
@@ -490,7 +953,7 @@ deployment_validate() {
     component="$(deployment_trim "$component")"
     IFS="$old_ifs"
     deployment_is_valid_value "$component" $deployment_component_list || {
-      deployment_error "Unknown deployment component: $component"
+      deployment_error "$(deployment_i18n validation.unknown_component "$component")"
       return 1
     }
     IFS=','
@@ -498,19 +961,19 @@ deployment_validate() {
   IFS="$old_ifs"
 
   deployment_is_valid_value "$DEPLOYMENT_PORT_POLICY" $deployment_port_policy_list || {
-    deployment_error "Unsupported port policy: $DEPLOYMENT_PORT_POLICY. Use development or production."
+    deployment_error "$(deployment_i18n validation.unsupported_port_policy "$DEPLOYMENT_PORT_POLICY")"
     return 1
   }
   deployment_is_valid_value "$DEPLOYMENT_IMAGE_SOURCE" $deployment_image_source_list || {
-    deployment_error "Unsupported image source: $DEPLOYMENT_IMAGE_SOURCE. Use general, mainland, or local-latest."
+    deployment_error "$(deployment_i18n validation.unsupported_image_source "$DEPLOYMENT_IMAGE_SOURCE")"
     return 1
   }
   deployment_is_valid_value "$DEPLOYMENT_REGISTRY_PROFILE" $deployment_registry_profile_list || {
-    deployment_error "Unsupported registry profile: $DEPLOYMENT_REGISTRY_PROFILE"
+    deployment_error "$(deployment_i18n validation.unsupported_registry_profile "$DEPLOYMENT_REGISTRY_PROFILE")"
     return 1
   }
   deployment_is_valid_value "$DEPLOYMENT_MONITORING_PROVIDER" $deployment_monitoring_provider_list || {
-    deployment_error "Unsupported monitoring provider: $DEPLOYMENT_MONITORING_PROVIDER"
+    deployment_error "$(deployment_i18n validation.unsupported_monitoring_provider "$DEPLOYMENT_MONITORING_PROVIDER")"
     return 1
   }
 }
@@ -518,7 +981,7 @@ deployment_validate() {
 deployment_tui_cancel() {
   printf '\033[?25h'
   printf '\033[2J\033[H'
-  deployment_warn "Deployment configuration cancelled."
+  deployment_warn "$(deployment_i18n tui.cancelled)"
   return 130
 }
 
@@ -544,12 +1007,12 @@ deployment_tui_multiselect_components() {
 
   local components=(infrastructure application data-process supabase terminal monitoring)
   local details=(
-    "required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO"
-    "Nexent app services: config, runtime, MCP, northbound API, web UI"
-    "background file parsing, indexing, and knowledge processing workers"
-    "user, tenant, login, invitation, and permission services"
-    "OpenSSH container used by the terminal tool"
-    "OpenTelemetry collector and optional tracing dashboard"
+    "$(deployment_i18n tui.component.infrastructure)"
+    "$(deployment_i18n tui.component.application)"
+    "$(deployment_i18n tui.component.data_process)"
+    "$(deployment_i18n tui.component.supabase)"
+    "$(deployment_i18n tui.component.terminal)"
+    "$(deployment_i18n tui.component.monitoring)"
   )
   local selected=(0 0 0 0 0 0)
   local cursor=0
@@ -563,9 +1026,9 @@ deployment_tui_multiselect_components() {
 
   deployment_tui_render_components() {
     printf '\033[2J\033[H'
-    printf 'Select deployment components\n'
-    printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.\n'
-    printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.components.title)"
+    printf '%s\n' "$(deployment_i18n tui.components.subtitle)"
+    printf '%s\n\n' "$(deployment_i18n tui.components.help)"
     local row marker check
     for row in "${!components[@]}"; do
       marker=" "
@@ -640,12 +1103,12 @@ deployment_tui_select_monitoring_provider() {
 
   local providers=(otlp phoenix langfuse langsmith grafana zipkin)
   local details=(
-    "collector only; use this when forwarding to an external OTLP backend"
-    "local Phoenix UI for LLM traces and span inspection"
-    "local self-hosted Langfuse stack; replace default secrets for production"
-    "forward traces to hosted LangSmith; requires LANGSMITH_API_KEY"
-    "local Grafana + Tempo dashboard for traces"
-    "local Zipkin UI for trace browsing"
+    "$(deployment_i18n tui.monitoring.otlp)"
+    "$(deployment_i18n tui.monitoring.phoenix)"
+    "$(deployment_i18n tui.monitoring.langfuse)"
+    "$(deployment_i18n tui.monitoring.langsmith)"
+    "$(deployment_i18n tui.monitoring.grafana)"
+    "$(deployment_i18n tui.monitoring.zipkin)"
   )
   local cursor=0
   local i key key_tail
@@ -659,10 +1122,10 @@ deployment_tui_select_monitoring_provider() {
 
   deployment_tui_render_monitoring_provider() {
     printf '\033[2J\033[H'
-    printf 'Select monitoring provider\n'
-    printf 'This is used only when the monitoring component is selected.\n'
-    printf 'Provider controls where OpenTelemetry traces are stored and viewed.\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.monitoring.title)"
+    printf '%s\n' "$(deployment_i18n tui.monitoring.subtitle)"
+    printf '%s\n' "$(deployment_i18n tui.monitoring.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
     local row marker radio
     for row in "${!providers[@]}"; do
       marker=" "
@@ -719,8 +1182,8 @@ deployment_tui_select_port_policy() {
 
   local policies=(development production)
   local details=(
-    "publish web plus debug/internal service ports for local troubleshooting"
-    "publish only production entry ports; keep internal services private"
+    "$(deployment_i18n tui.port.development)"
+    "$(deployment_i18n tui.port.production)"
   )
   local cursor=0
   local i key key_tail
@@ -734,10 +1197,10 @@ deployment_tui_select_port_policy() {
 
   deployment_tui_render_port_policy() {
     printf '\033[2J\033[H'
-    printf 'Select port policy\n'
-    printf 'This controls which service ports are exposed on the host or cluster node.\n'
-    printf 'Choose development for local debugging; choose production for a smaller external surface.\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.port.title)"
+    printf '%s\n' "$(deployment_i18n tui.port.subtitle)"
+    printf '%s\n' "$(deployment_i18n tui.port.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
     local row marker radio
     for row in "${!policies[@]}"; do
       marker=" "
@@ -787,6 +1250,23 @@ deployment_tui_select_port_policy() {
   printf '\033[2J\033[H'
 }
 
+deployment_image_source_example_tag() {
+  local source="$1"
+  local version="${DEPLOYMENT_APP_VERSION:-${APP_VERSION:-latest}}"
+  local prefix="nexent"
+
+  case "$source" in
+    mainland)
+      prefix="ccr.ccs.tencentyun.com/nexent-hub"
+      ;;
+    local-latest)
+      version="latest"
+      ;;
+  esac
+
+  printf '%s/nexent:%s' "$prefix" "$version"
+}
+
 deployment_tui_select_image_source() {
   [ -t 0 ] || return 0
   [ -n "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ] && return 0
@@ -794,9 +1274,9 @@ deployment_tui_select_image_source() {
 
   local sources=(general mainland local-latest)
   local details=(
-    "pull images from standard public registries"
-    "pull from mainland China mirrors for better access in mainland networks"
-    "use locally built Nexent :latest images and avoid pulling app images"
+    "$(deployment_image_source_example_tag general)"
+    "$(deployment_image_source_example_tag mainland)"
+    "$(deployment_image_source_example_tag local-latest)"
   )
   local cursor=0
   local i key key_tail
@@ -810,10 +1290,9 @@ deployment_tui_select_image_source() {
 
   deployment_tui_render_image_source() {
     printf '\033[2J\033[H'
-    printf 'Select image source\n'
-    printf 'This controls where deployment images come from.\n'
-    printf 'Use local-latest only after building Nexent images locally.\n'
-    printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.\n\n'
+    printf '%s\n' "$(deployment_i18n tui.image.title)"
+    printf '%s\n' "$(deployment_i18n tui.image.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
     local row marker radio
     for row in "${!sources[@]}"; do
       marker=" "
@@ -916,6 +1395,16 @@ deployment_tui_previous_step() {
 deployment_run_tui_configuration() {
   local step=0
   local result=0
+  local config_mode="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
+  if [ "$config_mode" = "defaults" ]; then
+    return 0
+  fi
+
+  if { [ "$config_mode" = "tui" ] || [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; } && [ ! -t 0 ]; then
+    deployment_error "Interactive deployment configuration requires a TTY."
+    return 1
+  fi
 
   if ! deployment_tui_step_should_run "$step"; then
     step="$(deployment_tui_next_step "$step")"
@@ -964,26 +1453,37 @@ deployment_run_tui_configuration() {
 }
 
 deployment_maybe_select_local_config() {
+  local config_mode="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
+  case "$config_mode" in
+    ""|defaults|tui)
+      ;;
+    *)
+      deployment_error "Unsupported NEXENT_DEPLOY_CONFIG_MODE: $config_mode. Use defaults or tui."
+      return 1
+      ;;
+  esac
+
   [ -f "$DEPLOYMENT_LOCAL_CONFIG_PATH" ] || return 0
-  if [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
-    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
+  if [ "$config_mode" = "defaults" ] || [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
     return 0
   fi
-  if [ "$DEPLOYMENT_USE_LOCAL_CONFIG" = "true" ]; then
-    DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
+  if [ "$config_mode" = "tui" ] || [ "$DEPLOYMENT_RECONFIGURE" = "true" ]; then
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
     return 0
   fi
   [ -t 0 ] || return 0
 
-  deployment_log "Existing deployment config found: $DEPLOYMENT_LOCAL_CONFIG_PATH"
-  deployment_log "Choose how to handle saved deployment options:"
-  deployment_log "  1) Use local config - skip the menus and reuse the saved components, port policy, image source, and monitoring provider."
-  deployment_log "  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them."
-  deployment_log "     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope."
+  deployment_log "$(deployment_i18n local_config.found "$DEPLOYMENT_LOCAL_CONFIG_PATH")"
+  deployment_log "$(deployment_i18n local_config.choose)"
+  deployment_log "$(deployment_i18n local_config.use)"
+  deployment_log "$(deployment_i18n local_config.reconfigure)"
+  deployment_log "$(deployment_i18n local_config.reconfigure_hint)"
   local input
-  read -r -p "Choose [1/2] (default: 1): " input
+  read -r -p "$(deployment_prompt prompt.choose_1_2)" input
   if [ "${input:-1}" = "1" ]; then
-    DEPLOYMENT_CONFIG_PATH="$DEPLOYMENT_LOCAL_CONFIG_PATH"
+    deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" || return 1
   else
     DEPLOYMENT_RECONFIGURE="true"
     deployment_load_config_file "$DEPLOYMENT_LOCAL_CONFIG_PATH" defaults || return 1
@@ -1072,6 +1572,31 @@ deployment_image_tag() {
   printf '%s' "${image##*:}"
 }
 
+deployment_image_rollout_checksum() {
+  local image="$1"
+  local image_id=""
+
+  if command -v docker >/dev/null 2>&1; then
+    image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+    if [ -n "$image_id" ]; then
+      deployment_sha256_string "local-image=${image}|id=${image_id}"
+      return 0
+    fi
+    deployment_warn "Local image not found: $image; same-tag image changes cannot be detected from this host."
+  else
+    deployment_warn "Docker is not available; same-tag image changes cannot be detected for $image."
+  fi
+
+  deployment_sha256_string "image-ref=${image}"
+}
+
+deployment_render_image_rollout_checksums() {
+  printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
+  printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
+  printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
+  printf '    sshImage: "%s"\n' "$(deployment_image_rollout_checksum "$OPENSSH_SERVER_IMAGE")"
+}
+
 deployment_apply_image_source() {
   local version="${DEPLOYMENT_APP_VERSION:-latest}"
 
@@ -1127,16 +1652,16 @@ deployment_monitoring_dashboard_url() {
       printf 'http://localhost:%s' "${ZIPKIN_PORT:-9411}"
       ;;
     k8s:phoenix|helm:phoenix)
-      printf 'http://localhost:30006'
+      printf 'http://localhost:%s' "${K8S_PHOENIX_NODE_PORT:-30006}"
       ;;
     k8s:langfuse|helm:langfuse)
-      printf 'http://localhost:30001'
+      printf 'http://localhost:%s' "${K8S_LANGFUSE_NODE_PORT:-30001}"
       ;;
     k8s:grafana|helm:grafana)
-      printf 'http://localhost:30002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1'
+      printf 'http://localhost:%s/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1' "${K8S_GRAFANA_NODE_PORT:-30002}"
       ;;
     k8s:zipkin|helm:zipkin)
-      printf 'http://localhost:30011'
+      printf 'http://localhost:%s' "${K8S_ZIPKIN_NODE_PORT:-30011}"
       ;;
     *:langsmith)
       printf 'https://smith.langchain.com/'
@@ -1163,9 +1688,6 @@ deployment_render_docker_env() {
     printf 'SUPABASE_KONG="%s"\n' "$SUPABASE_KONG"
     printf 'SUPABASE_GOTRUE="%s"\n' "$SUPABASE_GOTRUE"
     printf 'SUPABASE_DB="%s"\n' "$SUPABASE_DB"
-    printf 'ENABLE_TELEMETRY="%s"\n' "$(deployment_monitoring_enabled)"
-    printf 'MONITORING_PROVIDER="%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
-    printf 'MONITORING_DASHBOARD_URL="%s"\n' "$(deployment_monitoring_dashboard_url docker)"
   } > "$output_file"
 }
 
@@ -1217,10 +1739,9 @@ deployment_render_image_values() {
 }
 
 deployment_render_k8s_port_values() {
-  local northbound_type="ClusterIP"
+  local northbound_type="NodePort"
   local internal_type="ClusterIP"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
-    northbound_type="NodePort"
     internal_type="NodePort"
   fi
 
@@ -1263,11 +1784,10 @@ deployment_chart_enabled() {
 
 deployment_render_helm_chart_values() {
   local local_pull_policy="IfNotPresent"
-  local northbound_type="ClusterIP"
+  local northbound_type="NodePort"
   local internal_type="ClusterIP"
   [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ] && local_pull_policy="Never"
   if [ "$DEPLOYMENT_PORT_POLICY" = "development" ]; then
-    northbound_type="NodePort"
     internal_type="NodePort"
   fi
 
@@ -1330,6 +1850,128 @@ deployment_render_helm_chart_values() {
   printf '  images:\n    mcp:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_MCP_DOCKER_IMAGE")" "$(deployment_image_tag "$NEXENT_MCP_DOCKER_IMAGE")" "$local_pull_policy"
 }
 
+deployment_yaml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+deployment_render_helm_monitoring_global_values() {
+  local enabled
+  enabled="$(deployment_monitoring_enabled)"
+
+  printf '  monitoring:\n'
+  printf '    enabled: %s\n' "$enabled"
+  printf '    provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '    dashboardUrl: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_URL "$(deployment_monitoring_dashboard_url k8s)")")"
+  printf '    projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROJECT_NAME "nexent")")"
+  printf '    serviceName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_SERVICE_NAME "nexent-backend")")"
+  printf '    otlpEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_ENDPOINT "http://nexent-otel-collector:4318")")"
+  printf '    otlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "")")"
+  printf '    otlpMetricsEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENDPOINT "")")"
+  printf '    otlpProtocol: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_PROTOCOL "http")")"
+  printf '    otlpHeaders: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_HEADERS "")")"
+  printf '    otlpAuthorization: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_AUTHORIZATION "")")"
+  printf '    otlpApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_X_API_KEY "")")"
+  printf '    otlpLangfuseIngestionVersion: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION "")")"
+  printf '    langsmithApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_API_KEY "")")"
+  printf '    langsmithProject: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_PROJECT "nexent")")"
+  printf '    langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
+  printf '    otlpMetricsEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENABLED "true")")"
+  printf '    instrumentRequests: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_INSTRUMENT_REQUESTS "false")")"
+  printf '    fastapiIncludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_INCLUDED_URLS "/agent/run")")"
+  printf '    fastapiExcludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDED_URLS "")")"
+  printf '    fastapiExcludeSpans: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDE_SPANS "receive,send")")"
+  printf '    telemetrySampleRate: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TELEMETRY_SAMPLE_RATE "1.0")")"
+  printf '    traceContentMode: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_CONTENT_MODE "full")")"
+  printf '    traceMaxChars: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_CHARS "4000")")"
+  printf '    traceMaxItems: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_ITEMS "20")")"
+}
+
+deployment_render_helm_monitoring_chart_values() {
+  local enabled
+  local langfuse_nextauth_url
+  enabled="$(deployment_monitoring_enabled)"
+  langfuse_nextauth_url="$(deployment_monitoring_env_value K8S_LANGFUSE_NEXTAUTH_URL "http://localhost:${K8S_LANGFUSE_NODE_PORT:-30001}")"
+
+  printf 'nexent-monitoring:\n'
+  printf '  enabled: %s\n' "$enabled"
+  printf '  provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
+  printf '  images:\n'
+  printf '    otelCollector:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_VERSION "0.151.0")")"
+  printf '    phoenix:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value PHOENIX_VERSION "15")")"
+  printf '    tempo:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TEMPO_VERSION "2.10.5")")"
+  printf '    grafana:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_VERSION "12.4")")"
+  printf '    zipkin:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value ZIPKIN_VERSION "latest")")"
+  printf '    langfuseWeb:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_VERSION "3")")"
+  printf '    langfuseWorker:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_VERSION "3")")"
+  printf '    clickhouse:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")")"
+  printf '    minio:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")")"
+  printf '    redis:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_REDIS_VERSION "alpine")")"
+  printf '    postgres:\n      tag: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_VERSION "15-alpine")")"
+  printf '  collector:\n'
+  printf '    configFile: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_COLLECTOR_CONFIG_FILE "$(deployment_monitoring_collector_config_file k8s "$DEPLOYMENT_MONITORING_PROVIDER")")")"
+  printf '    service:\n'
+  printf '      grpcPort: %s\n' "$(deployment_monitoring_env_value OTEL_COLLECTOR_GRPC_PORT "4317")"
+  printf '      httpPort: %s\n' "$(deployment_monitoring_env_value OTEL_COLLECTOR_HTTP_PORT "4318")"
+  printf '    env:\n'
+  printf '      langsmithApiKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_API_KEY "")")"
+  printf '      langsmithProject: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_PROJECT "nexent")")"
+  printf '      langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
+  printf '      langfuseOtlpAuthHeader: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_OTLP_AUTH_HEADER "")")"
+  printf '  phoenix:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value PHOENIX_PORT "6006")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_PHOENIX_NODE_PORT "30006")"
+  printf '  grafana:\n'
+  printf '    adminUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_USER "admin")")"
+  printf '    adminPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_PASSWORD "nexent@4321")")"
+  printf '    defaultLanguage: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_DEFAULT_LANGUAGE "zh-Hans")")"
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value GRAFANA_PORT "3002")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_GRAFANA_NODE_PORT "30002")"
+  printf '  tempo:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value TEMPO_PORT "3200")"
+  printf '  zipkin:\n'
+  printf '    service:\n'
+  printf '      port: %s\n' "$(deployment_monitoring_env_value ZIPKIN_PORT "9411")"
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_ZIPKIN_NODE_PORT "30011")"
+  printf '  langfuse:\n'
+  printf '    nextauthUrl: %s\n' "$(deployment_yaml_quote "$langfuse_nextauth_url")"
+  printf '    nextauthSecret: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_NEXTAUTH_SECRET "nexent-langfuse-secret")")"
+  printf '    salt: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_SALT "nexent-langfuse-salt")")"
+  printf '    encryptionKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_ENCRYPTION_KEY "0000000000000000000000000000000000000000000000000000000000000000")")"
+  printf '    telemetryEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_TELEMETRY_ENABLED "false")")"
+  printf '    enableExperimentalFeatures: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES "false")")"
+  printf '    init:\n'
+  printf '      orgId: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_ORG_ID "nexent")")"
+  printf '      orgName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_ORG_NAME "Nexent")")"
+  printf '      projectId: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_ID "nexent")")"
+  printf '      projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_NAME "Nexent")")"
+  printf '      projectPublicKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_PUBLIC_KEY "pk-lf-nexent-local")")"
+  printf '      projectSecretKey: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_PROJECT_SECRET_KEY "sk-lf-nexent-local")")"
+  printf '      userEmail: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_EMAIL "admin@nexent.com")")"
+  printf '      userName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_NAME "admin")")"
+  printf '      userPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_INIT_USER_PASSWORD "nexent@4321")")"
+  printf '    service:\n'
+  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_LANGFUSE_NODE_PORT "30001")"
+  printf '    postgres:\n'
+  printf '      user: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_USER "postgres")")"
+  printf '      password: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_PASSWORD "nexent@4321")")"
+  printf '      database: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_POSTGRES_DB "postgres")")"
+  printf '    clickhouse:\n'
+  printf '      user: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_USER "clickhouse")")"
+  printf '      password: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_PASSWORD "clickhouse")")"
+  printf '    minio:\n'
+  printf '      rootUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_ROOT_USER "minio")")"
+  printf '      rootPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_MINIO_ROOT_PASSWORD "miniosecret")")"
+  printf '      bucket: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_S3_BUCKET "langfuse")")"
+  printf '    redis:\n'
+  printf '      auth: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_REDIS_AUTH "myredissecret")")"
+}
+
 deployment_render_helm_values() {
   local output_file="$1"
   mkdir -p "$(dirname "$output_file")"
@@ -1345,21 +1987,8 @@ deployment_render_helm_values() {
     fi
     printf '  portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf '  imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
-    printf '  monitoring:\n'
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-      printf '    enabled: true\n'
-    else
-      printf '    enabled: false\n'
-    fi
-    printf '    provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
-    printf '    dashboardUrl: "%s"\n' "$(deployment_monitoring_dashboard_url k8s)"
-    printf 'nexent-monitoring:\n'
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-      printf '  enabled: true\n'
-    else
-      printf '  enabled: false\n'
-    fi
-    printf '  provider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    deployment_render_helm_monitoring_global_values
+    deployment_render_helm_monitoring_chart_values
     deployment_render_helm_chart_values
   } > "$output_file"
 }
@@ -1369,7 +1998,6 @@ deployment_persist_local_config() {
   mkdir -p "$(dirname "$output_file")"
   {
     printf 'schemaVersion: "%s"\n' "$DEPLOYMENT_SCHEMA_VERSION"
-    printf 'appVersion: "%s"\n' "$DEPLOYMENT_APP_VERSION"
     printf 'components:\n'
     local old_ifs="$IFS"
     IFS=','
@@ -1388,29 +2016,31 @@ deployment_persist_local_config() {
 deployment_print_summary() {
   local target="${1:-all}"
 
-  deployment_log "Deployment components: $DEPLOYMENT_COMPONENTS"
-  deployment_log "Port policy: $DEPLOYMENT_PORT_POLICY"
-  deployment_log "Image source: $DEPLOYMENT_IMAGE_SOURCE"
+  deployment_log "$(deployment_i18n summary.components "$DEPLOYMENT_COMPONENTS")"
+  deployment_log "$(deployment_i18n summary.port_policy "$DEPLOYMENT_PORT_POLICY")"
+  deployment_log "$(deployment_i18n summary.image_source "$DEPLOYMENT_IMAGE_SOURCE")"
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    deployment_log "Monitoring provider: $DEPLOYMENT_MONITORING_PROVIDER"
+    deployment_log "$(deployment_i18n summary.monitoring_provider "$DEPLOYMENT_MONITORING_PROVIDER")"
   fi
   case "$target" in
     docker)
-      deployment_log "Docker services: $DEPLOYMENT_SELECTED_DOCKER_SERVICES"
-      deployment_log "Docker published ports: $DEPLOYMENT_DOCKER_PORTS"
+      deployment_log "$(deployment_i18n summary.docker_services "$DEPLOYMENT_SELECTED_DOCKER_SERVICES")"
+      deployment_log "$(deployment_i18n summary.docker_ports "$DEPLOYMENT_DOCKER_PORTS")"
       ;;
     k8s|helm)
-      deployment_log "Helm charts: $DEPLOYMENT_SELECTED_HELM_CHARTS"
+      deployment_log "$(deployment_i18n summary.helm_charts "$DEPLOYMENT_SELECTED_HELM_CHARTS")"
       ;;
     *)
-      deployment_log "Docker services: $DEPLOYMENT_SELECTED_DOCKER_SERVICES"
-      deployment_log "Helm charts: $DEPLOYMENT_SELECTED_HELM_CHARTS"
-      deployment_log "Docker published ports: $DEPLOYMENT_DOCKER_PORTS"
+      deployment_log "$(deployment_i18n summary.docker_services "$DEPLOYMENT_SELECTED_DOCKER_SERVICES")"
+      deployment_log "$(deployment_i18n summary.helm_charts "$DEPLOYMENT_SELECTED_HELM_CHARTS")"
+      deployment_log "$(deployment_i18n summary.docker_ports "$DEPLOYMENT_DOCKER_PORTS")"
       ;;
   esac
 }
 
 deployment_prepare_config() {
+  local NEXENT_DEPLOY_CONFIG_MODE="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
   deployment_init_defaults
 
   local raw_args=("$@")
@@ -1423,6 +2053,9 @@ deployment_prepare_config() {
       --registry-profile) DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT="true" ;;
       --app-version|--version) DEPLOYMENT_APP_VERSION_EXPLICIT="true" ;;
       --monitoring-provider) DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT="true" ;;
+      --config) DEPLOYMENT_RECONFIGURE="true" ;;
+      --reconfigure) DEPLOYMENT_RECONFIGURE="true" ;;
+      --defaults) DEPLOYMENT_RECONFIGURE="false" ;;
       --rotate-secrets) DEPLOYMENT_ROTATE_SECRETS="true" ;;
       --refresh-es-key) DEPLOYMENT_REFRESH_ES_KEY="true" ;;
     esac
@@ -1432,10 +2065,7 @@ deployment_prepare_config() {
   if [ -n "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ]; then
     DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_REGISTRY_PROFILE"
   fi
-  deployment_maybe_select_local_config
-  if [ -n "$DEPLOYMENT_CONFIG_PATH" ] && [ "$DEPLOYMENT_RECONFIGURE" != "true" ]; then
-    deployment_load_config_file "$DEPLOYMENT_CONFIG_PATH" || return 1
-  fi
+  deployment_maybe_select_local_config || return 1
   deployment_apply_legacy_inputs
   deployment_parse_common_args "$@"
   if [ -n "${DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT:-}" ] && [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ]; then

@@ -3,11 +3,12 @@
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Table, Button, Popconfirm, message, Tag, Segmented, Tooltip } from "antd";
-import { Edit, Trash2, RefreshCw } from "lucide-react";
+import { Edit, Trash2, RefreshCw, TriangleAlert } from "lucide-react";
 import { ColumnsType } from "antd/es/table";
 import type { TablePaginationConfig } from "antd";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
 import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
+import { useCapacityCoverage } from "@/hooks/model/useCapacityCoverage";
 import { useMonitoringData, type TimeRange } from "@/hooks/useMonitoringData";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
@@ -15,6 +16,7 @@ import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
+import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
 import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "lucide-react";
 
 interface UnifiedModelRow extends ModelOption {
@@ -28,6 +30,8 @@ interface UnifiedModelRow extends ModelOption {
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+
+  const { bareModelIds } = useCapacityCoverage();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -221,6 +225,33 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       key: "displayName",
       width: 180,
       ellipsis: true,
+      render: (displayName: string, record: UnifiedModelRow) => {
+        // bareModelIds comes from /capacity-coverage which already filters
+        // by CAPACITY_COVERAGE_MODEL_TYPES on the backend (llm/vlm/vlm2/vlm3).
+        // The earlier `type === 'llm' || 'vlm'` guard was a duplicated
+        // type list that drifted -- it silently hid the badge on vlm2
+        // (image-gen) and vlm3 (video-und) rows even when backend marked
+        // them bare. Drop the guard and trust the authoritative set.
+        const isBareCapacity = Boolean(record.id && bareModelIds.has(record.id));
+
+        return (
+          <div className="flex items-center">
+            <span className="truncate">{displayName}</span>
+            {isBareCapacity && (
+              <Tooltip title={t("model.list.capacityWarning.badgeTooltip")}>
+                <TriangleAlert
+                  size={14}
+                  className="text-yellow-500 cursor-pointer ml-1.5 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit(record);
+                  }}
+                />
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: t("common.type"),
@@ -361,6 +392,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <ModelCapacityCoverageWidget />
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <Segmented

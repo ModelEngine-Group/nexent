@@ -1,18 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
-import {
-  FileImageFilled,
-  FilePdfFilled,
-  FileWordFilled,
-  FileExcelFilled,
-  FilePptFilled,
-  FileTextFilled,
-  FileMarkdownFilled,
-  Html5Filled,
-  CodeFilled,
-  FileUnknownFilled,
-} from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
 import { Button, Tooltip } from "antd";
@@ -24,17 +12,18 @@ import { extractColorsFromUri } from "@/lib/avatar";
 import log from "@/lib/logger";
 import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
+import {
+  getFileExtension,
+  getFileIcon,
+  MAX_FILE_COUNT,
+  MAX_FILE_SIZE,
+} from "@/lib/chat/fileIconUtils";
+import { safeUUID } from "@/lib/utils";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
+import { ChatModelSelector } from "./chatModelSelector";
 import { TokenUsageIndicator } from "@/components/common/tokenUsageIndicator";
 import { TokenMetrics } from "@/types/chat";
-
-// Get file extension
-const getFileExtension = (filename: string): string => {
-  return filename
-    .slice(((filename.lastIndexOf(".") - 1) >>> 0) + 2)
-    .toLowerCase();
-};
 
 // Format file size
 const formatFileSize = (sizeInBytes: number): string => {
@@ -47,75 +36,11 @@ const formatFileSize = (sizeInBytes: number): string => {
   }
 };
 
-// Get file icon
-const getFileIcon = (file: File) => {
-  const extension = getFileExtension(file.name);
-  const fileType = file.type;
-  const iconSize = 32;
-
-  // Image file
-  if (fileType.startsWith("image/")) {
-    return <FileImageFilled size={iconSize} color="#8e44ad" />;
-  }
-
-  // Check each file type category using config
-  if (chatConfig.fileIcons.pdf.includes(extension)) {
-    return <FilePdfFilled size={iconSize} color="#e74c3c" />;
-  }
-
-  if (chatConfig.fileIcons.word.includes(extension)) {
-    return <FileWordFilled size={iconSize} color="#3498db" />;
-  }
-
-  if (chatConfig.fileIcons.text.includes(extension)) {
-    return <FileTextFilled size={iconSize} color="#7f8c8d" />;
-  }
-
-  if (chatConfig.fileIcons.markdown.includes(extension)) {
-    return <FileMarkdownFilled size={iconSize} color="#34495e" />;
-  }
-
-  if (chatConfig.fileIcons.excel.includes(extension)) {
-    return <FileExcelFilled size={iconSize} color="#27ae60" />;
-  }
-
-  if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    return <FilePptFilled size={iconSize} color="#e67e22" />;
-  }
-
-  if (chatConfig.fileIcons.html.includes(extension)) {
-    return <Html5Filled size={iconSize} color="#e67e22" />;
-  }
-
-  if (chatConfig.fileIcons.code.includes(extension)) {
-    return <CodeFilled size={iconSize} color="#f39c12" />;
-  }
-
-  if (chatConfig.fileIcons.json.includes(extension)) {
-    return <CodeFilled size={iconSize} color="#f1c40f" />;
-  }
-
-  if (chatConfig.fileIcons.audio.includes(extension) || fileType.startsWith("audio/")) {
-    return <FileTextFilled size={iconSize} color="#16a085" />;
-  }
-
-  if (chatConfig.fileIcons.video.includes(extension) || fileType.startsWith("video/")) {
-    return <FileTextFilled size={iconSize} color="#8e44ad" />;
-  }
-
-  // Default file icon
-  return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
-};
-
 const isSupportedMediaFile = (extension: string, fileType: string) =>
   fileType.startsWith("audio/") ||
   fileType.startsWith("video/") ||
   chatConfig.audioExtensions.includes(extension) ||
   chatConfig.videoExtensions.includes(extension);
-
-// File limit constants from config
-const MAX_FILE_COUNT = chatConfig.maxFileCount;
-const MAX_FILE_SIZE = chatConfig.maxFileSize;
 
 interface ChatInputProps {
   input: string;
@@ -134,10 +59,15 @@ interface ChatInputProps {
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: string | null;
-  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[]) => void;
+  onAgentSelect?: (agentId: string | null, greetingMessage?: string, exampleQuestions?: string[], modelIds?: number[], modelNames?: string[]) => void;
   latestMetrics?: TokenMetrics | null;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
+  agentModelIds?: number[];
+  agentModelNames?: string[];
+  availableModels?: { id: number; displayName: string; connect_status?: string }[];
+  selectedModelId?: number | null;
+  onModelSelect?: (modelId: number | null) => void;
 }
 
 export function ChatInput({
@@ -159,6 +89,11 @@ export function ChatInput({
   latestMetrics = null,
   agentGreeting = null,
   agentExampleQuestions = [],
+  agentModelIds = [],
+  agentModelNames = [],
+  availableModels = [],
+  selectedModelId = null,
+  onModelSelect,
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -615,7 +550,7 @@ export function ChatInput({
         return;
       }
 
-      const fileId = Math.random().toString(36).substring(7);
+      const fileId = safeUUID();
       const extension = getFileExtension(file.name);
 
       // Supported image file types
@@ -765,7 +700,7 @@ export function ChatInput({
                         className="flex-shrink-0 transform group-hover:scale-110 transition-transform w-8 flex justify-center cursor-pointer"
                         onClick={() => handlePreviewFile(attachment.file)}
                       >
-                        {getFileIcon(attachment.file)}
+                        {getFileIcon(attachment.file.name, attachment.file.type, 32)}
                       </div>
                       <div
                         className="flex-1 overflow-hidden cursor-pointer"
@@ -863,14 +798,24 @@ export function ChatInput({
         />
       </div>
       <div className="h-12 bg-slate-100 relative">
-        {/* Agent selector on the left */}
-        <div className="absolute left-5 top-[40%] -translate-y-1/2">
+        {/* Agent and model selectors on the left */}
+        <div className="absolute left-5 top-[40%] -translate-y-1/2 flex items-center gap-2">
           <ChatAgentSelector
             selectedAgentId={selectedAgentId}
             onAgentSelect={onAgentSelect || (() => {})}
             disabled={isLoading || isStreaming}
             isInitialMode={isInitialMode}
           />
+          {/* Model selector - show when agent is selected and has models */}
+          {selectedAgentId && agentModelIds.length > 0 && (
+            <ChatModelSelector
+              modelIds={agentModelIds}
+              modelNames={agentModelNames}
+              selectedModelId={selectedModelId}
+              onModelSelect={onModelSelect || (() => {})}
+              disabled={isLoading || isStreaming}
+            />
+          )}
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
@@ -917,7 +862,7 @@ export function ChatInput({
                 id="file-upload-regular"
                 className="hidden"
                 onChange={handleFileUpload}
-                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                accept={`image/*,audio/*,video/*,${Object.values(chatConfig.fileIcons).flat().map(ext => '.' + ext).join(',')}`}
                 multiple
               />
             </Button>

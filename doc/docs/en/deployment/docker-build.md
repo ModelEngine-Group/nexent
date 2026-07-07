@@ -4,10 +4,13 @@ Recommended unified build entry:
 
 ```bash
 # Run interactive selection, similar to the deploy scripts
+bash build.sh
+
+# Equivalent direct image builder
 bash deploy/images/build.sh
 
 # Build selected images with a fixed version tag
-bash deploy/images/build.sh \
+bash build.sh \
   --images main,web,mcp,data-process,terminal \
   --version v2.2.1 \
   --registry general \
@@ -15,7 +18,7 @@ bash deploy/images/build.sh \
   --push
 
 # Build the same image set as latest
-bash deploy/images/build.sh \
+bash build.sh \
   --images main,web,mcp,data-process \
   --version latest \
   --registry general \
@@ -23,12 +26,15 @@ bash deploy/images/build.sh \
   --load
 
 # Build one or more explicit images when needed
-bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
+bash build.sh --web --docs --version v2.2.1 --dry-run
+
+# Build without Docker cache
+bash build.sh --web --version v2.2.1 --no-cache
 ```
 
-When run in a terminal without arguments, `deploy/images/build.sh` prompts for images, image version (`latest` or root `VERSION`), and registry. The interactive defaults are images `main,web` and version `latest`. Use `--interactive` to force the same prompts.
+The root `build.sh` forwards image builds to `deploy/images/build.sh`. Use `bash build.sh --package ...` to forward to the offline package builder. When run in a terminal without arguments, `build.sh` prompts for images, image version (`latest` or root `VERSION`), and image source. The interactive defaults are images `main,web` and version `latest`. Use `--interactive` to force the same prompts.
 
-`--platform` is command-line only. Omit it to build for the local architecture.
+`--platform` and `--no-cache` are command-line only. Omit `--platform` to build for the local architecture. The `mainland` web build also uses `--no-cache` automatically to avoid stale frontend dependency caches.
 
 Variant options:
 - `--dependency-variant cpu|gpu` controls data-process dependencies and defaults to `cpu`. `gpu` builds GPU/CUDA dependencies and uses the `-gpu` image-name suffix.
@@ -157,9 +163,10 @@ docker builder prune -f && docker system prune -f
 
 ### 🏷️ Tagging Strategy
 
-Each image is pushed to two repositories:
-- `nexent/*` - Main public image repository
-- `ccr.ccs.tencentyun.com/nexent-hub/*` - Tencent Cloud image repository (China region acceleration)
+Repository selection depends on `--registry` and `--push`:
+- `--registry general` builds or pushes `nexent/*`.
+- `--registry mainland --push` pushes to `ccr.ccs.tencentyun.com/nexent-hub/*` for mainland China acceleration.
+- `--registry mainland` without `--push` still builds local `nexent/*` tags while using mainland build mirrors.
 
 All images include:
 - `nexent/nexent` - Main application backend service
@@ -224,11 +231,35 @@ Notes:
 
 ## 🚀 Deployment Recommendations
 
-After building is complete, you can deploy local images from the `docker` directory:
+After building is complete, you can deploy local images from the repository root:
 
 ```bash
-cd docker
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
 > `local-latest` uses local `latest` Nexent application images and avoids pulling those images again. You do not need to modify `deploy/docker/deploy.sh`.
+
+### Package Local Images for Offline Deployment
+
+After building local `latest` images, package them with the offline builder:
+
+```bash
+bash build.sh --package \
+  --target docker \
+  --version latest \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest \
+  --compress true \
+  --output-dir offline-package/docker-local
+```
+
+When `--version latest` or `--image-source local-latest` is used, the builder expects local Nexent application images and skips pulling those `latest` tags. The package can then be moved to another host and deployed with:
+
+```bash
+cd offline-package/docker-local
+bash deploy.sh --load-images docker \
+  --version latest \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest
+```

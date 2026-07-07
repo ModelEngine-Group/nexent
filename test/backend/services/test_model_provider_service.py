@@ -464,6 +464,48 @@ async def test_prepare_model_dict_llm():
 
 
 @pytest.mark.asyncio
+async def test_prepare_model_dict_excludes_w11_accept_signal_fields():
+    """ModelRequest exposes accepted_suggestion_match_kind /
+    accepted_capability_profile_version for app-layer ingest but they are
+    audit-only and have no DB column. model_dump() must exclude them so
+    SQLAlchemy does not raise 'Unconsumed column names' on insert when the
+    batch_create path reuses prepare_model_dict.
+    """
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("openai", "gpt-4"),
+    ), mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="openai/gpt-4",
+    ), mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service.embedding_dimension_check",
+        new_callable=mock.AsyncMock,
+    ):
+        mock_model_req_instance = mock.MagicMock()
+        mock_model_req_instance.model_dump.return_value = {
+            "model_factory": "openai",
+            "model_name": "gpt-4",
+            "model_type": "llm",
+        }
+        mock_model_request.return_value = mock_model_req_instance
+
+        await prepare_model_dict(
+            "openai",
+            {"id": "openai/gpt-4", "model_type": "llm"},
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        _, dump_kwargs = mock_model_req_instance.model_dump.call_args
+        assert dump_kwargs.get("exclude") == {
+            "accepted_suggestion_match_kind",
+            "accepted_capability_profile_version",
+        }
+
+
+@pytest.mark.asyncio
 async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
     """Provider capacity candidates remain UI hints until an operator saves them.
 
@@ -574,11 +616,12 @@ async def test_prepare_model_dict_persists_operator_capacity():
             "model_type": "llm",
             "max_tokens": 31920,
             "context_window_tokens": 200000,
-            "max_input_tokens": None,
+            "max_input_tokens": 180000,
             "max_output_tokens": 31920,
             "default_output_reserve_tokens": 4096,
             "tokenizer_family": "qwen",
             "capacity_source": "operator",
+            "capability_profile_version": "dashscope/glm-5.2@1",
         }
 
         await prepare_model_dict(
@@ -589,15 +632,25 @@ async def test_prepare_model_dict_persists_operator_capacity():
         )
 
         _, kwargs = mock_model_request.call_args
+        # W11 spec L721-727: pin every capacity field the constructor must
+        # thread for the accepted-suggestion save path. Missing any of these
+        # silently drops the field on the DB row and reproduces CM-031.
         assert kwargs["context_window_tokens"] == 200000
+        assert kwargs["max_input_tokens"] == 180000
         assert kwargs["max_output_tokens"] == 31920
         assert kwargs["default_output_reserve_tokens"] == 4096
         assert kwargs["tokenizer_family"] == "qwen"
+        assert kwargs["capability_profile_version"] == "dashscope/glm-5.2@1"
         # capacity_source is forced to "operator" by the prepare_model_dict
         # contract: only operator-marked values reach the row, and the
         # marker itself is normalized to the canonical value rather than
         # echoing whatever the caller sent.
         assert kwargs["capacity_source"] == "operator"
+        # Canonical provider/model values land via constructor kwargs too,
+        # so model_factory + model_name are pinned to catch regressions
+        # in split_repo_name plumbing.
+        assert kwargs["model_factory"] == "dashscope"
+        assert kwargs["model_name"] == "glm-5.2"
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,7 @@ docker/openssh-server
 docker/volumes/db/data
 docker/.env
 docker/.env.generated
-deploy/docker/assets/monitoring/monitoring.env
+deploy/env/monitoring.env
 docker/.run
 docker/deploy.options
 k8s/helm/deploy.options
@@ -81,3 +81,7 @@ doc/mermaid
 _doc/
 
 .claude/skills/python-import-triage
+/deploy/env/.env
+/deploy/env/.env.bak
+
+agent_repository_frontend

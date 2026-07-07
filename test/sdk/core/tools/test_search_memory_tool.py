@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
-from sdk.nexent.core.tools.search_memory_tool import SearchMemoryTool
+from sdk.nexent.core.tools.search_memory_tool import SearchMemoryTool, _run_coroutine
 
 
 @pytest.fixture
@@ -207,3 +207,47 @@ def test_forward_exception_returns_friendly_error(search_memory_tool):
     assert "Memory search failed" in result
     assert "Elasticsearch timeout" in result
     assert "Continuing without memory results" in result
+
+
+def test_levels_none_config_conservative_default(mock_observer):
+    tool = SearchMemoryTool(
+        memory_config={"test": "config"},
+        tenant_id="tenant_1",
+        user_id="user_1",
+        agent_id="agent_1",
+        memory_user_config=None,
+        observer=mock_observer,
+    )
+
+    with patch(
+        "sdk.nexent.memory.memory_service.search_memory_in_levels",
+        new_callable=AsyncMock,
+        return_value={"results": []},
+    ) as mock_search:
+        tool.forward("query")
+
+    call_kwargs = mock_search.call_args[1]
+    assert "agent" not in call_kwargs["memory_levels"]
+    assert "tenant" in call_kwargs["memory_levels"]
+    assert "user" in call_kwargs["memory_levels"]
+    assert "user_agent" in call_kwargs["memory_levels"]
+
+
+def test_run_coroutine_no_running_loop():
+    async def sample_coro():
+        return "result"
+
+    result = _run_coroutine(sample_coro())
+    assert result == "result"
+
+
+def test_run_coroutine_with_running_loop():
+    async def sample_coro():
+        return "result"
+
+    async def run_with_loop():
+        return _run_coroutine(sample_coro())
+
+    import asyncio
+    result = asyncio.run(run_with_loop())
+    assert result == "result"

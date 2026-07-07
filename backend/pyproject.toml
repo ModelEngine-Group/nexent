@@ -29,6 +29,7 @@ dependencies = [
     "openjiuwen>=0.1.0",
     "pydantic-settings>=2.0.0",
     "python-docx>=1.1.0",
+    "xlrd>=2.0.1",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,8 @@ data-process = [
     "flower>=2.0.1",
     "nest_asyncio>=1.5.6",
     "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
+    "openpyxl>=3.1.5",
+    "xlrd>=2.0.1",
     "huggingface_hub>=0.30.0,<1.0"
 ]
 test = [

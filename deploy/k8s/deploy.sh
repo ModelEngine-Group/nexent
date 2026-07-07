@@ -25,7 +25,7 @@ GENERATED_VALUES="$CHART_DIR/generated-values.yaml"
 GENERATED_RUNTIME_VALUES="$CHART_DIR/generated-runtime-values.yaml"
 GENERATED_SECRETS_VALUES="$CHART_DIR/generated-secrets-values.yaml"
 GENERATED_PERSISTENCE_VALUES="$CHART_DIR/generated-persistence-values.yaml"
-ROOT_ENV_FILE="$PROJECT_ROOT/.env"
+ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 SQL_INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
 SUPABASE_SQL_DIR="$DEPLOY_ROOT/sql/supabase"
 
@@ -68,14 +68,25 @@ case "${1:-}" in
     shift
     ;;
   delete|delete-all|clean)
-    echo "K8s uninstall and cleanup have moved to uninstall.sh."
-    echo "Use: bash uninstall.sh ${1}"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "K8s 卸载和清理已迁移到 uninstall.sh。"
+      echo "请使用：bash uninstall.sh ${1}"
+    else
+      echo "K8s uninstall and cleanup have moved to uninstall.sh."
+      echo "Use: bash uninstall.sh ${1}"
+    fi
     exit 1
     ;;
   *)
-    echo "Unknown command: $1"
-    echo "Usage: $0 [apply] [options]"
-    echo "Uninstall: bash uninstall.sh"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "未知命令：$1"
+      echo "用法：$0 [apply] [选项]"
+      echo "卸载：bash uninstall.sh"
+    else
+      echo "Unknown command: $1"
+      echo "Usage: $0 [apply] [options]"
+      echo "Uninstall: bash uninstall.sh"
+    fi
     exit 1
     ;;
 esac
@@ -172,6 +183,7 @@ apply_deployment_common_config() {
     esac
 
     deployment_apply_image_source
+    deployment_prepare_monitoring_env k8s || return 1
     deployment_render_helm_values "$GENERATED_VALUES"
     render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
     render_persistence_values "$GENERATED_PERSISTENCE_VALUES"
@@ -472,31 +484,6 @@ render_k8s_runtime_config_values() {
     printf '      queues: %s\n' "$(yaml_quote "$(env_or_default QUEUES "process_q,forward_q")")"
     printf '      workerName: %s\n' "$(yaml_quote "$(env_or_default WORKER_NAME "")")"
     printf '      workerConcurrency: %s\n' "$(yaml_quote "$(env_or_default WORKER_CONCURRENCY "4")")"
-    echo "    telemetry:"
-    printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default ENABLE_TELEMETRY "false")")"
-    printf '      provider: %s\n' "$(yaml_quote "$(env_or_default MONITORING_PROVIDER "otlp")")"
-    printf '      projectName: %s\n' "$(yaml_quote "$(env_or_default MONITORING_PROJECT_NAME "")")"
-    printf '      serviceName: %s\n' "$(yaml_quote "$(env_or_default OTEL_SERVICE_NAME "nexent-backend")")"
-    printf '      otlpEndpoint: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_ENDPOINT "http://nexent-otel-collector:4318")")"
-    printf '      otlpTracesEndpoint: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_TRACES_ENDPOINT "")")"
-    printf '      otlpMetricsEndpoint: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_METRICS_ENDPOINT "")")"
-    printf '      otlpProtocol: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_PROTOCOL "http")")"
-    printf '      otlpHeaders: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_HEADERS "")")"
-    printf '      otlpAuthorization: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_AUTHORIZATION "")")"
-    printf '      otlpApiKey: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_X_API_KEY "")")"
-    printf '      otlpLangfuseIngestionVersion: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION "")")"
-    printf '      langsmithApiKey: %s\n' "$(yaml_quote "$(env_or_default LANGSMITH_API_KEY "")")"
-    printf '      langsmithProject: %s\n' "$(yaml_quote "$(env_or_default LANGSMITH_PROJECT "")")"
-    printf '      otlpMetricsEnabled: %s\n' "$(yaml_quote "$(env_or_default OTEL_EXPORTER_OTLP_METRICS_ENABLED "true")")"
-    printf '      instrumentRequests: %s\n' "$(yaml_quote "$(env_or_default MONITORING_INSTRUMENT_REQUESTS "false")")"
-    printf '      fastapiIncludedUrls: %s\n' "$(yaml_quote "$(env_or_default MONITORING_FASTAPI_INCLUDED_URLS "")")"
-    printf '      fastapiExcludedUrls: %s\n' "$(yaml_quote "$(env_or_default MONITORING_FASTAPI_EXCLUDED_URLS "")")"
-    printf '      fastapiExcludeSpans: %s\n' "$(yaml_quote "$(env_or_default MONITORING_FASTAPI_EXCLUDE_SPANS "receive,send")")"
-    printf '      dashboardUrl: %s\n' "$(yaml_quote "$(env_or_default MONITORING_DASHBOARD_URL "")")"
-    printf '      telemetrySampleRate: %s\n' "$(yaml_quote "$(env_or_default TELEMETRY_SAMPLE_RATE "1.0")")"
-    printf '      traceContentMode: %s\n' "$(yaml_quote "$(env_or_default MONITORING_TRACE_CONTENT_MODE "full")")"
-    printf '      traceMaxChars: %s\n' "$(yaml_quote "$(env_or_default MONITORING_TRACE_MAX_CHARS "4000")")"
-    printf '      traceMaxItems: %s\n' "$(yaml_quote "$(env_or_default MONITORING_TRACE_MAX_ITEMS "20")")"
     echo "    oauth:"
     printf '      githubClientId: %s\n' "$(yaml_quote "$(env_or_default GITHUB_OAUTH_CLIENT_ID "")")"
     printf '      githubClientSecret: %s\n' "$(yaml_quote "$(env_or_default GITHUB_OAUTH_CLIENT_SECRET "")")"
@@ -622,6 +609,7 @@ update_values_yaml() {
   echo ""
 
   deployment_apply_image_source
+  deployment_prepare_monitoring_env k8s || exit 1
   deployment_render_helm_values "$GENERATED_VALUES"
   render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
   render_persistence_values "$GENERATED_PERSISTENCE_VALUES"
@@ -811,7 +799,7 @@ generate_supabase_secrets() {
     if [ -n "${JWT_SECRET:-}" ] && [ -n "${SECRET_KEY_BASE:-}" ] && [ -n "${VAULT_ENC_KEY:-}" ] && [ -n "${SUPABASE_KEY:-}" ] && [ -n "${SERVICE_ROLE_KEY:-}" ]; then
         SUPABASE_ANON_KEY="$SUPABASE_KEY"
         SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
-        echo "Using Supabase secrets from root .env."
+        echo "Using Supabase secrets from deploy/env/.env."
         echo ""
         echo "--------------------------------"
         echo ""
@@ -889,32 +877,24 @@ pull_mcp_image() {
 
 render_runtime_secret_values() {
     local gotrue_db_url
-    local runtime_config_hash
-    local backend_checksum
-    local minio_checksum
-    local supabase_checksum
-    local web_checksum
-    local ssh_checksum
+    local env_checksum
     local sql_checksum
+    local supabase_postgres_password
+    local supabase_secret_checksum
 
-    gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
-    runtime_config_hash="$(deployment_sha256_file "$GENERATED_RUNTIME_VALUES")"
+    supabase_postgres_password="$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")"
+    gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:${supabase_postgres_password}@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
+    env_checksum="$(deployment_env_values_checksum)"
     sql_checksum="$(sql_files_checksum)"
-    backend_checksum="$(deployment_sha256_string "runtime=${runtime_config_hash}|sql=${sql_checksum}|elastic=$(env_or_default ELASTICSEARCH_API_KEY "")|postgres=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")|minio=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
-    minio_checksum="$(deployment_sha256_string "root=$(env_or_default MINIO_ROOT_USER "nexent"):$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")|client=${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}")"
-    supabase_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|base=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|pg=$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")|db=${gotrue_db_url}")"
-    web_checksum="$(deployment_sha256_string "market=$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")|model=$(env_or_default MODEL_ENGINE_ENABLED "false")")"
-    ssh_checksum="$(deployment_sha256_string "ssh=$(env_or_default SSH_USERNAME "nexent"):$(env_or_default SSH_PASSWORD "nexent@2025")")"
+    supabase_secret_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|secretKeyBase=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|postgres=${supabase_postgres_password}|gotrue=${gotrue_db_url}")"
 
     {
         echo "global:"
         echo "  rolloutChecksums:"
-        printf '    backend: %s\n' "$(yaml_quote "$backend_checksum")"
-        printf '    minio: %s\n' "$(yaml_quote "$minio_checksum")"
-        printf '    supabase: %s\n' "$(yaml_quote "$supabase_checksum")"
-        printf '    web: %s\n' "$(yaml_quote "$web_checksum")"
-        printf '    ssh: %s\n' "$(yaml_quote "$ssh_checksum")"
+        printf '    env: %s\n' "$(yaml_quote "$env_checksum")"
         printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
+        printf '    supabaseSecret: %s\n' "$(yaml_quote "$supabase_secret_checksum")"
+        deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  secrets:"
         printf '    elasticPassword: %s\n' "$(yaml_quote "$(env_or_default ELASTIC_PASSWORD "nexent@2025")")"
@@ -935,14 +915,18 @@ render_runtime_secret_values() {
             printf '      vaultEncKey: %s\n' "$(yaml_quote "$VAULT_ENC_KEY")"
             printf '      anonKey: %s\n' "$(yaml_quote "$SUPABASE_ANON_KEY")"
             printf '      serviceRoleKey: %s\n' "$(yaml_quote "$SUPABASE_SERVICE_ROLE_KEY")"
-            printf '      postgresPassword: %s\n' "$(yaml_quote "$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")")"
+            printf '      postgresPassword: %s\n' "$(yaml_quote "$supabase_postgres_password")"
             printf '      gotrueDbUrl: %s\n' "$(yaml_quote "$gotrue_db_url")"
         fi
     } > "$GENERATED_SECRETS_VALUES"
 }
 
 apply() {
-    echo "Deploying Nexent using Helm..."
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "正在使用 Helm 部署 Nexent..."
+    else
+        echo "Deploying Nexent using Helm..."
+    fi
 
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
@@ -956,7 +940,7 @@ apply() {
     echo "  MinIO Access Key/Secret Key Setup"
     echo "=========================================="
     if [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
-        echo "Using MinIO credentials from root .env."
+        echo "Using MinIO credentials from deploy/env/.env."
         echo "Access Key: $MINIO_ACCESS_KEY"
     elif load_existing_minio_secrets; then
         echo "Reusing existing MinIO credentials from Kubernetes secret."
@@ -985,7 +969,7 @@ apply() {
 
     if [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ]; then
         if [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
-            echo "Using ELASTICSEARCH_API_KEY from root .env."
+            echo "Using ELASTICSEARCH_API_KEY from deploy/env/.env."
         elif load_existing_elasticsearch_api_key; then
             echo "Reusing existing ELASTICSEARCH_API_KEY from Kubernetes secret."
         fi
@@ -996,24 +980,45 @@ apply() {
     # Step 5: Configure Terminal tool (OpenSSH) only when selected.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         ENABLE_OPENSSH="true"
-        echo "Terminal tool will be enabled."
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "将启用终端工具。"
+        else
+            echo "Terminal tool will be enabled."
+        fi
 
         # Ask for SSH credentials
         echo ""
-        echo "SSH credentials configuration:"
-        read -p "SSH Username (default: nexent): " ssh_username
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "SSH 凭据配置："
+            read -p "SSH 用户名（默认：nexent）：" ssh_username
+        else
+            echo "SSH credentials configuration:"
+            read -p "SSH Username (default: nexent): " ssh_username
+        fi
         SSH_USERNAME="${ssh_username:-nexent}"
-        read -s -p "SSH Password (default: nexent@2025): " ssh_password
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            read -s -p "SSH 密码（默认：nexent@2025）：" ssh_password
+        else
+            read -s -p "SSH Password (default: nexent@2025): " ssh_password
+        fi
         echo ""
         SSH_PASSWORD="${ssh_password:-nexent@2025}"
     else
         ENABLE_OPENSSH="false"
-        echo "Terminal tool disabled."
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "终端工具已禁用。"
+        else
+            echo "Terminal tool disabled."
+        fi
     fi
     echo ""
 
     # Step 6: Clean up stale PVs
-    echo "Checking for stale PersistentVolumes..."
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "正在检查残留 PersistentVolumes..."
+    else
+        echo "Checking for stale PersistentVolumes..."
+    fi
     for pv in nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
         pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
         if [ "$pv_status" = "Released" ]; then
@@ -1036,7 +1041,11 @@ apply() {
     # Step 7: Deploy using Helm
     ensure_namespace
     recreate_legacy_nexent_secret_for_helm_management
-    echo "Deploying Helm chart..."
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "正在部署 Helm chart..."
+    else
+        echo "Deploying Helm chart..."
+    fi
     helm_upgrade_release
 
     # Step 9: Wait for Elasticsearch to be ready and initialize API key
@@ -1046,15 +1055,27 @@ apply() {
     echo "=========================================="
     local deploy_success=true
 
-    echo "Waiting for Elasticsearch deployment to be ready..."
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "正在等待 Elasticsearch deployment 就绪..."
+    else
+        echo "Waiting for Elasticsearch deployment to be ready..."
+    fi
     sleep 5
     if wait_for_deployment_ready "nexent-elasticsearch"; then
-        echo "Elasticsearch deployment is ready."
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "Elasticsearch deployment 已就绪。"
+        else
+            echo "Elasticsearch deployment is ready."
+        fi
 
         # Initialize Elasticsearch API key only when it is missing, invalid, or explicitly refreshed.
         INIT_ES_SCRIPT="$SCRIPT_DIR/init-elasticsearch.sh"
         if [ -f "$INIT_ES_SCRIPT" ]; then
-            echo "Running Elasticsearch initialization script..."
+            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                echo "正在运行 Elasticsearch 初始化脚本..."
+            else
+                echo "Running Elasticsearch initialization script..."
+            fi
             local es_key_before
             local es_key_after
             local es_key_output_file
@@ -1067,11 +1088,19 @@ apply() {
                     es_key_after="$es_key_before"
                 fi
                 rm -f "$es_key_output_file"
-                echo "Elasticsearch API key initialized successfully."
+                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                    echo "Elasticsearch API key 初始化成功。"
+                else
+                    echo "Elasticsearch API key initialized successfully."
+                fi
 
                 if [ "$es_key_before" != "$es_key_after" ]; then
                     echo ""
-                    echo "ELASTICSEARCH_API_KEY updated; refreshing Helm values and rolling affected backend services..."
+                    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                        echo "ELASTICSEARCH_API_KEY 已更新；正在刷新 Helm values 并滚动受影响的后端服务..."
+                    else
+                        echo "ELASTICSEARCH_API_KEY updated; refreshing Helm values and rolling affected backend services..."
+                    fi
                     ELASTICSEARCH_API_KEY="$es_key_after"
                     render_runtime_secret_values
                     helm_upgrade_release
@@ -1080,7 +1109,11 @@ apply() {
                     deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && backend_services="$backend_services data-process"
 
                     echo ""
-                    echo "Waiting for backend services to be ready..."
+                    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                        echo "正在等待后端服务就绪..."
+                    else
+                        echo "Waiting for backend services to be ready..."
+                    fi
                     sleep 5
                     for svc in $backend_services; do
                         echo "  Waiting for nexent-$svc..."
@@ -1092,26 +1125,46 @@ apply() {
                         fi
                     done
                 else
-                    echo "ELASTICSEARCH_API_KEY unchanged; backend rollout is not needed."
+                    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                        echo "ELASTICSEARCH_API_KEY 未变化；无需滚动后端服务。"
+                    else
+                        echo "ELASTICSEARCH_API_KEY unchanged; backend rollout is not needed."
+                    fi
                 fi
             else
                 rm -f "$es_key_output_file"
-                echo "Error: Elasticsearch initialization script failed."
+                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                    echo "错误：Elasticsearch 初始化脚本执行失败。"
+                else
+                    echo "Error: Elasticsearch initialization script failed."
+                fi
                 deploy_success=false
             fi
         else
-            echo "Error: init-elasticsearch.sh not found at $INIT_ES_SCRIPT"
+            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                echo "错误：未找到 init-elasticsearch.sh：$INIT_ES_SCRIPT"
+            else
+                echo "Error: init-elasticsearch.sh not found at $INIT_ES_SCRIPT"
+            fi
             deploy_success=false
         fi
     else
-        echo "Error: nexent-elasticsearch did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "错误：nexent-elasticsearch 未能在 ${K8S_WAIT_TIMEOUT_SECONDS}s 内就绪。"
+        else
+            echo "Error: nexent-elasticsearch did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
+        fi
         deploy_success=false
     fi
 
     if [ "$deploy_success" = false ]; then
         echo ""
         echo "=========================================="
-        echo "  Deployment Failed!"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "  部署失败！"
+        else
+            echo "  Deployment Failed!"
+        fi
         echo "=========================================="
         exit 1
     fi
@@ -1125,12 +1178,24 @@ apply() {
             echo "  Super Admin User Creation"
             echo "=========================================="
             if bash "$CREATE_SUADMIN_SCRIPT"; then
-                echo "Super admin user creation completed."
+                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                    echo "超级管理员创建完成。"
+                else
+                    echo "Super admin user creation completed."
+                fi
             else
-                echo "Warning: Super admin user creation failed, but continuing deployment."
+                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                    echo "警告：超级管理员创建失败，但部署将继续。"
+                else
+                    echo "Warning: Super admin user creation failed, but continuing deployment."
+                fi
             fi
         else
-            echo "Warning: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
+            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+                echo "警告：未找到 create-suadmin.sh：$CREATE_SUADMIN_SCRIPT"
+            else
+                echo "Warning: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
+            fi
         fi
     fi
 
@@ -1141,14 +1206,51 @@ apply() {
     # Step 11: Pull MCP image after persisting deployment options
     pull_mcp_image
 
-    echo "Deployment completed successfully!"
-    echo "Access the application at: http://localhost:30000"
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "部署完成！"
+        echo "应用访问地址：http://localhost:30000"
+    else
+        echo "Deployment completed successfully!"
+        echo "Access the application at: http://localhost:30000"
+    fi
     if [ "$ENABLE_OPENSSH" = "true" ]; then
-        echo "SSH Terminal at: localhost:30022"
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "SSH Terminal 地址：localhost:30022"
+        else
+            echo "SSH Terminal at: localhost:30022"
+        fi
     fi
 }
 
 print_usage() {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "用法：$0 [apply] [选项]"
+        echo ""
+        echo "使用 Helm 部署 Nexent K8s 资源。"
+        echo ""
+        echo "选项："
+        echo "  --components LIST          要部署的组件"
+        echo "  --port-policy POLICY       development 或 production"
+        echo "  --image-source SOURCE      general、mainland 或 local-latest"
+        echo "  --is-mainland Y|N          兼容旧参数，映射为 mainland/general 镜像源"
+        echo "  --version VERSION          指定应用版本（未设置时自动从 const.py 检测）"
+        echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
+        echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
+        echo "  --persistence-mode MODE    local、dynamic 或 existing"
+        echo "  --storage-class NAME       用于 PV/PVC 绑定的 StorageClass（别名：--storageclass、--storage-class-name、--sc）"
+        echo "  --local-path PATH          本地 PV 基础路径"
+        echo "  --local-node-name NAME     已废弃；local 模式使用 hostPath，不需要 nodeAffinity"
+        echo "  --existing-claim-prefix P  现有 PVC 前缀，渲染为 P-<component>"
+        echo "  --wait-timeout SECONDS     Kubernetes 部署等待超时（默认：600）"
+        echo "  --rotate-secrets           强制轮换部署密钥"
+        echo "  --refresh-es-key           强制重新创建 ELASTICSEARCH_API_KEY"
+        echo "  --config                   进入交互式部署配置界面"
+        echo "  --help, -h                 显示帮助信息"
+        echo ""
+        echo "卸载：bash uninstall.sh"
+        return
+    fi
+
     echo "Usage: $0 [apply] [options]"
     echo ""
     echo "Deploy Nexent K8s resources using Helm."
@@ -1159,6 +1261,7 @@ print_usage() {
     echo "  --image-source SOURCE      general, mainland, or local-latest"
     echo "  --is-mainland Y|N          Legacy alias for image source mainland/general"
     echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
+    echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
     echo "  --storage-class NAME       StorageClass for PV/PVC binding (aliases: --storageclass, --storage-class-name, --sc)"
@@ -1168,6 +1271,7 @@ print_usage() {
     echo "  --wait-timeout SECONDS    Kubernetes deployment wait timeout (default: 600)"
     echo "  --rotate-secrets           Force rotation of deployment secrets"
     echo "  --refresh-es-key           Force recreation of ELASTICSEARCH_API_KEY"
+    echo "  --config                   Open the interactive deployment configuration"
     echo "  --help, -h                 Show this help message"
     echo ""
     echo "Uninstall: bash uninstall.sh"

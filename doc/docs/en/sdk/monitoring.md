@@ -15,20 +15,8 @@ NexentAgent ──► OpenTelemetry SDK ──► OTLP Collector ──► Arize
 ## Quick Start
 
 ```bash
-cd docker
-[ -f .env ] || cp .env.example .env
-cp monitoring/monitoring.env.example monitoring/monitoring.env
-
-vim .env
-ENABLE_TELEMETRY=true
-MONITORING_PROVIDER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http
-
-vim monitoring/monitoring.env
-MONITORING_PROVIDER=otlp
-
-./start-monitoring.sh --stack collector
+cd deploy
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider otlp
 ```
 
 ## AI Observability Platforms
@@ -89,15 +77,16 @@ LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoin
 **Collector forwarding:**
 
 ```bash
-cd docker
-vim monitoring/monitoring.env
+cd deploy
+[ -f env/monitoring.env ] || cp env/monitoring.env.example env/monitoring.env
+vim env/monitoring.env
 
 MONITORING_PROVIDER=langsmith
 LANGSMITH_API_KEY=lsv2_xxx
 LANGSMITH_PROJECT=nexent
 LANGSMITH_OTLP_TRACES_ENDPOINT=https://api.smith.langchain.com/otel/v1/traces
 
-./start-monitoring.sh --stack langsmith
+bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider langsmith
 ```
 
 Nexent backend configuration when it sends OTLP to the Collector:
@@ -123,7 +112,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
-Set `MONITORING_DASHBOARD_URL` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path.
+Set `MONITORING_DASHBOARD_URL` in `deploy/env/monitoring.env` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path. In speed mode, the top-bar entry is visible when the URL is configured; in standard mode, only the super administrator can see it.
 
 ```bash
 MONITORING_DASHBOARD_URL=http://localhost:6006
@@ -138,9 +127,9 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
 | `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
-| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
+| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar; visible in speed mode and to super administrators in standard mode |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
-| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
+| `MONITORING_TRACE_CONTENT_MODE` | `full` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |
 | `MONITORING_TRACE_MAX_ITEMS` | `20` | Maximum dict keys/list items included in payload previews |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
@@ -310,7 +299,7 @@ All monitoring methods work without errors when disabled - decorators pass throu
 
 ### No data appearing
 
-1. Check `ENABLE_TELEMETRY=true` in `.env`
+1. Check `ENABLE_TELEMETRY=true` in `deploy/env/monitoring.env`
 2. Verify OTLP endpoint is reachable
 3. Check authentication headers are correct
 

@@ -175,10 +175,37 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Check if current route has access
   const cleanPath = getEffectiveRoutePath(pathname);
-  const hasAccess = accessibleRoutes.includes(cleanPath);
+
+  // Share pages are always accessible to any logged-in user (covers /share/...).
+  const isSharePage = cleanPath.startsWith("/share/");
+
+  // Agent evaluation page lives at /space/agents/{id}/evaluate but the legacy
+  // /space menu entry was removed during the menu refactor
+  // (v2.2.2_0622_update_left_nav_menu.sql). Grant an explicit allow-list so the
+  // route guard never blocks this page even when the DB migration has not been
+  // applied yet. The actual permission still needs to be granted at the DB
+  // level; this is just a defensive fallback.
+  const isAgentEvaluationPage =
+    /^\/[^/]+\/space\/agents\/\d+\/evaluate(?:\/|$)/.test(cleanPath);
+
+  // Support prefix matching so nested routes such as
+  // /space/agents/{id}/evaluate (agent evaluator) are covered by /space.
+  const isWithinAccessiblePrefix = accessibleRoutes.some(
+    (route) => route !== "/" && cleanPath.startsWith(route + "/")
+  );
+
+  const hasAccess =
+    isSharePage ||
+    isAgentEvaluationPage ||
+    accessibleRoutes.includes(cleanPath) ||
+    isWithinAccessiblePrefix;
 
   // Route guard
   useLayoutEffect(() => {
+    if (isSharePage || isAgentEvaluationPage) {
+      return;
+    }
+
     if (isLoading || !user || accessibleRoutes.length === 0 || pathname === lastCheckedPath) {
       return;
     }
@@ -195,7 +222,7 @@ export function useAuthorization(): AuthorizationContextType {
     }
 
     setLastCheckedPath(pathname);
-  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, router, openAuthzPromptModal]);
+  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, isSharePage, router, openAuthzPromptModal]);
 
   // Permission checking utilities
   const hasPermission = useCallback((permission: string): boolean => {

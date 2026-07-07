@@ -303,12 +303,16 @@ def get_version_detail_impl(
     # Add enabled skills to result
     result['skills'] = [s for s in skills_snapshot if s.get('enabled', True)]
 
-    # Get model name from model_id
-    if result.get('model_id') is not None and result['model_id'] != 0:
-        model_info = get_model_by_model_id(result['model_id'])
-        result['model_name'] = model_info.get('display_name', None) if model_info else None
-    else:
-        result['model_name'] = None
+    # Get model names from model_ids array
+    snapshot_model_ids = result.get("model_ids") or []
+    snapshot_model_names: List[str] = []
+    for mid in snapshot_model_ids:
+        mid_info = get_model_by_model_id(mid)
+        if mid_info and mid_info.get("display_name"):
+            snapshot_model_names.append(mid_info["display_name"])
+    result["model_names"] = snapshot_model_names
+    # Derive legacy model_name from the first model for backward compatibility
+    result["model_name"] = snapshot_model_names[0] if snapshot_model_names else None
 
     # Get business logic model name
     if result.get('business_logic_model_id') is not None and result['business_logic_model_id'] != 0:
@@ -363,8 +367,8 @@ def _check_version_snapshot_availability(
         return False, [AgentUnavailableReason.AGENT_NOT_FOUND]
 
     # Check model availability
-    model_id = agent_info.get('model_id')
-    if model_id is None or model_id == 0:
+    model_ids = agent_info.get('model_ids') or []
+    if not model_ids:
         unavailable_reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
 
     # Check tools availability (only when tools are configured)
@@ -628,13 +632,21 @@ def compare_versions_impl(
             'value_b': version_b.get('name'),
         })
 
-    # Compare model_name
-    if version_a.get('model_name') != version_b.get('model_name'):
+    # Compare model_ids (canonical field). Both versions should always have the
+    # same shape (list of ints) after get_version_detail_impl / draft path normalization.
+    def _normalize_model_ids(value: Any) -> List[int]:
+        if not value:
+            return []
+        return [int(x) for x in value if x is not None]
+
+    model_ids_a = _normalize_model_ids(version_a.get('model_ids'))
+    model_ids_b = _normalize_model_ids(version_b.get('model_ids'))
+    if model_ids_a != model_ids_b:
         differences.append({
-            'field': 'model_name',
+            'field': 'model_ids',
             'label': 'Model',
-            'value_a': version_a.get('model_name'),
-            'value_b': version_b.get('model_name'),
+            'value_a': version_a.get('model_names') or model_ids_a,
+            'value_b': version_b.get('model_names') or model_ids_b,
         })
 
     # Compare max_steps
@@ -752,12 +764,15 @@ def _get_version_detail_or_draft(
         # Get published version detail (already includes skills from get_version_detail_impl)
         result = get_version_detail_impl(agent_id, tenant_id, version_no)
 
-    # Get model name from model_id
-    if result.get('model_id') is not None and result['model_id'] != 0:
-        model_info = get_model_by_model_id(result['model_id'])
-        result['model_name'] = model_info.get('display_name', None) if model_info else None
-    else:
-        result['model_name'] = None
+    # Get model names from model_ids array
+    detail_model_ids = result.get("model_ids") or []
+    detail_model_names: List[str] = []
+    for mid in detail_model_ids:
+        mid_info = get_model_by_model_id(mid)
+        if mid_info and mid_info.get("display_name"):
+            detail_model_names.append(mid_info["display_name"])
+    result["model_names"] = detail_model_names
+    result["model_name"] = detail_model_names[0] if detail_model_names else None
 
     # Get business logic model name
     if result.get('business_logic_model_id') is not None and result['business_logic_model_id'] != 0:
@@ -908,12 +923,20 @@ async def list_published_agents_impl(
             agent = entry["raw_agent"]
             unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
 
-            model_id = agent.get("model_id")
-            model_info = None
-            if model_id is not None:
-                if model_id not in model_cache:
-                    model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
-                model_info = model_cache.get(model_id)
+            # Build model_ids and model_names from agent snapshot
+            model_ids_list = agent.get("model_ids")
+            model_names_list: list[str] = []
+
+            if model_ids_list:
+                # Resolve model names for each model_id
+                for mid in model_ids_list:
+                    if mid not in model_cache:
+                        model_cache[mid] = get_model_by_model_id(mid, tenant_id)
+                    model_info_item = model_cache.get(mid)
+                    if model_info_item:
+                        model_names_list.append(model_info_item.get("display_name") or model_info_item.get("model_name") or str(mid))
+                    else:
+                        model_names_list.append(str(mid))
 
             permission = resolve_agent_list_permission(
                 user_role=user_role,
@@ -928,9 +951,9 @@ async def list_published_agents_impl(
                 "display_name": agent.get("display_name") if agent.get("display_name") else agent.get("name"),
                 "description": agent.get("description"),
                 "author": agent.get("author"),
-                "model_id": model_id,
-                "model_name": model_info.get("model_name") if model_info is not None else agent.get("model_name"),
-                "model_display_name": model_info.get("display_name") if model_info is not None else None,
+                "model_ids": model_ids_list,
+                "model_names": model_names_list,
+                "model_name": model_names_list[0] if model_names_list else None,
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),

@@ -56,11 +56,11 @@ if [ ! -f "$SCRIPT_PATH" ]; then
     exit 1
 fi
 
-# Load environment from project root .env if exists. The script may run from
+# Load environment from deploy/env/.env if exists. The script may run from
 # deploy/docker/assets/scripts or from the copied ROOT_DIR/scripts directory.
 ENV_FILE="${DEPLOYMENT_ROOT_ENV:-}"
 if [ -z "$ENV_FILE" ]; then
-    for candidate in "${SCRIPT_DIR}/../../../../.env" "${SCRIPT_DIR}/../../../.env" "${SCRIPT_DIR}/../../.env"; do
+    for candidate in "${SCRIPT_DIR}/../../../env/.env" "${SCRIPT_DIR}/../../../../docker/.env"; do
         if [ -f "$candidate" ]; then
             ENV_FILE="$candidate"
             break

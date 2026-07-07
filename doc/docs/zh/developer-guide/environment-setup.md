@@ -8,7 +8,7 @@ title: 环境准备
 
 ## 🧱 通用要求
 
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+
 - Docker & Docker Compose
 - uv（Python 包管理器）
@@ -22,8 +22,7 @@ title: 环境准备
 
 ```bash
 # 在项目根目录的 docker 目录执行
-cd docker
-./deploy.sh --components infrastructure --port-policy development
+bash deploy.sh docker --components infrastructure --port-policy development
 ```
 
 :::: info 重要提示

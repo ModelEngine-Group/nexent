@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Form, Input, Button, Switch, message } from "antd";
+import { App, Modal, Form, Input, Button, Switch } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 
 const { TextArea } = Input;
@@ -38,6 +38,7 @@ export default function AgentVersionPubulishModal({
   onUpdated,
 }: AgentVersionPubulishModalProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const queryClient = useQueryClient();
 
   // Get version list for duplicate name validation

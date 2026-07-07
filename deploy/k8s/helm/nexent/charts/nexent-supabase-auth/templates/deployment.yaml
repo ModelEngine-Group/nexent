@@ -19,7 +19,7 @@ spec:
       labels:
         app: nexent-supabase-auth
       annotations:
-        checksum/nexent-supabase: {{ dig "rolloutChecksums" "supabase" "" .Values.global | quote }}
+        checksum/nexent-supabase-secret: {{ dig "rolloutChecksums" "supabaseSecret" "" .Values.global | quote }}
     spec:
       initContainers:
         - name: init-db

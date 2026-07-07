@@ -94,6 +94,17 @@ def _update_single_config(user_id: str, config_key: str, config_value: str) -> b
 				f"update_config_by_id failed, user_id={user_id}, key={config_key}, value={config_value}"
 			)
 			return False
+		
+		# Handle duplicate records: delete all except the first one
+		if len(record_list) > 1:
+			logger.warning(
+				f"Found {len(record_list)} duplicate records for user_id={user_id}, key={config_key}. Cleaning up..."
+			)
+			for duplicate in record_list[1:]:
+				dup_id = duplicate["config_id"]
+				delete_result = delete_config_by_config_id(dup_id, updated_by=user_id)
+				if not delete_result:
+					logger.error(f"Failed to delete duplicate config_id={dup_id}")
 	return True
 
 

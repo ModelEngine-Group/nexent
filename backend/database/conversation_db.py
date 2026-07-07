@@ -90,7 +90,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
         return result_dict
 
 
-def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None) -> int:
+def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
+                                 status: str = 'completed') -> int:
     """
     Create a conversation message record
 
@@ -102,6 +103,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             - content: Message content
             - minio_files: JSON string of attachment information
         user_id: Reserved parameter for created_by and updated_by fields
+        status: Lifecycle status (pending / streaming / completed / failed / stopped)
 
     Returns:
         int: Newly created message ID (auto-increment ID)
@@ -121,7 +123,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         # Prepare data dictionary
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_data['role'],
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
-                "delete_flag": 'N'}
+                "delete_flag": 'N', "status": status}
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -182,6 +184,153 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
             unit_ids.append(unit_id)
 
         return unit_ids
+
+
+def create_message_unit(message_id: int, conversation_id: int, unit_index: int,
+                        unit_type: str, unit_content: str,
+                        user_id: Optional[str] = None,
+                        unit_status: str = 'completed') -> int:
+    """
+    Insert a single ConversationMessageUnit row.
+
+    Args:
+        message_id: Message ID (integer)
+        conversation_id: Conversation ID (integer)
+        unit_index: Sequence number for frontend display sorting
+        unit_type: Type of the unit (e.g. "model_output_code", "final_answer")
+        unit_content: Complete content of the unit
+        user_id: Reserved parameter for created_by and updated_by fields
+        unit_status: Lifecycle status (streaming / completed)
+
+    Returns:
+        int: Newly created unit ID (auto-increment ID)
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+        conversation_id = int(conversation_id)
+        unit_index = int(unit_index)
+
+        row_data = {
+            "message_id": message_id,
+            "conversation_id": conversation_id,
+            "unit_index": unit_index,
+            "unit_type": unit_type,
+            "unit_content": unit_content,
+            "unit_status": unit_status,
+            "delete_flag": 'N',
+        }
+        if user_id:
+            row_data["created_by"] = user_id
+            row_data["updated_by"] = user_id
+
+        stmt = insert(ConversationMessageUnit).values(
+            **row_data).returning(ConversationMessageUnit.unit_id)
+        result = session.execute(stmt)
+        return result.scalar_one()
+
+
+def update_conversation_message_status(message_id: int, status: str,
+                                        user_id: Optional[str] = None) -> None:
+    """
+    Update the lifecycle status of a conversation message.
+
+    Args:
+        message_id: Message ID (integer)
+        status: New status (pending / streaming / completed / failed / stopped)
+        user_id: Reserved parameter for updated_by field
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+        update_data = {
+            "status": status,
+            "update_time": func.current_timestamp(),
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+        session.execute(
+            update(ConversationMessage)
+            .where(ConversationMessage.message_id == message_id,
+                   ConversationMessage.delete_flag == 'N')
+            .values(update_data)
+        )
+
+
+def update_conversation_message_content(message_id: int, content: str,
+                                         user_id: Optional[str] = None) -> None:
+    """
+    Update the message_content field of a conversation message.
+
+    Args:
+        message_id: Message ID (integer)
+        content: New content text
+        user_id: Reserved parameter for updated_by field
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+        update_data = {
+            "message_content": content,
+            "update_time": func.current_timestamp(),
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+        session.execute(
+            update(ConversationMessage)
+            .where(ConversationMessage.message_id == message_id,
+                   ConversationMessage.delete_flag == 'N')
+            .values(update_data)
+        )
+
+
+def update_message_unit_status(unit_id: int, status: str,
+                                user_id: Optional[str] = None) -> None:
+    """
+    Update the unit_status field of a message unit.
+
+    Args:
+        unit_id: Unit ID (integer)
+        status: New status (streaming / completed)
+        user_id: Reserved parameter for updated_by field
+    """
+    with get_db_session() as session:
+        unit_id = int(unit_id)
+        update_data = {
+            "unit_status": status,
+            "update_time": func.current_timestamp(),
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+        session.execute(
+            update(ConversationMessageUnit)
+            .where(ConversationMessageUnit.unit_id == unit_id,
+                   ConversationMessageUnit.delete_flag == 'N')
+            .values(update_data)
+        )
+
+
+def update_message_unit_content(unit_id: int, content: str,
+                                user_id: Optional[str] = None) -> None:
+    """
+    Update the unit_content field of a message unit.
+
+    Args:
+        unit_id: Unit ID (integer)
+        content: New content text
+        user_id: Reserved parameter for updated_by field
+    """
+    with get_db_session() as session:
+        unit_id = int(unit_id)
+        update_data = {
+            "unit_content": content,
+            "update_time": func.current_timestamp(),
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+        session.execute(
+            update(ConversationMessageUnit)
+            .where(ConversationMessageUnit.unit_id == unit_id,
+                   ConversationMessageUnit.delete_flag == 'N')
+            .values(update_data)
+        )
 
 
 def get_conversation(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -547,12 +696,13 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         conversation = as_dict(conversation)
 
         subquery = select(
-            # Move the order_by to the json_agg function
             func.json_agg(
                 func.json_build_object(
                     'unit_id', ConversationMessageUnit.unit_id,
                     'unit_type', ConversationMessageUnit.unit_type,
-                    'unit_content', ConversationMessageUnit.unit_content
+                    'unit_content', ConversationMessageUnit.unit_content,
+                    'unit_status', ConversationMessageUnit.unit_status,
+                    'unit_index', ConversationMessageUnit.unit_index
                 )
             )
         ).select_from(
@@ -568,6 +718,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.message_index,
             ConversationMessage.message_role.label('role'),
             ConversationMessage.message_content,
+            ConversationMessage.status,
             ConversationMessage.minio_files,
             ConversationMessage.opinion_flag,
             subquery.label('units')
@@ -598,9 +749,11 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         for record in message_records:
             message_data = as_dict(record)
 
-            # Ensure units field is empty list instead of None
+            # Ensure units field is empty list instead of None, then sort by unit_index
             if message_data['units'] is None:
                 message_data['units'] = []
+            else:
+                message_data['units'] = sorted(message_data['units'], key=lambda u: u['unit_index'])
 
             # Process minio_files field - if it's a JSON string, parse it into Python object
             if message_data.get('minio_files'):
@@ -1071,6 +1224,85 @@ def get_latest_assistant_message_id(conversation_id: int, user_id: Optional[str]
 
         result = session.execute(stmt).scalar()
         return result
+
+
+def get_latest_assistant_message(conversation_id: int, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get the latest assistant message for a conversation, including its status field.
+    Used for streaming recovery to check if a stream is still in progress.
+
+    Args:
+        conversation_id: Conversation ID
+        user_id: Optional user ID for ownership check
+
+    Returns:
+        Optional[Dict]: Contains message_id, status, message_content, or None if not found
+    """
+    with get_db_session() as session:
+        conversation_id = int(conversation_id)
+
+        stmt = select(
+            ConversationMessage.message_id,
+            ConversationMessage.status,
+            ConversationMessage.message_content,
+        ).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == 'N',
+            ConversationMessage.message_role == 'assistant'
+        ).order_by(desc(ConversationMessage.message_index)).limit(1)
+
+        if user_id:
+            stmt = stmt.join(
+                ConversationRecord,
+                ConversationMessage.conversation_id == ConversationRecord.conversation_id
+            ).where(ConversationRecord.created_by == user_id)
+
+        result = session.execute(stmt).first()
+        if result:
+            return {
+                'message_id': result.message_id,
+                'status': result.status,
+                'message_content': result.message_content,
+            }
+        return None
+
+
+def get_last_unit_for_message(message_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Get the last unit (highest unit_index) for a message.
+    Used for streaming recovery to determine the resume position.
+
+    Args:
+        message_id: Message ID
+
+    Returns:
+        Optional[Dict]: Contains unit_id, unit_index, unit_type, unit_content, unit_status,
+                        or None if no units exist
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = select(
+            ConversationMessageUnit.unit_id,
+            ConversationMessageUnit.unit_index,
+            ConversationMessageUnit.unit_type,
+            ConversationMessageUnit.unit_content,
+            ConversationMessageUnit.unit_status,
+        ).where(
+            ConversationMessageUnit.message_id == message_id,
+            ConversationMessageUnit.delete_flag == 'N'
+        ).order_by(desc(ConversationMessageUnit.unit_index)).limit(1)
+
+        result = session.execute(stmt).first()
+        if result:
+            return {
+                'unit_id': result.unit_id,
+                'unit_index': result.unit_index,
+                'unit_type': result.unit_type,
+                'unit_content': result.unit_content,
+                'unit_status': result.unit_status,
+            }
+        return None
 
 
 def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[str, Any]]) -> bool:

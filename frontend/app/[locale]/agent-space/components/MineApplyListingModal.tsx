@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { App, Button, Modal, Select } from "antd";
+import { App, Button, Modal, Select, Spin } from "antd";
 import { Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,10 +9,15 @@ import {
   AGENT_REPOSITORY_ICONS,
   AGENT_REPOSITORY_PRESET_TAGS,
 } from "@/const/agentRepository";
+import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
   getAgentRepositoryCategoryLabel,
   getAgentRepositoryTagLabel,
 } from "@/lib/agentRepositoryLabels";
+import {
+  buildApplyListingFormPrefill,
+  pickApplyListingPrefillSource,
+} from "@/lib/agentRepositoryMine";
 import type {
   AgentRepositoryListingCreatePayload,
   MyEditableAgentItem,
@@ -42,12 +47,28 @@ export function MineApplyListingModal({
   const icons = AGENT_REPOSITORY_ICONS;
   const categories = AGENT_REPOSITORY_CATEGORIES;
   const presetTags = AGENT_REPOSITORY_PRESET_TAGS;
+  const allowedCategoryIds = useMemo(
+    () => categories.map((category) => category.id),
+    [categories]
+  );
 
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(
     null
   );
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  const agentId = agent?.agent_id;
+  const {
+    data: listingsData,
+    isSuccess: isListingsSuccess,
+    isFetching: isListingsFetching,
+  } = useAgentRepositoryListings(
+    agentId != null
+      ? { agent_id: agentId, page: 1, page_size: 100 }
+      : undefined,
+    open && agentId != null
+  );
 
   const tagOptions = useMemo(
     () =>
@@ -62,16 +83,49 @@ export function MineApplyListingModal({
     if (!open) {
       return;
     }
-    setSelectedIcon(icons[0] ?? null);
-    setSelectedCategoryId(categories[0]?.id ?? null);
-    setSelectedTags([]);
-  }, [open, icons, categories]);
 
-  if (!agent) {
-    return null;
-  }
+    const defaultIcon = icons[0] ?? null;
+    const defaultCategoryId = categories[0]?.id ?? null;
 
-  const title = agent.name?.trim() || t("agentRepository.card.untitled");
+    if (!agent || !isListingsSuccess) {
+      setSelectedIcon(defaultIcon);
+      setSelectedCategoryId(defaultCategoryId);
+      setSelectedTags([]);
+      return;
+    }
+
+    const source = pickApplyListingPrefillSource(
+      listingsData?.items ?? [],
+      agent.version_label
+    );
+    const prefill = buildApplyListingFormPrefill(source, {
+      allowedIcons: icons,
+      allowedCategoryIds,
+      maxTags: MAX_TAGS,
+    });
+
+    if (!prefill) {
+      setSelectedIcon(defaultIcon);
+      setSelectedCategoryId(defaultCategoryId);
+      setSelectedTags([]);
+      return;
+    }
+
+    setSelectedIcon(prefill.icon ?? defaultIcon);
+    setSelectedCategoryId(prefill.categoryId ?? defaultCategoryId);
+    setSelectedTags(prefill.tags);
+  }, [
+    open,
+    agent,
+    isListingsSuccess,
+    listingsData,
+    icons,
+    categories,
+    allowedCategoryIds,
+  ]);
+
+  const title =
+    agent?.name?.trim() || t("agentRepository.card.untitled");
 
   const normalizeTags = (tags: string[]) => {
     const normalized: string[] = [];
@@ -128,7 +182,7 @@ export function MineApplyListingModal({
 
   return (
     <Modal
-      open={open}
+      open={open && agent != null}
       onCancel={onClose}
       centered
       destroyOnHidden
@@ -153,70 +207,74 @@ export function MineApplyListingModal({
         {t("agentRepository.mine.applyModal.agentName", { name: title })}
       </p>
 
-      <div className="space-y-5">
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {t("agentRepository.mine.applyModal.icon")}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {icons.map((icon) => {
-              const isSelected = selectedIcon === icon;
-              return (
-                <button
-                  key={icon}
-                  type="button"
-                  onClick={() => setSelectedIcon(icon)}
-                  className={`flex size-11 items-center justify-center rounded-xl border text-2xl transition-colors ${
-                    isSelected
-                      ? "border-primary bg-primary/10 ring-2 ring-primary/30"
-                      : "border-slate-200 bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800"
-                  }`}
-                  aria-label={icon}
-                  aria-pressed={isSelected}
-                >
-                  <span aria-hidden>{icon}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+      <Spin spinning={isListingsFetching && open}>
+        <div className="space-y-5">
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.icon")}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {icons.map((icon) => {
+                const isSelected = selectedIcon === icon;
+                return (
+                  <button
+                    key={icon}
+                    type="button"
+                    onClick={() => setSelectedIcon(icon)}
+                    className={`flex size-11 items-center justify-center rounded-xl border text-2xl transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/10 ring-2 ring-primary/30"
+                        : "border-slate-200 bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800"
+                    }`}
+                    aria-label={icon}
+                    aria-pressed={isSelected}
+                  >
+                    <span aria-hidden>{icon}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {t("agentRepository.mine.applyModal.category")}
-          </p>
-          <Select
-            className="w-full"
-            value={selectedCategoryId ?? undefined}
-            onChange={setSelectedCategoryId}
-            options={categories.map((category) => ({
-              label: getAgentRepositoryCategoryLabel(category, t),
-              value: category.id,
-            }))}
-            placeholder={t("agentRepository.mine.applyModal.categoryPlaceholder")}
-          />
-        </section>
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.category")}
+            </p>
+            <Select
+              className="w-full"
+              value={selectedCategoryId ?? undefined}
+              onChange={setSelectedCategoryId}
+              options={categories.map((category) => ({
+                label: getAgentRepositoryCategoryLabel(category, t),
+                value: category.id,
+              }))}
+              placeholder={t(
+                "agentRepository.mine.applyModal.categoryPlaceholder"
+              )}
+            />
+          </section>
 
-        <section className="space-y-2">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {t("agentRepository.mine.applyModal.tags")}
-          </p>
-          <Select
-            mode="tags"
-            className="w-full"
-            value={selectedTags}
-            onChange={setSelectedTags}
-            options={tagOptions}
-            maxCount={MAX_TAGS}
-            placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
-          />
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {t("agentRepository.mine.applyModal.tagsHint", {
-              count: MAX_TAGS,
-            })}
-          </p>
-        </section>
-      </div>
+          <section className="space-y-2">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {t("agentRepository.mine.applyModal.tags")}
+            </p>
+            <Select
+              mode="tags"
+              className="w-full"
+              value={selectedTags}
+              onChange={setSelectedTags}
+              options={tagOptions}
+              maxCount={MAX_TAGS}
+              placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t("agentRepository.mine.applyModal.tagsHint", {
+                count: MAX_TAGS,
+              })}
+            </p>
+          </section>
+        </div>
+      </Spin>
     </Modal>
   );
 }

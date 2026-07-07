@@ -22,7 +22,8 @@ spec:
       labels:
         app: nexent-config
       annotations:
-        checksum/nexent-backend: {{ dig "rolloutChecksums" "backend" "" .Values.global | quote }}
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}

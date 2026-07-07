@@ -8,10 +8,10 @@
 
 ```bash
 # 类似部署脚本，进入交互式选择
-bash deploy/images/build.sh
+bash build.sh
 
 # 按镜像构建指定版本
-bash deploy/images/build.sh \
+bash build.sh \
   --images main,web,mcp,data-process,terminal \
   --version v2.2.1 \
   --registry general \
@@ -19,7 +19,7 @@ bash deploy/images/build.sh \
   --push
 
 # 按同一镜像集合构建 latest 镜像
-bash deploy/images/build.sh \
+bash build.sh \
   --images main,web,mcp,data-process \
   --version latest \
   --registry general \
@@ -27,12 +27,15 @@ bash deploy/images/build.sh \
   --load
 
 # 需要时也可以只构建一个或多个指定镜像
-bash deploy/images/build.sh --web --docs --version v2.2.1 --dry-run
+bash build.sh --web --docs --version v2.2.1 --dry-run
+
+# 跳过 Docker 构建缓存
+bash build.sh --web --version v2.2.1 --no-cache
 ```
 
-在终端无参数运行 `deploy/images/build.sh` 时，会依次选择镜像、镜像版本（`latest` 或根 `VERSION`）和镜像源。交互式默认选择 `main,web` 和 `latest`。也可以用 `--interactive` 强制进入同样的选择流程。
+根目录 `build.sh` 会把镜像构建转发到 `deploy/images/build.sh`。使用 `bash build.sh --package ...` 可以转发到离线包构建脚本。在终端无参数运行 `build.sh` 时，会依次选择镜像、镜像版本（`latest` 或根 `VERSION`）和镜像源。交互式默认选择 `main,web` 和 `latest`。也可以用 `--interactive` 强制进入同样的选择流程。
 
-`--platform` 仅支持命令行传入。不传时不会添加 `--platform` 参数，默认按本地架构构建。
+`--platform` 和 `--no-cache` 仅支持命令行传入。不传 `--platform` 时不会添加该参数，默认按本地架构构建。`mainland` 的 web 镜像构建也会自动使用 `--no-cache`，避免前端依赖缓存过期。
 
 变体选项：
 - `--dependency-variant cpu|gpu` 控制数据处理依赖，默认 `cpu`。`gpu` 会构建带 GPU/CUDA 依赖的镜像，并使用 `-gpu` 镜像名后缀。
@@ -154,9 +157,10 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/i
 
 ## 🏷️ 标签策略
 
-每个镜像都会推送到两个仓库：
-- `nexent/*` - 主要的公共镜像仓库
-- `ccr.ccs.tencentyun.com/nexent-hub/*` - 腾讯云镜像仓库（中国地区加速）
+镜像仓库由 `--registry` 和 `--push` 决定：
+- `--registry general` 构建或推送 `nexent/*`。
+- `--registry mainland --push` 推送到 `ccr.ccs.tencentyun.com/nexent-hub/*`，用于中国大陆加速。
+- `--registry mainland` 但不带 `--push` 时，仍构建本地 `nexent/*` tag，同时使用大陆构建镜像源。
 
 所有镜像包括：
 - `nexent/nexent` - 主应用后端服务
@@ -209,8 +213,32 @@ docker rm nexent-docs
 构建完成后，可以进入 `docker` 目录使用部署脚本启动本地镜像：
 
 ```bash
-cd docker
-bash deploy.sh --image-source local-latest
+bash deploy.sh docker --image-source local-latest
 ```
 
 > `local-latest` 会使用本地 `latest` Nexent 应用镜像并避免重新拉取这些镜像，无需修改 `deploy/docker/deploy.sh`。
+
+### 将本地镜像打包为离线部署包
+
+构建本地 `latest` 镜像后，可以使用离线打包脚本把镜像和部署资源打包：
+
+```bash
+bash build.sh --package \
+  --target docker \
+  --version latest \
+  --platform amd64 \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest \
+  --compress true \
+  --output-dir offline-package/docker-local
+```
+
+使用 `--version latest` 或 `--image-source local-latest` 时，脚本会使用本地 Nexent 应用镜像，并跳过这些 `latest` 标签的拉取。将包复制到目标机器后，可加载镜像并部署：
+
+```bash
+cd offline-package/docker-local
+bash deploy.sh --load-images docker \
+  --version latest \
+  --components infrastructure,application,data-process,supabase \
+  --image-source local-latest
+```

@@ -15,7 +15,7 @@
 更新之前，先记录下当前部署的版本和数据目录
 
 - 当前部署版本信息的位置：根目录 `VERSION`
-- 数据目录信息的位置：`.env`中的 ROOT_DIR
+- 数据目录信息的位置：`deploy/env/.env`中的 ROOT_DIR
 
 **git 方式下载的代码**
 
@@ -31,17 +31,17 @@ git pull
 
 ## 🔄 步骤二：执行升级
 
-进入更新后代码目录的docker目录，执行升级脚本：
+在更新后的代码仓库根目录执行 Docker 部署入口：
 
 ```bash
-bash upgrade.sh
+bash deploy.sh docker
 ```
 
 缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
 
 > 💡 提示
-> - 若 `.env` 不存在，部署脚本会从 `.env.example` 自动复制一份。
-> - 若需配置语音模型（STT/TTS），请在 `.env` 中补充相关变量，我们将尽快提供前端配置入口。
+> - 已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
+> - 若需配置语音模型（STT/TTS），请在 `deploy/env/.env` 中补充相关变量，我们将尽快提供前端配置入口。
 
 ## 🌐 步骤三：验证部署
 
@@ -82,9 +82,9 @@ docker system prune -af
 
 ### 🗄️ 数据库迁移
 
-SQL 增量不再手动执行。Docker 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动检查并执行 `deploy/sql/migrations/` 下的合并迁移文件，例如 `v1_merged_migrations.sql`、`v2.0_merged_migrations.sql`、`v2.1_merged_migrations.sql`、`v2.2_merged_migrations.sql`；其他后端容器只等待迁移记录达到目标状态。
+SQL 增量不再手动执行。Docker 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端容器只等待迁移记录达到目标状态。SQL 会从 `deploy/sql` 挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
 
-迁移脚本会按合并文件中的源片段写入 `nexent.schema_migrations`。如果历史记录缺失但业务表已存在，会通过每个片段的 probe 安全补齐 `baselined` 记录；无法判断时会失败退出。
+迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
 
 > 💡 提示
 > - 升级前请备份数据库，生产环境尤为重要。

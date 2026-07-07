@@ -32,6 +32,7 @@ from .prompt_cache import (
     extract_prompt_cache_usage,
     resolve_prompt_cache_profile,
 )
+from .message_utils import prepare_messages_for_smolagents_text_flattening
 
 logger = logging.getLogger("openai_llm")
 
@@ -40,7 +41,7 @@ class OpenAIModel(OpenAIServerModel):
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-ssl_verify=True, model_factory: Optional[str] = None,
+                 ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
@@ -216,12 +217,19 @@ ssl_verify=True, model_factory: Optional[str] = None,
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
+        flatten_messages_as_text = self.model_factory == "modelengine"
+        messages_for_completion = (
+            prepare_messages_for_smolagents_text_flattening(normalized_messages)
+            if flatten_messages_as_text
+            else normalized_messages
+        )
+
         completion_kwargs = self._prepare_completion_kwargs(
-            messages=normalized_messages, stop_sequences=stop_sequences,
+            messages=messages_for_completion, stop_sequences=stop_sequences,
             response_format=response_format, tools_to_call_from=tools_to_call_from, model=self.model_id,
             custom_role_conversions=self.custom_role_conversions, convert_images_to_image_urls=True,
             temperature=self.temperature, top_p=self.top_p,
-            flatten_messages_as_text=self.model_factory == "modelengine", **kwargs,
+            flatten_messages_as_text=flatten_messages_as_text, **kwargs,
         )
 
         completion_kwargs["stream_options"] = {"include_usage": True}

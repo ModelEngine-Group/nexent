@@ -637,7 +637,7 @@ class TestAdditionalCoverage:
         assert client.default_bucket == "fallback-bucket"
 
     def test_as_dict_for_sqlalchemy_object_and_mapping(self, mocker):
-        from datetime import datetime
+        from datetime import datetime, timezone
         dt = datetime(2025, 1, 1, 0, 0, 0)
 
         class Obj:
@@ -651,12 +651,29 @@ class TestAdditionalCoverage:
         mock_col_name.key = "name"
         mocker.patch("backend.database.client.class_mapper", return_value=MagicMock(columns=[mock_col_created, mock_col_name]))
         orm_result = as_dict(Obj())
-        assert orm_result["created"] == dt.isoformat()
+        # Naive datetimes are normalized to UTC-equivalent by appending ``Z``.
+        assert orm_result["created"] == dt.isoformat() + "Z"
         assert orm_result["name"] == "n1"
 
         mapping_obj = MagicMock()
         mapping_obj._mapping = {"a": 1}
         assert as_dict(mapping_obj) == {"a": 1}
+
+        # Timezone-aware datetimes must keep their offset and NOT get ``Z``
+        # appended — that would clobber the original timezone.
+        aware_dt = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        class AwareObj:
+            __mapper__ = object()
+            updated = aware_dt
+
+        mock_col_updated = MagicMock()
+        mock_col_updated.key = "updated"
+        mocker.patch(
+            "backend.database.client.class_mapper",
+            return_value=MagicMock(columns=[mock_col_updated]),
+        )
+        assert as_dict(AwareObj())["updated"] == aware_dt.isoformat()
 
     def test_get_monitoring_db_session_paths(self, mocker):
         mock_session = MagicMock()
