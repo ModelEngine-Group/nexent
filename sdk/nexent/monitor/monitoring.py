@@ -936,6 +936,21 @@ class MonitoringManager:
         span_attrs = {
             OPENINFERENCE_SPAN_KIND: span_kind,
         }
+        
+        # Process input.value and output.value through payload preview (same as trace_llm_request)
+        input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
+        output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
+        if input_value is not None:
+            input_preview = self._trace_payload_preview(input_value)
+            if input_preview != "":
+                span_attrs[OPENINFERENCE_INPUT_VALUE] = input_preview
+            span_attrs.update(self._trace_payload_attributes("input", input_value))
+        if output_value is not None:
+            output_preview = self._trace_payload_preview(output_value)
+            if output_preview != "":
+                span_attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
+            span_attrs.update(self._trace_payload_attributes("output", output_value))
+        
         span_attrs.update(attributes)
 
         with self._tracer.start_as_current_span(

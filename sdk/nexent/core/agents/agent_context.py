@@ -26,7 +26,13 @@ from smolagents.models import ChatMessage, MessageRole
 from .summary_cache import CompressionCallRecord, CurrentSummaryCache, PreviousSummaryCache
 from .summary_config import ContextManagerConfig, StrategyType
 from ..context_runtime.contracts import ContextEvidence, FinalContext
-from nexent.monitor import get_monitoring_manager, OPENINFERENCE_SPAN_KIND_CHAIN, OPENINFERENCE_SPAN_KIND_LLM
+from nexent.monitor import (
+    get_monitoring_manager,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    OPENINFERENCE_SPAN_KIND_LLM,
+    OPENINFERENCE_INPUT_VALUE,
+    OPENINFERENCE_OUTPUT_VALUE,
+)
 
 logger = logging.getLogger("agent_context")
 
@@ -70,6 +76,7 @@ class ManagedRunContext:
     dynamic_messages: Tuple[dict, ...] = ()
     selected_component_types: Tuple[str, ...] = ()
     components: Tuple[Any, ...] = ()
+    selected_components: Tuple[Any, ...] = ()
 
 
 # ============================================================
@@ -501,10 +508,17 @@ class ContextManager:
             **{
                 "context.context_overhead_tokens": context_overhead_tokens,
                 "context.current_run_start_idx": current_run_start_idx,
+                OPENINFERENCE_INPUT_VALUE: {
+                    "memory_steps": len(memory.steps) if hasattr(memory, 'steps') else 0,
+                    "original_message_count": len(original_messages),
+                    "current_run_start_idx": current_run_start_idx,
+                },
             },
         ):
             # G1
             if not self.config.enabled:
+                if monitoring_manager.is_enabled:
+                    monitoring_manager.set_openinference_output({"decision": "disabled", "message_count": len(original_messages)})
                 return original_messages
 
             soft_input_budget_tokens = self._soft_input_budget_tokens()
@@ -527,6 +541,7 @@ class ContextManager:
                             "context.soft_budget": soft_history_budget_tokens,
                         },
                     )
+                    monitoring_manager.set_openinference_output({"decision": "skipped", "message_count": len(original_messages), "reason": "under_budget"})
                 
                 return original_messages
 
@@ -586,6 +601,8 @@ class ContextManager:
                     )
                     self._last_uncompressed_token_count = self._msg_token_count(original_messages)
                     self._last_compressed_token_count = self._msg_token_count(compressed_msgs)
+                    if monitoring_manager.is_enabled:
+                        monitoring_manager.set_openinference_output({"decision": "stable_bypass", "message_count": len(compressed_msgs), "cache_hit": True})
                     return compressed_msgs
 
                 self._step_local_log.clear()
@@ -699,6 +716,13 @@ class ContextManager:
                         f"Consider reducing keep_recent_pairs ({self.config.keep_recent_pairs}) "
                         f"or keep_recent_steps({self.config.keep_recent_steps})"
                     )
+                if monitoring_manager.is_enabled:
+                    monitoring_manager.set_openinference_output({
+                        "decision": "compressed",
+                        "message_count": len(final_messages),
+                        "uncompressed_tokens": self._last_uncompressed_token_count,
+                        "compressed_tokens": self._last_compressed_token_count,
+                    })
                 return final_messages
 
     # ============================================================
@@ -1112,6 +1136,12 @@ class ContextManager:
             **{
                 "context.call_type": call_type,
                 "context.prompt_type": prompt_type,
+                OPENINFERENCE_INPUT_VALUE: {
+                    "call_type": call_type,
+                    "prompt_type": prompt_type,
+                    "input_chars": len(text),
+                    "input_preview": text[:500],
+                },
             },
         ):
             # prompt_type selects which system prompt to render. For "incremental"
@@ -1154,9 +1184,21 @@ class ContextManager:
                 **{
                     "context.call_type": call_type,
                     "context.input_chars": len(text),
+                    OPENINFERENCE_INPUT_VALUE: [
+                        {"role": "system", "content": system_prompt[:500]},
+                        {"role": "user", "content": user_prompt[:500]},
+                    ],
                 },
             ):
                 response = model(messages, stop_sequences=[])
+                if monitoring_manager.is_enabled:
+                    model_output = response.content
+                    if isinstance(model_output, list):
+                        model_output = " ".join(
+                            block.get("text", "") for block in model_output
+                            if isinstance(block, dict) and block.get("type") == "text"
+                        )
+                    monitoring_manager.set_openinference_output(str(model_output)[:1000] if model_output else "")
 
             raw_output = response.content
             if isinstance(raw_output, list):
@@ -1176,13 +1218,11 @@ class ContextManager:
             )
             
             if monitoring_manager.is_enabled:
-                monitoring_manager.add_span_event(
-                    "context.generate_summary.completed",
-                    {
-                        "context.output_chars": len(raw_output),
-                        "context.call_type": call_type,
-                    },
-                )
+                monitoring_manager.set_openinference_output({
+                    "summary_chars": len(raw_output),
+                    "summary_preview": raw_output[:500],
+                    "call_type": call_type,
+                })
             
             return summary
 
@@ -1442,9 +1482,18 @@ class ContextManager:
             system_prompt=stable_text or fallback_system_prompt
         )
         source_components = tuple(self._component_source(components))
+        if source_components:
+            budget = self._calculate_component_budget()
+            strategy = self._get_strategy()
+            selected_components = tuple(strategy.select_components(
+                source_components, budget, self.config.component_budgets
+            ))
+        else:
+            selected_components = ()
+
         selected_component_types = tuple(
             str(getattr(component, "component_type", "unknown"))
-            for component in source_components
+            for component in selected_components
         )
         return ManagedRunContext(
             component_messages=tuple(component_messages),
@@ -1452,6 +1501,7 @@ class ContextManager:
             dynamic_messages=tuple(dynamic_messages),
             selected_component_types=selected_component_types,
             components=source_components,
+            selected_components=selected_components,
         )
 
     def assemble_final_context(
@@ -1485,6 +1535,12 @@ class ContextManager:
                 "context.conversation_id": conversation_id,
                 "context.use_context_items": self.config.use_context_items,
                 "context.current_run_start_idx": current_run_start_idx,
+                OPENINFERENCE_INPUT_VALUE: {
+                    "purpose": purpose,
+                    "memory_steps": len(memory.steps) if hasattr(memory, 'steps') else 0,
+                    "has_tools": bool(tools),
+                    "has_run_context": run_context is not None,
+                },
             },
         ):
             if run_context is None:
@@ -1492,7 +1548,7 @@ class ContextManager:
 
             context_items_for_evidence: tuple = ()
             if self.config.use_context_items:
-                projected_items = self.project_context_items(run_context.components)
+                projected_items = self.project_context_items(run_context.selected_components)
 
                 history_projector = self.config.history_projector
                 if history_projector is not None and conversation_id is not None:
@@ -1536,6 +1592,7 @@ class ContextManager:
                     dynamic_messages=tuple(dynamic_from_items),
                     selected_component_types=run_context.selected_component_types,
                     components=run_context.components,
+                    selected_components=run_context.selected_components,
                 )
 
             tools = self._canonical_tools(tools or ())
@@ -1573,13 +1630,23 @@ class ContextManager:
             fingerprint = self._fingerprint({"messages": stable_messages, "tools": tools})
             component_fingerprints = self._stable_component_fingerprints(
                 purpose_stable,
-                components=run_context.components,
+                components=run_context.selected_components,
             )
             if tools:
                 component_fingerprints["tools"] = self._fingerprint(tools)
             reasons = self._change_reasons(fingerprint, component_fingerprints)
             self._previous_stable_fingerprint = fingerprint
             self._previous_stable_components = component_fingerprints
+
+            if monitoring_manager.is_enabled:
+                monitoring_manager.set_openinference_output({
+                    "message_count": len(messages),
+                    "stable_count": len(stable_messages),
+                    "dynamic_count": len(dynamic_messages),
+                    "tool_count": len(tools),
+                    "context_items": len(context_items_for_evidence),
+                    "total_tokens": self._last_compressed_token_count,
+                })
 
             return FinalContext(
                 messages=messages,
@@ -1911,18 +1978,19 @@ class ContextManager:
             OPENINFERENCE_SPAN_KIND_CHAIN,
             **{
                 "context.component_count": len(source_components),
+                OPENINFERENCE_INPUT_VALUE: [
+                    getattr(c, "component_type", type(c).__name__) for c in source_components
+                ],
             },
         ):
             projector = ContextProjector()
             items = projector.project(list(source_components))
             
             if monitoring_manager.is_enabled:
-                monitoring_manager.add_span_event(
-                    "context.project_items.completed",
-                    {
-                        "context.item_count": len(items),
-                    },
-                )
+                monitoring_manager.set_openinference_output({
+                    "item_count": len(items),
+                    "item_types": [item.item_type.value for item in items],
+                })
             
             return items
 

@@ -4,7 +4,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .context_item import AuthorityTier, ContextItem, ContextItemType, RepresentationTier
 from .item_handler_registry import ItemHandlerRegistry
-from nexent.monitor import get_monitoring_manager, OPENINFERENCE_SPAN_KIND_CHAIN, OPENINFERENCE_SPAN_KIND_RETRIEVER
+from nexent.monitor import (
+    get_monitoring_manager,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    OPENINFERENCE_SPAN_KIND_RETRIEVER,
+    OPENINFERENCE_INPUT_VALUE,
+    OPENINFERENCE_OUTPUT_VALUE,
+)
 
 
 class HistoryProjector:
@@ -51,6 +57,11 @@ class HistoryProjector:
                 "context.conversation_id": conversation_id,
                 "context.run_id": run_id,
                 "context.purpose": purpose,
+                OPENINFERENCE_INPUT_VALUE: {
+                    "conversation_id": conversation_id,
+                    "run_id": run_id,
+                    "purpose": purpose,
+                },
             },
         ):
             with monitoring_manager.trace_operation(
@@ -59,15 +70,22 @@ class HistoryProjector:
                 **{
                     "context.conversation_id": conversation_id,
                     "context.run_id": run_id,
+                    OPENINFERENCE_INPUT_VALUE: {
+                        "conversation_id": conversation_id,
+                        "run_id": run_id,
+                    },
                 },
             ):
                 units = self.query_units_fn(conversation_id, run_id)
-            
-            if monitoring_manager.is_enabled:
-                monitoring_manager.add_span_event(
-                    "context.history_query.completed",
-                    {"context.unit_count": len(units)},
-                )
+                if monitoring_manager.is_enabled:
+                    unit_types = {}
+                    for u in units:
+                        ut = u.get("unit_type", "unknown")
+                        unit_types[ut] = unit_types.get(ut, 0) + 1
+                    monitoring_manager.set_openinference_output({
+                        "unit_count": len(units),
+                        "unit_types": unit_types,
+                    })
 
             if purpose == "model_context":
                 items = self._project_model_context(units)
@@ -79,10 +97,10 @@ class HistoryProjector:
                 raise ValueError(f"Unknown purpose: {purpose}")
             
             if monitoring_manager.is_enabled:
-                monitoring_manager.add_span_event(
-                    "context.history_project.completed",
-                    {"context.item_count": len(items)},
-                )
+                monitoring_manager.set_openinference_output({
+                    "item_count": len(items),
+                    "item_types": [item.item_type.value for item in items],
+                })
             
             return items
 
