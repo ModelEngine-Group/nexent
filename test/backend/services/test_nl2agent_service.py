@@ -213,6 +213,112 @@ async def test_recommend_local_resources_awaits_tool_list_and_filters_sources(mo
 
 
 @pytest.mark.asyncio
+async def test_recommend_local_resources_returns_unranked_candidates_when_scoring_fails(monkeypatch):
+    list_tools = AsyncMock(
+        return_value=[
+            {
+                "tool_id": 1,
+                "name": "document_reader",
+                "description": "Read Word documents",
+                "source": "local",
+            }
+        ]
+    )
+    list_skills = MagicMock(
+        return_value=[
+            {
+                "skill_id": 10,
+                "name": "ppt_builder",
+                "description": "Create PPT reports",
+                "tags": ["presentation"],
+            }
+        ]
+    )
+    score_llm = MagicMock(side_effect=RuntimeError("model unavailable"))
+
+    monkeypatch.setattr(nl2agent_service, "list_all_tools", list_tools)
+    monkeypatch.setattr(nl2agent_service, "list_tenant_skills", list_skills)
+    monkeypatch.setattr(nl2agent_service, "call_llm_for_system_prompt", score_llm)
+
+    result = await nl2agent_service.recommend_local_resources(
+        query="read Word and create PPT",
+        agent_id=202,
+        tenant_id="tenant_1",
+        model_id=9,
+    )
+
+    assert result["tools"] == [
+        {
+            "tool_id": 1,
+            "name": "document_reader",
+            "description": "Read Word documents",
+            "labels": [],
+            "source": "local",
+            "category": "",
+            "score": 0,
+            "reason": "LLM scoring unavailable; shown as an unranked tool candidate.",
+        }
+    ]
+    assert result["skills"] == [
+        {
+            "skill_id": 10,
+            "name": "ppt_builder",
+            "description": "Create PPT reports",
+            "tags": ["presentation"],
+            "score": 0,
+            "reason": "LLM scoring unavailable; shown as an unranked skill candidate.",
+        }
+    ]
+    assert score_llm.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_search_web_mcps_returns_unranked_candidates_when_scoring_fails(monkeypatch):
+    registry_search = AsyncMock(
+        return_value={
+            "servers": [
+                {
+                    "name": "chart-mcp",
+                    "description": "Generate charts",
+                }
+            ]
+        }
+    )
+    community_search = AsyncMock(return_value={"items": []})
+
+    monkeypatch.setattr(
+        nl2agent_service, "list_registry_mcp_services", registry_search
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "list_community_mcp_services", community_search
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "call_llm_for_system_prompt",
+        MagicMock(side_effect=RuntimeError("model unavailable")),
+    )
+
+    result = await nl2agent_service.search_web_mcps(
+        query="make charts",
+        tenant_id="tenant_1",
+        model_id=9,
+    )
+
+    assert result == [
+        {
+            "name": "chart-mcp",
+            "description": "Generate charts",
+            "source": "registry",
+            "url": "",
+            "transport": "registry",
+            "tools_summary": "",
+            "score": 0,
+            "reason": "LLM scoring unavailable; shown as an unranked MCP candidate.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_draft(
     monkeypatch,
 ):

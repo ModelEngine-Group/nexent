@@ -383,8 +383,19 @@ def _score_candidates_with_llm(
             tenant_id=tenant_id,
         )
     except Exception as exc:
-        logger.error(f"LLM scoring call failed for {kind}s: {exc}")
-        raise AgentRunException(f"Failed to score {kind}s.") from exc
+        logger.warning(
+            f"LLM scoring call failed for {kind}s; returning unranked candidates: {exc}"
+        )
+        return [
+            {
+                **candidate,
+                "score": 0,
+                "reason": (
+                    f"LLM scoring unavailable; shown as an unranked {kind} candidate."
+                ),
+            }
+            for candidate in pruned[:top_n]
+        ]
 
     scored = _parse_scored_json(raw, id_field)
     if not scored:
@@ -571,8 +582,17 @@ async def search_web_mcps(
             tenant_id=tenant_id,
         )
     except Exception as exc:
-        logger.error(f"LLM scoring for web MCPs failed: {exc}")
-        raise AgentRunException("Failed to score web MCPs.") from exc
+        logger.warning(
+            f"LLM scoring for web MCPs failed; returning unranked candidates: {exc}"
+        )
+        return [
+            {
+                **candidate,
+                "score": 0,
+                "reason": "LLM scoring unavailable; shown as an unranked MCP candidate.",
+            }
+            for candidate in candidates[:top_n]
+        ]
 
     scored = _parse_scored_json(raw, "name")
     name_to_candidate = {c.get("name"): c for c in candidates}
