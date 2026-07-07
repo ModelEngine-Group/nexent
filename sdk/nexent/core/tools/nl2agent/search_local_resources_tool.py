@@ -7,7 +7,7 @@ from typing import Optional
 
 from smolagents import tool
 
-from nexent.core.tools.nl2agent._context import (
+from ._context import (
     Nl2AgentContext,
     get_nl2agent_context,
     set_nl2agent_context,
@@ -24,7 +24,7 @@ def get_search_local_resources_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the search_local_resources tool."""
+    """Initialize the NL2AGENT session context for the nl2agent_search_local_resources tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         user_id=user_id,
@@ -36,7 +36,7 @@ def get_search_local_resources_tool(
 
 
 @tool
-def search_local_resources(query: str) -> str:
+def nl2agent_search_local_resources(query: str) -> str:
     """Search local tools (SDK + locally-installed MCP + LangChain) and local skills.
 
     Use this to find resources already available in this tenant that match the
@@ -58,7 +58,7 @@ def search_local_resources(query: str) -> str:
         return json.dumps(
             {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
         )
-    # search_local_resources scores resources for the draft target. Use
+    # nl2agent_search_local_resources scores resources for the draft target. Use
     # draft_agent_id when present; fall back to agent_id (older callers).
     target_agent_id = ctx.draft_agent_id or ctx.agent_id
     if target_agent_id is None:
@@ -80,5 +80,5 @@ def search_local_resources(query: str) -> str:
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        logger.exception(f"search_local_resources failed: {exc}")
+        logger.exception(f"nl2agent_search_local_resources failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

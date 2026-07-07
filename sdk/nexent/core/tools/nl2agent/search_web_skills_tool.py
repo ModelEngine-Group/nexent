@@ -7,7 +7,7 @@ from typing import Optional
 
 from smolagents import tool
 
-from nexent.core.tools.nl2agent._context import (
+from ._context import (
     Nl2AgentContext,
     get_nl2agent_context,
     set_nl2agent_context,
@@ -24,7 +24,7 @@ def get_search_web_skills_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the search_web_skills tool."""
+    """Initialize the NL2AGENT session context for the nl2agent_search_web_skills tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
@@ -36,7 +36,7 @@ def get_search_web_skills_tool(
 
 
 @tool
-def search_web_skills(query: str) -> str:
+def nl2agent_search_web_skills(query: str) -> str:
     """Search the official/web skills marketplace for skills matching the user's intent.
 
     Returns a JSON array of up to 5 skill cards. Each item has ``skill_id``,
@@ -68,5 +68,5 @@ def search_web_skills(query: str) -> str:
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        logger.exception(f"search_web_skills failed: {exc}")
+        logger.exception(f"nl2agent_search_web_skills failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

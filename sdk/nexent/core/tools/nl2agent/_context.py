@@ -20,8 +20,9 @@ class Nl2AgentContext:
     Attributes:
         agent_id: The running NL2AGENT default agent's id (the chat agent).
         draft_agent_id: The target draft agent being built. Tools that operate
-            on the draft (apply_local_resources, finalize_agent,
-            search_local_resources) read this field. Falls back to agent_id
+            on the draft (nl2agent_apply_local_resources,
+            nl2agent_finalize_agent, nl2agent_search_local_resources) read this
+            field. Falls back to agent_id
             when not set (backward-compat).
         user_id: The user initiating the session.
         tenant_id: The tenant ID.

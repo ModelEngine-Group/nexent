@@ -357,7 +357,7 @@ class NexentAgent:
             from nexent.core.tools.read_skill_config_tool import read_skill_config
             return read_skill_config
         elif class_name == "NL2AgentSearchLocalResourcesTool":
-            from nexent.core.tools.nl2agent.search_local_resources_tool import (
+            from ..tools.nl2agent.search_local_resources_tool import (
                 get_search_local_resources_tool,
             )
             metadata = tool_config.metadata or {}
@@ -370,12 +370,12 @@ class NexentAgent:
                 model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
             )
-            from nexent.core.tools.nl2agent.search_local_resources_tool import (
-                search_local_resources,
+            from ..tools.nl2agent.search_local_resources_tool import (
+                nl2agent_search_local_resources,
             )
-            return search_local_resources
+            return nl2agent_search_local_resources
         elif class_name == "NL2AgentSearchWebMcpsTool":
-            from nexent.core.tools.nl2agent.search_web_mcps_tool import (
+            from ..tools.nl2agent.search_web_mcps_tool import (
                 get_search_web_mcps_tool,
             )
             metadata = tool_config.metadata or {}
@@ -388,10 +388,10 @@ class NexentAgent:
                 model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
             )
-            from nexent.core.tools.nl2agent.search_web_mcps_tool import search_web_mcps
-            return search_web_mcps
+            from ..tools.nl2agent.search_web_mcps_tool import nl2agent_search_web_mcps
+            return nl2agent_search_web_mcps
         elif class_name == "NL2AgentSearchWebSkillsTool":
-            from nexent.core.tools.nl2agent.search_web_skills_tool import (
+            from ..tools.nl2agent.search_web_skills_tool import (
                 get_search_web_skills_tool,
             )
             metadata = tool_config.metadata or {}
@@ -404,12 +404,12 @@ class NexentAgent:
                 model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
             )
-            from nexent.core.tools.nl2agent.search_web_skills_tool import (
-                search_web_skills,
+            from ..tools.nl2agent.search_web_skills_tool import (
+                nl2agent_search_web_skills,
             )
-            return search_web_skills
+            return nl2agent_search_web_skills
         elif class_name == "NL2AgentApplyLocalResourcesTool":
-            from nexent.core.tools.nl2agent.apply_local_resources_tool import (
+            from ..tools.nl2agent.apply_local_resources_tool import (
                 get_apply_local_resources_tool,
             )
             metadata = tool_config.metadata or {}
@@ -422,12 +422,12 @@ class NexentAgent:
                 model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
             )
-            from nexent.core.tools.nl2agent.apply_local_resources_tool import (
-                apply_local_resources,
+            from ..tools.nl2agent.apply_local_resources_tool import (
+                nl2agent_apply_local_resources,
             )
-            return apply_local_resources
+            return nl2agent_apply_local_resources
         elif class_name == "NL2AgentInstallWebSkillTool":
-            from nexent.core.tools.nl2agent.install_web_skill_tool import (
+            from ..tools.nl2agent.install_web_skill_tool import (
                 get_install_web_skill_tool,
             )
             metadata = tool_config.metadata or {}
@@ -440,12 +440,12 @@ class NexentAgent:
                 model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
             )
-            from nexent.core.tools.nl2agent.install_web_skill_tool import (
-                install_web_skill,
+            from ..tools.nl2agent.install_web_skill_tool import (
+                nl2agent_install_web_skill,
             )
-            return install_web_skill
+            return nl2agent_install_web_skill
         elif class_name == "NL2AgentFinalizeAgentTool":
-            from nexent.core.tools.nl2agent.finalize_agent_tool import (
+            from ..tools.nl2agent.finalize_agent_tool import (
                 get_finalize_agent_tool,
             )
             metadata = tool_config.metadata or {}
@@ -458,8 +458,8 @@ class NexentAgent:
                 model_id=metadata.get("model_id"),
                 language=metadata.get("language"),
             )
-            from nexent.core.tools.nl2agent.finalize_agent_tool import finalize_agent
-            return finalize_agent
+            from ..tools.nl2agent.finalize_agent_tool import nl2agent_finalize_agent
+            return nl2agent_finalize_agent
         else:
             raise ValueError(f"Unknown builtin tool: {class_name}")
 

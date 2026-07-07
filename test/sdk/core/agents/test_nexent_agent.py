@@ -2077,6 +2077,47 @@ class TestCreateMcpTool:
 class TestCreateBuiltinTool:
     """Tests for create_builtin_tool method."""
 
+    @pytest.mark.parametrize(
+        ("class_name", "tool_name"),
+        [
+            ("NL2AgentSearchLocalResourcesTool", "nl2agent_search_local_resources"),
+            ("NL2AgentSearchWebMcpsTool", "nl2agent_search_web_mcps"),
+            ("NL2AgentSearchWebSkillsTool", "nl2agent_search_web_skills"),
+            ("NL2AgentApplyLocalResourcesTool", "nl2agent_apply_local_resources"),
+            ("NL2AgentInstallWebSkillTool", "nl2agent_install_web_skill"),
+            ("NL2AgentFinalizeAgentTool", "nl2agent_finalize_agent"),
+        ],
+    )
+    def test_create_builtin_tool_uses_prefixed_nl2agent_tool_names(
+        self,
+        nexent_agent_instance,
+        class_name,
+        tool_name,
+    ):
+        """NL2AGENT executable tool names must match persisted DB/default-agent names."""
+        tool_config = ToolConfig(
+            class_name=class_name,
+            name=tool_name,
+            description="desc",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+            metadata={
+                "agent_id": 101,
+                "draft_agent_id": 202,
+                "user_id": "user_1",
+                "tenant_id": "tenant_1",
+                "model_id": 7,
+                "language": "en",
+            },
+        )
+
+        with patch.dict("sys.modules", {"paramiko": MagicMock()}):
+            tool_obj = nexent_agent_instance.create_builtin_tool(tool_config)
+
+        assert tool_obj.name == tool_name
+
     def test_create_builtin_tool_unknown_tool(self, nexent_agent_instance):
         """Test create_builtin_tool raises error for unknown tool."""
         tool_config = ToolConfig(

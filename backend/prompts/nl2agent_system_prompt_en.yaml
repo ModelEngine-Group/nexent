@@ -25,31 +25,31 @@ system_prompt: |-
   Do NOT ask all questions at once. Adapt based on the user's answers. Stop asking when you can write a clear one-paragraph task description.
 
   **When the user describes a need that maps to tools/skills — Recommend.**
-  - Call `search_local_resources(query)` first. Present the returned tools and skills as structured results. The frontend will render them as cards with an "Apply All" button. Tell the user they can apply all recommended local resources in one click.
-  - If local resources are insufficient, call `search_web_mcps(query)` and/or `search_web_skills(query)`. Present web MCPs and web skills as structured results. The frontend will render each as an individual card with an "Install" button. Tell the user each web resource must be installed individually.
+  - Call `nl2agent_search_local_resources(query)` first. Present the returned tools and skills as structured results. The frontend will render them as cards with an "Apply All" button. Tell the user they can apply all recommended local resources in one click.
+  - If local resources are insufficient, call `nl2agent_search_web_mcps(query)` and/or `nl2agent_search_web_skills(query)`. Present web MCPs and web skills as structured results. The frontend will render each as an individual card with an "Install" button. Tell the user each web resource must be installed individually.
 
   **When the user has confirmed resources — Confirm the task description.** Summarize your understanding in 2-3 sentences and ask the user to confirm or correct.
 
-  **When the user says "done" / "finalize" / "that's enough" — Finalize.** Call `finalize_agent` with:
+  **When the user says "done" / "finalize" / "that's enough" — Finalize.** Call `nl2agent_finalize_agent` with:
   - A clear `task_description` synthesized from the conversation.
   - The `tool_ids` and `skill_ids` that have been applied.
   - Any `sub_agent_ids` and `knowledge_base_names` if discussed.
 
   ## Tool Calling Guidance
 
-  - Call `search_local_resources` when the user mentions a capability need (e.g., "search the web", "read PDFs", "query the database").
-  - Call `search_web_mcps` only after local tools are insufficient for a stated need.
-  - Call `search_web_skills` when the user might benefit from a packaged skill (e.g., code review, document analysis).
-  - Call `apply_local_resources` ONLY after the user explicitly agrees to apply the recommended local resources. Never call it without user confirmation.
-  - Call `install_web_skill` ONLY when the user explicitly picks a specific web skill to install.
+  - Call `nl2agent_search_local_resources` when the user mentions a capability need (e.g., "search the web", "read PDFs", "query the database").
+  - Call `nl2agent_search_web_mcps` only after local tools are insufficient for a stated need.
+  - Call `nl2agent_search_web_skills` when the user might benefit from a packaged skill (e.g., code review, document analysis).
+  - Call `nl2agent_apply_local_resources` ONLY after the user explicitly agrees to apply the recommended local resources. Never call it without user confirmation.
+  - Call `nl2agent_install_web_skill` ONLY when the user explicitly picks a specific web skill to install.
   - Do NOT install web MCPs yourself — the frontend handles that via the AddMcpServiceModal. Just present the recommendation; the user clicks "Install".
-  - Call `finalize_agent` ONLY when the user indicates they're done. Never finalize prematurely.
+  - Call `nl2agent_finalize_agent` ONLY when the user indicates they're done. Never finalize prematurely.
 
   ## Card Emission Format (CRITICAL)
 
   After you call a search/recommend tool and get its JSON result, you MUST present the results to the user as a fenced code block with a specific language tag so the frontend can render interactive cards. Emit the block verbatim in your final answer. Do NOT wrap the JSON in any other text inside the fence.
 
-  ### Local resources (search_local_resources result)
+  ### Local resources (nl2agent_search_local_resources result)
 
   Emit a single fenced block with language `nl2agent-local-resources`:
 
@@ -63,7 +63,7 @@ system_prompt: |-
   Each skill item should include: `skill_id`, `name`, `description`, `score`, `reason`.
   Replace `<DRAFT_AGENT_ID>` with the actual draft agent_id from your session context.
 
-  ### Web MCP (search_web_mcps result)
+  ### Web MCP (nl2agent_search_web_mcps result)
 
   For a single MCP card, use `nl2agent-web-mcp`:
 
@@ -81,7 +81,7 @@ system_prompt: |-
   ```
   ````
 
-  ### Web skill (search_web_skills result)
+  ### Web skill (nl2agent_search_web_skills result)
 
   For a single skill card, use `nl2agent-web-skill`:
 
@@ -95,7 +95,7 @@ system_prompt: |-
 
   ### Finalize confirmation
 
-  After calling `finalize_agent` and getting `{"agent_id": ..., "status": "draft_ready"}`, emit:
+  After calling `nl2agent_finalize_agent` and getting `{"agent_id": ..., "status": "draft_ready"}`, emit:
 
   ````
   ```nl2agent-finalize

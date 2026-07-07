@@ -7,7 +7,7 @@ from typing import Optional
 
 from smolagents import tool
 
-from nexent.core.tools.nl2agent._context import (
+from ._context import (
     Nl2AgentContext,
     get_nl2agent_context,
     set_nl2agent_context,
@@ -24,7 +24,7 @@ def get_install_web_skill_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the install_web_skill tool."""
+    """Initialize the NL2AGENT session context for the nl2agent_install_web_skill tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
@@ -36,13 +36,13 @@ def get_install_web_skill_tool(
 
 
 @tool
-def install_web_skill(skill_id: int) -> str:
+def nl2agent_install_web_skill(skill_id: int) -> str:
     """Install a single official/web skill into the tenant.
 
     Use this when the user picks a specific web skill from the recommendation
     list. Each web skill is installed individually — there is no batch install
     for web skills. After install, the skill becomes a local skill and can be
-    bound to the draft agent via apply_local_resources.
+    bound to the draft agent via nl2agent_apply_local_resources.
 
     Args:
         skill_id: The skill_id of the web skill to install.
@@ -68,5 +68,5 @@ def install_web_skill(skill_id: int) -> str:
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        logger.exception(f"install_web_skill failed: {exc}")
+        logger.exception(f"nl2agent_install_web_skill failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

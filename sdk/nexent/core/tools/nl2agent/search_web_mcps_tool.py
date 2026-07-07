@@ -7,7 +7,7 @@ from typing import Optional
 
 from smolagents import tool
 
-from nexent.core.tools.nl2agent._context import (
+from ._context import (
     Nl2AgentContext,
     get_nl2agent_context,
     set_nl2agent_context,
@@ -24,7 +24,7 @@ def get_search_web_mcps_tool(
     language: Optional[str] = None,
     draft_agent_id: Optional[int] = None,
 ) -> Nl2AgentContext:
-    """Initialize the NL2AGENT session context for the search_web_mcps tool."""
+    """Initialize the NL2AGENT session context for the nl2agent_search_web_mcps tool."""
     return set_nl2agent_context(
         agent_id=agent_id,
         draft_agent_id=draft_agent_id,
@@ -36,7 +36,7 @@ def get_search_web_mcps_tool(
 
 
 @tool
-def search_web_mcps(query: str) -> str:
+def nl2agent_search_web_mcps(query: str) -> str:
     """Search web MCP marketplaces (official registry + community) for servers matching the user's intent.
 
     Returns a JSON array of up to 5 MCP server cards. Each item has
@@ -70,5 +70,5 @@ def search_web_mcps(query: str) -> str:
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        logger.exception(f"search_web_mcps failed: {exc}")
+        logger.exception(f"nl2agent_search_web_mcps failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
