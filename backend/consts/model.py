@@ -311,6 +311,9 @@ class AgentRequest(BaseModel):
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
+    # Target draft agent being built by NL2AGENT. When set, NL2AGENT builtin
+    # tools operate on this draft instead of the running NL2AGENT agent.
+    draft_agent_id: Optional[int] = None
     model_id: Optional[int] = None
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
