@@ -1357,7 +1357,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               // Code blocks and inline code
               code({ node, inline, className, children, ...props }: any) {
                 try {
-                  const match = /language-(\w+)/.exec(className || "");
+                  const match = /language-([^\s]+)/.exec(className || "");
                   const raw = Array.isArray(children)
                     ? children.join("")
                     : children ?? "";
