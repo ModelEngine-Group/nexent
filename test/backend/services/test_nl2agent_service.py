@@ -11,16 +11,36 @@ class _FixedUuid:
     hex = "abcdef1234567890"
 
 
+@pytest.fixture(autouse=True)
+def mock_nl2agent_seed_defaults(monkeypatch):
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_nl2agent_system_prompt_template",
+        MagicMock(return_value={"system_prompt": "NL2AGENT seed prompt"}),
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "get_model_records",
+        MagicMock(return_value=[]),
+    )
+
+
+def _seeded_nl2agent_info(agent_id: int = 101):
+    return {
+        "agent_id": agent_id,
+        "prompt_template_id": 0,
+        "prompt_template_name": "system_default",
+        "duty_prompt": "NL2AGENT seed prompt",
+        "constraint_prompt": "",
+        "few_shots_prompt": "",
+        "model_ids": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypatch):
     search_builder = MagicMock(return_value=101)
-    search_agent = MagicMock(
-        return_value={
-            "agent_id": 101,
-            "prompt_template_id": 0,
-            "prompt_template_name": "system_default",
-        }
-    )
+    search_agent = MagicMock(return_value=_seeded_nl2agent_info())
     create_draft = MagicMock(return_value={"agent_id": 202})
     create_conversation = MagicMock(return_value={"conversation_id": 303})
 
@@ -67,13 +87,7 @@ async def test_start_session_seeds_nl2agent_for_current_tenant_when_missing(
 ):
     search_builder = MagicMock(side_effect=Exception("agent not found"))
     seed_builder = MagicMock(return_value=101)
-    search_agent = MagicMock(
-        return_value={
-            "agent_id": 101,
-            "prompt_template_id": 0,
-            "prompt_template_name": "system_default",
-        }
-    )
+    search_agent = MagicMock(return_value=_seeded_nl2agent_info())
     create_draft = MagicMock(return_value={"agent_id": 202})
     create_conversation = MagicMock(return_value={"conversation_id": 303})
 
@@ -142,6 +156,9 @@ async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
     request = update_agent.call_args.kwargs["agent_info"]
     assert request.prompt_template_id == 0
     assert request.prompt_template_name == "system_default"
+    assert request.duty_prompt == "NL2AGENT seed prompt"
+    assert request.constraint_prompt == ""
+    assert request.few_shots_prompt == ""
     update_agent.assert_called_once_with(
         agent_id=101,
         agent_info=request,
@@ -248,17 +265,26 @@ async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_d
     bind_skill.assert_called_once()
 
 
-def test_seed_nl2agent_default_agent_sets_prompt_template_link(monkeypatch):
+def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatch):
     seed_tools = MagicMock(return_value=[11, 12])
     query_agents = MagicMock(return_value=[])
     create_agent = MagicMock(return_value={"agent_id": 101})
     bind_tool = MagicMock()
+    get_models = MagicMock(
+        return_value=[
+            {"model_id": 7, "model_type": "llm", "connect_status": "available"},
+            {"model_id": 8, "model_type": "chat", "connect_status": "available"},
+            {"model_id": 9, "model_type": "embedding", "connect_status": "available"},
+            {"model_id": 10, "model_type": "llm", "connect_status": "unavailable"},
+        ]
+    )
 
     monkeypatch.setattr(nl2agent_service, "seed_nl2agent_builtin_tools", seed_tools)
     monkeypatch.setattr(
         nl2agent_service, "query_all_agent_info_by_tenant_id", query_agents
     )
     monkeypatch.setattr(nl2agent_service, "create_agent", create_agent)
+    monkeypatch.setattr(nl2agent_service, "get_model_records", get_models)
     monkeypatch.setattr(
         nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
     )
@@ -272,9 +298,14 @@ def test_seed_nl2agent_default_agent_sets_prompt_template_link(monkeypatch):
     assert payload["name"] == "nl2agent"
     assert payload["prompt_template_id"] == 0
     assert payload["prompt_template_name"] == "system_default"
+    assert payload["duty_prompt"] == "NL2AGENT seed prompt"
+    assert payload["constraint_prompt"] == ""
+    assert payload["few_shots_prompt"] == ""
+    assert payload["model_ids"] == [7, 8]
+    assert payload["business_logic_model_id"] == 7
 
 
-def test_seed_nl2agent_default_agent_backfills_existing_prompt_template_link(
+def test_seed_nl2agent_default_agent_backfills_existing_seed_defaults(
     monkeypatch,
 ):
     seed_tools = MagicMock(return_value=[11, 12])
@@ -285,11 +316,22 @@ def test_seed_nl2agent_default_agent_backfills_existing_prompt_template_link(
                 "name": "nl2agent",
                 "prompt_template_id": None,
                 "prompt_template_name": None,
+                "duty_prompt": "placeholder prompt",
+                "constraint_prompt": "placeholder constraint",
+                "few_shots_prompt": "placeholder few shots",
+                "model_ids": [],
+                "business_logic_model_id": None,
             }
         ]
     )
     update_agent = MagicMock()
     create_agent = MagicMock()
+    get_models = MagicMock(
+        return_value=[
+            {"model_id": 7, "model_type": "llm", "connect_status": "available"},
+            {"model_id": 8, "model_type": "chat", "connect_status": "available"},
+        ]
+    )
 
     monkeypatch.setattr(nl2agent_service, "seed_nl2agent_builtin_tools", seed_tools)
     monkeypatch.setattr(
@@ -297,6 +339,7 @@ def test_seed_nl2agent_default_agent_backfills_existing_prompt_template_link(
     )
     monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
     monkeypatch.setattr(nl2agent_service, "create_agent", create_agent)
+    monkeypatch.setattr(nl2agent_service, "get_model_records", get_models)
 
     result = nl2agent_service.seed_nl2agent_default_agent(
         tenant_id="tenant_1", user_id="user_1"
@@ -307,6 +350,11 @@ def test_seed_nl2agent_default_agent_backfills_existing_prompt_template_link(
     request = update_agent.call_args.kwargs["agent_info"]
     assert request.prompt_template_id == 0
     assert request.prompt_template_name == "system_default"
+    assert request.duty_prompt == "NL2AGENT seed prompt"
+    assert request.constraint_prompt == ""
+    assert request.few_shots_prompt == ""
+    assert request.model_ids == [7, 8]
+    assert request.business_logic_model_id == 7
     update_agent.assert_called_once_with(
         agent_id=101,
         agent_info=request,

@@ -14,6 +14,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { searchAgentInfo } from "@/services/agentConfigService";
 import { conversationService } from "@/services/conversationService";
 import {
   storageService,
@@ -218,8 +219,10 @@ export function ChatInterface() {
   const handleAgentSelectWithGreeting = (
     agentId: string | null,
     greeting?: string,
-    exampleQuestions?: string[]
-  , modelIds?: number[], modelNames?: string[]) => {
+    exampleQuestions?: string[],
+    modelIds?: number[],
+    modelNames?: string[]
+  ) => {
     setSelectedAgentId(agentId);
     setAgentGreeting(greeting || null);
     setAgentExampleQuestions(exampleQuestions || []);
@@ -229,6 +232,8 @@ export function ChatInterface() {
   };
 
   useEffect(() => {
+    let isMounted = true;
+
     const agentId = sessionStorage.getItem("selectedAgentId");
     const draftAgentId = parseStoredNumber(
       sessionStorage.getItem(NL2AGENT_DRAFT_AGENT_ID_KEY)
@@ -240,6 +245,36 @@ export function ChatInterface() {
     // Set selected agent ID from sessionStorage if it exists
     if (agentId) {
       setSelectedAgentId(agentId);
+      const numericAgentId = Number(agentId);
+      if (Number.isFinite(numericAgentId)) {
+        void searchAgentInfo(numericAgentId)
+          .then((result) => {
+            if (!isMounted || !result.success || !result.data) {
+              return;
+            }
+
+            const modelIds = Array.isArray(result.data.model_ids)
+              ? result.data.model_ids
+                  .map((id: unknown) => Number(id))
+                  .filter((id: number) => Number.isFinite(id))
+              : [];
+            const rawModelNames = Array.isArray(result.data.model_names)
+              ? result.data.model_names
+              : [];
+            const modelNames = modelIds.map(
+              (modelId, index) => rawModelNames[index] || String(modelId)
+            );
+
+            setAgentGreeting(result.data.greeting_message || null);
+            setAgentExampleQuestions(result.data.example_questions || []);
+            setAgentModelIds(modelIds);
+            setAgentModelNames(modelNames);
+            setSelectedModelId(modelIds.length > 0 ? modelIds[0] : null);
+          })
+          .catch((error) => {
+            log.error("Failed to hydrate selected agent details", error);
+          });
+      }
       sessionStorage.removeItem("selectedAgentId");
     }
     if (draftAgentId != null) {
@@ -276,6 +311,9 @@ export function ChatInterface() {
         });
     }
     // Consume one-shot sessionStorage handoff values only when the chat page opens.
+    return () => {
+      isMounted = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

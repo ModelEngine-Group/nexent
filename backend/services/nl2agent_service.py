@@ -18,7 +18,12 @@ from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import AgentRunException, AppException
 from consts.error_code import ErrorCode
-from consts.model import AgentInfoRequest, SkillInstanceInfoRequest, ToolInstanceInfoRequest
+from consts.model import (
+    AgentInfoRequest,
+    ModelConnectStatusEnum,
+    SkillInstanceInfoRequest,
+    ToolInstanceInfoRequest,
+)
 from database.agent_db import (
     create_agent,
     query_all_agent_info_by_tenant_id,
@@ -27,6 +32,7 @@ from database.agent_db import (
     update_agent,
 )
 from database.conversation_db import create_conversation
+from database.model_management_db import get_model_records
 from database.skill_db import (
     create_or_update_skill_by_skill_info,
     get_skill_by_id as get_tenant_skill_by_id,
@@ -52,6 +58,7 @@ from services.skill_service import (
 )
 from services.tool_configuration_service import list_all_tools
 from utils.llm_utils import call_llm_for_system_prompt
+from utils.prompt_template_utils import get_nl2agent_system_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -64,35 +71,142 @@ DRAFT_AGENT_NAME_PREFIX = "draft_"
 # Maximum number of items to send to the LLM scorer per category.
 _SCORER_MAX_CANDIDATES = 60
 
+_NL2AGENT_SEED_PROMPT_FALLBACK = (
+    "You are NL2AGENT, the Agent Builder. Help the user design and build "
+    "a custom agent through multi-turn natural-language dialogue."
+)
+
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
 
 
-def _ensure_nl2agent_prompt_template_link(agent: Dict[str, Any], user_id: str) -> None:
-    """Backfill the system prompt-template link on existing NL2AGENT rows."""
+def _load_nl2agent_seed_system_prompt() -> str:
+    """Load the stable prompt stored on the internal NL2AGENT agent row."""
+    try:
+        prompt_template = get_nl2agent_system_prompt_template(LANGUAGE["EN"])
+        system_prompt = (
+            prompt_template.get("system_prompt") if prompt_template else None
+        )
+        if isinstance(system_prompt, str) and system_prompt.strip():
+            return system_prompt
+    except Exception as exc:
+        logger.warning(f"Failed to load NL2AGENT seed prompt template: {exc}")
+
+    return _NL2AGENT_SEED_PROMPT_FALLBACK
+
+
+def _normalize_model_ids(value: Any) -> List[int]:
+    if not value:
+        return []
+    if isinstance(value, (str, int)):
+        value = [value]
+
+    normalized: List[int] = []
+    for item in value:
+        try:
+            model_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if model_id not in normalized:
+            normalized.append(model_id)
+    return normalized
+
+
+def _get_available_llm_model_ids(tenant_id: str) -> List[int]:
+    """Return all connected LLM-style models the builder agent can offer."""
+    try:
+        records = get_model_records(None, tenant_id) or []
+    except Exception as exc:
+        logger.warning(
+            f"Failed to list models for NL2AGENT seed in tenant {tenant_id}: {exc}"
+        )
+        return []
+
+    model_ids: List[int] = []
+    for record in records:
+        model_type = record.get("model_type")
+        if model_type not in {"llm", "chat"}:
+            continue
+
+        connect_status = ModelConnectStatusEnum.get_value(
+            record.get("connect_status")
+        )
+        if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
+            continue
+
+        try:
+            model_id = int(record["model_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if model_id not in model_ids:
+            model_ids.append(model_id)
+
+    return model_ids
+
+
+def _build_nl2agent_seed_defaults(tenant_id: str) -> Dict[str, Any]:
+    model_ids = _get_available_llm_model_ids(tenant_id)
+    defaults: Dict[str, Any] = {
+        "prompt_template_id": SYSTEM_PROMPT_TEMPLATE_ID,
+        "prompt_template_name": SYSTEM_PROMPT_TEMPLATE_NAME,
+        "duty_prompt": _load_nl2agent_seed_system_prompt(),
+        "constraint_prompt": "",
+        "few_shots_prompt": "",
+    }
+    if model_ids:
+        defaults["model_ids"] = model_ids
+        defaults["business_logic_model_id"] = model_ids[0]
+    return defaults
+
+
+def _ensure_nl2agent_seed_defaults(
+    agent: Dict[str, Any], user_id: str, tenant_id: str
+) -> None:
+    """Backfill intended prompt/template/model defaults on existing NL2AGENT rows."""
     agent_id = agent.get("agent_id")
     if not agent_id:
         return
-    if (
-        agent.get("prompt_template_id") == SYSTEM_PROMPT_TEMPLATE_ID
-        and agent.get("prompt_template_name") == SYSTEM_PROMPT_TEMPLATE_NAME
+
+    defaults = _build_nl2agent_seed_defaults(tenant_id)
+    update_values: Dict[str, Any] = {}
+
+    for field in (
+        "prompt_template_id",
+        "prompt_template_name",
+        "duty_prompt",
+        "constraint_prompt",
+        "few_shots_prompt",
     ):
+        if agent.get(field) != defaults[field]:
+            update_values[field] = defaults[field]
+
+    desired_model_ids = defaults.get("model_ids") or []
+    if (
+        desired_model_ids
+        and _normalize_model_ids(agent.get("model_ids")) != desired_model_ids
+    ):
+        update_values["model_ids"] = desired_model_ids
+
+    if (
+        desired_model_ids
+        and agent.get("business_logic_model_id") not in desired_model_ids
+    ):
+        update_values["business_logic_model_id"] = desired_model_ids[0]
+
+    if not update_values:
         return
 
     try:
         update_agent(
             agent_id=agent_id,
-            agent_info=AgentInfoRequest(
-                prompt_template_id=SYSTEM_PROMPT_TEMPLATE_ID,
-                prompt_template_name=SYSTEM_PROMPT_TEMPLATE_NAME,
-            ),
+            agent_info=AgentInfoRequest(**update_values),
             user_id=user_id,
             version_no=0,
         )
     except Exception as exc:
         logger.warning(
-            f"Failed to backfill NL2AGENT prompt template link for "
+            f"Failed to backfill NL2AGENT seed defaults for "
             f"agent_id={agent_id}: {exc}"
         )
 
@@ -138,8 +252,8 @@ async def start_session(
             agent_id=nl2agent_agent_id, tenant_id=tenant_id
         )
         if nl2agent_agent:
-            _ensure_nl2agent_prompt_template_link(
-                nl2agent_agent, user_id=user_id
+            _ensure_nl2agent_seed_defaults(
+                nl2agent_agent, user_id=user_id, tenant_id=tenant_id
             )
     except Exception as exc:
         logger.warning(
@@ -699,7 +813,9 @@ def seed_nl2agent_default_agent(
     for agent in all_agents:
         if (agent.get("name") or "") == NL2AGENT_AGENT_NAME:
             existing_id = agent.get("agent_id")
-            _ensure_nl2agent_prompt_template_link(agent, user_id=user_id)
+            _ensure_nl2agent_seed_defaults(
+                agent, user_id=user_id, tenant_id=tenant_id
+            )
             logger.info(
                 f"NL2AGENT default agent already exists (agent_id={existing_id})"
             )
@@ -721,21 +837,8 @@ def seed_nl2agent_default_agent(
         "max_steps": 20,
         "enabled": True,
         "is_new": False,
-        "prompt_template_id": SYSTEM_PROMPT_TEMPLATE_ID,
-        "prompt_template_name": SYSTEM_PROMPT_TEMPLATE_NAME,
-        "duty_prompt": (
-            "You are NL2AGENT, the Agent Builder. Help the user design and "
-            "build a custom agent through multi-turn natural-language dialogue. "
-            "The full system prompt is loaded from "
-            "backend/prompts/nl2agent_system_prompt_*.yaml at runtime."
-        ),
-        "constraint_prompt": (
-            "Always wait for explicit user confirmation before applying local "
-            "resources or finalizing the agent. Never make up tool or skill "
-            "names. Use the user's language."
-        ),
-        "few_shots_prompt": "",
     }
+    agent_payload.update(_build_nl2agent_seed_defaults(tenant_id))
 
     try:
         created = create_agent(agent_payload, tenant_id=tenant_id, user_id=user_id)
