@@ -1,11 +1,11 @@
 """
-Comprehensive verification test for PR-0/1/2 context module features.
+Comprehensive verification test for context module features.
 
 Tests:
-- PR-0: All 10 handler to_messages() implementations
-- PR-0: ContextProjector with all 7 component types
-- PR-1: Semantic equivalence between use_context_items=True/False
-- PR-2: HistoryProjector with all 3 projection purposes
+- All 10 handler to_messages() implementations
+- ContextProjector with all 7 component types
+- Semantic equivalence between use_context_items=True/False
+- HistoryProjector with all 3 projection purposes
 - Integration: Full agent run with all components + history projector
 """
 import os
@@ -44,9 +44,9 @@ from nexent.core.agents.agent_context import ContextManager
 
 
 def test_pr0_handlers():
-    """PR-0: Test all 10 handler to_messages() implementations."""
+    """Handler: Test all 10 handler to_messages() implementations."""
     print("\n" + "=" * 70)
-    print("PR-0: Testing all 10 handler to_messages() implementations")
+    print("Handler: Testing all 10 handler to_messages() implementations")
     print("=" * 70)
     
     register_all()
@@ -180,14 +180,14 @@ def test_pr0_handlers():
         print(f"  ✅ {name}: {len(messages)} message(s), roles={actual_roles}")
         passed += 1
     
-    print(f"\nPR-0 Handlers: {passed} passed, {failed} failed")
+    print(f"\nHandlers: {passed} passed, {failed} failed")
     return failed == 0
 
 
 def test_pr0_projector():
-    """PR-0: Test ContextProjector with all 7 component types."""
+    """Projector: Test ContextProjector with all 7 component types."""
     print("\n" + "=" * 70)
-    print("PR-0: Testing ContextProjector with all 7 component types")
+    print("Projector: Testing ContextProjector with all 7 component types")
     print("=" * 70)
     
     register_all()
@@ -265,14 +265,14 @@ def test_pr0_projector():
         print(f"  ❌ Some items missing _source_component back-reference")
         failed += 1
     
-    print(f"\nPR-0 Projector: {passed} passed, {failed} failed")
+    print(f"\nProjector: {passed} passed, {failed} failed")
     return failed == 0
 
 
 def test_pr1_semantic_equivalence():
-    """PR-1: Test semantic equivalence between use_context_items=True/False."""
+    """Equivalence: Test semantic equivalence between use_context_items=True/False."""
     print("\n" + "=" * 70)
-    print("PR-1: Testing semantic equivalence (use_context_items=True vs False)")
+    print("Equivalence: Testing semantic equivalence (use_context_items=True vs False)")
     print("=" * 70)
     
     register_all()
@@ -349,14 +349,14 @@ def test_pr1_semantic_equivalence():
             return False
     
     print(f"  ✅ All {len(msgs_false)} messages are semantically equivalent")
-    print(f"\nPR-1 Semantic Equivalence: PASSED")
+    print(f"\nSemantic Equivalence: PASSED")
     return True
 
 
 def test_pr2_history_projector():
-    """PR-2: Test HistoryProjector with all 3 projection purposes."""
+    """HistoryProjector: Test HistoryProjector with all 3 projection purposes."""
     print("\n" + "=" * 70)
-    print("PR-2: Testing HistoryProjector with all 3 projection purposes")
+    print("HistoryProjector: Testing HistoryProjector with all 3 projection purposes")
     print("=" * 70)
     
     register_all()
@@ -446,7 +446,7 @@ def test_pr2_history_projector():
     else:
         print(f"    ⚠️  Chat may not include thinking (check implementation)")
     
-    print(f"\nPR-2 HistoryProjector: {passed} passed, {failed} failed")
+    print(f"\nHistoryProjector: {passed} passed, {failed} failed")
     return failed == 0
 
 
@@ -564,15 +564,15 @@ def test_integration_full_agent():
 
 def main():
     print("=" * 70)
-    print("Comprehensive PR-0/1/2 Context Module Verification")
+    print("Comprehensive Context Module Verification")
     print("=" * 70)
     
     results = {}
     
-    results["PR-0 Handlers"] = test_pr0_handlers()
-    results["PR-0 Projector"] = test_pr0_projector()
-    results["PR-1 Equivalence"] = test_pr1_semantic_equivalence()
-    results["PR-2 HistoryProjector"] = test_pr2_history_projector()
+    results["Handlers"] = test_pr0_handlers()
+    results["Projector"] = test_pr0_projector()
+    results["Equivalence"] = test_pr1_semantic_equivalence()
+    results["HistoryProjector"] = test_pr2_history_projector()
     results["Integration"] = test_integration_full_agent()
     
     print("\n" + "=" * 70)
