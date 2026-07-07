@@ -2336,9 +2336,10 @@ async def list_all_agent_info_impl(
     Args:
         tenant_id (str): tenant id
         user_id (str): user id (used for permission calculation and filtering)
-        include_drafts (bool): when False, hide agents whose name starts with
-            ``draft_`` (NL2AGENT draft agents). Defaults to False. Drafts
-            remain accessible via direct agent_id lookup.
+        include_drafts (bool): when False, hide NL2AGENT internal agents:
+            draft agents whose name starts with ``draft_`` and the seeded
+            ``nl2agent`` runner. Defaults to False. These agents remain
+            accessible via direct agent_id lookup.
 
     Raises:
         ValueError: failed to query all agent info
@@ -2375,11 +2376,13 @@ async def list_all_agent_info_impl(
             if not agent["enabled"]:
                 continue
 
-            # Hide NL2AGENT draft agents (name starts with "draft_") unless the
-            # caller explicitly requests them. Drafts are created by
-            # POST /nl2agent/session/start and remain accessible via direct
-            # agent_id lookup for the finalize/review flow.
-            if not include_drafts and (agent.get("name") or "").startswith("draft_"):
+            # Hide NL2AGENT internal agents unless the caller explicitly
+            # requests them. Drafts are created by POST /nl2agent/session/start;
+            # the seeded "nl2agent" runner is only an entry point for that flow.
+            agent_name = agent.get("name") or ""
+            if not include_drafts and (
+                agent_name.startswith("draft_") or agent_name == "nl2agent"
+            ):
                 continue
 
             # Apply visibility filter for DEV/USER based on group overlap

@@ -295,7 +295,7 @@ async def list_all_agent_info_api(
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
     include_drafts: bool = Query(
-        False, description="Include NL2AGENT draft agents (name starts with 'draft_')"),
+        False, description="Include NL2AGENT internal agents (draft_* and nl2agent)"),
     authorization: Optional[str] = Header(None),
     request: Request = None
 ):
@@ -630,5 +630,4 @@ async def list_published_agents_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
         )
-
 
