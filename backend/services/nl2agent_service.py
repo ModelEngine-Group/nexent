@@ -248,13 +248,20 @@ async def recommend_local_resources(
     if not query:
         return {"tools": [], "skills": []}
 
-    # Local tool catalog: list_all_tools returns LOCAL + MCP + LANGCHAIN tools
-    # already installed/registered for this tenant.
+    # Local tool catalog: list_all_tools returns LOCAL + MCP + LANGCHAIN + BUILTIN
+    # tools already installed/registered for this tenant. Filter to the first three
+    # so NL2AGENT builtin tools are not recommended back to the user.
     try:
-        all_tools = list_all_tools(tenant_id=tenant_id, labels=None)
+        all_tools = await list_all_tools(tenant_id=tenant_id, labels=None)
     except Exception as exc:
         logger.error(f"Failed to list tools for NL2AGENT recommendation: {exc}")
         raise AgentRunException("Failed to list local tools.") from exc
+
+    allowed_sources = {"local", "mcp", "langchain"}
+    all_tools = [
+        t for t in all_tools
+        if str(t.get("source") or "").lower() in allowed_sources
+    ]
 
     compact_tools = [_compact_tool_for_scoring(t) for t in all_tools]
     scored_tools = _score_candidates_with_llm(
