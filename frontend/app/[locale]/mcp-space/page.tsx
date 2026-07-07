@@ -139,9 +139,7 @@ export default function McpToolsPage() {
   const repositoryBrowser = useMcpCommunityBrowser(
     tab === McpToolsServicesTab.REPOSITORY
   );
-  const reviewBrowser = useMcpCommunityReview(
-    tab === McpToolsServicesTab.REVIEW && isAdmin
-  );
+  const reviewBrowser = useMcpCommunityReview(isAdmin);
   const quickAdd = useMcpCommunityQuickAdd({
     onSuccess: () => setShowAddModal(false),
   });
