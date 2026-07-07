@@ -14,12 +14,20 @@ class _FixedUuid:
 @pytest.mark.asyncio
 async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypatch):
     search_builder = MagicMock(return_value=101)
+    search_agent = MagicMock(
+        return_value={
+            "agent_id": 101,
+            "prompt_template_id": 0,
+            "prompt_template_name": "system_default",
+        }
+    )
     create_draft = MagicMock(return_value={"agent_id": 202})
     create_conversation = MagicMock(return_value={"conversation_id": 303})
 
     monkeypatch.setattr(
         nl2agent_service, "search_agent_id_by_agent_name", search_builder
     )
+    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", search_agent)
     monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
     monkeypatch.setattr(
         nl2agent_service, "create_conversation", create_conversation
@@ -41,6 +49,7 @@ async def test_start_session_returns_builder_draft_and_conversation_ids(monkeypa
     assert result["draft_agent_id"] != result["nl2agent_agent_id"]
 
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
+    search_agent.assert_called_once_with(agent_id=101, tenant_id="tenant_1")
     draft_payload = create_draft.call_args.args[0]
     assert draft_payload["name"] == "draft_abcdef12"
     assert draft_payload["name"].startswith("draft_")
@@ -58,6 +67,13 @@ async def test_start_session_seeds_nl2agent_for_current_tenant_when_missing(
 ):
     search_builder = MagicMock(side_effect=Exception("agent not found"))
     seed_builder = MagicMock(return_value=101)
+    search_agent = MagicMock(
+        return_value={
+            "agent_id": 101,
+            "prompt_template_id": 0,
+            "prompt_template_name": "system_default",
+        }
+    )
     create_draft = MagicMock(return_value={"agent_id": 202})
     create_conversation = MagicMock(return_value={"conversation_id": 303})
 
@@ -67,6 +83,7 @@ async def test_start_session_seeds_nl2agent_for_current_tenant_when_missing(
     monkeypatch.setattr(
         nl2agent_service, "seed_nl2agent_default_agent", seed_builder
     )
+    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", search_agent)
     monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
     monkeypatch.setattr(
         nl2agent_service, "create_conversation", create_conversation
@@ -83,8 +100,54 @@ async def test_start_session_seeds_nl2agent_for_current_tenant_when_missing(
     assert result["draft_agent_id"] == 202
     search_builder.assert_called_once_with("nl2agent", "tenant_1")
     seed_builder.assert_called_once_with(tenant_id="tenant_1", user_id="user_1")
+    search_agent.assert_called_once_with(agent_id=101, tenant_id="tenant_1")
     draft_payload = create_draft.call_args.args[0]
     assert draft_payload["name"] == "draft_abcdef12"
+
+
+@pytest.mark.asyncio
+async def test_start_session_backfills_existing_nl2agent_prompt_template_link(
+    monkeypatch,
+):
+    search_builder = MagicMock(return_value=101)
+    search_agent = MagicMock(
+        return_value={
+            "agent_id": 101,
+            "prompt_template_id": None,
+            "prompt_template_name": None,
+        }
+    )
+    update_agent = MagicMock()
+    create_draft = MagicMock(return_value={"agent_id": 202})
+    create_conversation = MagicMock(return_value={"conversation_id": 303})
+
+    monkeypatch.setattr(
+        nl2agent_service, "search_agent_id_by_agent_name", search_builder
+    )
+    monkeypatch.setattr(nl2agent_service, "search_agent_info_by_agent_id", search_agent)
+    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    monkeypatch.setattr(nl2agent_service, "create_agent", create_draft)
+    monkeypatch.setattr(
+        nl2agent_service, "create_conversation", create_conversation
+    )
+    monkeypatch.setattr(
+        nl2agent_service.uuid, "uuid4", MagicMock(return_value=_FixedUuid())
+    )
+
+    result = await nl2agent_service.start_session(
+        user_id="user_1", tenant_id="tenant_1", language="en"
+    )
+
+    assert result["nl2agent_agent_id"] == 101
+    request = update_agent.call_args.kwargs["agent_info"]
+    assert request.prompt_template_id == 0
+    assert request.prompt_template_name == "system_default"
+    update_agent.assert_called_once_with(
+        agent_id=101,
+        agent_info=request,
+        user_id="user_1",
+        version_no=0,
+    )
 
 
 @pytest.mark.asyncio
@@ -183,3 +246,70 @@ async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_d
     assert skill_request.enabled is True
     assert skill_request.version_no == 0
     bind_skill.assert_called_once()
+
+
+def test_seed_nl2agent_default_agent_sets_prompt_template_link(monkeypatch):
+    seed_tools = MagicMock(return_value=[11, 12])
+    query_agents = MagicMock(return_value=[])
+    create_agent = MagicMock(return_value={"agent_id": 101})
+    bind_tool = MagicMock()
+
+    monkeypatch.setattr(nl2agent_service, "seed_nl2agent_builtin_tools", seed_tools)
+    monkeypatch.setattr(
+        nl2agent_service, "query_all_agent_info_by_tenant_id", query_agents
+    )
+    monkeypatch.setattr(nl2agent_service, "create_agent", create_agent)
+    monkeypatch.setattr(
+        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+    )
+
+    result = nl2agent_service.seed_nl2agent_default_agent(
+        tenant_id="tenant_1", user_id="user_1"
+    )
+
+    assert result == 101
+    payload = create_agent.call_args.args[0]
+    assert payload["name"] == "nl2agent"
+    assert payload["prompt_template_id"] == 0
+    assert payload["prompt_template_name"] == "system_default"
+
+
+def test_seed_nl2agent_default_agent_backfills_existing_prompt_template_link(
+    monkeypatch,
+):
+    seed_tools = MagicMock(return_value=[11, 12])
+    query_agents = MagicMock(
+        return_value=[
+            {
+                "agent_id": 101,
+                "name": "nl2agent",
+                "prompt_template_id": None,
+                "prompt_template_name": None,
+            }
+        ]
+    )
+    update_agent = MagicMock()
+    create_agent = MagicMock()
+
+    monkeypatch.setattr(nl2agent_service, "seed_nl2agent_builtin_tools", seed_tools)
+    monkeypatch.setattr(
+        nl2agent_service, "query_all_agent_info_by_tenant_id", query_agents
+    )
+    monkeypatch.setattr(nl2agent_service, "update_agent", update_agent)
+    monkeypatch.setattr(nl2agent_service, "create_agent", create_agent)
+
+    result = nl2agent_service.seed_nl2agent_default_agent(
+        tenant_id="tenant_1", user_id="user_1"
+    )
+
+    assert result == 101
+    create_agent.assert_not_called()
+    request = update_agent.call_args.kwargs["agent_info"]
+    assert request.prompt_template_id == 0
+    assert request.prompt_template_name == "system_default"
+    update_agent.assert_called_once_with(
+        agent_id=101,
+        agent_info=request,
+        user_id="user_1",
+        version_no=0,
+    )

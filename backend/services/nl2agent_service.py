@@ -18,7 +18,7 @@ from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import AgentRunException, AppException
 from consts.error_code import ErrorCode
-from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
+from consts.model import AgentInfoRequest, SkillInstanceInfoRequest, ToolInstanceInfoRequest
 from database.agent_db import (
     create_agent,
     query_all_agent_info_by_tenant_id,
@@ -42,6 +42,10 @@ from services.mcp_management_service import (
     list_registry_mcp_services,
 )
 from services.prompt_service import generate_and_save_system_prompt_impl
+from services.prompt_template_service import (
+    SYSTEM_PROMPT_TEMPLATE_ID,
+    SYSTEM_PROMPT_TEMPLATE_NAME,
+)
 from services.skill_service import (
     get_official_skills_with_status,
     install_skills_for_tenant,
@@ -63,6 +67,34 @@ _SCORER_MAX_CANDIDATES = 60
 
 def _is_draft_agent_name(name: Optional[str]) -> bool:
     return bool(name) and name.startswith(DRAFT_AGENT_NAME_PREFIX)
+
+
+def _ensure_nl2agent_prompt_template_link(agent: Dict[str, Any], user_id: str) -> None:
+    """Backfill the system prompt-template link on existing NL2AGENT rows."""
+    agent_id = agent.get("agent_id")
+    if not agent_id:
+        return
+    if (
+        agent.get("prompt_template_id") == SYSTEM_PROMPT_TEMPLATE_ID
+        and agent.get("prompt_template_name") == SYSTEM_PROMPT_TEMPLATE_NAME
+    ):
+        return
+
+    try:
+        update_agent(
+            agent_id=agent_id,
+            agent_info=AgentInfoRequest(
+                prompt_template_id=SYSTEM_PROMPT_TEMPLATE_ID,
+                prompt_template_name=SYSTEM_PROMPT_TEMPLATE_NAME,
+            ),
+            user_id=user_id,
+            version_no=0,
+        )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to backfill NL2AGENT prompt template link for "
+            f"agent_id={agent_id}: {exc}"
+        )
 
 
 async def start_session(
@@ -99,6 +131,20 @@ async def start_session(
     if not nl2agent_agent_id:
         raise AgentRunException(
             f"Failed to seed NL2AGENT default agent for tenant {tenant_id}."
+        )
+
+    try:
+        nl2agent_agent = search_agent_info_by_agent_id(
+            agent_id=nl2agent_agent_id, tenant_id=tenant_id
+        )
+        if nl2agent_agent:
+            _ensure_nl2agent_prompt_template_link(
+                nl2agent_agent, user_id=user_id
+            )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to verify NL2AGENT prompt template link for "
+            f"tenant {tenant_id}: {exc}"
         )
 
     draft_name = f"{DRAFT_AGENT_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
@@ -653,6 +699,7 @@ def seed_nl2agent_default_agent(
     for agent in all_agents:
         if (agent.get("name") or "") == NL2AGENT_AGENT_NAME:
             existing_id = agent.get("agent_id")
+            _ensure_nl2agent_prompt_template_link(agent, user_id=user_id)
             logger.info(
                 f"NL2AGENT default agent already exists (agent_id={existing_id})"
             )
@@ -674,6 +721,8 @@ def seed_nl2agent_default_agent(
         "max_steps": 20,
         "enabled": True,
         "is_new": False,
+        "prompt_template_id": SYSTEM_PROMPT_TEMPLATE_ID,
+        "prompt_template_name": SYSTEM_PROMPT_TEMPLATE_NAME,
         "duty_prompt": (
             "You are NL2AGENT, the Agent Builder. Help the user design and "
             "build a custom agent through multi-turn natural-language dialogue. "
