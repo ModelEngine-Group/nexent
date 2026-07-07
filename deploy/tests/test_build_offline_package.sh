@@ -138,7 +138,7 @@ SH
 chmod +x "$deploy_wrapper_dir/load-images.sh"
 cat > "$deploy_wrapper_dir/deploy/deploy.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'deploy:%s\n' "$*" >> "$DEPLOY_WRAPPER_LOG"
+printf 'deploy:%s:%s\n' "${NEXENT_DEPLOY_CONFIG_MODE:-}" "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/deploy/deploy.sh"
 
@@ -147,14 +147,22 @@ DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" do
 if grep -q '^load-images$' "$deploy_wrapper_log"; then
   fail "deploy.sh should not load images by default"
 fi
-grep -q '^deploy:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args without --load-images"
+grep -q '^deploy::docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args without --load-images"
 
 : > "$deploy_wrapper_log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
 [ "$first_line" = "load-images" ] || fail "deploy.sh --load-images should load images before deploy"
-[ "$second_line" = "deploy:docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+[ "$second_line" = "deploy::docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
+
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" --defaults docker --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults before target should enable defaults mode"
+
+: > "$deploy_wrapper_log"
+DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" bash "$deploy_wrapper_dir/deploy.sh" docker --defaults --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh --defaults after target should enable defaults mode and consume the flag"
 
 latest_package_dir="$OUT_DIR/latest"
 latest_pull_log="$TMP_DIR/latest-docker.log"
@@ -199,6 +207,10 @@ grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offl
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --config --foo bar
 grep -q '^deploy:tui:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --config should enable TUI mode and consume the flag"
+
+: > "$offline_deploy_log"
+DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" docker --defaults --foo bar
+grep -q '^deploy:defaults:docker --foo bar$' "$offline_deploy_log" || fail "offline deploy.sh --defaults should preserve defaults mode and consume the flag"
 
 : > "$offline_deploy_log"
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --load-images docker --foo bar

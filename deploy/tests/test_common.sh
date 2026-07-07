@@ -98,12 +98,15 @@ assert_eq "backend API service" "$(DEPLOYMENT_LANGUAGE=en deployment_i18n image_
 
 ZH_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$ZH_DEPLOY_HELP" "用法：" "deploy wrapper help should follow Chinese locale"
+assert_contains "$ZH_DEPLOY_HELP" "--defaults" "deploy wrapper help should document defaults mode"
 EN_DEPLOY_HELP="$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$EN_DEPLOY_HELP" "Usage:" "DEPLOYMENT_LANG should force English deploy wrapper help"
+assert_contains "$EN_DEPLOY_HELP" "--defaults" "English deploy wrapper help should document defaults mode"
 
 ZH_ROOT_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../../deploy.sh" --help)"
 assert_contains "$ZH_ROOT_DEPLOY_HELP" "用法：" "root deploy help should follow Chinese locale"
 assert_contains "$ZH_ROOT_DEPLOY_HELP" "此根入口只转发到目标专用部署脚本。" "root deploy help should describe forwarding in Chinese"
+assert_contains "$ZH_ROOT_DEPLOY_HELP" "--defaults" "root deploy help should document defaults mode"
 
 ZH_UNINSTALL_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../uninstall.sh" --help)"
 assert_contains "$ZH_UNINSTALL_HELP" "用法：" "uninstall wrapper help should follow Chinese locale"
@@ -207,11 +210,28 @@ NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$TM
 assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "defaults mode should use built-in image source when local config is absent"
 
+deployment_prepare_config --defaults --local-config "$TMP_DIR/missing.yaml" --app-version latest
+assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
+assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "--defaults should use built-in image source when local config is absent"
+
+deployment_prepare_config --local-config "$FULL_CONFIG" --defaults --image-source general --app-version latest
+assert_eq "true" "$DEPLOYMENT_CONFIG_FILE_LOADED" "--defaults should load saved local config"
+assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "--defaults should include saved components"
+assert_eq "development" "$DEPLOYMENT_PORT_POLICY" "--defaults should include saved port policy"
+assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "explicit CLI image source should override --defaults local config"
+
 if deployment_prepare_config --config "$FULL_CONFIG" --app-version latest 2>"$TMP_DIR/config-tui-error.log"; then
   echo "FAIL: --config should request interactive TUI and fail without a TTY"
   exit 1
 fi
 assert_contains "$(cat "$TMP_DIR/config-tui-error.log")" "Interactive deployment configuration requires a TTY." "--config should no longer load a config file path"
+if deployment_prepare_config --defaults --config --app-version latest 2>"$TMP_DIR/defaults-config-tui-error.log"; then
+  echo "FAIL: --config should override earlier --defaults and require a TTY"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/defaults-config-tui-error.log")" "Interactive deployment configuration requires a TTY." "--config should override earlier --defaults"
+deployment_prepare_config --config --defaults --local-config "$FULL_CONFIG" --app-version latest
+assert_eq "true" "$DEPLOYMENT_CONFIG_FILE_LOADED" "--defaults should override earlier --config when it appears later"
 if NEXENT_DEPLOY_CONFIG_MODE=tui deployment_prepare_config --app-version latest 2>"$TMP_DIR/mode-tui-error.log"; then
   echo "FAIL: NEXENT_DEPLOY_CONFIG_MODE=tui should fail without a TTY"
   exit 1

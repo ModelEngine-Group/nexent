@@ -112,7 +112,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
-Set `MONITORING_DASHBOARD_URL` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path.
+Set `MONITORING_DASHBOARD_URL` in `deploy/env/monitoring.env` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path. In speed mode, the top-bar entry is visible when the URL is configured; in standard mode, only the super administrator can see it.
 
 ```bash
 MONITORING_DASHBOARD_URL=http://localhost:6006
@@ -127,9 +127,9 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
 | `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
-| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
+| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar; visible in speed mode and to super administrators in standard mode |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
-| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
+| `MONITORING_TRACE_CONTENT_MODE` | `full` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |
 | `MONITORING_TRACE_MAX_ITEMS` | `20` | Maximum dict keys/list items included in payload previews |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
@@ -299,7 +299,7 @@ All monitoring methods work without errors when disabled - decorators pass throu
 
 ### No data appearing
 
-1. Check `ENABLE_TELEMETRY=true` in `.env`
+1. Check `ENABLE_TELEMETRY=true` in `deploy/env/monitoring.env`
 2. Verify OTLP endpoint is reachable
 3. Check authentication headers are correct
 

@@ -50,13 +50,13 @@ cd nexent
 bash deploy.sh docker
 ```
 
-根目录 `deploy.sh` 只负责转发到目标部署脚本；Docker 真实实现为 `bash deploy/docker/deploy.sh`。Docker 和 Kubernetes 使用同一套部署配置模型；交互式运行会通过 Bash TUI 选择组件、端口策略和镜像源。`infrastructure` 必选，`application`、`data-process`、`supabase` 默认选中，也可以取消以部署更小的组合。非交互部署可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
+根目录 `deploy.sh` 只负责转发到目标部署脚本；Docker 真实实现为 `bash deploy/docker/deploy.sh`。Docker 和 Kubernetes 使用同一套部署配置模型；交互式运行会通过 Bash TUI 选择组件、端口策略和镜像源。`infrastructure` 必选，`application`、`data-process`、`supabase` 默认选中，也可以取消以部署更小的组合。使用 `--defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。非交互部署也可传入 `--version`、`--components`、`--port-policy development|production`、`--image-source general|mainland|local-latest`。
 
 Docker 与 Kubernetes 统一使用 `deploy/env/.env` 作为运行配置文件；已有 `deploy/env/.env` 会原样保留。如果 `deploy/env/.env` 不存在，部署脚本会优先复用已有的 `docker/.env`，再回退到 `deploy/env/.env.example`。监控相关配置会从 `deploy/env/monitoring.env.example` 生成到 `deploy/env/monitoring.env`。
 
 Docker 卸载入口为 `bash uninstall.sh docker`，默认交互确认是否删除持久化数据；也可以通过 `--delete-volumes true|false` 控制，或使用 `bash uninstall.sh docker delete-all` 同时删除容器和持久化数据。
 
-离线镜像包可通过 `bash build.sh --package --target docker --compress true` 或 `bash deploy/offline/build_offline_package.sh --target docker --compress true` 构建。包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、部署脚本、SQL 文件、`manifest.yaml` 和 `checksums.txt`；在目标机器上使用 `bash deploy.sh --load-images docker ...` 加载镜像并部署。
+离线镜像包可通过 `bash build.sh --package --target docker --compress true` 或 `bash deploy/offline/build_offline_package.sh --target docker --compress true` 构建。包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、部署脚本、SQL 文件、`manifest.yaml` 和 `checksums.txt`。包内部署会复用已保存的 `deploy.options` 或内置默认值，默认不进入 TUI；添加 `--config` 可交互配置。在目标机器上使用 `bash deploy.sh --load-images docker ...` 加载镜像并部署。
 
 详细部署指南请参考 [Docker 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/installation.html)。
 

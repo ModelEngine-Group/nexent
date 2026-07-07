@@ -16,8 +16,8 @@ usage() {
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     cat <<'USAGE'
 用法：
-  bash deploy.sh [--load-images] [--config] docker [Docker 部署选项]
-  bash deploy.sh [--load-images] [--config] k8s [K8s 部署选项]
+  bash deploy.sh [--load-images] [--config|--defaults] docker [Docker 部署选项]
+  bash deploy.sh [--load-images] [--config|--defaults] k8s [K8s 部署选项]
 
 USAGE
     if [ "$DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE" = "defaults" ]; then
@@ -39,14 +39,15 @@ USAGE
   --load-images    部署前从 ./images 加载 Docker 镜像 tar 文件。
                    默认关闭。
   --config         进入交互式部署配置界面。
+  --defaults       复用保存配置或内置默认值，跳过交互界面。
 USAGE
     return
   fi
 
   cat <<'USAGE'
 Usage:
-  bash deploy.sh [--load-images] [--config] docker [docker deploy options]
-  bash deploy.sh [--load-images] [--config] k8s [k8s deploy options]
+  bash deploy.sh [--load-images] [--config|--defaults] docker [docker deploy options]
+  bash deploy.sh [--load-images] [--config|--defaults] k8s [k8s deploy options]
 
 USAGE
   if [ "$DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE" = "defaults" ]; then
@@ -68,6 +69,7 @@ Options:
   --load-images    Load Docker image tar files from ./images before deploying.
                    Defaults to off.
   --config         Open the interactive deployment configuration.
+  --defaults       Use saved configuration or built-in defaults and skip TUI.
 USAGE
 }
 
@@ -88,6 +90,10 @@ while [ $# -gt 0 ]; do
       ;;
     --config)
       DEPLOY_CONFIG_MODE="tui"
+      shift
+      ;;
+    --defaults)
+      DEPLOY_CONFIG_MODE="defaults"
       shift
       ;;
     *)

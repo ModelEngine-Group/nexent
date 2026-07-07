@@ -76,7 +76,7 @@ bash deploy.sh docker --components infrastructure,monitoring --monitoring-provid
 访问地址：
 
 - Langfuse UI：`http://localhost:3001`
-- 默认管理员：`admin@nexent.local` / `nexent-langfuse-admin`
+- 默认管理员：`admin@nexent.com` / `nexent@4321`
 - 默认项目 Key：`pk-lf-nexent-local` / `sk-lf-nexent-local`
 
 部署脚本会在 `LANGFUSE_OTLP_AUTH_HEADER` 为空时自动生成 `Basic base64(public_key:secret_key)`，并让 Collector 将 trace 转发到 `http://langfuse-web:3000/api/public/otel`。本地默认密钥只适合开发验证，生产部署必须替换 `LANGFUSE_NEXTAUTH_SECRET`、`LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、数据库密码和对象存储密钥。
@@ -119,7 +119,7 @@ cd deploy
 bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana
 ```
 
-后端 `.env` 使用 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口：
+`deploy/env/monitoring.env` 中的 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口。speed 模式下配置 URL 后即可显示；标准模式下只有超级管理员可见。
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -131,7 +131,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 访问地址：
 
 - Grafana UI：`http://localhost:3002`
-- 默认管理员：`admin` / `nexent-grafana-admin`
+- 默认管理员：`admin` / `nexent@4321`
 - Tempo API：`http://localhost:3200`
 
 Grafana 会自动预置 Tempo datasource，并加载 `Nexent Agent Trace Monitoring` dashboard。Trace 查询入口在 Grafana Explore 中选择 `Tempo` datasource，示例 TraceQL 为 `{ resource.service.name = "nexent-backend" }`。
@@ -145,7 +145,7 @@ cd deploy
 bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider zipkin
 ```
 
-后端 `.env`：
+`deploy/env/monitoring.env`：
 
 ```bash
 ENABLE_TELEMETRY=true
@@ -217,9 +217,9 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
 | `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
-| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址 |
+| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址；speed 模式下可见，标准模式下仅超级管理员可见 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
-| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
+| `MONITORING_TRACE_CONTENT_MODE` | `full` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | 每个 payload 预览最多写入的字符数 |
 | `MONITORING_TRACE_MAX_ITEMS` | `20` | dict/list 预览最多写入的 key 或 item 数 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
@@ -248,7 +248,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `GRAFANA_VERSION` | `12.4` | 本地 Grafana 镜像版本 |
 | `GRAFANA_PORT` | `3002` | 本地 Grafana UI 端口 |
 | `GRAFANA_ADMIN_USER` | `admin` | 本地 Grafana 管理员用户名 |
-| `GRAFANA_ADMIN_PASSWORD` | `nexent-grafana-admin` | 本地 Grafana 管理员密码 |
+| `GRAFANA_ADMIN_PASSWORD` | `nexent@4321` | 本地 Grafana 管理员密码 |
 | `GRAFANA_DEFAULT_LANGUAGE` | `zh-Hans` | 本地 Grafana 默认界面语言 |
 | `TEMPO_VERSION` | `2.10.5` | 本地 Tempo 镜像版本，避免浮动 tag 带来的配置兼容性漂移 |
 | `TEMPO_PORT` | `3200` | 本地 Tempo HTTP API 端口 |
@@ -445,7 +445,7 @@ pip install nexent[performance]  # 包含 OTLP 支持
 
 ### 数据未显示
 
-1. 检查 `.env` 中 `ENABLE_TELEMETRY=true`
+1. 检查 `deploy/env/monitoring.env` 中 `ENABLE_TELEMETRY=true`
 2. 验证 OTLP 端点可访问
 3. 检查认证头配置正确
 

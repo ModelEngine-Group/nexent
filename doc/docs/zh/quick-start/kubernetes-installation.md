@@ -59,6 +59,8 @@ bash deploy.sh k8s
 
 Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。已有 `deploy/env/.env` 会原样保留；如果不存在，部署脚本会优先复用 `docker/.env`，再回退到 `deploy/env/.env.example`。
 
+使用 `bash deploy.sh k8s --defaults` 可跳过 TUI，并复用已保存的 `deploy.options` 或内置默认值。
+
 部署成功后，非敏感部署选项会保存到 `deploy/k8s/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
 
 ### ⚠️ 重要提示
@@ -200,7 +202,9 @@ bash deploy/offline/build_offline_package.sh \
   --output-dir offline-package
 ```
 
-包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`deploy/env/.env.example`、`deploy/env/monitoring.env.example`、`manifest.yaml` 和 `checksums.txt`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或生成的 Helm values。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
+包内包含镜像 tar、`load-images.sh`、根目录部署/卸载入口、Kubernetes Helm 资源、SQL 文件、`deploy/env/.env.example`、`deploy/env/monitoring.env.example`、`manifest.yaml` 和 `checksums.txt`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或生成的 Helm values。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
+
+在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择。如果是单节点、Docker 作为容器运行时的集群，可以直接加载并部署：
 
 ```bash
 cd offline-package
@@ -282,7 +286,7 @@ bash deploy.sh k8s
 | `global.monitoring.enabled` | 是否让 Nexent 后端开启 OpenTelemetry 上报 |
 | `global.monitoring.provider` | 后端 provider 标识：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
 | `global.monitoring.otlpEndpoint` | 后端 OTLP HTTP 上报地址，默认 `http://nexent-otel-collector:4318` |
-| `global.monitoring.dashboardUrl` | 前端监控入口地址，留空则隐藏入口 |
+| `global.monitoring.dashboardUrl` | 前端监控入口地址，留空则隐藏入口；speed 模式下可见，标准模式下仅超级管理员可见 |
 | `global.monitoring.traceContentMode` | Trace 内容采集模式：`summary`、`metrics`、`full` |
 | `nexent-monitoring.<provider>.service.nodePort` | 调整各 Dashboard 的 NodePort |
 | `nexent-monitoring.langfuse.init.*` | 本地 Langfuse 初始组织、项目和管理员账号 |

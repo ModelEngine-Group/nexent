@@ -53,6 +53,9 @@ After running the command, the script opens Bash TUI menus for deployment option
 You can also pass options directly:
 
 ```bash
+# Use saved deploy.options or built-in defaults without opening the TUI
+bash deploy.sh docker --defaults
+
 # Default component set, development port policy, standard image source
 bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
@@ -66,7 +69,7 @@ bash deploy.sh docker --image-source mainland
 bash deploy.sh docker --image-source local-latest
 ```
 
-After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. The next interactive deployment can reuse the local config or run a full reconfiguration.
+After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. `--defaults` reuses that file when it exists, otherwise it uses built-in defaults. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
 #### ⚠️ Important Notes
 
@@ -189,7 +192,7 @@ bash deploy/offline/build_offline_package.sh \
 
 The package directory contains `images/*.tar`, `load-images.sh`, `deploy.sh`, `uninstall.sh`, `manifest.yaml`, `checksums.txt`, `deploy/env/.env.example`, `deploy/env/monitoring.env.example`, and `deploy/sql`. It does not include local `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`. With `--compress true`, a `nexent-offline-<target>-<platform>-<version>.zip` archive is created next to the output directory.
 
-On the target host, keep the deployment options consistent with the package manifest:
+On the target host, the package root `deploy.sh` uses saved `deploy.options` when present, otherwise built-in defaults, and does not open the TUI by default. Add `--config` to open the interactive configuration UI. If the package was built with a custom version, component set, port policy, or image source, pass the same options during deployment or use `--config` to select them interactively:
 
 ```bash
 cd offline-package
@@ -217,7 +220,7 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`. The frontend monitoring entry is visible in speed mode when a dashboard URL is configured; in standard mode, only the super administrator can see it.
 
 ```bash
 cd nexent

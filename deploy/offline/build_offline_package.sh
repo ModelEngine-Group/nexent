@@ -59,6 +59,7 @@ show_help() {
     echo "  --components LIST       用于镜像选择的部署组件"
     echo "  --image-source SOURCE   general、mainland 或 local-latest"
     echo "  --registry-profile NAME 兼容旧参数，映射到 --image-source general|mainland"
+    echo "  --defaults              复用保存配置或内置默认值并跳过交互界面"
     echo "  --config                进入交互式部署配置界面"
     echo "  --dry-run               只展示执行计划，不执行实际操作"
     echo "  --help                  显示帮助信息"
@@ -90,6 +91,7 @@ show_help() {
   echo "  --components LIST       Deployment components for image selection"
   echo "  --image-source SOURCE   general, mainland, or local-latest"
   echo "  --registry-profile NAME Legacy alias for --image-source general|mainland"
+  echo "  --defaults              Use saved config or built-in defaults and skip TUI"
   echo "  --config                Open the interactive deployment configuration"
   echo "  --dry-run               Show execution plan without actual operations"
   echo "  --help                  Show this help message"
@@ -137,7 +139,7 @@ parse_args() {
         COMMON_ARGS+=("$1" "$2")
         shift 2
         ;;
-      --config|--use-local-config|--reconfigure)
+      --defaults|--config|--use-local-config|--reconfigure)
         COMMON_ARGS+=("$1")
         shift
         ;;

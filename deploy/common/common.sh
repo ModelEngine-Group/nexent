@@ -739,7 +739,13 @@ deployment_parse_common_args() {
         shift
         ;;
       --reconfigure)
+        NEXENT_DEPLOY_CONFIG_MODE="tui"
         DEPLOYMENT_RECONFIGURE="true"
+        shift
+        ;;
+      --defaults)
+        NEXENT_DEPLOY_CONFIG_MODE="defaults"
+        DEPLOYMENT_RECONFIGURE="false"
         shift
         ;;
       --rotate-secrets)
@@ -751,6 +757,7 @@ deployment_parse_common_args() {
         shift
         ;;
       --config)
+        NEXENT_DEPLOY_CONFIG_MODE="tui"
         DEPLOYMENT_RECONFIGURE="true"
         shift
         ;;
@@ -2032,6 +2039,8 @@ deployment_print_summary() {
 }
 
 deployment_prepare_config() {
+  local NEXENT_DEPLOY_CONFIG_MODE="${NEXENT_DEPLOY_CONFIG_MODE:-}"
+
   deployment_init_defaults
 
   local raw_args=("$@")
@@ -2046,6 +2055,7 @@ deployment_prepare_config() {
       --monitoring-provider) DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT="true" ;;
       --config) DEPLOYMENT_RECONFIGURE="true" ;;
       --reconfigure) DEPLOYMENT_RECONFIGURE="true" ;;
+      --defaults) DEPLOYMENT_RECONFIGURE="false" ;;
       --rotate-secrets) DEPLOYMENT_ROTATE_SECRETS="true" ;;
       --refresh-es-key) DEPLOYMENT_REFRESH_ES_KEY="true" ;;
     esac

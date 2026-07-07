@@ -53,6 +53,9 @@ bash deploy.sh docker
 您也可以通过参数跳过交互：
 
 ```bash
+# 使用已保存的 deploy.options 或内置默认值，不进入 TUI
+bash deploy.sh docker --defaults
+
 # 默认组件组合，development 端口策略，标准镜像源
 bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
 
@@ -66,7 +69,7 @@ bash deploy.sh docker --image-source mainland
 bash deploy.sh docker --image-source local-latest
 ```
 
-部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。下次交互部署时可选择复用本地配置或重新全量配置。
+部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。`--defaults` 会优先复用该文件；文件不存在时使用内置默认值。下次交互部署时可选择复用本地配置或重新全量配置。
 
 
 #### ⚠️ 重要提示
@@ -185,7 +188,7 @@ bash deploy/offline/build_offline_package.sh \
 
 包目录会包含 `images/*.tar`、`load-images.sh`、`deploy.sh`、`uninstall.sh`、`manifest.yaml`、`checksums.txt`、`deploy/env/.env.example`、`deploy/env/monitoring.env.example` 和 `deploy/sql`，不会包含本地 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。使用 `--compress true` 时，会在输出目录的父目录生成 `nexent-offline-<target>-<platform>-<version>.zip`。
 
-在目标机器上部署时，请保持部署参数与 `manifest.yaml` 中的版本、组件和镜像源一致：
+在目标机器上部署时，包根目录的 `deploy.sh` 会优先复用已保存的 `deploy.options`，否则使用内置默认值，默认不进入 TUI。添加 `--config` 可进入交互式配置界面。如果离线包构建时使用了自定义版本、组件、端口策略或镜像源，请在部署时传入相同选项，或使用 `--config` 交互选择：
 
 ```bash
 cd offline-package
@@ -213,7 +216,7 @@ bash deploy.sh --load-images docker
 
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。前端监控入口在 speed 模式下配置 dashboard URL 后可见；标准模式下仅超级管理员可见。
 
 ```bash
 cd nexent
