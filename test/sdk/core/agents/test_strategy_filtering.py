@@ -15,8 +15,9 @@ Tests:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "sdk"))
-sys.path.insert(0, str(Path(__file__).parent / "backend"))
+_project_root = Path(__file__).parent.parent.parent.parent.parent
+sys.path.insert(0, str(_project_root / "sdk"))
+sys.path.insert(0, str(_project_root / "backend"))
 
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
