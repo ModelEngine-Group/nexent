@@ -1907,7 +1907,8 @@ class TestCreateAgentConfig:
                 context_components=ANY,
                 capacity_snapshot=ANY,
                 safe_input_budget_snapshot=ANY,
-                verification_config=ANY
+                verification_config=ANY,
+                conversation_id=None
             )
 
     @pytest.mark.asyncio
@@ -1982,7 +1983,8 @@ class TestCreateAgentConfig:
                     context_components=ANY,
                     capacity_snapshot=ANY,
                     safe_input_budget_snapshot=ANY,
-                    verification_config=ANY
+                    verification_config=ANY,
+                    conversation_id=None
                 )
 
     @pytest.mark.asyncio
@@ -2244,7 +2246,8 @@ class TestCreateAgentConfig:
                 context_components=ANY,
                 capacity_snapshot=None,
                 safe_input_budget_snapshot=None,
-                verification_config=ANY
+                verification_config=ANY,
+                conversation_id=None
             )
 
     @pytest.mark.asyncio
@@ -3394,6 +3397,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=1,
                 tool_params=None,
+                conversation_id=None,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
@@ -3931,6 +3935,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=False,
                 version_no=1,
                 tool_params=None,
+                conversation_id=None,
             )
 
     @pytest.mark.asyncio
@@ -3978,6 +3983,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Debug mode uses draft version 0
                 tool_params=None,
+                conversation_id=None,
             )
 
     @pytest.mark.asyncio
@@ -4031,6 +4037,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
                 tool_params=None,
+                conversation_id=None,
             )
             # Verify that get_remote_mcp_server_list was called with is_need_auth=True
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)

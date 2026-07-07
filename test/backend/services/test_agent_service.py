@@ -33,6 +33,8 @@ sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
 sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+sys.modules['nexent.core.agents.context'] = MagicMock()
+sys.modules['nexent.core.agents.context.history_projector'] = MagicMock()
 
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
@@ -3850,6 +3852,7 @@ async def test_prepare_agent_run(
         override_model_id=None,
         requested_output_tokens=4096,
         tool_params=None,
+        conversation_id=123,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
@@ -4448,8 +4451,8 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     # Track save_message calls to verify streaming message creation
     save_message_calls = []
 
-    def fake_save_message(req, user_id, tenant_id, status="completed"):
-        save_message_calls.append((req, user_id, tenant_id, status))
+    def fake_save_message(req, user_id, tenant_id, status="completed", **kwargs):
+        save_message_calls.append((req, user_id, tenant_id, status, kwargs))
         return 4242
 
     monkeypatch.setattr(
