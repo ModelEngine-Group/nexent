@@ -47,7 +47,10 @@ from database.model_management_db import get_model_records, get_model_by_model_i
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
-from utils.prompt_template_utils import get_agent_prompt_template
+from utils.prompt_template_utils import (
+    get_agent_prompt_template,
+    get_nl2agent_system_prompt_template,
+)
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.context_utils import build_context_components
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE, DATA_PROCESS_SERVICE, MINIO_DEFAULT_BUCKET
@@ -84,6 +87,19 @@ _OPERATOR_OVERRIDE_FIELDS = (
 # leading to duplicate WARNING lines defeating the per-process dedup.
 _CAPACITY_WARNING_EMITTED: set = set()
 _CAPACITY_WARNING_LOCK = threading.Lock()
+
+
+def _load_nl2agent_system_prompt(language: str) -> Optional[str]:
+    """Load the YAML-backed NL2AGENT system prompt, returning None on fallback."""
+    try:
+        prompt_template = get_nl2agent_system_prompt_template(language)
+        system_prompt = prompt_template.get("system_prompt") if prompt_template else None
+        if isinstance(system_prompt, str) and system_prompt.strip():
+            return system_prompt
+        logger.warning("NL2AGENT system prompt YAML has no system_prompt field.")
+    except Exception as exc:
+        logger.warning(f"Failed to load NL2AGENT system prompt YAML: {exc}")
+    return None
 
 
 # W11 spec line 710: emitted every time _resolve_input_budget resolves a row
@@ -881,6 +897,10 @@ async def create_agent_config(
         system_prompt = Template(
             prompt_template["system_prompt"], undefined=StrictUndefined
         ).render(render_kwargs)
+    if agent_info.get("name") == "nl2agent":
+        nl2agent_system_prompt = _load_nl2agent_system_prompt(language)
+        if nl2agent_system_prompt:
+            system_prompt = nl2agent_system_prompt
 
     model_id_to_use = override_model_id if override_model_id else agent_info.get("model_id")
     model_info = None

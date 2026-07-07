@@ -118,6 +118,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'skill_creation_complicated': {
             LANGUAGE["ZH"]: 'backend/prompts/skill_creation_complicate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/skill_creation_complicate_en.yaml'
+        },
+        'nl2agent_system_prompt': {
+            LANGUAGE["ZH"]: 'backend/prompts/nl2agent_system_prompt_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/nl2agent_system_prompt_en.yaml'
         }
     }
 
@@ -182,6 +186,19 @@ def get_agent_prompt_template(is_manager: bool, language: str = LANGUAGE["ZH"]) 
         dict: Loaded prompt template configuration
     """
     return get_prompt_template('agent', language, is_manager=is_manager)
+
+
+def get_nl2agent_system_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:
+    """
+    Get the NL2AGENT conversational builder system prompt template.
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        dict: Loaded NL2AGENT prompt template configuration
+    """
+    return get_prompt_template('nl2agent_system_prompt', language)
 
 
 def get_generate_title_prompt_template(language: str = 'zh') -> Dict[str, Any]:
