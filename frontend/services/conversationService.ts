@@ -900,6 +900,7 @@ export const conversationService = {
         description?: string;
       }>;
     agent_id?: number; // Add agent_id parameter
+    draft_agent_id?: number; // Optional NL2AGENT draft target agent
     model_id?: number; // Optional model override
     version_no?: number; // Optional version override
     is_debug?: boolean; // Add debug mode parameter
@@ -918,6 +919,12 @@ export const conversationService = {
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {
         requestParams.agent_id = params.agent_id;
+      }
+      if (
+        params.draft_agent_id !== undefined &&
+        params.draft_agent_id !== null
+      ) {
+        requestParams.draft_agent_id = params.draft_agent_id;
       }
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;

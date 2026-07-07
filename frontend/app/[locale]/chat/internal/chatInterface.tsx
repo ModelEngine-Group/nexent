@@ -47,6 +47,41 @@ import { Button, Checkbox, Layout, message } from "antd";
 import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
+const NL2AGENT_DRAFT_AGENT_ID_KEY = "nl2agent_draft_agent_id";
+const NL2AGENT_CONVERSATION_ID_KEY = "nl2agent_conversation_id";
+const NL2AGENT_DRAFT_MAP_KEY = "nl2agent_draft_by_conversation";
+
+const parseStoredNumber = (value: string | null): number | null => {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const readNl2AgentDraftMap = (): Record<string, number> => {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(NL2AGENT_DRAFT_MAP_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const persistNl2AgentDraftForConversation = (
+  conversationId: number,
+  draftAgentId: number
+) => {
+  if (typeof window === "undefined") return;
+  const draftMap = readNl2AgentDraftMap();
+  draftMap[String(conversationId)] = draftAgentId;
+  localStorage.setItem(NL2AGENT_DRAFT_MAP_KEY, JSON.stringify(draftMap));
+};
+
+const getNl2AgentDraftForConversation = (
+  conversationId: number | null
+): number | null => {
+  if (conversationId == null) return null;
+  return readNl2AgentDraftMap()[String(conversationId)] ?? null;
+};
 
 // Get internationalization key based on message type
 const getI18nKeyByType = (type: string): string => {
@@ -133,6 +168,12 @@ export function ChatInterface() {
 
   // Add agent selection state
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [nl2agentDraftAgentId, setNl2agentDraftAgentId] = useState<
+    number | null
+  >(null);
+  const [nl2agentConversationId, setNl2agentConversationId] = useState<
+    number | null
+  >(null);
   const [agentGreeting, setAgentGreeting] = useState<string | null>(null);
   const [agentExampleQuestions, setAgentExampleQuestions] = useState<string[]>(
     []
@@ -165,11 +206,53 @@ export function ChatInterface() {
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
+    const draftAgentId = parseStoredNumber(
+      sessionStorage.getItem(NL2AGENT_DRAFT_AGENT_ID_KEY)
+    );
+    const conversationId = parseStoredNumber(
+      sessionStorage.getItem(NL2AGENT_CONVERSATION_ID_KEY)
+    );
+
     // Set selected agent ID from sessionStorage if it exists
     if (agentId) {
       setSelectedAgentId(agentId);
       sessionStorage.removeItem("selectedAgentId");
     }
+    if (draftAgentId != null) {
+      setNl2agentDraftAgentId(draftAgentId);
+      sessionStorage.removeItem(NL2AGENT_DRAFT_AGENT_ID_KEY);
+    }
+    if (conversationId != null) {
+      setNl2agentConversationId(conversationId);
+      conversationManagement.setSelectedConversationId(conversationId);
+      conversationManagement.setIsNewConversation(false);
+      sessionStorage.removeItem(NL2AGENT_CONVERSATION_ID_KEY);
+
+      if (draftAgentId != null) {
+        persistNl2AgentDraftForConversation(conversationId, draftAgentId);
+      }
+
+      conversationManagement
+        .fetchConversationList()
+        .then((dialogList) => {
+          const dialog = dialogList.find(
+            (item) => item.conversation_id === conversationId
+          );
+          if (dialog) {
+            conversationManagement.setConversationTitle(
+              dialog.conversation_title
+            );
+          }
+        })
+        .catch((error) => {
+          log.error(
+            t("chatInterface.refreshDialogListFailedButContinue"),
+            error
+          );
+        });
+    }
+    // Consume one-shot sessionStorage handoff values only when the chat page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset scroll to bottom state
@@ -385,37 +468,23 @@ export function ChatInterface() {
     try {
       // Check if need to create new conversation
       if (currentConversationId == null) {
-        // No conversation selected: create new conversation first
-        try {
-          const createData = await conversationService.create(
-            t("chatInterface.newConversation")
-          );
-          currentConversationId = createData.conversation_id;
-
-          // Update current session state
+        if (nl2agentConversationId != null) {
+          currentConversationId = nl2agentConversationId;
+          shouldGenerateTitle = false;
           conversationManagement.setSelectedConversationId(
             currentConversationId
           );
-          conversationManagement.setConversationTitle(
-            createData.conversation_title || t("chatInterface.newConversation")
-          );
+          conversationManagement.setIsNewConversation(false);
 
-          // After creating new conversation, add it to streaming list
-          setStreamingConversations((prev) => {
-            const newSet = new Set(prev).add(createData.conversation_id);
-            return newSet;
-          });
-
-          // Refresh conversation list
           try {
             const dialogList =
               await conversationManagement.fetchConversationList();
-            const newDialog = dialogList.find(
+            const dialog = dialogList.find(
               (dialog) => dialog.conversation_id === currentConversationId
             );
-            if (newDialog) {
-              conversationManagement.setSelectedConversationId(
-                currentConversationId
+            if (dialog) {
+              conversationManagement.setConversationTitle(
+                dialog.conversation_title
               );
             }
           } catch (error) {
@@ -424,12 +493,53 @@ export function ChatInterface() {
               error
             );
           }
-        } catch (error) {
-          log.error(t("chatInterface.createDialogFailedButContinue"), error);
-          // Reset button states when conversation creation fails
-          setIsLoading(false);
-          setIsStreaming(false);
-          return;
+        } else {
+          // No conversation selected: create new conversation first
+          try {
+            const createData = await conversationService.create(
+              t("chatInterface.newConversation")
+            );
+            currentConversationId = createData.conversation_id;
+
+            // Update current session state
+            conversationManagement.setSelectedConversationId(
+              currentConversationId
+            );
+            conversationManagement.setConversationTitle(
+              createData.conversation_title || t("chatInterface.newConversation")
+            );
+
+            // After creating new conversation, add it to streaming list
+            setStreamingConversations((prev) => {
+              const newSet = new Set(prev).add(createData.conversation_id);
+              return newSet;
+            });
+
+            // Refresh conversation list
+            try {
+              const dialogList =
+                await conversationManagement.fetchConversationList();
+              const newDialog = dialogList.find(
+                (dialog) => dialog.conversation_id === currentConversationId
+              );
+              if (newDialog) {
+                conversationManagement.setSelectedConversationId(
+                  currentConversationId
+                );
+              }
+            } catch (error) {
+              log.error(
+                t("chatInterface.refreshDialogListFailedButContinue"),
+                error
+              );
+            }
+          } catch (error) {
+            log.error(t("chatInterface.createDialogFailedButContinue"), error);
+            // Reset button states when conversation creation fails
+            setIsLoading(false);
+            setIsStreaming(false);
+            return;
+          }
         }
       }
 
@@ -556,6 +666,12 @@ export function ChatInterface() {
       // Only add agent_id if it's not null
       if (selectedAgentId !== null) {
         runAgentParams.agent_id = Number(selectedAgentId);
+      }
+
+      const draftAgentIdForRun =
+        nl2agentDraftAgentId ?? getNl2AgentDraftForConversation(id);
+      if (draftAgentIdForRun !== null) {
+        runAgentParams.draft_agent_id = draftAgentIdForRun;
       }
 
       // Add selected model_id for agent run
@@ -905,14 +1021,20 @@ export function ChatInterface() {
       let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
       try {
+        const draftAgentId = getNl2AgentDraftForConversation(conversationId);
+        const runAgentParams: any = {
+          query: "",
+          conversation_id: conversationId,
+          history: [],
+          is_resume: true,
+        };
+        if (draftAgentId !== null) {
+          runAgentParams.draft_agent_id = draftAgentId;
+        }
+
         // Call resume API
         const response = await conversationService.runAgent(
-          {
-            query: "",
-            conversation_id: conversationId,
-            history: [],
-            is_resume: true,
-          },
+          runAgentParams,
           controller.signal
         );
 
