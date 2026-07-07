@@ -278,7 +278,7 @@ export default function SkillRepositoryPage() {
                       Skill 仓库
                     </h1>
                     <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                      发现、复制和管理团队内可复用的 Skill。
+                      浏览同租户共享仓库、管理你有权限的 Skill，并发布与审核
                     </p>
                   </div>
                 </div>

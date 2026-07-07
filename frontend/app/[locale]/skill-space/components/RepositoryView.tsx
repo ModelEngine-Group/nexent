@@ -52,11 +52,15 @@ export function RepositoryView({
           allowClear
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="搜索 Skill 名称或描述"
+          placeholder="搜索Skill名称、描述或标签"
           prefix={<Search className="size-4 text-slate-400" aria-hidden />}
           className="h-11 rounded-xl"
         />
       </div>
+
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        共 {total} 个 Skill · 同租户内的 Skill 需先「复制为我的 Skill」后才能编辑
+      </p>
 
       <AsyncContent
         isLoading={isLoading}

@@ -1329,6 +1329,7 @@ export const createSkillFromFile = async (
     if (skillName) {
       formData.append("skill_name", skillName);
     }
+    formData.append("source", "custom");
 
     const endpoint =
       isUpdate && skillName

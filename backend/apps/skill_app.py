@@ -169,7 +169,7 @@ async def create_skill_from_file(
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     skill_name: Optional[str] = Form(
         None, description="Optional skill name override"),
-    source: Optional[str] = Form("自定义", description="Skill source"),
+    source: Optional[str] = Form("custom", description="Skill source"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create a skill from file upload.

@@ -21,8 +21,12 @@ import {
   Upload as UploadIcon,
   Send,
   Trash2,
-  MessagesSquare,
-  HardDriveUpload,
+  MessageCircle,
+  Box,
+  Bot,
+  FileText,
+  Folder,
+  Maximize2,
   Loader2,
   Plus,
   X,
@@ -45,7 +49,6 @@ import {
   findSkillByName,
   searchSkillsByName as searchSkillsByNameUtil,
   createSkillStream,
-  clearChatAndTempFile,
   stopSkillCreation,
   type SkillListItem,
   type SkillData,
@@ -97,6 +100,8 @@ export default function SkillBuildModal({
     { path: "SKILL.md", content: "" },
   ]);
   const [activeSkillTab, setActiveSkillTab] = useState<string>("SKILL.md");
+  const [expandedEditorPath, setExpandedEditorPath] = useState<string>("");
+  const [expandedEditorContent, setExpandedEditorContent] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState(false);
 
   // Tab management state
@@ -166,9 +171,8 @@ export default function SkillBuildModal({
     content: string;
   } | null>(null);
 
-  // Whether the user is in multi-turn refinement mode (has already received a draft).
-  // Used to switch the placeholder from "创建 to "继续修改" and to pass existing_skill.
-  const [isMultiTurn, setIsMultiTurn] = useState(false);
+  const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
+    tabs.filter((tab, index, self) => self.findIndex((item) => item.path === tab.path) === index);
 
   // Name input dropdown control
   const [isNameDropdownOpen, setIsNameDropdownOpen] = useState(false);
@@ -238,7 +242,6 @@ export default function SkillBuildModal({
       setSummaryContent("");
       currentAssistantIdRef.current = "";
       setAccumulatedDraft(null);
-      setIsMultiTurn(false);
       setEditingTabKey(null);
       setEditingTabName("");
     }
@@ -517,7 +520,7 @@ export default function SkillBuildModal({
         return a.path.localeCompare(b.path);
       });
 
-      setSkillTabs(tabsContent);
+      setSkillTabs(dedupeSkillTabs(tabsContent));
       setActiveSkillTab("SKILL.md");
     } catch (error) {
       log.error("Failed to load skill files:", error);
@@ -774,7 +777,6 @@ export default function SkillBuildModal({
                 content: assembledDraft,
               };
               setAccumulatedDraft(newDraft);
-              setIsMultiTurn(true);
 
               // Scroll to bottom after content is fully loaded
               setTimeout(() => scrollTextareaToBottom("SKILL.md"), 0);
@@ -812,20 +814,6 @@ export default function SkillBuildModal({
     }
   };
 
-  // Handle chat clear - reset all form fields
-  const handleChatClear = async () => {
-    await clearChatAndTempFile();
-    setChatMessages([]);
-    form.resetFields(["name", "description", "source", "tags", "content"]);
-    setInteractiveSkillName("");
-    setSkillTabs([{ path: "SKILL.md", content: "" }]);
-    streamingTabsRef.current = [{ path: "SKILL.md", content: "" }];
-    setActiveSkillTab("SKILL.md");
-    setSummaryContent("");
-    setAccumulatedDraft(null);
-    setIsMultiTurn(false);
-  };
-
   // Handle stop - cancel the ongoing streaming request
   const handleStop = async () => {
     // Call backend stop API first
@@ -859,7 +847,7 @@ export default function SkillBuildModal({
     }
   }, [chatMessages]);
 
-  const modalBodyFrame = "min(90vh, 700px)";
+  const modalBodyFrame = "min(92vh, 760px)";
 
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
@@ -893,17 +881,17 @@ export default function SkillBuildModal({
     };
 
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
-        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
           <p className="text-sm font-semibold text-gray-800">
-            {t("skillManagement.tabs.upload")}
+            安装
           </p>
           <p className="text-xs text-gray-500">
             {t("skillManagement.form.uploadHint")}
           </p>
         </div>
 
-        <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="flex flex-1 flex-col gap-4 p-5">
           <Spin spinning={uploadExtractingName}>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -930,7 +918,7 @@ export default function SkillBuildModal({
           </Spin>
 
           <div
-            className="flex flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/70 px-6 py-10 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/40"
+            className="flex flex-1 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/70 px-6 py-10 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/50"
             onClick={() => {
               const input = document.getElementById("skill-upload-input") as HTMLInputElement;
               input?.click();
@@ -1006,36 +994,24 @@ export default function SkillBuildModal({
     );
   };
   const renderChatPanel = () => (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-3">
-        <div>
-          <p className="text-sm font-semibold text-gray-800">
-            {t("skillManagement.tabs.interactive")}
-          </p>
-          <p className="text-xs text-gray-500">
-            {isMultiTurn
-              ? t("skillManagement.form.multiTurnPlaceholder")
-              : t("skillManagement.form.chatPlaceholder")}
-          </p>
-        </div>
-        {chatMessages.length > 0 ? (
-          <button
-            onClick={handleChatClear}
-            className="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-            title={t("agent.debug.clear")}
-          >
-            <Trash2 size={15} />
-          </button>
-        ) : null}
-      </div>
-
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div
         ref={chatContainerRef}
-        className="custom-scrollbar flex-1 space-y-3 overflow-y-auto p-4"
+        className="custom-scrollbar flex-1 space-y-3 overflow-y-auto px-4 py-5"
       >
         {chatMessages.length === 0 ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-400">
-            {t("skillManagement.form.chatPlaceholder")}
+          <div className="flex pt-7">
+            <div className="mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+              <Bot size={16} />
+            </div>
+            <div className="max-w-[88%] rounded-2xl bg-blue-50 px-5 py-3 text-sm leading-6 text-slate-700">
+              <p>
+                你好！我是 Skill 构建助手。请告诉我你想创建什么样的技能，我来帮你生成 Skill 的结构和代码。
+              </p>
+              <p className="mt-3">
+                例如：「创建一个能够分析 CSV 文件并生成数据报告的技能」
+              </p>
+            </div>
           </div>
         ) : null}
         {chatMessages.map((msg) => (
@@ -1073,80 +1049,78 @@ export default function SkillBuildModal({
         ))}
       </div>
 
-      <div className="border-t border-gray-200 p-3">
-        <Flex gap={8} align="center">
-          <TextArea
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onPressEnter={(e) => {
-              if (!e.shiftKey) {
-                e.preventDefault();
-                if (!isChatLoading && !isStreaming) {
-                  handleChatSend();
+      <div className="border-t border-slate-200 bg-white p-4">
+        <div>
+          <Flex gap={8} align="center">
+            <TextArea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onPressEnter={(e) => {
+                if (!e.shiftKey) {
+                  e.preventDefault();
+                  if (!isChatLoading && !isStreaming) {
+                    handleChatSend();
+                  }
                 }
-              }
-            }}
-            placeholder={
-              isMultiTurn
-                ? t("skillManagement.form.multiTurnPlaceholder")
-                : t("skillManagement.form.chatPlaceholder")
-            }
-            disabled={isChatLoading || isStreaming}
-            autoSize={{ minRows: 1, maxRows: 3 }}
-            className="resize-none"
-          />
-          {isChatLoading || isStreaming ? (
-            <Tooltip title={t("skillManagement.stopGenerating") || "Stop generating"}>
+              }}
+              placeholder="描述你想要的技能..."
+              disabled={isChatLoading || isStreaming}
+              autoSize={{ minRows: 1, maxRows: 3 }}
+              className="resize-none rounded-xl"
+            />
+            {isChatLoading || isStreaming ? (
+              <Tooltip title={t("skillManagement.stopGenerating") || "Stop generating"}>
+                <Button
+                  type="primary"
+                  danger
+                  shape="circle"
+                  icon={<Square size={14} />}
+                  onClick={handleStop}
+                  style={{ backgroundColor: "#ef4444" }}
+                />
+              </Tooltip>
+            ) : (
               <Button
                 type="primary"
-                danger
-                shape="circle"
-                icon={<Square size={14} />}
-                onClick={handleStop}
-                style={{ backgroundColor: "#ef4444" }}
+                icon={<Send size={14} />}
+                onClick={handleChatSend}
+                disabled={!chatInput.trim()}
+                style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 12 }}
               />
-            </Tooltip>
-          ) : (
-            <Button
-              type="primary"
-              icon={<Send size={14} />}
-              onClick={handleChatSend}
-              disabled={!chatInput.trim()}
-              style={{ width: 32, height: 32, flexShrink: 0 }}
-            />
-          )}
-        </Flex>
+            )}
+          </Flex>
+          <div className="mt-3 text-xs text-slate-500">
+            按 Enter 发送，Shift+Enter 换行
+          </div>
+        </div>
       </div>
     </div>
   );
 
   const renderDraftPanel = () => (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
-      <div className="border-b border-gray-200 px-4 py-3">
-        <p className="text-sm font-semibold text-gray-800">
-          {t("skillManagement.title")}
-        </p>
-        <p className="text-xs text-gray-500">
-          {activeTab === "interactive"
-            ? t("skillManagement.tabs.interactive")
-            : t("skillManagement.tabs.upload")}
-        </p>
-      </div>
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
+      {(() => {
+        const visibleSkillTabs = dedupeSkillTabs(skillTabs);
+        const activeFile = visibleSkillTabs.find((tab) => tab.path === activeSkillTab) || visibleSkillTabs[0];
 
-      <div className="shrink-0 px-4 pt-4">
+        return (
+          <>
+      <div className="shrink-0 rounded-2xl border border-slate-200 bg-white px-5 pb-2 pt-3 shadow-sm">
         <Form
           form={form}
           layout="vertical"
+          className="skill-build-info-form"
           initialValues={{
             source: "custom",
             tags: [],
           }}
         >
-          <Row gutter={12}>
+          <Row gutter={16}>
             <Col span={12}>
               <Form.Item
                 name="name"
                 label={t("skillManagement.form.name")}
+                style={{ marginBottom: 10 }}
                 rules={[
                   { required: true, message: t("skillManagement.form.nameRequired") },
                 ]}
@@ -1186,7 +1160,11 @@ export default function SkillBuildModal({
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="source" label={t("skillManagement.form.source")}>
+              <Form.Item
+                name="source"
+                label={t("skillManagement.form.source")}
+                style={{ marginBottom: 10 }}
+              >
                 <Select
                   options={[{ label: "自定义", value: "custom" }]}
                 />
@@ -1197,6 +1175,7 @@ export default function SkillBuildModal({
           <Form.Item
             name="description"
             label={t("skillManagement.form.description")}
+            style={{ marginBottom: 10 }}
             rules={[
               { required: true, message: t("skillManagement.form.descriptionRequired") },
             ]}
@@ -1207,7 +1186,11 @@ export default function SkillBuildModal({
             />
           </Form.Item>
 
-          <Form.Item name="tags" label={t("skillManagement.form.tags")}>
+          <Form.Item
+            name="tags"
+            label={t("skillManagement.form.tags")}
+            style={{ marginBottom: 8 }}
+          >
             <Select
               mode="tags"
               suffixIcon={null}
@@ -1222,44 +1205,64 @@ export default function SkillBuildModal({
         </Form>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
-        <Tabs
-          activeKey={activeSkillTab}
-          onChange={(key) => setActiveSkillTab(key)}
-          type="card"
-          size="small"
-          className="flex min-h-0 flex-1 flex-col"
-          tabBarStyle={{ marginBottom: 0, flexShrink: 0 }}
-          tabBarExtraContent={{
-            right: (
-              <Button
-                type="text"
-                size="small"
-                icon={<Plus size={14} />}
-                onClick={() => {
-                  const newPath = `file_${Date.now()}.md`;
-                  setSkillTabs((prev) => [...prev, { path: newPath, content: "" }]);
-                  setActiveSkillTab(newPath);
-                  shouldAutoScrollRef.current[newPath] = true;
-                }}
-                className="add-tab-btn"
-              />
-            ),
-          }}
-          items={skillTabs.map((tab) => ({
-            key: tab.path,
-            label: (
-              <div className="flex items-center group/tab">
-                {editingTabKey === tab.path ? (
-                  <input
-                    className="w-24 rounded border border-blue-400 px-1 py-0.5 text-xs"
-                    value={editingTabName}
-                    autoFocus
-                    onChange={(e) => setEditingTabName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        e.stopPropagation();
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
+            <div className="flex h-11 items-center justify-between border-b border-slate-200 px-3">
+              <span className="text-sm font-medium text-slate-700">文件</span>
+              {!isStreaming ? (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<Plus size={14} />}
+                  onClick={() => {
+                    const newPath = `file_${Date.now()}.md`;
+                    setSkillTabs((prev) => [...prev, { path: newPath, content: "" }]);
+                    setActiveSkillTab(newPath);
+                    shouldAutoScrollRef.current[newPath] = true;
+                  }}
+                />
+              ) : null}
+            </div>
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto py-2">
+              {visibleSkillTabs.filter((tab) => !tab.path.includes("/")).map((tab) => (
+                <div
+                  key={tab.path}
+                  className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs transition-colors ${
+                    activeSkillTab === tab.path
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                  onClick={() => setActiveSkillTab(tab.path)}
+                >
+                  <FileText size={15} className="shrink-0" />
+                  {editingTabKey === tab.path ? (
+                    <input
+                      className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs"
+                      value={editingTabName}
+                      autoFocus
+                      onChange={(e) => setEditingTabName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSkillTabs((prev) =>
+                            prev.map((t) =>
+                              t.path === editingTabKey ? { ...t, path: editingTabName } : t
+                            )
+                          );
+                          if (activeSkillTab === editingTabKey) {
+                            setActiveSkillTab(editingTabName);
+                          }
+                          setEditingTabKey(null);
+                          setEditingTabName("");
+                        } else if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setEditingTabKey(null);
+                          setEditingTabName("");
+                        }
+                      }}
+                      onBlur={() => {
                         setSkillTabs((prev) =>
                           prev.map((t) =>
                             t.path === editingTabKey ? { ...t, path: editingTabName } : t
@@ -1270,54 +1273,28 @@ export default function SkillBuildModal({
                         }
                         setEditingTabKey(null);
                         setEditingTabName("");
-                      } else if (e.key === "Escape") {
-                        e.stopPropagation();
-                        setEditingTabKey(null);
-                        setEditingTabName("");
-                      }
-                    }}
-                    onBlur={() => {
-                      setSkillTabs((prev) =>
-                        prev.map((t) =>
-                          t.path === editingTabKey ? { ...t, path: editingTabName } : t
-                        )
-                      );
-                      if (activeSkillTab === editingTabKey) {
-                        setActiveSkillTab(editingTabName);
-                      }
-                      setEditingTabKey(null);
-                      setEditingTabName("");
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className={activeSkillTab === tab.path ? "font-bold" : ""}>
-                    {tab.path}
-                  </span>
-                )}
-                {!isStreaming && (
-                  <div className="ml-1 flex w-0 items-center overflow-hidden transition-all duration-200 group-hover/tab:w-auto">
-                    {tab.path !== "SKILL.md" ? (
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate">{tab.path}</span>
+                  )}
+                  {!isStreaming && tab.path !== "SKILL.md" ? (
+                    <div className="hidden items-center gap-1 group-hover/file:flex">
                       <button
-                        className="flex-shrink-0 rounded p-0.5 hover:bg-gray-200"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
+                        className="rounded p-0.5 hover:bg-slate-200"
+                        onClick={(e) => {
                           e.stopPropagation();
-                          setTimeout(() => {
-                            setEditingTabKey(tab.path);
-                            setEditingTabName(tab.path);
-                          }, 0);
+                          setEditingTabKey(tab.path);
+                          setEditingTabName(tab.path);
                         }}
                         title="Rename"
                       >
                         <Pencil size={12} />
                       </button>
-                    ) : null}
-                    {tab.path !== "SKILL.md" ? (
                       <button
-                        className="flex-shrink-0 rounded p-0.5 hover:bg-gray-200"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
+                        className="rounded p-0.5 hover:bg-slate-200"
+                        onClick={(e) => {
                           e.stopPropagation();
                           const newTabs = skillTabs.filter((t) => t.path !== tab.path);
                           setSkillTabs(newTabs);
@@ -1329,37 +1306,163 @@ export default function SkillBuildModal({
                       >
                         <X size={12} />
                       </button>
-                    ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {Array.from(new Set(
+                visibleSkillTabs
+                  .filter((tab) => tab.path.includes("/"))
+                  .map((tab) => tab.path.split("/")[0])
+              )).map((folderName) => (
+                <div key={folderName}>
+                  <div className="mx-2 mt-1 flex h-8 items-center gap-2 rounded-lg px-2 text-xs font-normal text-slate-500">
+                    <Folder size={15} className="shrink-0 text-amber-500" />
+                    <span className="min-w-0 flex-1 truncate">{folderName}</span>
                   </div>
-                )}
+                  {visibleSkillTabs
+                    .filter((tab) => tab.path.startsWith(`${folderName}/`))
+                    .map((tab) => (
+                      <div
+                        key={tab.path}
+                        className={`group/file mx-2 flex h-9 cursor-pointer items-center gap-2 rounded-lg pl-7 pr-2 text-xs transition-colors ${
+                          activeSkillTab === tab.path
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-slate-600 hover:bg-slate-100"
+                        }`}
+                        onClick={() => setActiveSkillTab(tab.path)}
+                      >
+                        <FileText size={15} className="shrink-0" />
+                        {editingTabKey === tab.path ? (
+                          <input
+                            className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs"
+                            value={editingTabName}
+                            autoFocus
+                            onChange={(e) => setEditingTabName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSkillTabs((prev) =>
+                                  prev.map((t) =>
+                                    t.path === editingTabKey ? { ...t, path: editingTabName } : t
+                                  )
+                                );
+                                if (activeSkillTab === editingTabKey) {
+                                  setActiveSkillTab(editingTabName);
+                                }
+                                setEditingTabKey(null);
+                                setEditingTabName("");
+                              } else if (e.key === "Escape") {
+                                e.stopPropagation();
+                                setEditingTabKey(null);
+                                setEditingTabName("");
+                              }
+                            }}
+                            onBlur={() => {
+                              setSkillTabs((prev) =>
+                                prev.map((t) =>
+                                  t.path === editingTabKey ? { ...t, path: editingTabName } : t
+                                )
+                              );
+                              if (activeSkillTab === editingTabKey) {
+                                setActiveSkillTab(editingTabName);
+                              }
+                              setEditingTabKey(null);
+                              setEditingTabName("");
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate">
+                            {tab.path.slice(folderName.length + 1)}
+                          </span>
+                        )}
+                        {!isStreaming && tab.path !== "SKILL.md" ? (
+                          <div className="hidden items-center gap-1 group-hover/file:flex">
+                            <button
+                              className="rounded p-0.5 hover:bg-slate-200"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTabKey(tab.path);
+                                setEditingTabName(tab.path);
+                              }}
+                              title="Rename"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              className="rounded p-0.5 hover:bg-slate-200"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newTabs = skillTabs.filter((t) => t.path !== tab.path);
+                                setSkillTabs(newTabs);
+                                if (activeSkillTab === tab.path) {
+                                  setActiveSkillTab(newTabs[0]?.path || "");
+                                }
+                              }}
+                              title="Delete"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                </div>
+              ))}
+            </div>
+          </div>
+          {(() => {
+            if (!activeFile) {
+              return null;
+            }
+            return (
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 px-4 text-sm font-medium text-slate-700">
+                  <span className="min-w-0 flex-1 truncate">{activeFile.path}</span>
+                  <Tooltip title="放大查看">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Maximize2 size={15} />}
+                      onClick={() => {
+                        setExpandedEditorPath(activeFile.path);
+                        setExpandedEditorContent(activeFile.content);
+                      }}
+                    />
+                  </Tooltip>
+                </div>
+                <TextArea
+                  className="min-h-0 flex-1 rounded-none border-0 font-mono text-xs shadow-none focus:border-0 focus:shadow-none"
+                  placeholder={isStreaming ? "" : `${activeFile.path} content...`}
+                  value={activeFile.content}
+                  disabled={isStreaming}
+                  style={{ resize: "none" }}
+                  ref={(el) => {
+                    textareaRefs.current[activeFile.path] = el;
+                    if (el && shouldAutoScrollRef.current[activeFile.path] === undefined) {
+                      shouldAutoScrollRef.current[activeFile.path] = true;
+                    }
+                  }}
+                  onScroll={() => handleTextareaScroll(activeFile.path)}
+                  onChange={(e) => {
+                    if (isStreaming) return;
+                    setSkillTabs((prev) =>
+                      prev.map((t) =>
+                        t.path === activeFile.path ? { ...t, content: e.target.value } : t
+                      )
+                    );
+                  }}
+                />
               </div>
-            ),
-            children: (
-              <TextArea
-                className="min-h-[190px] font-mono text-xs"
-                placeholder={isStreaming ? "" : `${tab.path} content...`}
-                value={tab.content}
-                disabled={isStreaming}
-                ref={(el) => {
-                  textareaRefs.current[tab.path] = el;
-                  if (el && shouldAutoScrollRef.current[tab.path] === undefined) {
-                    shouldAutoScrollRef.current[tab.path] = true;
-                  }
-                }}
-                onScroll={() => handleTextareaScroll(tab.path)}
-                onChange={(e) => {
-                  if (isStreaming) return;
-                  setSkillTabs((prev) =>
-                    prev.map((t) =>
-                      t.path === tab.path ? { ...t, content: e.target.value } : t
-                    )
-                  );
-                }}
-              />
-            ),
-          }))}
-        />
+            );
+          })()}
+        </div>
       </div>
+          </>
+        );
+      })()}
     </div>
   );
 
@@ -1368,7 +1471,7 @@ export default function SkillBuildModal({
       key: "interactive",
       label: (
         <Flex gap={6} align="center">
-          <MessagesSquare size={14} />
+          <MessageCircle size={16} />
           <span>{t("skillManagement.tabs.interactive")}</span>
         </Flex>
       ),
@@ -1377,8 +1480,8 @@ export default function SkillBuildModal({
       key: "upload",
       label: (
         <Flex gap={6} align="center">
-          <HardDriveUpload size={14} />
-          <span>{t("skillManagement.tabs.upload")}</span>
+          <Box size={16} />
+          <span>安装</span>
         </Flex>
       ),
     },
@@ -1397,7 +1500,16 @@ export default function SkillBuildModal({
 
   return (
     <Modal
-      title={t("skillManagement.title")}
+      title={
+        <div>
+          <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
+            {t("skillManagement.title")}
+          </div>
+          <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
+            创建、编辑并发布你的 Skill。
+          </div>
+        </div>
+      }
       open={isOpen}
       onCancel={handleModalClose}
       centered
@@ -1446,10 +1558,87 @@ export default function SkillBuildModal({
         items={tabItems}
         className="skill-build-tabs shrink-0"
       />
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(340px,0.9fr)_minmax(520px,1.1fr)]">
-        {activeTab === "interactive" ? renderChatPanel() : renderUploadTab()}
-        {renderDraftPanel()}
-      </div>
+      {activeTab === "interactive" ? (
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          {renderChatPanel()}
+          {renderDraftPanel()}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1">
+          {renderUploadTab()}
+        </div>
+      )}
+      <Modal
+        title={expandedEditorPath}
+        open={Boolean(expandedEditorPath)}
+        onCancel={() => {
+          setExpandedEditorPath("");
+          setExpandedEditorContent("");
+        }}
+        centered
+        width={640}
+        styles={{
+          body: {
+            padding: 0,
+          },
+        }}
+        footer={[
+          <Button
+            key="cancel-expanded-editor"
+            onClick={() => {
+              setExpandedEditorPath("");
+              setExpandedEditorContent("");
+            }}
+          >
+            取消
+          </Button>,
+          <Button
+            key="save-expanded-editor"
+            type="primary"
+            disabled={isStreaming}
+            onClick={() => {
+              setSkillTabs((prev) =>
+                prev.map((tab) =>
+                  tab.path === expandedEditorPath
+                    ? { ...tab, content: expandedEditorContent }
+                    : tab
+                )
+              );
+              setExpandedEditorPath("");
+              setExpandedEditorContent("");
+            }}
+          >
+            保存
+          </Button>,
+        ]}
+      >
+        <TextArea
+          value={expandedEditorContent}
+          disabled={isStreaming}
+          onChange={(e) => setExpandedEditorContent(e.target.value)}
+          autoSize={{ minRows: 10, maxRows: 28 }}
+          className="expanded-file-editor rounded-none border-0 font-mono text-sm shadow-none focus:border-0 focus:shadow-none"
+          style={{ resize: "none" }}
+        />
+      </Modal>
+      <style jsx global>{`
+        .skill-build-info-form .ant-form-item-label {
+          padding-bottom: 3px !important;
+        }
+
+        .skill-build-info-form .ant-form-item-label > label {
+          height: 20px;
+          color: #475569;
+          font-size: 12px;
+          line-height: 20px;
+        }
+
+        .expanded-file-editor textarea {
+          max-height: 70vh !important;
+          overflow-y: auto !important;
+          resize: none !important;
+        }
+      `}</style>
     </Modal>
   );
 }

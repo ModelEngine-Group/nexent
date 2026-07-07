@@ -157,7 +157,7 @@ export function MineSkillsView({
           <Input
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="搜索我的 Skill"
+            placeholder="搜索Skill名称、描述或标签"
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
             className="h-11 rounded-xl"
             allowClear
@@ -181,6 +181,10 @@ export function MineSkillsView({
           </span>
         </FilterButton>
       </div>
+
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        共 {counts.all} 个服务 · 标题旁带 Hub 标签的已上架到仓库
+      </p>
 
       <AsyncContent
         isLoading={isLoading}

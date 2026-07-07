@@ -1013,7 +1013,7 @@ class SkillService:
         file_content: Union[bytes, str, io.BytesIO],
         skill_name: Optional[str] = None,
         file_type: str = "auto",
-        source: str = "自定义",
+        source: str = "custom",
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -1027,7 +1027,7 @@ class SkillService:
             file_content: File content as bytes, string, or BytesIO
             skill_name: Optional skill name (extracted from ZIP if not provided)
             file_type: File type hint - "md", "zip", or "auto" (detect)
-            source: Source identifier for the skill (e.g., "自定义", "官方", "导入")
+            source: Source identifier for the skill (e.g., "custom", "official", "repository")
             tenant_id: Tenant ID for skill isolation. Uses instance tenant_id if not provided.
             user_id: User ID of the creator
 
@@ -1058,7 +1058,7 @@ class SkillService:
         self,
         content_bytes: bytes,
         skill_name: Optional[str] = None,
-        source: str = "自定义",
+        source: str = "custom",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -1113,7 +1113,7 @@ class SkillService:
         self,
         zip_bytes: bytes,
         skill_name: Optional[str] = None,
-        source: str = "自定义",
+        source: str = "custom",
         user_id: Optional[str] = None,
         tenant_id: Optional[str] = None
     ) -> Dict[str, Any]:
