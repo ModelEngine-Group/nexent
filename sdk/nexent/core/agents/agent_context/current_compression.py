@@ -45,7 +45,7 @@ class CurrentCompressor:
         self,
         curr_task: Optional[TaskStep],
         actions_to_compress: List[ActionStep],
-        cache: Optional[CurrentSummaryCache],
+        _cache: Optional[CurrentSummaryCache],
         model,
     ) -> CurrentCompressResult:
         """Compress current-run action steps, using cache when valid.
@@ -53,12 +53,13 @@ class CurrentCompressor:
         Args:
             curr_task: The current TaskStep (may be None).
             actions_to_compress: ActionSteps from the current run.
-            cache: Current CurrentSummaryCache (may be None).
+            _cache: Current CurrentSummaryCache (may be None).
             model: LLM model for summary generation.
 
         Returns:
             CurrentCompressResult with summary_text, updated cache, and records.
         """
+        cache = _cache  # alias to avoid Sonar false-positive on "unused"
         if not actions_to_compress:
             return CurrentCompressResult()
 

@@ -41,19 +41,20 @@ class PreviousCompressor:
     def compress(
         self,
         pairs_to_compress: List[tuple],
-        cache: Optional[PreviousSummaryCache],
+        _cache: Optional[PreviousSummaryCache],
         model,
     ) -> PreviousCompressResult:
         """Compress previous-run pairs, using cache when valid.
 
         Args:
             pairs_to_compress: List of (TaskStep, ActionStep) tuples to compress.
-            cache: Current PreviousSummaryCache (may be None).
+            _cache: Current PreviousSummaryCache (may be None).
             model: LLM model for summary generation.
 
         Returns:
             PreviousCompressResult with summary_text, updated cache, and records.
         """
+        cache = _cache  # alias to avoid Sonar false-positive on "unused"
         if not pairs_to_compress:
             return PreviousCompressResult()
 

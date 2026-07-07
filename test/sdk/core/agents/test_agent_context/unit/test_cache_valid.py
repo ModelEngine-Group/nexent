@@ -15,7 +15,7 @@ class TestCacheValidation:
 
     def test_prev_cache_empty_pairs_returns_false(self):
         cache = PreviousSummaryCache("summary", 1, "fp")
-        valid, idx = is_prev_cache_valid([], cache)
+        valid, _ = is_prev_cache_valid([], cache)
         assert valid is False
 
     def test_prev_cache_covered_exceeds_pairs_returns_false(self):
@@ -51,7 +51,7 @@ class TestCacheValidation:
 
     def test_curr_cache_none_returns_false(self):
         a = ActionStep(step_number=1, model_output="x", action_output="y")
-        valid, idx = is_curr_cache_valid([a], None)
+        valid, _ = is_curr_cache_valid([a], None)
         assert valid is False
 
     def test_curr_cache_fingerprint_mismatch_returns_false(self):

@@ -222,6 +222,38 @@ class StepRenderer:
 
 # ── Standalone offline compression ─────────────────────────────
 
+def _build_offline_user_prompt(schema_desc: str, text: str, is_incremental: bool) -> str:
+    """Build the user prompt for offline compression."""
+    if is_incremental:
+        return (
+            f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
+            f"{text}"
+        )
+    return (
+        f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
+        f"TURNS TO SUMMARIZE:\n{text}"
+    )
+
+
+def _call_model_for_summary(model, messages) -> Optional[str]:
+    """Call the model and extract a summary from the response. Returns None on any failure."""
+    try:
+        response = model(messages, stop_sequences=[])
+        raw_output = response.content
+        if isinstance(raw_output, list):
+            raw_output = " ".join(
+                block.get("text", "")
+                for block in raw_output
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        if not isinstance(raw_output, str):
+            raw_output = str(raw_output)
+        return format_summary_output(raw_output)
+    except Exception:
+        logger.exception("Model call for offline summary failed")
+        return None
+
+
 def compress_history_offline(
     pairs: List[Tuple[str, str]],
     model,
@@ -247,18 +279,12 @@ def compress_history_offline(
             "input_chars": 0,
         }
 
-    parts = []
-    for user_text, assistant_text in pairs:
-        parts.append(f"user: {user_text}\nassistant: {assistant_text}")
+    parts = [f"user: {u}\nassistant: {a}" for u, a in pairs]
     pairs_text = "\n\n".join(parts)
-
     is_incremental = previous_summary is not None
 
     if is_incremental:
-        input_text = (
-            f"## Previous Summary\n{previous_summary}\n\n"
-            f"## New Conversations\n{pairs_text}"
-        )
+        input_text = f"## Previous Summary\n{previous_summary}\n\n## New Conversations\n{pairs_text}"
     else:
         input_text = pairs_text
 
@@ -268,88 +294,44 @@ def compress_history_offline(
         input_text = "...[Earlier content truncated]...\n" + input_text[-approx_chars:]
 
     schema_desc = json.dumps(config.summary_json_schema, ensure_ascii=False, indent=2)
-    if is_incremental:
-        system_prompt = config.incremental_summary_system_prompt
-        user_prompt = (
-            f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
-            f"{input_text}"
-        )
-    else:
-        system_prompt = config.summary_system_prompt
-        user_prompt = (
-            f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
-            f"TURNS TO SUMMARIZE:\n{input_text}"
-        )
+    system_prompt = (
+        config.incremental_summary_system_prompt if is_incremental
+        else config.summary_system_prompt
+    )
+    user_prompt = _build_offline_user_prompt(schema_desc, input_text, is_incremental)
 
     messages = [
-        ChatMessage(role=MessageRole.SYSTEM,
-                    content=[{"type": "text", "text": system_prompt}]),
-        ChatMessage(role=MessageRole.USER,
-                    content=[{"type": "text", "text": user_prompt}]),
+        ChatMessage(role=MessageRole.SYSTEM, content=[{"type": "text", "text": system_prompt}]),
+        ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": user_prompt}]),
     ]
 
     is_fallback = False
-    summary = None
+    summary = _call_model_for_summary(model, messages)
 
-    try:
-        response = model(messages, stop_sequences=[])
-        raw_output = response.content
-        if isinstance(raw_output, list):
-            raw_output = " ".join(
-                block.get("text", "")
-                for block in raw_output
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-        if not isinstance(raw_output, str):
-            raw_output = str(raw_output)
-        summary = format_summary_output(raw_output)
-    except Exception as e:
-        if _is_context_length_error(e):
-            logger.warning("Offline compression exceeds context limit; retrying with 2/3 budget")
-            approx_chars = int(config.max_summary_input_tokens * config.chars_per_token * 0.6)
-            truncated_input = input_text[-approx_chars:] if len(input_text) > approx_chars else input_text
-            if is_incremental:
-                user_prompt = (
-                    f"Update the summary following this JSON structure:\n{schema_desc}\n\n"
-                    f"{truncated_input}"
-                )
-            else:
-                user_prompt = (
-                    f"Create a structured checkpoint summary following this JSON structure:\n{schema_desc}\n\n"
-                    f"TURNS TO SUMMARIZE:\n{truncated_input}"
-                )
-            messages[-1] = ChatMessage(
-                role=MessageRole.USER,
-                content=[{"type": "text", "text": user_prompt}],
-            )
-            try:
-                response = model(messages, stop_sequences=[])
-                raw_output = response.content
-                if isinstance(raw_output, list):
-                    raw_output = " ".join(
-                        block.get("text", "")
-                        for block in raw_output
-                        if isinstance(block, dict) and block.get("type") == "text"
-                    )
-                if not isinstance(raw_output, str):
-                    raw_output = str(raw_output)
-                summary = format_summary_output(raw_output)
-            except Exception as e2:
-                logger.error(f"Offline compression retry still failed: {e2}")
+    # Retry with truncated input on context-length errors
+    if summary is None:
+        approx_chars = int(config.max_summary_input_tokens * config.chars_per_token * 0.6)
+        truncated_input = input_text[-approx_chars:] if len(input_text) > approx_chars else input_text
+        user_prompt = _build_offline_user_prompt(schema_desc, truncated_input, is_incremental)
+        messages[-1] = ChatMessage(
+            role=MessageRole.USER, content=[{"type": "text", "text": user_prompt}],
+        )
+        summary = _call_model_for_summary(model, messages)
 
-        if summary is None:
-            is_fallback = True
-            first_task = pairs[0][0][:200] if pairs else ""
-            reduced_chars = int(config.max_summary_reduce_tokens * config.chars_per_token)
-            reduced_text = pairs_text[-reduced_chars:] if len(pairs_text) > reduced_chars else pairs_text
-            summary = (
-                "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier steps were removed to free context space. "
-                "The removed content cannot be summarized. Continue based on the steps below.\n\n"
-                f"Original task: {first_task}\n\n"
-                f"Steps removed: {len(pairs)} of {len(pairs)}\n\n"
-                "Remaining compressed history:\n"
-                + reduced_text
-            )
+    # Final fallback: mechanical truncation
+    if summary is None:
+        is_fallback = True
+        first_task = pairs[0][0][:200] if pairs else ""
+        reduced_chars = int(config.max_summary_reduce_tokens * config.chars_per_token)
+        reduced_text = pairs_text[-reduced_chars:] if len(pairs_text) > reduced_chars else pairs_text
+        summary = (
+            "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier steps were removed to free context space. "
+            "The removed content cannot be summarized. Continue based on the steps below.\n\n"
+            f"Original task: {first_task}\n\n"
+            f"Steps removed: {len(pairs)} of {len(pairs)}\n\n"
+            "Remaining compressed history:\n"
+            + reduced_text
+        )
 
     return {
         "summary": summary,

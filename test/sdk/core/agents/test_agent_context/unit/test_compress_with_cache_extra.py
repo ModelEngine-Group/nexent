@@ -61,7 +61,7 @@ def _compress_current_with_cache(cm, task, actions, model):
 
 class TestCompressPreviousExtra:
 
-    def test_P1_full_hit_fp_mismatch_goes_to_fresh(self):
+    def test_p1_full_hit_fp_mismatch_goes_to_fresh(self):
         """covered_pairs == len(pairs) but fingerprint wrong.
         Should not take incremental path (covered < len condition not met),
         go directly to fresh full compression.
@@ -79,7 +79,7 @@ class TestCompressPreviousExtra:
         assert "old summary" not in _llm_text(model)
         assert cm._previous_summary_cache.covered_pairs == 2
 
-    def test_P2_incremental_over_budget_falls_through_to_fresh(self):
+    def test_p2_incremental_over_budget_falls_through_to_fresh(self):
         """Incremental input token count exceeds max_summary_input_tokens,
         should skip incremental and go to fresh, still call LLM once (fresh).
         """
@@ -100,7 +100,7 @@ class TestCompressPreviousExtra:
         assert "task2" in _llm_text(model)
         assert "fresh" in result
 
-    def test_P3_incremental_llm_none_returns_empty_result(self):
+    def test_p3_incremental_llm_none_returns_empty_result(self):
         """When generate_summary returns SummaryResult(summary_text=None) in incremental path,
         v2 compressor returns PreviousCompressResult(summary_text=None) immediately (no fall-through to fresh).
         LLM is called exactly once.
@@ -116,7 +116,7 @@ class TestCompressPreviousExtra:
 
         assert result is None
 
-    def test_P4_fresh_llm_none_returns_none_and_preserves_old_cache(self):
+    def test_p4_fresh_llm_none_returns_none_and_preserves_old_cache(self):
         """When _summarize_pairs returns PreviousCompressResult(summary_text=None):
         - function returns None (no summary produced)
         - existing _previous_summary_cache not modified
@@ -131,7 +131,7 @@ class TestCompressPreviousExtra:
         assert result is None
         assert cm._previous_summary_cache.summary_text == "old summary"
 
-    def test_P4_fresh_llm_none_no_cache_remains_none(self):
+    def test_p4_fresh_llm_none_no_cache_remains_none(self):
         """Initial no cache, fresh _summarize_pairs returns None -> cache still None."""
         cm = make_cm()
         pairs = [make_pair("task", "action", 0)]
@@ -152,7 +152,7 @@ class TestCompressCurrentExtra:
             for i in range(n)
         ]
 
-    def test_C1_full_hit_fp_mismatch_goes_to_fresh(self):
+    def test_c1_full_hit_fp_mismatch_goes_to_fresh(self):
         """end_steps == len(actions) but anchor_fingerprint wrong.
         Incremental condition 0 < end_steps < len not met, go directly to fresh.
         """
@@ -171,7 +171,7 @@ class TestCompressCurrentExtra:
         real_fp = action_fingerprint(actions[-1])
         assert cm._current_summary_cache.anchor_fingerprint == real_fp
 
-    def test_C2_incremental_anchor_fp_mismatch_goes_to_fresh(self):
+    def test_c2_incremental_anchor_fp_mismatch_goes_to_fresh(self):
         """cache.end_steps < len(actions) (incremental condition met),
         but anchor action fingerprint mismatch with cache -> fall-through to fresh.
         """
@@ -188,7 +188,7 @@ class TestCompressCurrentExtra:
         assert "old summary" not in _llm_text(model)
         assert "fresh summary" in result
 
-    def test_C4_incremental_llm_none_returns_empty_result(self):
+    def test_c4_incremental_llm_none_returns_empty_result(self):
         """When generate_summary returns SummaryResult(summary_text=None) in incremental path,
         v2 compressor returns CurrentCompressResult(summary_text=None) immediately (no fall-through to fresh).
         LLM is called exactly once.
@@ -203,7 +203,7 @@ class TestCompressCurrentExtra:
 
         assert result is None
 
-    def test_C5_fresh_actions_trimmed_cache_uses_original_len(self):
+    def test_c5_fresh_actions_trimmed_cache_uses_original_len(self):
         """trim_actions_to_budget trimmed some actions,
         but end_steps should still record original len(actions_to_compress),
         ensuring next call cache covers same range.
@@ -220,7 +220,7 @@ class TestCompressCurrentExtra:
         real_fp = action_fingerprint(actions[-1])
         assert cm._current_summary_cache.anchor_fingerprint == real_fp
 
-    def test_C5_fresh_partial_trim_still_calls_llm_once(self):
+    def test_c5_fresh_partial_trim_still_calls_llm_once(self):
         """After trim still only call LLM once (no retry)."""
         cm = make_cm()
         actions = self._make_actions(3)
@@ -231,7 +231,7 @@ class TestCompressCurrentExtra:
 
         model.assert_called_once()
 
-    def test_C6_fresh_llm_none_writes_none_to_cache(self):
+    def test_c6_fresh_llm_none_writes_none_to_cache(self):
         """Current fresh path if LLM call fails, no cache.
         Only truncation performed.
         """
@@ -244,7 +244,7 @@ class TestCompressCurrentExtra:
         assert "[CONTEXT COMPACTION" in result
         assert cm._current_summary_cache is None
 
-    def test_C6_vs_previous_asymmetry(self):
+    def test_c6_vs_previous_asymmetry(self):
         """Regression test: clarify asymmetry between previous and current behavior when LLM=None.
         previous _summarize_pairs=None -> cache not written (preserve old value)
         current  generate_summary=None -> cache not written (L3 fallback produces summary, no cache)
