@@ -103,14 +103,14 @@ class TestPureFunctions:
     # ── _is_context_length_error ──────────────────────────────
 
     def test_context_length_error_detected(self):
-        assert _is_context_length_error(Exception("context_length exceeded"))
-        assert _is_context_length_error(Exception("maximum context length reached"))
-        assert _is_context_length_error(Exception("prompt is too long"))
-        assert _is_context_length_error(Exception("token limit exceeded"))
+        assert _is_context_length_error(ValueError("context_length exceeded"))
+        assert _is_context_length_error(ValueError("maximum context length reached"))
+        assert _is_context_length_error(ValueError("prompt is too long"))
+        assert _is_context_length_error(ValueError("token limit exceeded"))
 
     def test_context_length_error_not_detected(self):
-        assert not _is_context_length_error(Exception("connection timeout"))
-        assert not _is_context_length_error(Exception("out of memory"))
+        assert not _is_context_length_error(ValueError("connection timeout"))
+        assert not _is_context_length_error(ValueError("out of memory"))
 
     # ── has_invoked_tools ─────────────────────────────────────
 

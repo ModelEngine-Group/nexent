@@ -427,7 +427,7 @@ class TestBuildCompressedSnapshot:
         result = cm.build_compressed_snapshot(model=None, memory=memory, current_run_start_idx=0)
         assert isinstance(result, tuple)
         assert len(result) == 2
-        messages, metadata = result
+        _, metadata = result
         assert isinstance(metadata, dict)
         assert "token_counts" in metadata
 

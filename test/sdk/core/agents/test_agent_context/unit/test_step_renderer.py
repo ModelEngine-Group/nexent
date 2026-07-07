@@ -21,9 +21,7 @@ from loader import (
 )
 
 
-# ──────────────────────────────────────────────────────────────
 # truncate_text_to_tokens
-# ──────────────────────────────────────────────────────────────
 
 class TestTruncateTextToTokens:
 
@@ -53,9 +51,7 @@ class TestTruncateTextToTokens:
         assert "Earlier content truncated" in result
 
 
-# ──────────────────────────────────────────────────────────────
 # pairs_to_steps
-# ──────────────────────────────────────────────────────────────
 
 class TestPairsToSteps:
 
@@ -72,9 +68,7 @@ class TestPairsToSteps:
         assert cm._renderer.pairs_to_steps([(t, a)]) == [t, a]
 
 
-# ──────────────────────────────────────────────────────────────
 # render_steps_with_truncation
-# ──────────────────────────────────────────────────────────────
 
 class TestRenderStepsWithTruncation:
 
@@ -122,9 +116,7 @@ class TestRenderStepsWithTruncation:
         assert "assistant:" in text
 
 
-# ──────────────────────────────────────────────────────────────
 # _truncate_text / _reduce_budgets / _actions_to_text_with_limit
-# ──────────────────────────────────────────────────────────────
 
 class TestTruncateText:
 
@@ -172,9 +164,7 @@ class TestActionsToTextWithLimit:
         assert len(result) > 0
 
 
-# ──────────────────────────────────────────────────────────────
 # compress_history_offline (standalone function)
-# ──────────────────────────────────────────────────────────────
 
 class TestCompressHistoryOffline:
 
