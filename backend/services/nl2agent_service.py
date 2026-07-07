@@ -18,7 +18,7 @@ from consts.const import LANGUAGE
 from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID
 from consts.exceptions import AgentRunException, AppException
 from consts.error_code import ErrorCode
-from consts.model import ToolInstanceInfoRequest
+from consts.model import SkillInstanceInfoRequest, ToolInstanceInfoRequest
 from database.agent_db import (
     create_agent,
     query_all_agent_info_by_tenant_id,
@@ -27,7 +27,11 @@ from database.agent_db import (
     update_agent,
 )
 from database.conversation_db import create_conversation
-from database.skill_db import list_skills as list_tenant_skills
+from database.skill_db import (
+    create_or_update_skill_by_skill_info,
+    get_skill_by_id as get_tenant_skill_by_id,
+    list_skills as list_tenant_skills,
+)
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_tools_by_ids,
@@ -451,6 +455,7 @@ async def apply_local_resources_batch(
     """
     bound_tools = 0
     bound_skills = 0
+    bound_skill_ids: List[int] = []
 
     # Bind tools.
     for tool_id in tool_ids or []:
@@ -477,22 +482,44 @@ async def apply_local_resources_batch(
         except Exception as exc:
             logger.error(f"Failed to bind tool {tool_id} to agent {agent_id}: {exc}")
 
-    # Bind skills: install official skills for the tenant (idempotent), then
-    # create SkillInstance rows linked to the agent.
-    if skill_ids:
+    # Bind skills. Local tenant skills already have ag_skill_info_t rows; web
+    # official skills may arrive as global template IDs and must be installed
+    # into the tenant before creating the per-agent SkillInstance row.
+    for skill_id in skill_ids or []:
         try:
-            installed_ids = install_skills_for_tenant(
-                skill_ids=skill_ids, tenant_id=tenant_id, user_id=user_id
+            tenant_skill = get_tenant_skill_by_id(skill_id, tenant_id)
+            target_skill_id = skill_id
+            if not tenant_skill:
+                installed_ids = install_skills_for_tenant(
+                    skill_ids=[skill_id], tenant_id=tenant_id, user_id=user_id
+                )
+                if not installed_ids:
+                    logger.warning(f"Skill id {skill_id} not found or installable, skipping.")
+                    continue
+                target_skill_id = installed_ids[0]
+
+            instance_req = SkillInstanceInfoRequest(
+                skill_id=target_skill_id,
+                agent_id=agent_id,
+                enabled=True,
+                version_no=0,
             )
-            bound_skills = len(installed_ids or [])
+            create_or_update_skill_by_skill_info(
+                skill_info=instance_req,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                version_no=0,
+            )
+            bound_skills += 1
+            bound_skill_ids.append(target_skill_id)
         except Exception as exc:
-            logger.error(f"Failed to install skills {skill_ids}: {exc}")
+            logger.error(f"Failed to bind skill {skill_id} to agent {agent_id}: {exc}")
 
     return {
         "bound_tool_count": bound_tools,
         "bound_skill_count": bound_skills,
         "tool_ids": tool_ids or [],
-        "skill_ids": skill_ids or [],
+        "skill_ids": bound_skill_ids,
     }
 
 
