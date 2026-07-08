@@ -161,6 +161,26 @@ PRODUCTION_HELM_CONTENT="$(cat "$PRODUCTION_HELM_VALUES")"
 assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    northbound:\n      type: "NodePort"\n      nodePort: 30013' "production k8s should expose northbound as NodePort"
 assert_contains "$PRODUCTION_HELM_CONTENT" $'services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "production k8s should expose web as NodePort"
 
+unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
+unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
+unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
+deployment_prepare_config --components infrastructure,application --port-policy development --image-source local-latest --image-registry-prefix https://registry.local/nexent/ --app-version latest
+assert_eq "registry.local/nexent" "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" "image registry prefix should be normalized"
+deployment_apply_image_source
+assert_eq "registry.local/nexent/nexent/nexent:latest" "$NEXENT_IMAGE" "image registry prefix should be applied to local latest backend image"
+PREFIXED_DOCKER_ENV="$TMP_DIR/prefixed-docker.env"
+deployment_render_docker_env "$PREFIXED_DOCKER_ENV"
+assert_contains "$(cat "$PREFIXED_DOCKER_ENV")" 'NEXENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent/"' "docker env should expose registry prefix for monitoring compose images"
+PREFIXED_HELM_VALUES="$TMP_DIR/prefixed-generated-values.yaml"
+deployment_render_helm_values "$PREFIXED_HELM_VALUES"
+PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
+assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
+assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
+assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
+unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
+unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
+unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
+
 deployment_prepare_config --components supabase --port-policy development --app-version latest
 assert_eq "infrastructure,supabase" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
 if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-web"* ]]; then
@@ -629,6 +649,7 @@ assert_contains "$(cat "$MONITORING_EXAMPLE_FILE")" "LANGFUSE_CLICKHOUSE_CLUSTER
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'CLICKHOUSE_CLUSTER_ENABLED: ${LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED:-false}' "docker compose Langfuse clickhouse cluster fallback should match monitoring.env.example"
 
 LOCAL_CONFIG="$TMP_DIR/local-config.yaml"
+DEPLOYMENT_IMAGE_REGISTRY_PREFIX="registry.local/nexent"
 deployment_persist_local_config "$LOCAL_CONFIG"
 if grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY' "$LOCAL_CONFIG"; then
   echo "FAIL: persisted local config should not contain secret-looking fields"
@@ -642,6 +663,7 @@ if grep -q 'appVersion' "$LOCAL_CONFIG"; then
   echo "FAIL: persisted local config should not contain appVersion"
   exit 1
 fi
+assert_contains "$(cat "$LOCAL_CONFIG")" 'imageRegistryPrefix: "registry.local/nexent"' "persisted local config should include image registry prefix"
 
 assert_success "b should be treated as TUI back key" deployment_tui_is_back_key "b"
 assert_success "Backspace should be treated as TUI back key" deployment_tui_is_back_key $'\177'

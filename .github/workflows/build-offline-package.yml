@@ -7,14 +7,6 @@ on:
         description: 'Image version tag, e.g. v2.2.0 or latest'
         required: false
         default: ''
-      platform:
-        description: 'Target platform'
-        required: false
-        default: 'amd64'
-        type: choice
-        options:
-          - amd64
-          - arm64
       image_source:
         description: 'Image source'
         required: false
@@ -41,6 +33,12 @@ on:
 jobs:
   build-offline-package:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - amd64
+          - arm64
 
     steps:
       - name: Free disk space
@@ -63,7 +61,7 @@ jobs:
       - name: Set version and platform variables
         id: set-vars
         run: |
-          PLATFORM="${{ inputs.platform }}"
+          PLATFORM="${{ matrix.platform }}"
           REF_TYPE="${{ github.ref_type }}"
           REF_NAME="${{ github.ref_name }}"
 
@@ -106,8 +104,6 @@ jobs:
             --components "${{ steps.set-components.outputs.components }}" \
             --target "${{ inputs.target }}" \
             --compress true
-
-
 
       - name: Show zip package
         run: |
