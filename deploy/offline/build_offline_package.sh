@@ -327,11 +327,6 @@ should_skip_pull() {
     return 0
   fi
 
-  if uses_latest_tag "$image"; then
-    echo "Skipping pull for latest image; expecting local image: $image"
-    return 0
-  fi
-
   return 1
 }
 
