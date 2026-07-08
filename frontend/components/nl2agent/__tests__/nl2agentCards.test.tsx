@@ -5,6 +5,7 @@ import React from "react";
 import { tryRenderNl2AgentCard } from "..";
 import { LocalResourcesCard } from "../LocalResourcesCard";
 import { WebMcpCard, type WebMcpCardItem } from "../WebMcpCard";
+import { WebSkillCard, type WebSkillCardItem } from "../WebSkillCard";
 
 function assertElement(
   node: React.ReactNode
@@ -60,7 +61,7 @@ describe("tryRenderNl2AgentCard", () => {
 
     const node = tryRenderNl2AgentCard(
       "nl2agent-web-mcp",
-      JSON.stringify(item),
+      JSON.stringify({ agent_id: 202, ...item }),
       (nextItem) => {
         installedItem = nextItem;
       }
@@ -68,8 +69,53 @@ describe("tryRenderNl2AgentCard", () => {
 
     assertElement(node);
     assert.equal(node.type, WebMcpCard);
-    assert.deepEqual(node.props.item, item);
+    assert.equal(node.props.agentId, 202);
+    assert.equal(node.props.item.name, item.name);
     node.props.onInstall(node.props.item);
-    assert.deepEqual(installedItem, item);
+    assert.deepEqual(installedItem, node.props.item);
+  });
+
+  it("routes web MCP list fenced data to WebMcpCard items", () => {
+    const items: WebMcpCardItem[] = [
+      { name: "Browser MCP", source: "community" },
+      { name: "GitHub MCP", source: "registry" },
+    ];
+
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-web-mcps",
+      JSON.stringify({ agent_id: 202, items })
+    );
+
+    assertElement(node);
+    const children = React.Children.toArray(node.props.children);
+    assert.equal(children.length, 2);
+    children.forEach((child, index) => {
+      assertElement(child);
+      assert.equal(child.type, WebMcpCard);
+      assert.equal(child.props.agentId, 202);
+      assert.deepEqual(child.props.item, items[index]);
+    });
+  });
+
+  it("routes web skill list fenced data to WebSkillCard items", () => {
+    const items: WebSkillCardItem[] = [
+      { skill_id: 12, name: "doc-review" },
+      { skill_id: 13, name: "code-review" },
+    ];
+
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-web-skills",
+      JSON.stringify({ agent_id: 202, items })
+    );
+
+    assertElement(node);
+    const children = React.Children.toArray(node.props.children);
+    assert.equal(children.length, 2);
+    children.forEach((child, index) => {
+      assertElement(child);
+      assert.equal(child.type, WebSkillCard);
+      assert.equal(child.props.agentId, 202);
+      assert.deepEqual(child.props.item, items[index]);
+    });
   });
 });

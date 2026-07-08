@@ -40,18 +40,17 @@ def nl2agent_search_local_resources(query: str) -> str:
     """Search local tools (SDK + locally-installed MCP + LangChain) and local skills.
 
     Use this to find resources already available in this tenant that match the
-    user's stated goal. Returns a JSON string with two arrays: ``tools`` and
-    ``skills``, each containing up to 5 items with fields ``id``, ``name``,
-    ``description``, ``source``, ``score`` (0-10), and ``reason``.
+    user's stated goal. Returns a frontend card JSON string with ``agent_id``,
+    ``tools``, and ``skills``. The ``agent_id`` is the draft agent being built.
 
     Args:
         query: The user's intent or task description (e.g., "summarize PDFs and email them").
 
     Returns:
-        JSON string ``{"tools": [...], "skills": [...]}``. Tools include a
-        ``tool_id`` field; skills include a ``skill_id`` field. Both include a
-        ``score`` (0-10) and ``reason``. The frontend renders these as cards
-        with an "Apply All" button.
+        JSON string ``{"agent_id": 123, "tools": [...], "skills": [...]}``.
+        Tools include a ``tool_id`` field; skills include a ``skill_id`` field.
+        Both include a ``score`` (0-10) and ``reason``. The frontend renders
+        these as cards with an "Apply All" button.
     """
     ctx = get_nl2agent_context()
     if ctx is None or ctx.tenant_id is None:
@@ -61,7 +60,7 @@ def nl2agent_search_local_resources(query: str) -> str:
     # nl2agent_search_local_resources scores resources for the draft target. Use
     # draft_agent_id when present; fall back to agent_id (older callers).
     target_agent_id = ctx.draft_agent_id or ctx.agent_id
-    if target_agent_id is None:
+    if target_agent_id is None or target_agent_id <= 0:
         return json.dumps(
             {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )
@@ -78,7 +77,12 @@ def nl2agent_search_local_resources(query: str) -> str:
                 top_n=5,
             )
         )
-        return json.dumps(result, ensure_ascii=False)
+        card_payload = {
+            "agent_id": target_agent_id,
+            "tools": result.get("tools", []),
+            "skills": result.get("skills", []),
+        }
+        return json.dumps(card_payload, ensure_ascii=False)
     except Exception as exc:
         logger.exception(f"nl2agent_search_local_resources failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

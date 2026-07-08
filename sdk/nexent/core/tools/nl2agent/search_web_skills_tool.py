@@ -39,26 +39,33 @@ def get_search_web_skills_tool(
 def nl2agent_search_web_skills(query: str) -> str:
     """Search the official/web skills marketplace for skills matching the user's intent.
 
-    Returns a JSON array of up to 5 skill cards. Each item has ``skill_id``,
-    ``name``, ``description``, ``tags``, ``score`` (0-10), and ``reason``.
-    The frontend renders each as an individual card with an "Install" button.
+    Returns a frontend card JSON string with ``agent_id`` and ``items``. The
+    ``agent_id`` is the draft agent being built. Each item has ``skill_id``,
+    ``name``, ``description``, ``tags``, ``score`` (0-10), and ``reason``. The
+    frontend renders each as an individual card with an "Install" button.
 
     Args:
         query: The user's intent or task description.
 
     Returns:
-        JSON string containing an array of web skill cards.
+        JSON string ``{"agent_id": 123, "items": [...]}`` containing web skill
+        cards.
     """
     ctx = get_nl2agent_context()
     if ctx is None or ctx.tenant_id is None:
         return json.dumps(
             {"error": "NL2AGENT session context not initialized."}, ensure_ascii=False
         )
+    target_agent_id = ctx.draft_agent_id or ctx.agent_id
+    if target_agent_id is None or target_agent_id <= 0:
+        return json.dumps(
+            {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
+        )
 
     try:
         from services.nl2agent_service import search_web_skills as _search
 
-        result = asyncio.run(
+        items = asyncio.run(
             _search(
                 query=query,
                 tenant_id=ctx.tenant_id,
@@ -66,7 +73,10 @@ def nl2agent_search_web_skills(query: str) -> str:
                 top_n=5,
             )
         )
-        return json.dumps(result, ensure_ascii=False)
+        return json.dumps(
+            {"agent_id": target_agent_id, "items": items or []},
+            ensure_ascii=False,
+        )
     except Exception as exc:
         logger.exception(f"nl2agent_search_web_skills failed: {exc}")
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
