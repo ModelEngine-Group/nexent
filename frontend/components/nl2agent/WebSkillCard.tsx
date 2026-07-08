@@ -4,10 +4,14 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, message as AntMessage } from "antd";
 import { Download, CheckCircle2, Loader2 } from "lucide-react";
-import { installWebSkill } from "@/services/nl2agentService";
+import {
+  installWebSkill,
+  type Nl2AgentInstallWebSkillPayload,
+} from "@/services/nl2agentService";
 
 export interface WebSkillCardItem {
-  skill_id: number;
+  skill_id?: number;
+  skill_name?: string;
   name: string;
   description?: string;
   tags?: string[];
@@ -37,7 +41,13 @@ export const WebSkillCard: React.FC<WebSkillCardProps> = ({ agentId, item }) => 
   const handleInstall = async () => {
     setInstalling(true);
     try {
-      await installWebSkill(agentId, item.skill_id);
+      const payload: Nl2AgentInstallWebSkillPayload = {
+        skill_name: item.skill_name || item.name,
+      };
+      if (typeof item.skill_id === "number" && item.skill_id > 0) {
+        payload.skill_id = item.skill_id;
+      }
+      await installWebSkill(agentId, payload);
       AntMessage.success(
         t("nl2agent.webSkill.installed", {
           defaultValue: 'Skill "{{name}}" installed.',

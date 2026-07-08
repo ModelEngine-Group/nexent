@@ -115,7 +115,7 @@ async def install_web_skill_api(
 ):
     """Install a single official/web skill into the tenant."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(
+        user_id, tenant_id, language = get_current_user_info(
             authorization, http_request
         )
     except UnauthorizedError as exc:
@@ -126,8 +126,10 @@ async def install_web_skill_api(
     try:
         result = await install_web_skill(
             skill_id=payload.skill_id,
+            skill_name=payload.skill_name,
             tenant_id=tenant_id,
             user_id=user_id,
+            locale=language,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except AgentRunException as exc:

@@ -34,8 +34,15 @@ export interface Nl2AgentApplyLocalResourcesResponse {
 
 export interface Nl2AgentInstallWebSkillResponse {
   skill_id: number;
+  skill_name?: string;
   installed: boolean;
   installed_ids: number[];
+  installed_names?: string[];
+}
+
+export interface Nl2AgentInstallWebSkillPayload {
+  skill_id?: number;
+  skill_name?: string;
 }
 
 export interface Nl2AgentFinalizePayload {
@@ -97,14 +104,22 @@ export const applyLocalResources = async (
  */
 export const installWebSkill = async (
   agentId: number,
-  skillId: number
+  payload: Nl2AgentInstallWebSkillPayload
 ): Promise<Nl2AgentInstallWebSkillResponse> => {
   try {
+    const body: Nl2AgentInstallWebSkillPayload = {};
+    if (typeof payload.skill_id === "number" && payload.skill_id > 0) {
+      body.skill_id = payload.skill_id;
+    }
+    if (payload.skill_name) {
+      body.skill_name = payload.skill_name;
+    }
+
     const response = await fetchWithAuth(
       API_ENDPOINTS.nl2agent.installWebSkill(agentId),
       {
         method: "POST",
-        body: JSON.stringify({ skill_id: skillId }),
+        body: JSON.stringify(body),
       }
     );
     if (!response.ok) {

@@ -4828,3 +4828,26 @@ class TestInitSkillListForTenantAsync:
             tenant_id="new-tenant",
             user_id="new-user"
         )
+
+
+class TestOfficialSkillsZipDirectory:
+    """Test official skill ZIP catalog discovery."""
+
+    def test_get_official_skills_with_status_uses_repo_asset_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        """Official skills are discoverable without the /mnt/nexent mount."""
+        from backend.services import skill_service
+
+        monkeypatch.setattr(
+            skill_service,
+            "OFFICIAL_SKILLS_ZIP_PATH",
+            str(tmp_path / "missing-official-skills"),
+        )
+
+        skills = skill_service.get_official_skills_with_status(
+            tenant_id="tenant_1"
+        )
+
+        names = {skill["name"] for skill in skills}
+        assert "search-web-tavily" in names

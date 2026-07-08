@@ -36,7 +36,7 @@ def get_install_web_skill_tool(
 
 
 @tool
-def nl2agent_install_web_skill(skill_id: int) -> str:
+def nl2agent_install_web_skill(skill_id: int = 0, skill_name: str = "") -> str:
     """Install a single official/web skill into the tenant.
 
     Use this when the user picks a specific web skill from the recommendation
@@ -45,7 +45,8 @@ def nl2agent_install_web_skill(skill_id: int) -> str:
     bound to the draft agent via nl2agent_apply_local_resources.
 
     Args:
-        skill_id: The skill_id of the web skill to install.
+        skill_id: The skill_id of the web skill to install. Use 0 when installing by skill_name.
+        skill_name: The official skill name to install when skill_id is missing or 0.
 
     Returns:
         JSON string with ``skill_id`` and ``installed`` (bool).
@@ -62,6 +63,7 @@ def nl2agent_install_web_skill(skill_id: int) -> str:
         result = asyncio.run(
             _install(
                 skill_id=skill_id,
+                skill_name=skill_name or None,
                 tenant_id=ctx.tenant_id,
                 user_id=ctx.user_id or "",
             )

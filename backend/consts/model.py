@@ -449,7 +449,8 @@ class Nl2AgentApplyLocalResourcesRequest(BaseModel):
 
 class Nl2AgentInstallWebSkillRequest(BaseModel):
     """Request body for installing a single official/web skill into the tenant."""
-    skill_id: int
+    skill_id: Optional[int] = None
+    skill_name: Optional[str] = None
 
 
 class Nl2AgentFinalizeRequest(BaseModel):

@@ -219,3 +219,53 @@ def test_nl2agent_search_web_skills_rejects_invalid_draft_agent_id(monkeypatch):
     assert json.loads(raw_result) == {
         "error": "NL2AGENT draft agent_id not set in context."
     }
+
+
+def test_nl2agent_install_web_skill_passes_skill_name(monkeypatch):
+    _reset_nl2agent_modules(monkeypatch)
+
+    from nexent.core.tools.nl2agent.install_web_skill_tool import (
+        get_install_web_skill_tool,
+        nl2agent_install_web_skill,
+    )
+
+    calls = []
+
+    async def fake_install_web_skill(**kwargs):
+        calls.append(kwargs)
+        return {
+            "skill_id": 0,
+            "skill_name": "search-web-tavily",
+            "installed": True,
+            "installed_ids": [],
+            "installed_names": ["search-web-tavily"],
+        }
+
+    _install_fake_nl2agent_service(
+        monkeypatch, install_web_skill=fake_install_web_skill
+    )
+
+    get_install_web_skill_tool(
+        agent_id=101,
+        draft_agent_id=202,
+        user_id="user_1",
+        tenant_id="tenant_1",
+        model_id=7,
+        language="en",
+    )
+
+    raw_result = nl2agent_install_web_skill(
+        skill_id=0, skill_name="search-web-tavily"
+    )
+
+    assert json.loads(raw_result) == {
+        "skill_id": 0,
+        "skill_name": "search-web-tavily",
+        "installed": True,
+        "installed_ids": [],
+        "installed_names": ["search-web-tavily"],
+    }
+    assert calls[0]["skill_id"] == 0
+    assert calls[0]["skill_name"] == "search-web-tavily"
+    assert calls[0]["tenant_id"] == "tenant_1"
+    assert calls[0]["user_id"] == "user_1"

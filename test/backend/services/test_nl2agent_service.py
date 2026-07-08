@@ -424,6 +424,7 @@ async def test_search_web_skills_returns_unranked_candidates_when_scoring_is_inv
     assert result == [
         {
             "skill_id": 77,
+            "skill_name": "doc-review",
             "name": "doc-review",
             "description": "Review documents",
             "tags": ["documents"],
@@ -432,6 +433,57 @@ async def test_search_web_skills_returns_unranked_candidates_when_scoring_is_inv
             "reason": "LLM scoring unavailable; shown as an unranked skill candidate.",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_install_web_skill_installs_by_skill_name(monkeypatch):
+    install_from_zip = MagicMock(return_value=["search-web-tavily"])
+    monkeypatch.setattr(
+        nl2agent_service, "install_skills_from_zip_for_tenant", install_from_zip
+    )
+
+    result = await nl2agent_service.install_web_skill(
+        skill_id=0,
+        skill_name="search-web-tavily",
+        tenant_id="tenant_1",
+        user_id="user_1",
+        locale="en",
+    )
+
+    install_from_zip.assert_called_once_with(
+        skill_names=["search-web-tavily"],
+        tenant_id="tenant_1",
+        user_id="user_1",
+        locale="en",
+    )
+    assert result == {
+        "skill_id": 0,
+        "skill_name": "search-web-tavily",
+        "installed": True,
+        "installed_ids": [],
+        "installed_names": ["search-web-tavily"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_web_skill_still_installs_by_legacy_skill_id(monkeypatch):
+    install_by_id = MagicMock(return_value=[107])
+    monkeypatch.setattr(nl2agent_service, "install_skills_for_tenant", install_by_id)
+
+    result = await nl2agent_service.install_web_skill(
+        skill_id=77,
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    install_by_id.assert_called_once_with(
+        skill_ids=[77], tenant_id="tenant_1", user_id="user_1"
+    )
+    assert result == {
+        "skill_id": 77,
+        "installed": True,
+        "installed_ids": [107],
+    }
 
 
 @pytest.mark.asyncio

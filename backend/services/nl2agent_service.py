@@ -55,6 +55,7 @@ from services.prompt_template_service import (
 from services.skill_service import (
     get_official_skills_with_status,
     install_skills_for_tenant,
+    install_skills_from_zip_for_tenant,
 )
 from services.tool_configuration_service import list_all_tools
 from utils.llm_utils import call_llm_for_system_prompt
@@ -593,10 +594,8 @@ async def search_web_mcps(
 
     candidates: List[Dict[str, Any]] = []
 
-    try:
-        registry_data = await list_registry_mcp_services(
-            search=query, limit=30
-        )
+    def append_registry_candidates(registry_data: Optional[Dict[str, Any]]) -> int:
+        added = 0
         for srv in (registry_data or {}).get("servers", []) or []:
             scoring_id = (
                 f"registry:{srv.get('id') or srv.get('name') or len(candidates)}"
@@ -610,8 +609,24 @@ async def search_web_mcps(
                 "transport": "registry",
                 "tools_summary": "",
             })
+            added += 1
+        return added
+
+    registry_candidates = 0
+    try:
+        registry_data = await list_registry_mcp_services(
+            search=query, limit=30
+        )
+        registry_candidates = append_registry_candidates(registry_data)
     except Exception as exc:
         logger.warning(f"Registry MCP search failed (continuing with community): {exc}")
+
+    if registry_candidates == 0:
+        try:
+            registry_data = await list_registry_mcp_services(search=None, limit=30)
+            registry_candidates = append_registry_candidates(registry_data)
+        except Exception as exc:
+            logger.warning(f"Registry MCP fallback listing failed: {exc}")
 
     try:
         community_data = await list_community_mcp_services(
@@ -717,9 +732,13 @@ async def search_web_skills(
 
     candidates: List[Dict[str, Any]] = []
     for s in official:
+        skill_name = s.get("name") or s.get("skill_name") or ""
+        if not skill_name:
+            continue
         candidates.append({
-            "skill_id": s.get("skill_id"),
-            "name": s.get("name") or "",
+            "skill_id": s.get("skill_id") or 0,
+            "skill_name": skill_name,
+            "name": skill_name,
             "description": (s.get("description") or "")[:400],
             "tags": s.get("tags") or [],
             "status": s.get("status") or "installable",
@@ -732,7 +751,7 @@ async def search_web_skills(
         model_id=model_id,
         query=query,
         candidates=candidates,
-        id_field="skill_id",
+        id_field="skill_name",
         tenant_id=tenant_id,
         top_n=top_n,
         kind="skill",
@@ -828,9 +847,36 @@ async def apply_local_resources_batch(
 
 
 async def install_web_skill(
-    skill_id: int, tenant_id: str, user_id: str
+    skill_id: Optional[int],
+    tenant_id: str,
+    user_id: str,
+    skill_name: Optional[str] = None,
+    locale: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Install a single official/web skill into the tenant."""
+    if skill_name:
+        try:
+            installed_names = install_skills_from_zip_for_tenant(
+                skill_names=[skill_name],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                locale=locale,
+            )
+        except Exception as exc:
+            logger.error(f"Failed to install web skill {skill_name}: {exc}")
+            raise AgentRunException(f"Failed to install skill {skill_name}.") from exc
+
+        return {
+            "skill_id": skill_id or 0,
+            "skill_name": skill_name,
+            "installed": bool(installed_names),
+            "installed_ids": [],
+            "installed_names": installed_names,
+        }
+
+    if not skill_id or skill_id <= 0:
+        raise AgentRunException("Either skill_name or a positive skill_id is required.")
+
     try:
         installed = install_skills_for_tenant(
             skill_ids=[skill_id], tenant_id=tenant_id, user_id=user_id

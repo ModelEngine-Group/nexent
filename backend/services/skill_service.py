@@ -2585,6 +2585,41 @@ def install_skills_for_tenant(
     return installed_ids
 
 
+def _get_official_skills_zip_dir() -> Optional[str]:
+    """Return the first available official skills ZIP directory."""
+    candidates = [
+        OFFICIAL_SKILLS_ZIP_PATH,
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "deploy",
+                "docker",
+                "assets",
+                "official-skills-zip",
+            )
+        ),
+    ]
+
+    checked: List[str] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        normalized = os.path.abspath(os.path.expanduser(candidate))
+        if normalized in checked:
+            continue
+        checked.append(normalized)
+        if os.path.isdir(normalized):
+            return normalized
+
+    logger.warning(
+        "Official skills zip directory not found. Checked: %s",
+        ", ".join(checked) or "<none>",
+    )
+    return None
+
+
 def install_skills_from_zip_for_tenant(
     skill_names: List[str],
     tenant_id: str,
@@ -2614,9 +2649,8 @@ def install_skills_from_zip_for_tenant(
     if not skill_names:
         return []
 
-    zip_dir = OFFICIAL_SKILLS_ZIP_PATH
-    if not os.path.isdir(zip_dir):
-        logger.warning(f"Official skills zip directory not found: {zip_dir}")
+    zip_dir = _get_official_skills_zip_dir()
+    if not zip_dir:
         return []
 
     # Derive source label from locale: zh → "官方", otherwise "official"
@@ -2690,9 +2724,8 @@ def get_official_skills_with_status(
 
     result: List[Dict[str, Any]] = []
 
-    zip_dir = OFFICIAL_SKILLS_ZIP_PATH
-    if not os.path.isdir(zip_dir):
-        logger.warning(f"Official skills zip directory not found: {zip_dir}")
+    zip_dir = _get_official_skills_zip_dir()
+    if not zip_dir:
         return result
 
     try:
