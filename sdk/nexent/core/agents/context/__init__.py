@@ -18,6 +18,7 @@ from .policy_models import (
     validate_policy,
 )
 from .reducer_models import ReductionResult
+from .selection_engine import select_context
 
 
 __all__ = [
@@ -34,5 +35,6 @@ __all__ = [
     "RepresentationTier",
     "SelectionDecision",
     "resolve_policy",
+    "select_context",
     "validate_policy",
 ]
