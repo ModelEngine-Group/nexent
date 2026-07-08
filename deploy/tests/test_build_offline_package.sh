@@ -310,9 +310,9 @@ second_line="$(sed -n '2p' "$offline_deploy_log")"
 
 [ -f "$OUT_DIR/nexent-offline-docker-amd64-latest.zip" ] || fail "zip package should be created for latest package"
 grep -q "nexent/nexent:latest" "$latest_package_dir/manifest.yaml" || fail "manifest should include local latest Nexent image"
-! grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should not be pulled"
-! grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should not be pulled"
-! grep -q '^pull .*nexent/nexent-mcp:latest$' "$latest_pull_log" || fail "latest Nexent MCP image should not be pulled"
+grep -q '^pull .*nexent/nexent:latest$' "$latest_pull_log" || fail "latest Nexent image should be pulled"
+grep -q '^pull .*nexent/nexent-web:latest$' "$latest_pull_log" || fail "latest Nexent web image should be pulled"
+grep -q '^pull .*nexent/nexent-mcp:latest$' "$latest_pull_log" || fail "latest Nexent MCP image should be pulled"
 grep -q '^pull .*docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$latest_pull_log" || fail "non-latest infrastructure images should still be pulled"
 
 local_package_dir="$OUT_DIR/local-existing/package"
