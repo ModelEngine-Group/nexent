@@ -211,6 +211,12 @@ class MockProcessType:
         value = "model_output_thinking"
     class MODEL_OUTPUT_DEEP_THINKING:
         value = "model_output_deep_thinking"
+    class STEP_COUNT:
+        value = "step_count"
+    class TOOL:
+        value = "tool"
+    class EXECUTION_LOGS:
+        value = "execution_logs"
 
 sys.modules['nexent.core.utils.observer'] = MagicMock()
 sys.modules['nexent.core.utils.observer'].ProcessType = MockProcessType
@@ -4648,9 +4654,14 @@ async def test__stream_agent_chunks_captures_final_answer_and_adds_memory(monkey
     ):
         collected.append(out)
 
+    # Give the finally block time to create and execute the background task
+    await asyncio.sleep(0.1)
+
     # Ensure background task completed
     if task_holder["task"] is not None:
         await task_holder["task"]
+        # Give the task time to complete after awaiting
+        await asyncio.sleep(0.01)
 
     assert add_calls["called"] is True
     assert add_calls["args"]["messages"] == [
