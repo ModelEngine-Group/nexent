@@ -70,6 +70,7 @@ deploy/k8s/helm/**/*.tgz
 deploy/k8s/helm/nexent/Chart.lock
 
 MAC_DEVELOPMENT_GUIDE.md
+CONTEXT_MANAGEMENT_DEV_PLAN.md
 data/
 sdk/benchmark/.env
 /docker/.env.bak
