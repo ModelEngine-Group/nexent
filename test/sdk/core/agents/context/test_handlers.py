@@ -99,7 +99,7 @@ class TestHandlerScore:
         handler = handler_cls()
         item = _make_item(handler_cls)
         result = handler.score(item, "test query", {})
-        assert result == 1.0
+        assert result == pytest.approx(1.0, rel=1e-9)
 
 
 class TestHandlerReduce:

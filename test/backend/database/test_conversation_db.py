@@ -118,6 +118,7 @@ class ConversationMessage:
     status = MagicMock(name="ConversationMessage.status")
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
+    run_id = MagicMock(name="ConversationMessage.run_id")
 
 
 class ConversationMessageUnit:
@@ -129,6 +130,8 @@ class ConversationMessageUnit:
     conversation_id = MagicMock(name="ConversationMessageUnit.conversation_id")
     delete_flag = MagicMock(name="ConversationMessageUnit.delete_flag")
     unit_status = MagicMock(name="ConversationMessageUnit.unit_status")
+    run_id = MagicMock(name="ConversationMessageUnit.run_id")
+    step_id = MagicMock(name="ConversationMessageUnit.step_id")
 
 
 class ConversationSourceSearch:
@@ -197,9 +200,11 @@ from backend.database.conversation_db import (
     get_last_unit_for_message,
     get_latest_assistant_message,
     get_latest_assistant_message_id,
+    get_max_run_id_for_conversation,
     get_message,
     get_message_id_by_index,
     get_message_units,
+    get_message_units_by_run,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
@@ -2292,3 +2297,151 @@ def test_get_conversation_history_units_empty_list(monkeypatch, mock_session_ctx
 
     assert result is not None
     assert result['message_records'][0]['units'] == []
+
+
+# =============================================================================
+# Tests for get_message_units_by_run
+# =============================================================================
+
+
+def test_get_message_units_by_run_without_run_id(monkeypatch, mock_session_ctx):
+    """get_message_units_by_run returns all units when run_id is None."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock(), MagicMock(), MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"unit_id": id(record)}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_message_units_by_run(42)
+
+    assert len(result) == 3
+    session.scalars.assert_called_once()
+
+
+def test_get_message_units_by_run_with_run_id(monkeypatch, mock_session_ctx):
+    """get_message_units_by_run filters by run_id when provided."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock(), MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"unit_id": id(record), "run_id": 5}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_message_units_by_run(42, run_id=5)
+
+    assert len(result) == 2
+    session.scalars.assert_called_once()
+
+
+def test_get_message_units_by_run_empty_result(monkeypatch, mock_session_ctx):
+    """get_message_units_by_run returns empty list when no units found."""
+    session, ctx = mock_session_ctx
+    session.scalars.return_value.all.return_value = []
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_message_units_by_run(42, run_id=99)
+
+    assert result == []
+
+
+def test_get_message_units_by_run_string_conversation_id(monkeypatch, mock_session_ctx):
+    """get_message_units_by_run handles conversation_id passed as string."""
+    session, ctx = mock_session_ctx
+    mock_records = [MagicMock()]
+    session.scalars.return_value.all.return_value = mock_records
+
+    def as_dict_side_effect(record):
+        return {"unit_id": 1}
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_message_units_by_run("42")
+
+    assert len(result) == 1
+
+
+def test_get_message_units_by_run_returns_dicts(monkeypatch, mock_session_ctx):
+    """get_message_units_by_run converts records to dicts via as_dict."""
+    session, ctx = mock_session_ctx
+    mock_record = MagicMock(unit_id=10, unit_type="final_answer", unit_content="Hello")
+    session.scalars.return_value.all.return_value = [mock_record]
+
+    def as_dict_side_effect(record):
+        return {
+            "unit_id": record.unit_id,
+            "unit_type": record.unit_type,
+            "unit_content": record.unit_content,
+        }
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+
+    result = get_message_units_by_run(1, run_id=2)
+
+    assert len(result) == 1
+    assert result[0]["unit_id"] == 10
+    assert result[0]["unit_type"] == "final_answer"
+    assert result[0]["unit_content"] == "Hello"
+
+
+# =============================================================================
+# Tests for get_max_run_id_for_conversation
+# =============================================================================
+
+
+def test_get_max_run_id_for_conversation_found(monkeypatch, mock_session_ctx):
+    """get_max_run_id_for_conversation returns max run_id when messages exist."""
+    session, ctx = mock_session_ctx
+    session.scalar.return_value = 7
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_max_run_id_for_conversation(42)
+
+    assert result == 7
+    session.scalar.assert_called_once()
+
+
+def test_get_max_run_id_for_conversation_none(monkeypatch, mock_session_ctx):
+    """get_max_run_id_for_conversation returns None when no messages have run_id."""
+    session, ctx = mock_session_ctx
+    session.scalar.return_value = None
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_max_run_id_for_conversation(999)
+
+    assert result is None
+
+
+def test_get_max_run_id_for_conversation_string_id(monkeypatch, mock_session_ctx):
+    """get_max_run_id_for_conversation handles conversation_id passed as string."""
+    session, ctx = mock_session_ctx
+    session.scalar.return_value = 3
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_max_run_id_for_conversation("42")
+
+    assert result == 3
+
+
+def test_get_max_run_id_for_conversation_zero(monkeypatch, mock_session_ctx):
+    """get_max_run_id_for_conversation returns 0 when max run_id is 0."""
+    session, ctx = mock_session_ctx
+    session.scalar.return_value = 0
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = get_max_run_id_for_conversation(1)
+
+    assert result == 0
