@@ -106,6 +106,8 @@ assert_common_package_files() {
 create_fake_docker
 
 WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
+echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
+echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "offline package workflow package name should include source suffix"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress false' || fail "offline package workflow should let GitHub create the final artifact zip"
 echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
 ! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
@@ -123,6 +125,7 @@ for target in docker k8s all; do
       --output-dir "$package_dir" >/tmp/nexent-offline-package-${target}.log
 
   assert_common_package_files "$package_dir"
+  [ "$(cat "$package_dir/VERSION")" = "v2.2.0" ] || fail "root VERSION should match requested package version for target $target"
   [ -f "$OUT_DIR/nexent-offline-${target}-amd64-v2.2.0.zip" ] || fail "zip package should be created for target $target"
   grep -q "target: \"$target\"" "$package_dir/manifest.yaml" || fail "manifest should record target $target"
   grep -q "nexent/nexent:v2.2.0" "$package_dir/manifest.yaml" || fail "manifest should include Nexent image"
@@ -223,6 +226,7 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
+[ "$(cat "$latest_package_dir/VERSION")" = "latest" ] || fail "root VERSION should match requested latest package version"
 grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"$' "$latest_package_dir/deploy.sh" || fail "offline deploy.sh should reuse the root entrypoint with defaults mode enabled"
 offline_help="$(DEPLOYMENT_LANG=en bash "$latest_package_dir/deploy.sh" --help)"
 echo "$offline_help" | grep -q "deploys with saved configuration or built-in defaults" || fail "offline deploy help should explain default non-interactive mode"
@@ -328,6 +332,7 @@ PATH="$BIN_DIR:$PATH" \
     --output-dir "$local_package_dir" >/tmp/nexent-offline-package-local-existing.log
 
 assert_common_package_files "$local_package_dir"
+[ "$(cat "$local_package_dir/VERSION")" = "v2.2.0" ] || fail "root VERSION should match requested package version"
 [ -f "$OUT_DIR/local-existing/nexent-offline-docker-amd64-v2.2.0.zip" ] || fail "zip package should be created for local existing package"
 ! grep -q '^pull .*nexent/nexent:v2.2.0$' "$local_pull_log" || fail "existing local Nexent image should not be pulled"
 ! grep -q '^pull .*docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$local_pull_log" || fail "existing local infrastructure image should not be pulled"

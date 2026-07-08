@@ -524,6 +524,9 @@ copy_source_code() {
   done <<< "$git_files"
 
   echo "✅ Git-managed source code copied to: $source_dir"
+  if [ -f "$source_dir/VERSION" ]; then
+    printf '%s\n' "$VERSION" > "$source_dir/VERSION"
+  fi
 
   local total_size
   total_size=$(du -sh "$source_dir" | cut -f1)
@@ -597,7 +600,7 @@ copy_deployment_bundle() {
 
   cp "$PROJECT_ROOT/deploy.sh" "$OUTPUT_DIR/deploy.sh"
   cp "$PROJECT_ROOT/uninstall.sh" "$OUTPUT_DIR/uninstall.sh"
-  cp "$PROJECT_ROOT/VERSION" "$OUTPUT_DIR/VERSION"
+  printf '%s\n' "$VERSION" > "$OUTPUT_DIR/VERSION"
 
   if command -v rsync >/dev/null 2>&1; then
     rsync -a \

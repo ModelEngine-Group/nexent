@@ -70,9 +70,14 @@ jobs:
             VERSION="latest"
           fi
 
+          SOURCE_SUFFIX=""
+          if [ "${{ inputs.include_source }}" = "true" ]; then
+            SOURCE_SUFFIX="-with-source"
+          fi
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
-          echo "package-name=nexent-${VERSION}-${PLATFORM}" >> $GITHUB_OUTPUT
+          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> $GITHUB_OUTPUT
 
       - name: Set deployment components
         id: set-components

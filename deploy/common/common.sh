@@ -1958,6 +1958,7 @@ deployment_render_helm_chart_values() {
   printf 'nexent-supabase-auth:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$SUPABASE_GOTRUE")" "$(deployment_image_tag "$SUPABASE_GOTRUE")"
+  printf '  initImage:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$POSTGRESQL_IMAGE")" "$(deployment_image_tag "$POSTGRESQL_IMAGE")"
   printf '  service:\n    type: "%s"\n    nodePort: 30999\n' "$internal_type"
   printf 'nexent-supabase-db:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled supabase)"
