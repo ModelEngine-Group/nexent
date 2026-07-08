@@ -27,6 +27,17 @@ export interface Nl2AgentCardRendererProps {
   onInstallMcp?: (item: WebMcpCardItem) => void;
 }
 
+const parseAgentId = (value: unknown): number | null => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const renderInvalidAgentId = () => (
+  <div className="my-2 p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
+    Invalid NL2AGENT card JSON: missing draft agent_id.
+  </div>
+);
+
 /**
  * Try to render an NL2AGENT card from a fenced code block. Returns null if
  * the language tag is not an NL2AGENT tag (so the caller falls back to the
@@ -52,7 +63,10 @@ export const tryRenderNl2AgentCard = (
     );
   }
 
-  const agentId = typeof parsed.agent_id === "number" ? parsed.agent_id : 0;
+  const agentId = parseAgentId(parsed.agent_id);
+  if (agentId == null) {
+    return renderInvalidAgentId();
+  }
 
   switch (language) {
     case "nl2agent-local-resources": {

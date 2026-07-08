@@ -13,6 +13,7 @@ from ._context import (
     set_nl2agent_context,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +39,7 @@ def get_finalize_agent_tool(
 @tool
 def nl2agent_finalize_agent(
     task_description: str,
-    tool_ids: str,
+    tool_ids: str = "[]",
     skill_ids: str = "[]",
     sub_agent_ids: str = "[]",
     knowledge_base_names: str = "[]",
@@ -53,7 +54,7 @@ def nl2agent_finalize_agent(
 
     Args:
         task_description: A clear summary of what the agent should do, synthesized from the conversation.
-        tool_ids: JSON-encoded list of tool IDs bound to the agent, e.g. "[1, 2]".
+        tool_ids: JSON-encoded list of tool IDs bound to the agent. Defaults to "[]".
         skill_ids: JSON-encoded list of skill IDs bound to the agent. Defaults to "[]".
         sub_agent_ids: JSON-encoded list of sub-agent IDs. Defaults to "[]".
         knowledge_base_names: JSON-encoded list of knowledge base display names. Defaults to "[]".
@@ -69,7 +70,7 @@ def nl2agent_finalize_agent(
     # nl2agent_finalize_agent writes generated prompts to the draft target. Use
     # draft_agent_id when present; fall back to agent_id (older callers).
     target_agent_id = ctx.draft_agent_id or ctx.agent_id
-    if target_agent_id is None:
+    if target_agent_id is None or target_agent_id <= 0:
         return json.dumps(
             {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )

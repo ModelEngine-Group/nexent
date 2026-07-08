@@ -34,6 +34,20 @@ describe("tryRenderNl2AgentCard", () => {
     ]);
   });
 
+  it("does not default missing card agent_id to zero", () => {
+    const node = tryRenderNl2AgentCard(
+      "nl2agent-local-resources",
+      JSON.stringify({
+        tools: [{ tool_id: 1, name: "Search" }],
+        skills: [],
+      })
+    );
+
+    assertElement(node);
+    assert.equal(node.type, "div");
+    assert.match(String(node.props.children), /missing draft agent_id/);
+  });
+
   it("passes the web MCP install callback into WebMcpCard", () => {
     const item: WebMcpCardItem = {
       name: "GitHub MCP",

@@ -341,6 +341,43 @@ def _compact_skill_for_scoring(skill: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _strip_internal_scoring_fields(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in candidate.items()
+        if not key.startswith("_")
+    }
+
+
+def _unranked_candidates(
+    candidates: List[Dict[str, Any]],
+    top_n: int,
+    kind: str,
+) -> List[Dict[str, Any]]:
+    return [
+        {
+            **_strip_internal_scoring_fields(candidate),
+            "score": 0,
+            "reason": (
+                f"LLM scoring unavailable; shown as an unranked {kind} candidate."
+            ),
+        }
+        for candidate in candidates[:top_n]
+    ]
+
+
+def _validate_draft_agent_id(agent_id: int) -> None:
+    if not isinstance(agent_id, int) or agent_id <= 0:
+        raise AgentRunException("Invalid NL2AGENT draft agent_id.")
+
+
+def _normalize_tool_instance_params(params: Any) -> Dict[str, Any]:
+    """Return persisted tool-instance params, not catalog parameter schemas."""
+    if isinstance(params, dict):
+        return params
+    return {}
+
+
 def _score_candidates_with_llm(
     model_id: int,
     query: str,
@@ -386,20 +423,14 @@ def _score_candidates_with_llm(
         logger.warning(
             f"LLM scoring call failed for {kind}s; returning unranked candidates: {exc}"
         )
-        return [
-            {
-                **candidate,
-                "score": 0,
-                "reason": (
-                    f"LLM scoring unavailable; shown as an unranked {kind} candidate."
-                ),
-            }
-            for candidate in pruned[:top_n]
-        ]
+        return _unranked_candidates(pruned, top_n, kind)
 
     scored = _parse_scored_json(raw, id_field)
     if not scored:
-        return []
+        logger.warning(
+            f"LLM scoring returned no usable {kind} rankings; returning unranked candidates."
+        )
+        return _unranked_candidates(pruned, top_n, kind)
 
     id_to_candidate = {c.get(id_field): c for c in pruned}
     enriched: List[Dict[str, Any]] = []
@@ -413,6 +444,12 @@ def _score_candidates_with_llm(
             "score": item.get("score", 0),
             "reason": item.get("reason", ""),
         })
+
+    if not enriched:
+        logger.warning(
+            f"LLM scoring returned no matching {kind} IDs; returning unranked candidates."
+        )
+        return _unranked_candidates(pruned, top_n, kind)
 
     enriched.sort(key=lambda x: x.get("score", 0), reverse=True)
     return enriched[:top_n]
@@ -535,7 +572,11 @@ async def search_web_mcps(
             search=query, limit=30
         )
         for srv in (registry_data or {}).get("servers", []) or []:
+            scoring_id = (
+                f"registry:{srv.get('id') or srv.get('name') or len(candidates)}"
+            )
             candidates.append({
+                "_scoring_id": scoring_id,
                 "name": srv.get("name") or srv.get("id") or "",
                 "description": (srv.get("description") or "")[:400],
                 "source": "registry",
@@ -551,11 +592,20 @@ async def search_web_mcps(
             search=query, limit=30
         )
         for item in (community_data or {}).get("items", []) or []:
+            scoring_id = (
+                f"community:{item.get('communityId') or item.get('name') or len(candidates)}"
+            )
             candidates.append({
+                "_scoring_id": scoring_id,
                 "name": item.get("name") or "",
                 "description": (item.get("description") or "")[:400],
                 "source": "community",
-                "url": item.get("url") or "",
+                "url": (
+                    item.get("serverUrl")
+                    or item.get("url")
+                    or item.get("mcp_server")
+                    or ""
+                ),
                 "transport": item.get("transportType") or "",
                 "tools_summary": "",
                 "community_id": item.get("communityId"),
@@ -571,9 +621,19 @@ async def search_web_mcps(
         "You are an MCP marketplace recommender. Given the user's intent and a "
         "list of MCP servers from the registry and community, score each 0-10 "
         "and give a one-line reason. Respond with STRICT JSON: an array of "
-        "objects with `name`, `score` (0-10), and `reason`. No other text."
+        "objects with `mcp_id`, `score` (0-10), and `reason`. No other text."
     )
-    user_payload = {"user_intent": query, "mcps": candidates}
+    scoring_candidates = [
+        {
+            "mcp_id": candidate["_scoring_id"],
+            "name": candidate.get("name") or "",
+            "description": candidate.get("description") or "",
+            "source": candidate.get("source") or "",
+            "transport": candidate.get("transport") or "",
+        }
+        for candidate in candidates
+    ]
+    user_payload = {"user_intent": query, "mcps": scoring_candidates}
     try:
         raw = call_llm_for_system_prompt(
             model_id=model_id,
@@ -585,23 +645,32 @@ async def search_web_mcps(
         logger.warning(
             f"LLM scoring for web MCPs failed; returning unranked candidates: {exc}"
         )
-        return [
-            {
-                **candidate,
-                "score": 0,
-                "reason": "LLM scoring unavailable; shown as an unranked MCP candidate.",
-            }
-            for candidate in candidates[:top_n]
-        ]
+        return _unranked_candidates(candidates, top_n, "MCP")
 
-    scored = _parse_scored_json(raw, "name")
-    name_to_candidate = {c.get("name"): c for c in candidates}
+    scored = _parse_scored_json(raw, "mcp_id")
+    if not scored:
+        logger.warning(
+            "LLM scoring returned no usable MCP rankings; returning unranked candidates."
+        )
+        return _unranked_candidates(candidates, top_n, "MCP")
+
+    id_to_candidate = {c.get("_scoring_id"): c for c in candidates}
     enriched: List[Dict[str, Any]] = []
     for item in scored:
-        cand = name_to_candidate.get(item.get("name"))
+        cand = id_to_candidate.get(item.get("mcp_id"))
         if not cand:
             continue
-        enriched.append({**cand, "score": item.get("score", 0), "reason": item.get("reason", "")})
+        enriched.append({
+            **_strip_internal_scoring_fields(cand),
+            "score": item.get("score", 0),
+            "reason": item.get("reason", ""),
+        })
+
+    if not enriched:
+        logger.warning(
+            "LLM scoring returned no matching MCP IDs; returning unranked candidates."
+        )
+        return _unranked_candidates(candidates, top_n, "MCP")
 
     enriched.sort(key=lambda x: x.get("score", 0), reverse=True)
     return enriched[:top_n]
@@ -660,6 +729,8 @@ async def apply_local_resources_batch(
 
     Returns counts of bound items.
     """
+    _validate_draft_agent_id(agent_id)
+
     bound_tools = 0
     bound_skills = 0
     bound_skill_ids: List[int] = []
@@ -675,7 +746,7 @@ async def apply_local_resources_batch(
             instance_req = ToolInstanceInfoRequest(
                 tool_id=tool_id,
                 agent_id=agent_id,
-                params=ti.get("params") or {},
+                params=_normalize_tool_instance_params(ti.get("params")),
                 enabled=True,
                 version_no=0,
             )
@@ -767,6 +838,8 @@ async def finalize_agent(
     duty_prompt, constraint_prompt, few_shots_prompt, name, display_name,
     description, greeting_message, and example_questions.
     """
+    _validate_draft_agent_id(agent_id)
+
     if not task_description:
         raise AppException(
             ErrorCode.COMMON_VALIDATION_ERROR,

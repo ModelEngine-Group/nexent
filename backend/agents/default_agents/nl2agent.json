@@ -95,8 +95,8 @@
     {
       "class_name": "NL2AgentFinalizeAgentTool",
       "name": "nl2agent_finalize_agent",
-      "description": "Finalize the draft agent by generating its full prompt set.",
-      "inputs": "{\"task_description\": \"string\", \"tool_ids\": \"string (JSON list)\", \"skill_ids\": \"string (JSON list)\", \"sub_agent_ids\": \"string (JSON list)\", \"knowledge_base_names\": \"string (JSON list)\"}",
+      "description": "Finalize the draft agent by generating its full prompt set. Use [] for list arguments when no resources were selected.",
+      "inputs": "{\"task_description\": \"string\", \"tool_ids\": \"string (JSON list, default [])\", \"skill_ids\": \"string (JSON list, default [])\", \"sub_agent_ids\": \"string (JSON list, default [])\", \"knowledge_base_names\": \"string (JSON list, default [])\"}",
       "output_type": "string",
       "params": {},
       "source": "builtin",

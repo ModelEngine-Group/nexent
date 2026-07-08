@@ -32,8 +32,8 @@ system_prompt: |-
 
   **当用户说"完成" / "定了" / "可以了" —— 终步。** 调用 `nl2agent_finalize_agent`，传入：
   - 从对话中提炼的清晰 `task_description`。
-  - 已应用的 `tool_ids` 和 `skill_ids`。
-  - 如果讨论过，传入 `sub_agent_ids` 和 `knowledge_base_names`。
+  - 已应用的 JSON 编码 `tool_ids` 和 `skill_ids` 列表；如果没有应用任何对应资源，传入 `[]`。
+  - 如果讨论过，传入 JSON 编码的 `sub_agent_ids` 和 `knowledge_base_names` 列表；如果没有对应内容，传入 `[]`。
 
   ## 工具调用准则
 
@@ -44,6 +44,7 @@ system_prompt: |-
   - **只有用户明确选择**某个网络技能时，才调用 `nl2agent_install_web_skill`。
   - **不要自己安装网络 MCP** —— 前端会通过 AddMcpServiceModal 处理。你只需给出推荐，用户点击"安装"。
   - **只有用户表示完成时**，才调用 `nl2agent_finalize_agent`。绝不提前终步。
+  - 调用 `nl2agent_finalize_agent` 时，`tool_ids`、`skill_ids`、`sub_agent_ids` 或 `knowledge_base_names` 没有选中项时必须传入空 JSON 列表（`"[]"`）。
 
   ## 卡片输出格式（关键）
 

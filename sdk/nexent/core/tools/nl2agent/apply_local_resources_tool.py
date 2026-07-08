@@ -13,6 +13,7 @@ from ._context import (
     set_nl2agent_context,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +59,7 @@ def nl2agent_apply_local_resources(tool_ids: str, skill_ids: str) -> str:
     # nl2agent_apply_local_resources binds resources to the draft target. Use
     # draft_agent_id when present; fall back to agent_id (older callers).
     target_agent_id = ctx.draft_agent_id or ctx.agent_id
-    if target_agent_id is None:
+    if target_agent_id is None or target_agent_id <= 0:
         return json.dumps(
             {"error": "NL2AGENT draft agent_id not set in context."}, ensure_ascii=False
         )

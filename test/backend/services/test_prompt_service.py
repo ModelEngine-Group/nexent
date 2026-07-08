@@ -324,6 +324,68 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(call_args[0][1], "Test task")  # task_description
         self.assertEqual(call_args[0][2], [mock_tool1, mock_tool2])  # tool_info_list
 
+    def test_generate_and_save_system_prompt_impl_persists_generated_agent_fields(self):
+        def mock_generator(*args, **kwargs):
+            yield {"type": "duty", "content": "Final duty prompt", "is_complete": True}
+            yield {"type": "constraint", "content": "", "is_complete": True}
+            yield {"type": "few_shots", "content": "", "is_complete": True}
+            yield {"type": "agent_var_name", "content": "draft_helper", "is_complete": True}
+            yield {"type": "agent_display_name", "content": "Draft Helper", "is_complete": True}
+            yield {"type": "agent_description", "content": "Helps with draft work", "is_complete": True}
+
+        with patch(
+            'backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt',
+            return_value=[],
+        ), patch(
+            'backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt',
+            return_value=[],
+        ), patch(
+            'backend.services.prompt_service.get_knowledge_base_display_names',
+            return_value=[],
+        ), patch(
+            'backend.services.prompt_service.query_all_agent_info_by_tenant_id',
+            return_value=[],
+        ), patch(
+            'backend.services.prompt_service.generate_system_prompt',
+            side_effect=mock_generator,
+        ), patch(
+            'backend.services.prompt_service.update_agent',
+        ) as mock_update_agent, patch(
+            'backend.services.prompt_service.get_prompt_template',
+            return_value={
+                "GREETING_SYSTEM_PROMPT": "Generate greeting JSON",
+                "USER_PROMPT": "{{ display_name }}",
+            },
+        ), patch(
+            'backend.services.prompt_service.call_llm_for_system_prompt',
+            return_value='{"greeting_message": "Hi", "example_questions": ["What can you do?"]}',
+        ):
+            result = list(generate_and_save_system_prompt_impl(
+                agent_id=123,
+                model_id=self.test_model_id,
+                task_description="Build a draft helper",
+                user_id="user123",
+                tenant_id="tenant456",
+                language="en",
+                tool_ids=[],
+                sub_agent_ids=[],
+            ))
+
+        self.assertGreater(len(result), 0)
+        self.assertGreaterEqual(mock_update_agent.call_count, 2)
+        prompt_update_call = mock_update_agent.call_args_list[0]
+        prompt_request = prompt_update_call.args[1]
+
+        self.assertEqual(prompt_update_call.args[0], 123)
+        self.assertEqual(prompt_update_call.args[2], "user123")
+        self.assertEqual(prompt_request.name, "draft_helper")
+        self.assertEqual(prompt_request.display_name, "Draft Helper")
+        self.assertEqual(prompt_request.description, "Helps with draft work")
+        self.assertEqual(prompt_request.business_description, "Build a draft helper")
+        self.assertEqual(prompt_request.duty_prompt, "Final duty prompt")
+        self.assertEqual(prompt_request.constraint_prompt, "")
+        self.assertEqual(prompt_request.few_shots_prompt, "")
+
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')

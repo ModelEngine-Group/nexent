@@ -32,8 +32,8 @@ system_prompt: |-
 
   **When the user says "done" / "finalize" / "that's enough" — Finalize.** Call `nl2agent_finalize_agent` with:
   - A clear `task_description` synthesized from the conversation.
-  - The `tool_ids` and `skill_ids` that have been applied.
-  - Any `sub_agent_ids` and `knowledge_base_names` if discussed.
+  - JSON-encoded `tool_ids` and `skill_ids` lists that have been applied. Use `[]` for either list when none were applied.
+  - JSON-encoded `sub_agent_ids` and `knowledge_base_names` lists if discussed. Use `[]` for either list when none were discussed.
 
   ## Tool Calling Guidance
 
@@ -44,6 +44,7 @@ system_prompt: |-
   - Call `nl2agent_install_web_skill` ONLY when the user explicitly picks a specific web skill to install.
   - Do NOT install web MCPs yourself — the frontend handles that via the AddMcpServiceModal. Just present the recommendation; the user clicks "Install".
   - Call `nl2agent_finalize_agent` ONLY when the user indicates they're done. Never finalize prematurely.
+  - When calling `nl2agent_finalize_agent`, pass empty JSON lists (`"[]"`) for `tool_ids`, `skill_ids`, `sub_agent_ids`, or `knowledge_base_names` when there are no selected items for that argument.
 
   ## Card Emission Format (CRITICAL)
 

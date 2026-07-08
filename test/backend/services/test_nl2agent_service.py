@@ -319,6 +319,99 @@ async def test_search_web_mcps_returns_unranked_candidates_when_scoring_fails(mo
 
 
 @pytest.mark.asyncio
+async def test_search_web_mcps_returns_unranked_candidates_when_scoring_ids_do_not_match(monkeypatch):
+    registry_search = AsyncMock(return_value={"servers": []})
+    community_search = AsyncMock(
+        return_value={
+            "items": [
+                {
+                    "communityId": 55,
+                    "name": "browser-mcp",
+                    "description": "Automate browser workflows",
+                    "transportType": "url",
+                    "serverUrl": "https://example.com/mcp",
+                }
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        nl2agent_service, "list_registry_mcp_services", registry_search
+    )
+    monkeypatch.setattr(
+        nl2agent_service, "list_community_mcp_services", community_search
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "call_llm_for_system_prompt",
+        MagicMock(return_value='[{"mcp_id": "missing", "score": 9, "reason": "good"}]'),
+    )
+
+    result = await nl2agent_service.search_web_mcps(
+        query="control a browser",
+        tenant_id="tenant_1",
+        model_id=9,
+    )
+
+    assert result == [
+        {
+            "name": "browser-mcp",
+            "description": "Automate browser workflows",
+            "source": "community",
+            "url": "https://example.com/mcp",
+            "transport": "url",
+            "tools_summary": "",
+            "community_id": 55,
+            "score": 0,
+            "reason": "LLM scoring unavailable; shown as an unranked MCP candidate.",
+        }
+    ]
+    assert "_scoring_id" not in result[0]
+
+
+@pytest.mark.asyncio
+async def test_search_web_skills_returns_unranked_candidates_when_scoring_is_invalid(monkeypatch):
+    official_skills = MagicMock(
+        return_value=[
+            {
+                "skill_id": 77,
+                "name": "doc-review",
+                "description": "Review documents",
+                "tags": ["documents"],
+                "status": "installable",
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        nl2agent_service, "get_official_skills_with_status", official_skills
+    )
+    monkeypatch.setattr(
+        nl2agent_service,
+        "call_llm_for_system_prompt",
+        MagicMock(return_value="not json"),
+    )
+
+    result = await nl2agent_service.search_web_skills(
+        query="review documents",
+        tenant_id="tenant_1",
+        model_id=9,
+    )
+
+    assert result == [
+        {
+            "skill_id": 77,
+            "name": "doc-review",
+            "description": "Review documents",
+            "tags": ["documents"],
+            "status": "installable",
+            "score": 0,
+            "reason": "LLM scoring unavailable; shown as an unranked skill candidate.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_draft(
     monkeypatch,
 ):
@@ -370,6 +463,86 @@ async def test_apply_local_resources_batch_binds_tools_and_installed_skills_to_d
     assert skill_request.enabled is True
     assert skill_request.version_no == 0
     bind_skill.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_local_resources_batch_ignores_catalog_param_schema(monkeypatch):
+    query_tools = MagicMock(
+        return_value=[
+            {
+                "tool_id": 42,
+                "params": [
+                    {
+                        "type": "integer",
+                        "name": "top_k",
+                        "default": None,
+                        "optional": True,
+                    }
+                ],
+            }
+        ]
+    )
+    bind_tool = MagicMock()
+
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
+    monkeypatch.setattr(
+        nl2agent_service, "create_or_update_tool_by_tool_info", bind_tool
+    )
+
+    result = await nl2agent_service.apply_local_resources_batch(
+        agent_id=202,
+        tool_ids=[42],
+        skill_ids=[],
+        tenant_id="tenant_1",
+        user_id="user_1",
+    )
+
+    assert result["bound_tool_count"] == 1
+    tool_request = bind_tool.call_args.kwargs["tool_info"]
+    assert tool_request.params == {}
+
+
+@pytest.mark.asyncio
+async def test_apply_local_resources_batch_rejects_invalid_draft_agent_id(monkeypatch):
+    query_tools = MagicMock()
+    monkeypatch.setattr(nl2agent_service, "query_tools_by_ids", query_tools)
+
+    with pytest.raises(nl2agent_service.AgentRunException):
+        await nl2agent_service.apply_local_resources_batch(
+            agent_id=0,
+            tool_ids=[42],
+            skill_ids=[],
+            tenant_id="tenant_1",
+            user_id="user_1",
+        )
+
+    query_tools.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_finalize_agent_rejects_invalid_draft_agent_id(monkeypatch):
+    generate_prompt = MagicMock()
+    monkeypatch.setattr(
+        nl2agent_service,
+        "generate_and_save_system_prompt_impl",
+        generate_prompt,
+    )
+
+    with pytest.raises(nl2agent_service.AgentRunException):
+        await nl2agent_service.finalize_agent(
+            agent_id=0,
+            model_id=7,
+            task_description="Build a helper agent",
+            tool_ids=[],
+            skill_ids=[],
+            sub_agent_ids=[],
+            knowledge_base_display_names=[],
+            user_id="user_1",
+            tenant_id="tenant_1",
+            language="en",
+        )
+
+    generate_prompt.assert_not_called()
 
 
 def test_seed_nl2agent_default_agent_sets_prompt_and_available_models(monkeypatch):
