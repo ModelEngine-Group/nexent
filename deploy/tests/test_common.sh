@@ -677,6 +677,18 @@ if grep -q 'appVersion' "$LOCAL_CONFIG"; then
 fi
 assert_contains "$(cat "$LOCAL_CONFIG")" 'imageRegistryPrefix: "registry.local/nexent"' "persisted local config should include image registry prefix"
 
+K8S_DEPLOY_OPTIONS_BLOCK="$(awk '/persist_deploy_options\(\) {/,/^}/' "$SCRIPT_DIR/../k8s/deploy.sh")"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "PERSISTENCE_MODE=\"${PERSISTENCE_MODE}\""' "k8s deploy options should persist persistence mode"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "STORAGE_CLASS_NAME=\"${STORAGE_CLASS_NAME}\""' "k8s deploy options should persist storage class"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "LOCAL_PATH=\"${LOCAL_PATH}\""' "k8s deploy options should persist local path"
+assert_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'echo "EXISTING_CLAIM_PREFIX=\"${EXISTING_CLAIM_PREFIX}\""' "k8s deploy options should persist existing claim prefix"
+assert_not_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'LOCAL_NODE_NAME=' "k8s deploy options should not persist deprecated local node name"
+assert_not_contains "$K8S_DEPLOY_OPTIONS_BLOCK" 'K8S_WAIT_TIMEOUT_SECONDS=' "k8s deploy options should not persist one-time wait timeout"
+if echo "$K8S_DEPLOY_OPTIONS_BLOCK" | grep -Eq 'PASSWORD|TOKEN|JWT|SECRET|KEY'; then
+  echo "FAIL: k8s deploy options should not persist secret-looking fields"
+  exit 1
+fi
+
 assert_success "b should be treated as TUI back key" deployment_tui_is_back_key "b"
 assert_success "Backspace should be treated as TUI back key" deployment_tui_is_back_key $'\177'
 if deployment_tui_is_back_key "q"; then

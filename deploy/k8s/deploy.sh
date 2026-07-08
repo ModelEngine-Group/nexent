@@ -545,6 +545,10 @@ persist_deploy_options() {
     echo "APP_VERSION=\"${APP_VERSION}\""
     echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
     echo "DEPLOYMENT_VERSION=\"${VERSION_CHOICE_SAVED}\""
+    echo "PERSISTENCE_MODE=\"${PERSISTENCE_MODE}\""
+    echo "STORAGE_CLASS_NAME=\"${STORAGE_CLASS_NAME}\""
+    echo "LOCAL_PATH=\"${LOCAL_PATH}\""
+    echo "EXISTING_CLAIM_PREFIX=\"${EXISTING_CLAIM_PREFIX}\""
   } > "$DEPLOY_OPTIONS_FILE"
 }
 
