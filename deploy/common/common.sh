@@ -585,6 +585,7 @@ deployment_prepare_monitoring_env() {
   local legacy_file
   local telemetry_enabled
   local dashboard_url
+  local existing_dashboard_url
   local provider
   local collector_config_file
   local otlp_endpoint
@@ -613,8 +614,13 @@ deployment_prepare_monitoring_env() {
   deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
 
   deployment_source_env_file "$env_file"
-  dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
-  deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+  existing_dashboard_url="$(deployment_get_env_var_file "$env_file" "MONITORING_DASHBOARD_URL" 2>/dev/null || true)"
+  if [ "$telemetry_enabled" != "true" ]; then
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" ""
+  elif [ -z "$existing_dashboard_url" ]; then
+    dashboard_url="$(deployment_monitoring_dashboard_url "$target")"
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" "$dashboard_url"
+  fi
 
   case "$target" in
     k8s|helm)

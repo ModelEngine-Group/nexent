@@ -455,11 +455,20 @@ assert_contains "$MONITORING_HELM_CONTENT" 'configFile: "otel-collector-langsmit
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER" "Basic stale"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL" ""
 deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider langfuse --app-version latest
 deployment_prepare_monitoring_env docker
 EXPECTED_LANGFUSE_AUTH_HEADER="Basic $(printf "%s:%s" "pk-test" "sk-test" | base64 | tr -d '\n')"
 assert_eq "$EXPECTED_LANGFUSE_AUTH_HEADER" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER")" "monitoring.env should refresh derived Langfuse OTLP auth header"
 assert_eq "../assets/monitoring/otel-collector-langfuse-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record Docker collector config file"
+assert_eq "http://localhost:3001" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "empty monitoring dashboard URL should use the selected provider default"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL" "https://monitor.example.com/grafana"
+deployment_prepare_config --components infrastructure,application,monitoring --monitoring-provider grafana --app-version latest
+deployment_prepare_monitoring_env docker
+assert_eq "https://monitor.example.com/grafana" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "explicit monitoring dashboard URL should be preserved"
+deployment_prepare_config --components infrastructure,application --monitoring-provider grafana --app-version latest
+deployment_prepare_monitoring_env docker
+assert_eq "" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "disabled monitoring should clear dashboard URL"
 while IFS='=' read -r key _; do
   [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
   unset "$key"

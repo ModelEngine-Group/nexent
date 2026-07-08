@@ -105,6 +105,11 @@ assert_common_package_files() {
 
 create_fake_docker
 
+WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--compress false' || fail "offline package workflow should let GitHub create the final artifact zip"
+echo "$WORKFLOW_CONTENT" | grep -q 'path: ./offline-output' || fail "offline package workflow should upload package contents, not an inner zip"
+! echo "$WORKFLOW_CONTENT" | grep -q 'path: .*package-name.*\\.zip' || fail "offline package workflow should not upload a pre-compressed zip"
+
 for target in docker k8s all; do
   package_dir="$OUT_DIR/$target"
   PATH="$BIN_DIR:$PATH" \
