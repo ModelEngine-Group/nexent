@@ -196,6 +196,7 @@ def list_skill_repository_summaries(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
     """List active repository summaries for a publisher tenant without heavy payloads."""
     safe_page = max(int(page or 1), 1)
@@ -226,8 +227,13 @@ def list_skill_repository_summaries(
         )
 
         total = query.count()
+        order_by_fields = (
+            (SkillRepository.update_time.desc(), SkillRepository.skill_repository_id.desc())
+            if sort_by_update_time
+            else (SkillRepository.skill_repository_id.desc(),)
+        )
         rows = (
-            query.order_by(SkillRepository.skill_repository_id.desc())
+            query.order_by(*order_by_fields)
             .offset((safe_page - 1) * safe_page_size)
             .limit(safe_page_size)
             .all()

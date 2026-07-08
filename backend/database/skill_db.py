@@ -441,6 +441,96 @@ def update_skill(
         return result
 
 
+def update_skill_by_id(
+    skill_id: int,
+    skill_data: Dict[str, Any],
+    tenant_id: str,
+    updated_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update an existing skill by ID for a tenant."""
+    with get_db_session() as session:
+        skill = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != "Y",
+        ).first()
+
+        if not skill:
+            raise ValueError(f"Skill not found: {skill_id}")
+
+        now = datetime.now()
+        row_values: Dict[str, Any] = {"update_time": now}
+        if updated_by:
+            row_values["updated_by"] = updated_by
+
+        if "name" in skill_data:
+            new_name = str(skill_data["name"] or "").strip()
+            if not new_name:
+                raise ValueError("Skill name is required")
+            if new_name != skill.skill_name:
+                duplicate = session.query(SkillInfo).filter(
+                    SkillInfo.skill_name == new_name,
+                    SkillInfo.tenant_id == tenant_id,
+                    SkillInfo.skill_id != skill_id,
+                    SkillInfo.delete_flag != "Y",
+                ).first()
+                if duplicate:
+                    raise ValueError(f"Skill '{new_name}' already exists")
+                row_values["skill_name"] = new_name
+        if "description" in skill_data:
+            row_values["skill_description"] = skill_data["description"]
+        if "content" in skill_data:
+            row_values["skill_content"] = skill_data["content"]
+        if "tags" in skill_data:
+            row_values["skill_tags"] = skill_data["tags"]
+        if "source" in skill_data:
+            row_values["source"] = skill_data["source"]
+        if "config_schemas" in skill_data:
+            row_values["config_schemas"] = _params_value_for_db(skill_data["config_schemas"])
+        if "config_values" in skill_data:
+            row_values["config_values"] = _params_value_for_db(skill_data["config_values"])
+
+        session.execute(
+            sa_update(SkillInfo)
+            .where(
+                SkillInfo.skill_id == skill_id,
+                SkillInfo.tenant_id == tenant_id,
+                SkillInfo.delete_flag != "Y",
+            )
+            .values(**row_values)
+        )
+
+        if "tool_ids" in skill_data:
+            session.query(SkillToolRelation).filter(
+                SkillToolRelation.skill_id == skill_id
+            ).delete()
+
+            for tool_id in skill_data["tool_ids"]:
+                rel = SkillToolRelation(
+                    skill_id=skill_id,
+                    tool_id=tool_id,
+                    create_time=datetime.now()
+                )
+                session.add(rel)
+
+        session.commit()
+
+        refreshed = session.query(SkillInfo).filter(
+            SkillInfo.skill_id == skill_id,
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != "Y",
+        ).first()
+        if not refreshed:
+            raise ValueError(f"Skill not found after update: {skill_id}")
+
+        result = _to_dict(refreshed)
+        result["tool_ids"] = skill_data.get(
+            "tool_ids",
+            _get_tool_ids(session, skill_id),
+        )
+        return result
+
+
 def delete_skill(skill_name: str, tenant_id: str, updated_by: Optional[str] = None) -> bool:
     """Soft delete a skill for a tenant (mark as deleted).
 

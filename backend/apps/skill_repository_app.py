@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
-from consts.model import SkillRepositoryListingCreateRequest
+from consts.model import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from services.skill_repository_service import (
     create_skill_repository_listing_impl,
     get_skill_repository_listing_detail_impl,
@@ -36,6 +36,9 @@ async def list_skill_repository_listings_api(
     search: Optional[str] = Query(
         None, description="Filter by name, description, source, submitter, or tags"
     ),
+    sort_by_update_time: bool = Query(
+        False, description="Sort by repository update time descending"
+    ),
     authorization: str = Header(None),
 ):
     """List all skill marketplace repository listings with optional filters."""
@@ -49,6 +52,7 @@ async def list_skill_repository_listings_api(
             page=page,
             page_size=page_size,
             search=search,
+            sort_by_update_time=sort_by_update_time,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
@@ -215,6 +219,7 @@ async def create_skill_repository_listing_api(
 @skill_repository_router.post("/{skill_repository_id}/install")
 async def install_skill_from_repository_api(
     skill_repository_id: int,
+    payload: Optional[SkillRepositoryInstallRequest] = Body(None),
     authorization: Optional[str] = Header(None),
 ):
     """Install a skill from a shared marketplace repository listing."""
@@ -224,6 +229,7 @@ async def install_skill_from_repository_api(
             skill_repository_id=skill_repository_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            target_name=payload.target_name if payload else None,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
@@ -232,21 +238,21 @@ async def install_skill_from_repository_api(
             f"(id={skill_repository_id}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except SkillDuplicateError as exc:
-        logger.warning(
-            f"Skill duplicate on repository install (id={skill_repository_id}): "
-            f"{exc.duplicate_names}"
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT,
-            detail={
-                "type": "skill_duplicate",
-                "duplicate_skills": exc.duplicate_names,
-            },
-        )
     except ValueError as e:
         logger.warning(
             f"Skill repository listing not found for install "
             f"(id={skill_repository_id}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except SkillDuplicateError as e:
+        logger.warning(
+            f"Duplicate skill repository install attempt "
+            f"(id={skill_repository_id}, duplicates={e.duplicate_names})"
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "type": "skill_duplicate",
+                "duplicate_skills": e.duplicate_names,
+            },
+        )

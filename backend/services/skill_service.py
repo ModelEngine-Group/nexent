@@ -1615,6 +1615,87 @@ class SkillService:
             logger.error(f"Error updating skill {skill_name}: {e}")
             raise SkillException(f"Failed to update skill: {str(e)}") from e
 
+    def update_skill_by_id(
+        self,
+        skill_id: int,
+        skill_data: Dict[str, Any],
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Update an existing skill by ID for a tenant."""
+        effective_tenant_id = tenant_id or self.tenant_id
+        if not effective_tenant_id:
+            raise SkillException("tenant_id is required")
+        try:
+            existing = skill_db.get_skill_by_id(skill_id, effective_tenant_id)
+            if not existing:
+                raise SkillException(f"Skill not found: {skill_id}")
+
+            result = skill_db.update_skill_by_id(
+                skill_id,
+                skill_data,
+                effective_tenant_id,
+                updated_by=user_id or None,
+            )
+
+            local_dir = self.skill_manager.local_skills_dir or CONTAINER_SKILLS_PATH
+            local_skill_name = (
+                f"skill_{skill_id}"
+                if local_dir and os.path.isdir(os.path.join(local_dir, f"skill_{skill_id}"))
+                else str(result.get("name") or existing.get("name") or "")
+            )
+            if not local_skill_name:
+                return self._enrich_configs_from_yaml(result)
+
+            if local_dir and "config_values" in skill_data:
+                try:
+                    raw_config_values = skill_data["config_values"]
+                    if raw_config_values is None:
+                        _remove_local_skill_config_yaml(local_skill_name, local_dir)
+                    else:
+                        _write_skill_params_to_local_config_yaml(
+                            local_skill_name,
+                            _params_dict_to_storable(raw_config_values),
+                            local_dir,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Local config/config.yaml sync failed after skill ID update for %s: %s",
+                        skill_id,
+                        exc,
+                    )
+
+            if not local_dir:
+                return self._enrich_configs_from_yaml(result)
+
+            try:
+                allowed_tools = skill_db.get_tool_names_by_skill_name(
+                    str(existing.get("name") or ""),
+                    effective_tenant_id,
+                )
+                local_skill_dict = {
+                    "name": local_skill_name,
+                    "description": skill_data.get("description", existing.get("description", "")),
+                    "content": skill_data.get("content", existing.get("content", "")),
+                    "tags": skill_data.get("tags", existing.get("tags", [])),
+                    "allowed-tools": allowed_tools,
+                    "files": skill_data.get("files", []),
+                }
+                self.skill_manager.save_skill(local_skill_dict)
+            except Exception as exc:
+                logger.warning(
+                    "Local SKILL.md sync failed after DB update for skill ID %s: %s",
+                    skill_id,
+                    exc,
+                )
+
+            return self._enrich_configs_from_yaml(result)
+        except SkillException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating skill by ID {skill_id}: {e}")
+            raise SkillException(f"Failed to update skill: {str(e)}") from e
+
     def delete_skill(
         self,
         skill_name: str,
@@ -2078,7 +2159,6 @@ class SkillService:
         result = skill_db.create_skill(skill_dict, tenant_id)
 
         self.skill_manager.save_skill(skill_dict)
-
         self._upload_zip_files(zip_bytes, name, detected_skill_name)
 
         return self._enrich_configs_from_yaml(result)

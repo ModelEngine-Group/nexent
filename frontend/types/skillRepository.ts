@@ -43,6 +43,7 @@ export interface SkillRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  sort_by_update_time?: boolean;
 }
 
 export interface SkillRepositoryListingDetail

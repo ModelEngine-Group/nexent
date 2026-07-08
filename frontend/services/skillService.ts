@@ -4,6 +4,7 @@ import { fetchWithAuth } from "@/lib/auth";
 import {
   createSkill,
   updateSkill,
+  updateSkillById,
   createSkillFromFile,
   searchSkillsByName as searchSkillsByNameApi,
   fetchSkills,
@@ -211,17 +212,17 @@ export async function fetchSkillsList(tenantId?: string | null): Promise<SkillLi
  */
 export const submitSkillForm = async (
   values: SkillData,
-  allSkills: SkillListItem[],
-  onSuccess: () => void,
+  _allSkills: SkillListItem[],
+  onSuccess: () => void | Promise<void>,
   onCancel: () => void,
-  t: (key: string) => string
+  t: (key: string) => string,
+  options: { mode?: "create" | "edit"; skillId?: number } = { mode: "create" }
 ): Promise<boolean> => {
   try {
-    const existingSkill = allSkills.find((s) => s.name === values.name);
-
     let result;
-    if (existingSkill) {
-      result = await updateSkill(values.name, {
+    if (options.mode === "edit" && options.skillId) {
+      result = await updateSkillById(options.skillId, {
+        name: values.name,
         description: values.description,
         source: values.source,
         tags: values.tags,
@@ -241,21 +242,19 @@ export const submitSkillForm = async (
 
     if (result.success) {
       message.success(
-        existingSkill
+        options.mode === "edit"
           ? t("skillManagement.message.updateSuccess")
           : t("skillManagement.message.createSuccess")
       );
-      onSuccess();
+      await onSuccess();
       onCancel();
       return true;
     } else {
-      message.error(result.message || t("skillManagement.message.submitFailed"));
-      return false;
+      throw new Error(result.message || t("skillManagement.message.submitFailed"));
     }
   } catch (error) {
     log.error("Skill create/update error:", error);
-    message.error(t("skillManagement.message.submitFailed"));
-    return false;
+    throw error;
   }
 };
 
@@ -271,19 +270,10 @@ export const submitSkillFromFile = async (
   t: (key: string) => string
 ): Promise<boolean> => {
   try {
-    const normalizedName = skillName.trim().toLowerCase();
-    const existingSkill = allSkills.find(
-      (s) => s.name.trim().toLowerCase() === normalizedName
-    );
-
-    const result = await createSkillFromFile(skillName.trim(), file, !!existingSkill);
+    const result = await createSkillFromFile(skillName.trim(), file, false);
 
     if (result.success) {
-      message.success(
-        existingSkill
-          ? t("skillManagement.message.updateSuccess")
-          : t("skillManagement.message.createSuccess")
-      );
+      message.success(t("skillManagement.message.createSuccess"));
       onSuccess();
       onCancel();
       return true;

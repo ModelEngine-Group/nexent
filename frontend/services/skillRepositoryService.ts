@@ -150,14 +150,19 @@ export async function updateSkillRepositoryStatus(
 }
 
 export async function installSkillFromRepository(
-  skillRepositoryId: number
+  skillRepositoryId: number,
+  payload?: { target_name?: string }
 ): Promise<{ skill_id?: number; name?: string }> {
   try {
     const response = await fetch(
       API_ENDPOINTS.skillRepository.install(skillRepositoryId),
       {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload ?? {}),
       }
     );
 

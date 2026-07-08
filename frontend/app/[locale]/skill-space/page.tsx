@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { App, ConfigProvider } from "antd";
+import { App, ConfigProvider, Input, Modal } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
 
@@ -67,6 +67,9 @@ export default function SkillRepositoryPage() {
   );
   const [skillBuildOpen, setSkillBuildOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(null);
+  const [copyListing, setCopyListing] = useState<SkillRepositoryListingItem | null>(null);
+  const [copyTargetName, setCopyTargetName] = useState("");
+  const [copyNameError, setCopyNameError] = useState<string | null>(null);
 
   const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
   const isMineTab = tab === SkillRepositoryTab.MINE;
@@ -97,6 +100,7 @@ export default function SkillRepositoryPage() {
     () => ({
       page: reviewPage,
       page_size: REVIEW_PAGE_SIZE,
+      sort_by_update_time: true,
     }),
     [reviewPage]
   );
@@ -168,19 +172,40 @@ export default function SkillRepositoryPage() {
     ? updateStatusMutation.variables?.skillRepositoryId ?? null
     : null;
   const installingRepositoryId = installMutation.isPending
-    ? installMutation.variables ?? null
+    ? installMutation.variables?.skillRepositoryId ?? null
     : null;
 
   const openDetail = (listing: SkillRepositoryListingItem) => {
     setDetailRepositoryId(listing.skill_repository_id);
   };
 
-  const handleInstall = async (listing: SkillRepositoryListingItem) => {
+  const handleInstall = (listing: SkillRepositoryListingItem) => {
+    const baseName = listing.name?.trim() || "Skill";
+    setCopyListing(listing);
+    setCopyTargetName(`${baseName} 副本`);
+    setCopyNameError(null);
+  };
+
+  const handleConfirmInstall = async () => {
+    if (!copyListing) {
+      return;
+    }
+    const targetName = copyTargetName.trim();
+    if (!targetName) {
+      setCopyNameError("请输入 Skill 名称");
+      return;
+    }
     try {
-      const result = await installMutation.mutateAsync(listing.skill_repository_id);
+      setCopyNameError(null);
+      const result = await installMutation.mutateAsync({
+        skillRepositoryId: copyListing.skill_repository_id,
+        targetName,
+      });
       message.success(
         result.name ? `Skill 已复制为：${result.name}` : "Skill 复制成功"
       );
+      setCopyListing(null);
+      setCopyTargetName("");
     } catch (error) {
       const detail =
         error instanceof Error && "detail" in error
@@ -196,10 +221,10 @@ export default function SkillRepositoryPage() {
         const duplicateNames = Array.isArray(duplicates)
           ? duplicates.filter((name): name is string => typeof name === "string")
           : [];
-        message.error(
+        setCopyNameError(
           duplicateNames.length > 0
-            ? `我的 Skill 中已存在同名 Skill：${duplicateNames.join("、")}`
-            : "我的 Skill 中已存在同名 Skill，暂不支持重复复制"
+            ? `当前租户已存在同名 Skill：${duplicateNames.join("、")}`
+            : "当前租户已存在同名 Skill，请修改名称后再复制"
         );
         return;
       }
@@ -231,6 +256,55 @@ export default function SkillRepositoryPage() {
       status: "not_shared",
     });
     message.success(wasShared ? "已下架" : "已撤回申请");
+  };
+
+  const getActiveRepositoryInfo = (skill?: MyEditableSkillItem | null) =>
+    (skill?.repository_info ?? []).filter(
+      (info) => info.status === "shared" || info.status === "pending_review"
+    );
+
+  const confirmEditListedSkill = async (
+    skill: MyEditableSkillItem
+  ): Promise<boolean> => {
+    const activeInfo = getActiveRepositoryInfo(skill);
+    if (activeInfo.length === 0) {
+      return true;
+    }
+
+    const hasShared = activeInfo.some((info) => info.status === "shared");
+    return new Promise((resolve) => {
+      modal.confirm({
+        title: hasShared ? "保存后将自动下架" : "保存后将撤回审核",
+        content: hasShared
+          ? "该 Skill 已上架，保存修改后将自动下架，需要重新提交审核。"
+          : "该 Skill 正在审核中，保存修改后将撤回审核，需要重新提交。",
+        okText: "继续保存",
+        cancelText: "取消",
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+  };
+
+  const handleSkillBuildSuccess = async () => {
+    const activeInfo = getActiveRepositoryInfo(editingSkill);
+    if (activeInfo.length > 0) {
+      try {
+        await Promise.all(
+          activeInfo.map((info) =>
+            updateStatusMutation.mutateAsync({
+              skillRepositoryId: info.skill_repository_id,
+              status: "not_shared",
+            })
+          )
+        );
+        message.success("已自动下架，请重新上架");
+      } catch (error) {
+        message.error("Skill 已保存，但自动下架失败，请手动下架");
+      }
+    }
+    await refetchMine().catch(() => {});
+    setEditingSkill(null);
   };
 
   const confirmUpdateStatus = (
@@ -441,6 +515,47 @@ export default function SkillRepositoryPage() {
         onClose={() => setDetailRepositoryId(null)}
         onRetry={() => refetchDetail()}
       />
+      <Modal
+        centered
+        destroyOnHidden
+        title="复制为我的 Skill"
+        open={copyListing != null}
+        okText="复制"
+        cancelText="取消"
+        confirmLoading={installMutation.isPending}
+        onOk={handleConfirmInstall}
+        onCancel={() => {
+          setCopyListing(null);
+          setCopyTargetName("");
+          setCopyNameError(null);
+        }}
+      >
+        <div className="space-y-2 pt-2">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            Skill 名称
+          </label>
+          <Input
+            value={copyTargetName}
+            status={copyNameError ? "error" : undefined}
+            placeholder="请输入 Skill 名称"
+            maxLength={100}
+            onChange={(event) => {
+              setCopyTargetName(event.target.value);
+              if (copyNameError) {
+                setCopyNameError(null);
+              }
+            }}
+            onPressEnter={handleConfirmInstall}
+          />
+          {copyNameError ? (
+            <p className="text-sm text-red-500">{copyNameError}</p>
+          ) : (
+            <p className="text-sm text-slate-500">
+              如果当前租户已存在同名 Skill，请修改名称后再复制。
+            </p>
+          )}
+        </div>
+      </Modal>
       <SkillBuildModal
         isOpen={skillBuildOpen}
         editingSkill={editingSkill}
@@ -448,10 +563,8 @@ export default function SkillRepositoryPage() {
           setSkillBuildOpen(false);
           setEditingSkill(null);
         }}
-        onSuccess={() => {
-          refetchMine().catch(() => {});
-          setEditingSkill(null);
-        }}
+        onSuccess={handleSkillBuildSuccess}
+        onBeforeEditSave={confirmEditListedSkill}
       />
     </ConfigProvider>
   );

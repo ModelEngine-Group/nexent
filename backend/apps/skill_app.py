@@ -496,6 +496,76 @@ async def scan_and_update_skill(authorization: Optional[str] = Header(None)):
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update skill")
 
 
+@router.get("/{skill_id:int}")
+async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(None)) -> JSONResponse:
+    """Get a specific skill by ID."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        service = SkillService(tenant_id=tenant_id)
+        skill = service.get_skill_by_id(skill_id, tenant_id=tenant_id)
+        if not skill:
+            raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+        return JSONResponse(content=skill)
+    except HTTPException:
+        raise
+    except SkillException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting skill by ID {skill_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.put("/{skill_id:int}")
+async def update_skill_by_id(
+    skill_id: int,
+    request: SkillUpdateRequest,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """Update an existing skill by ID."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        service = SkillService(tenant_id=tenant_id)
+        update_data = {}
+        if request.name is not None:
+            update_data["name"] = request.name
+        if request.description is not None:
+            update_data["description"] = request.description
+        if request.content is not None:
+            update_data["content"] = request.content
+        if request.tags is not None:
+            update_data["tags"] = request.tags
+        if request.source is not None:
+            update_data["source"] = request.source
+        if request.config_schemas is not None:
+            update_data["config_schemas"] = request.config_schemas
+        if request.config_values is not None:
+            update_data["config_values"] = request.config_values
+        if request.files is not None:
+            update_data["files"] = [f.model_dump() for f in request.files]
+
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        skill = service.update_skill_by_id(
+            skill_id,
+            update_data,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return JSONResponse(content=skill)
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except SkillException as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating skill by ID {skill_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/{skill_name}")
 async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)) -> JSONResponse:
     """Get a specific skill by name."""

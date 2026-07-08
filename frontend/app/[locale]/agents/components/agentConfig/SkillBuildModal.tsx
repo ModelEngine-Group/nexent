@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useRef, type ChangeEvent, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -8,7 +8,6 @@ import {
   Form,
   Input,
   Button,
-  AutoComplete,
   Select,
   message,
   Flex,
@@ -36,7 +35,6 @@ import {
 import { extractSkillInfo, extractSkillInfoFromContent } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
 import {
-  MAX_RECENT_SKILLS,
   THINKING_STEPS_ZH,
   type SkillFormData,
   type ChatMessage,
@@ -47,29 +45,28 @@ import {
   submitSkillForm,
   submitSkillFromFile,
   findSkillByName,
-  searchSkillsByName as searchSkillsByNameUtil,
   createSkillStream,
   stopSkillCreation,
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
 import {
-  fetchSkillFiles,
-  fetchSkillFileContent,
-  SkillFilesAccessDeniedError,
-  type SkillFileNode,
+  fetchSkillById,
 } from "@/services/agentConfigService";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import log from "@/lib/logger";
 
 const { TextArea } = Input;
+const MAX_SKILL_TAGS = 5;
+const MAX_SKILL_TAG_LENGTH = 20;
 
 interface SkillBuildModalProps {
   isOpen: boolean;
   onCancel: () => void;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
   editingSkill?: MyEditableSkillItem | null;
+  onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
 }
 
 export default function SkillBuildModal({
@@ -77,6 +74,7 @@ export default function SkillBuildModal({
   onCancel,
   onSuccess,
   editingSkill,
+  onBeforeEditSave,
 }: SkillBuildModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
@@ -84,8 +82,6 @@ export default function SkillBuildModal({
   const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allSkills, setAllSkills] = useState<SkillListItem[]>([]);
-  const [searchResults, setSearchResults] = useState<SkillListItem[]>([]);
-  const [selectedSkillName, setSelectedSkillName] = useState<string>("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadExtractedSkillName, setUploadExtractedSkillName] = useState<string>("");
   const [uploadExtractingName, setUploadExtractingName] = useState(false);
@@ -178,25 +174,6 @@ export default function SkillBuildModal({
   const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
     tabs.filter((tab, index, self) => self.findIndex((item) => item.path === tab.path) === index);
 
-  // Name input dropdown control
-  const [isNameDropdownOpen, setIsNameDropdownOpen] = useState(false);
-  const [isTagsFocused, setIsTagsFocused] = useState(false);
-
-  // Create/Update mode detection
-  const [isCreateMode, setIsCreateMode] = useState(true);
-
-  // Recent skills (sorted by update_time descending, take top 5)
-  const recentSkills = useMemo(() => {
-    return [...allSkills]
-      .filter((s) => s.update_time)
-      .sort((a, b) => {
-        const timeA = new Date(a.update_time!).getTime();
-        const timeB = new Date(b.update_time!).getTime();
-        return timeB - timeA;
-      })
-      .slice(0, MAX_RECENT_SKILLS);
-  }, [allSkills]);
-
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -225,15 +202,10 @@ export default function SkillBuildModal({
       taskIdRef.current = "";
       form.resetFields();
       setActiveTab("interactive");
-      setSelectedSkillName("");
       setUploadFile(null);
-      setSearchResults([]);
       setChatMessages([]);
       setChatInput("");
       setInteractiveSkillName("");
-      setIsNameDropdownOpen(false);
-      setIsTagsFocused(false);
-      setIsCreateMode(true);
       setUploadExtractingName(false);
       setUploadExtractedSkillName("");
       setThinkingDescription("");
@@ -273,27 +245,6 @@ export default function SkillBuildModal({
     });
   }, [summaryContent]);
 
-  // Detect create/update mode when skill name changes
-  useEffect(() => {
-    const nameValue = interactiveSkillName.trim();
-    if (isEditMode) {
-      setIsCreateMode(false);
-      return;
-    }
-    if (nameValue) {
-      const matchedSkill = findSkillByName(nameValue, allSkills);
-      setIsCreateMode(!matchedSkill);
-      if (matchedSkill) {
-        setSelectedSkillName(matchedSkill.name);
-        // Load all skill data including files
-        loadSkillData(nameValue);
-      }
-    } else {
-      setIsCreateMode(true);
-      setSelectedSkillName("");
-    }
-  }, [interactiveSkillName, allSkills, form, isEditMode]);
-
   // Detect create/update mode when extracted skill name changes (upload tab)
   const [uploadIsCreateMode, setUploadIsCreateMode] = useState(true);
   useEffect(() => {
@@ -306,102 +257,68 @@ export default function SkillBuildModal({
     }
   }, [uploadExtractedSkillName, allSkills]);
 
-  // Dropdown options based on input state
-  const dropdownOptions = useMemo(() => {
-    if (!interactiveSkillName || interactiveSkillName.trim() === "") {
-      return recentSkills.map((skill) => ({
-        value: skill.name,
-        label: (
-          <Flex justify="space-between" align="center">
-            <span>{skill.name}</span>
-            <span className="text-xs text-gray-400">{skill.source}</span>
-          </Flex>
-        ),
-      }));
-    }
-    return searchResults.map((skill) => ({
-      value: skill.name,
-      label: (
-        <Flex justify="space-between" align="center">
-          <span>{skill.name}</span>
-          <span className="text-xs text-gray-400">{skill.source}</span>
-        </Flex>
-      ),
-    }));
-  }, [interactiveSkillName, searchResults, recentSkills]);
-
-  // Determine if dropdown should be open
-  const shouldShowDropdown = isNameDropdownOpen && !isTagsFocused;
-
-  const handleNameSearch = (value: string) => {
-    setInteractiveSkillName(value);
-    if (!value || value.trim() === "") {
-      setSearchResults([]);
-    } else {
-      const results = searchSkillsByNameUtil(value, allSkills);
-      setSearchResults(results);
-    }
-  };
-
-  const handleNameSelect = (value: string) => {
-    setSelectedSkillName(value);
-    setInteractiveSkillName(value);
-    setIsNameDropdownOpen(false);
-  };
-
-  // Load skill data when name is selected or typed
-  const loadSkillData = async (skillName: string) => {
-    const skill = allSkills.find((s) => s.name === skillName);
-    if (!skill) return;
-
-    const fieldsToSet = {
-      name: skill.name,
-      description: skill.description || "",
-      source: skill.source || "custom",
-      tags: skill.tags || [],
-      content: skill.content || "",
-    };
-    form.setFieldsValue(fieldsToSet);
-
-    await loadSkillFiles(skillName);
-  };
-
   useEffect(() => {
     if (!isOpen || !editingSkill) return;
     const skillName = editingSkill.name?.trim() || "";
+    let cancelled = false;
+
+    const applySkillInfo = (skill: Partial<SkillListItem> & { content?: string | null }) => {
+      if (cancelled) return;
+      const nextName = skill.name?.trim() || skillName;
+      setInteractiveSkillName(nextName);
+      form.setFieldsValue({
+        name: nextName,
+        description: skill.description || "",
+        source: skill.source || "custom",
+        tags: Array.isArray(skill.tags) ? skill.tags : [],
+      });
+      setSkillTabs([{ path: "SKILL.md", content: skill.content || "" }]);
+      setActiveSkillTab("SKILL.md");
+    };
+
     setActiveTab("interactive");
-    setSelectedSkillName(skillName);
-    setInteractiveSkillName(skillName);
-    setIsCreateMode(false);
-    form.setFieldsValue({
+    applySkillInfo({
       name: skillName,
       description: editingSkill.description || "",
       source: editingSkill.source || "custom",
       tags: editingSkill.tags || [],
     });
-    if (skillName && allSkills.length > 0) {
-      void loadSkillData(skillName);
-    }
-  }, [isOpen, editingSkill?.skill_id, allSkills.length]);
 
-  const handleNameChange = (value: string) => {
+    void fetchSkillById(editingSkill.skill_id).then((result) => {
+      if (result.success && result.data) {
+        applySkillInfo(result.data);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, editingSkill?.skill_id]);
+
+  const handleNameChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
     setInteractiveSkillName(value);
-    if (!value || value.trim() === "") {
-      setSelectedSkillName("");
+    form.setFieldsValue({ name: value });
+    if (!value.trim()) {
       // Reset skillTabs when input is cleared
       setSkillTabs([{ path: "SKILL.md", content: "" }]);
       setActiveSkillTab("SKILL.md");
     }
   };
 
-  const handleNameFocus = () => {
-    setIsNameDropdownOpen(true);
-  };
-
-  const handleNameBlur = () => {
-    setTimeout(() => {
-      setIsNameDropdownOpen(false);
-    }, 200);
+  const handleTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    const tags = form.getFieldValue("tags");
+    if (Array.isArray(tags) && tags.length >= MAX_SKILL_TAGS) {
+      form.setFields([
+        {
+          name: "tags",
+          errors: [t("skillManagement.form.tagsMaxCount")],
+        },
+      ]);
+    }
   };
 
   // Cleanup when modal is closed
@@ -412,6 +329,12 @@ export default function SkillBuildModal({
   const handleManualSubmit = async () => {
     try {
       const values = await form.validateFields();
+      if (isEditMode && editingSkill && onBeforeEditSave) {
+        const shouldContinue = await onBeforeEditSave(editingSkill);
+        if (!shouldContinue) {
+          return;
+        }
+      }
       setIsSubmitting(true);
 
       const skillTab = skillTabs.find(t => t.path === "SKILL.md");
@@ -429,10 +352,24 @@ export default function SkillBuildModal({
         allSkills,
         onSuccess,
         onCancel,
-        t
+        t,
+        isEditMode && editingSkill?.skill_id
+          ? { mode: "edit", skillId: editingSkill.skill_id }
+          : { mode: "create" }
       );
     } catch (error) {
       log.error("Skill create/update error:", error);
+      const errorMessage = error instanceof Error ? error.message : "";
+      if (/already exists|409/.test(errorMessage)) {
+        form.setFields([
+          {
+            name: "name",
+            errors: ["技能名称已存在，请修改名称"],
+          },
+        ]);
+        return;
+      }
+      message.error(t("skillManagement.message.submitFailed"));
     } finally {
       setIsSubmitting(false);
     }
@@ -494,75 +431,6 @@ export default function SkillBuildModal({
     return parts.join("\n\n");
   };
 
-  // Load all files for a skill into skillTabs
-  const loadSkillFiles = async (skillName: string) => {
-    try {
-      const files = await fetchSkillFiles(skillName);
-      if (files.length === 0) {
-        // Fallback: load SKILL.md content from the skill list item
-        const skill = allSkills.find((s) => s.name === skillName);
-        if (skill?.content) {
-          setSkillTabs([{ path: "SKILL.md", content: skill.content }]);
-        }
-        return;
-      }
-
-      // Flatten file tree and get all file paths.
-      // The root node's name IS the skill_name — skip the root itself and
-      // start from its children so paths stay relative (e.g. "SKILL.md", not "skill_name/SKILL.md").
-      const flattenFiles = (nodes: SkillFileNode[], prefix = ""): string[] => {
-        const result: string[] = [];
-        for (const node of nodes) {
-          if (node.type === "directory" && node.name === skillName && prefix === "") {
-            // Root directory — recurse into children without prepending the root name
-            if (node.children) {
-              result.push(...flattenFiles(node.children, ""));
-            }
-          } else {
-            const fullPath = prefix ? `${prefix}/${node.name}` : node.name;
-            if (node.type === "file") {
-              result.push(fullPath);
-            } else if (node.children) {
-              result.push(...flattenFiles(node.children, fullPath));
-            }
-          }
-        }
-        return result;
-      };
-
-      const filePaths = flattenFiles(files);
-
-      // Load content for each file
-      const tabsContent: SkillFileContent[] = [];
-      for (const filePath of filePaths) {
-        const content = await fetchSkillFileContent(skillName, filePath);
-        tabsContent.push({ path: filePath, content: content || "" });
-      }
-
-      // Sort so SKILL.md is always first
-      tabsContent.sort((a, b) => {
-        if (a.path === "SKILL.md") return -1;
-        if (b.path === "SKILL.md") return 1;
-        return a.path.localeCompare(b.path);
-      });
-
-      setSkillTabs(dedupeSkillTabs(tabsContent));
-      setActiveSkillTab("SKILL.md");
-    } catch (error) {
-      log.error("Failed to load skill files:", error);
-      if (error instanceof SkillFilesAccessDeniedError) {
-        message.warning(error.message);
-        return;
-      }
-      // Fallback to basic content
-      const skill = allSkills.find((s) => s.name === skillName);
-      if (skill?.content) {
-        setSkillTabs([{ path: "SKILL.md", content: skill.content }]);
-        setActiveSkillTab("SKILL.md");
-      }
-    }
-  };
-
   // Parse frontmatter YAML and update form fields
   const parseAndUpdateFrontmatter = (frontmatterYaml: string) => {
     try {
@@ -576,10 +444,6 @@ export default function SkillBuildModal({
         if (name && !isEditMode) {
           form.setFieldsValue({ name });
           setInteractiveSkillName(name);
-          const existingSkill = allSkills.find(
-            (s) => s.name.toLowerCase() === name.toLowerCase()
-          );
-          setIsCreateMode(!existingSkill);
         }
         if (description) {
           form.setFieldsValue({ description });
@@ -782,10 +646,6 @@ export default function SkillBuildModal({
               if (skillInfo && skillInfo.name && !isEditMode) {
                 form.setFieldsValue({ name: skillInfo.name });
                 setInteractiveSkillName(skillInfo.name);
-                const existingSkill = allSkills.find(
-                  (s) => s.name.toLowerCase() === skillInfo.name?.toLowerCase()
-                );
-                setIsCreateMode(!existingSkill);
               }
               if (skillInfo && skillInfo.description) {
                 form.setFieldsValue({ description: skillInfo.description });
@@ -929,11 +789,17 @@ export default function SkillBuildModal({
                 readOnly
                 placeholder={t("skillManagement.form.uploadSkillNamePlaceholder")}
                 style={{ fontWeight: 500 }}
-                status={!uploadExtractedSkillName && uploadFile ? "warning" : undefined}
+                status={
+                  existingSkill
+                    ? "error"
+                    : !uploadExtractedSkillName && uploadFile
+                      ? "warning"
+                      : undefined
+                }
               />
               {uploadExtractedSkillName && existingSkill ? (
-                <span className="ml-1 text-xs text-amber-600">
-                  {t("skillManagement.form.existingSkillHint")}
+                <span className="ml-1 text-xs text-red-500">
+                  {t("skillManagement.form.uploadSkillExists")}
                 </span>
               ) : null}
               {uploadExtractedSkillName && !existingSkill ? (
@@ -1164,35 +1030,9 @@ export default function SkillBuildModal({
                 rules={[
                   { required: true, message: t("skillManagement.form.nameRequired") },
                 ]}
-                help={
-                  interactiveSkillName.trim() ? (
-                    isCreateMode ? (
-                      <span className="text-xs text-green-600">
-                        {t("skillManagement.form.newSkillHint")}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-amber-600">
-                        {t("skillManagement.form.existingSkillHint")}
-                      </span>
-                    )
-                  ) : undefined
-                }
-                validateStatus={
-                  interactiveSkillName.trim()
-                    ? isCreateMode
-                      ? "success"
-                      : "warning"
-                    : undefined
-                }
               >
-                <AutoComplete
-                  open={shouldShowDropdown && dropdownOptions.length > 0}
-                  options={dropdownOptions}
-                  onSearch={handleNameSearch}
-                  onSelect={handleNameSelect}
+                <Input
                   onChange={handleNameChange}
-                  onFocus={handleNameFocus}
-                  onBlur={handleNameBlur}
                   value={interactiveSkillName}
                   placeholder={t("skillManagement.form.namePlaceholder")}
                   allowClear
@@ -1230,14 +1070,35 @@ export default function SkillBuildModal({
             name="tags"
             label={t("skillManagement.form.tags")}
             style={{ marginBottom: 8 }}
+            rules={[
+              {
+                validator: (_, value?: string[]) => {
+                  const tags = Array.isArray(value) ? value : [];
+                  if (tags.length > MAX_SKILL_TAGS) {
+                    return Promise.reject(
+                      new Error(t("skillManagement.form.tagsMaxCount"))
+                    );
+                  }
+                  if (tags.some((tag) => tag.length > MAX_SKILL_TAG_LENGTH)) {
+                    return Promise.reject(
+                      new Error(t("skillManagement.form.tagMaxLength"))
+                    );
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
           >
             <Select
               mode="tags"
+              maxCount={MAX_SKILL_TAGS}
               suffixIcon={null}
               placeholder={t("skillManagement.form.tagsPlaceholder")}
-              onFocus={() => setIsTagsFocused(true)}
-              onBlur={() => setIsTagsFocused(false)}
               open={false}
+              onInputKeyDown={handleTagInputKeyDown}
+              onChange={() => {
+                void form.validateFields(["tags"]).catch(() => {});
+              }}
               style={{ width: "100%" }}
               popupMatchSelectWidth={false}
             />
@@ -1533,13 +1394,9 @@ export default function SkillBuildModal({
       return "保存更改";
     }
     if (activeTab === "interactive") {
-      return isCreateMode
-        ? t("skillManagement.mode.create")
-        : t("skillManagement.mode.update");
+      return t("skillManagement.mode.create");
     }
-    return uploadIsCreateMode
-      ? t("skillManagement.mode.create")
-      : t("skillManagement.mode.update");
+    return t("skillManagement.mode.create");
   };
 
   return (
@@ -1589,7 +1446,7 @@ export default function SkillBuildModal({
             type="primary"
             loading={isSubmitting}
             onClick={handleUploadSubmit}
-            disabled={!uploadFile || !uploadExtractedSkillName.trim()}
+            disabled={!uploadFile || !uploadExtractedSkillName.trim() || !uploadIsCreateMode}
           >
             {getConfirmButtonText()}
           </Button>

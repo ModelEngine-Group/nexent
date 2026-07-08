@@ -117,8 +117,16 @@ export function useInstallSkillFromRepository() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (skillRepositoryId: number) =>
-      skillRepositoryService.installSkillFromRepository(skillRepositoryId),
+    mutationFn: ({
+      skillRepositoryId,
+      targetName,
+    }: {
+      skillRepositoryId: number;
+      targetName: string;
+    }) =>
+      skillRepositoryService.installSkillFromRepository(skillRepositoryId, {
+        target_name: targetName,
+      }),
     onSuccess: async () => {
       await Promise.all([
         invalidateSkillRepositoryCaches(queryClient),

@@ -360,7 +360,9 @@ export const API_ENDPOINTS = {
     official: `${API_BASE_URL}/skills/official`,
     upload: `${API_BASE_URL}/skills/upload`,
     get: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    getById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     update: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
+    updateById: (skillId: number) => `${API_BASE_URL}/skills/${skillId}`,
     updateUpload: (skillName: string) =>
       `${API_BASE_URL}/skills/${skillName}/upload`,
     delete: (skillName: string) => `${API_BASE_URL}/skills/${skillName}`,
@@ -481,6 +483,9 @@ export const API_ENDPOINTS = {
       }
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
+      }
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill${queryString ? `?${queryString}` : ""}`;

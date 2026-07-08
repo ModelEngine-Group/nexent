@@ -16,7 +16,7 @@ from consts.agent_repository import (
     VALID_REPOSITORY_STATUSES,
 )
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
-from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException, UnauthorizedError
+from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
 from database.skill_repository_db import (
     get_skill_repository_by_id_and_publisher,
     get_skill_repository_by_skill_id,
@@ -67,7 +67,6 @@ _MAX_LISTING_TAGS = 5
 _MAX_LISTING_TAG_LENGTH = 20
 _MAX_LISTING_ICON_LENGTH = 32
 _MAX_COPY_NAME_LENGTH = 100
-
 _UPDATE_SNAPSHOT_FIELDS = (
     "name",
     "description",
@@ -618,6 +617,7 @@ def install_skill_from_repository_impl(
     skill_repository_id: int,
     tenant_id: str,
     user_id: str,
+    target_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Install a shared skill repository listing into the current tenant."""
     record = get_skill_repository_by_id_and_publisher(
@@ -638,11 +638,16 @@ def install_skill_from_repository_impl(
     except Exception as exc:
         raise ValueError("Repository listing has invalid skill ZIP payload") from exc
 
-    try:
+    copy_skill_name = str(target_name or "").strip()
+    if not copy_skill_name:
         copy_skill_name = _generate_available_copy_skill_name(
             base_name=str(record.get("name") or "").strip(),
             tenant_id=tenant_id,
         )
+    if not copy_skill_name:
+        raise ValueError("Skill name is required")
+
+    try:
         created_skill = SkillService(tenant_id=tenant_id).create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
             skill_name=copy_skill_name,
@@ -653,11 +658,7 @@ def install_skill_from_repository_impl(
     except SkillException as exc:
         message = str(exc)
         if "already exists" in message.lower():
-            duplicate_name = (
-                _extract_duplicate_skill_name(message)
-                or str(record.get("name") or "").strip()
-                or "unknown"
-            )
+            duplicate_name = _extract_duplicate_skill_name(message) or copy_skill_name
             raise SkillDuplicateError([duplicate_name]) from exc
         raise
 
@@ -788,6 +789,7 @@ def list_skill_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
     """List skill repository listings for the caller tenant with optional filters."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -804,6 +806,7 @@ def list_skill_repository_listings_impl(
         page=page,
         page_size=page_size,
         search=search,
+        sort_by_update_time=sort_by_update_time,
     )
     return {
         "items": [_to_summary_item(record) for record in result.get("items", [])],

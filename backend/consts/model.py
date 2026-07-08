@@ -755,6 +755,11 @@ class SkillRepositoryListingCreateRequest(BaseModel):
     category_id: Optional[int] = Field(0, description="Optional marketplace category ID")
 
 
+class SkillRepositoryInstallRequest(BaseModel):
+    """Request body for installing a repository skill into current tenant."""
+    target_name: Optional[str] = Field(None, description="Target skill name in current tenant")
+
+
 class SkillRepositoryListingDetailResponse(BaseModel):
     """Detailed marketplace listing payload for skill repository detail view."""
     skill_repository_id: int
@@ -1295,6 +1300,7 @@ class SkillFileData(BaseModel):
 
 class SkillUpdateRequest(BaseModel):
     """Request model for updating a skill."""
+    name: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
     tool_ids: Optional[List[int]] = None

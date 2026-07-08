@@ -1311,6 +1311,99 @@ export const updateSkill = async (
   }
 };
 
+export const updateSkillById = async (
+  skillId: number,
+  skillData: {
+    name?: string;
+    description?: string;
+    source?: string;
+    tags?: string[];
+    content?: string;
+    config_values?: Record<string, unknown>;
+    files?: Array<{ path: string; content: string }>;
+  },
+  tenantId?: string | null
+) => {
+  try {
+    const requestBody: Record<string, any> = {};
+    if (skillData.name !== undefined) requestBody.name = skillData.name;
+    if (skillData.description !== undefined)
+      requestBody.description = skillData.description;
+    if (skillData.source !== undefined) requestBody.source = skillData.source;
+    if (skillData.tags !== undefined)
+      requestBody.tags = normalizeTags(skillData.tags);
+    if (skillData.content !== undefined)
+      requestBody.content = skillData.content;
+    if (skillData.config_values !== undefined)
+      requestBody.config_values = skillData.config_values;
+    if (skillData.files !== undefined) requestBody.files = skillData.files;
+
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.updateById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.updateById(skillId);
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error updating skill by ID:", error);
+    return {
+      success: false,
+      data: null,
+      message:
+        error instanceof Error ? error.message : "Failed to update skill",
+    };
+  }
+};
+
+export const fetchSkillById = async (skillId: number, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.skills.getById(skillId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.skills.getById(skillId);
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Error fetching skill by ID:", error);
+    return {
+      success: false,
+      data: null,
+      message:
+        error instanceof Error ? error.message : "Failed to fetch skill",
+    };
+  }
+};
+
 /**
  * Create or update skill from file upload
  * @param skillName skill name (optional for new skill)
