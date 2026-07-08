@@ -907,8 +907,9 @@ async def _stream_agent_chunks(
     # so that units saved incrementally have a valid message_id to reference.
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
+        history_items = getattr(agent_request, "history", None) or []
         user_role_count = sum(
-            1 for item in getattr(agent_request, "history", [])
+            1 for item in history_items
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
