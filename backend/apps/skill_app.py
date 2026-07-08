@@ -504,7 +504,8 @@ async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(N
         service = SkillService(tenant_id=tenant_id)
         skill = service.get_skill_by_id(skill_id, tenant_id=tenant_id)
         if not skill:
-            raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Skill not found: {skill_id}")
         return JSONResponse(content=skill)
     except HTTPException:
         raise

@@ -35,7 +35,8 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     Returns:
         Created or updated SkillInstance object
     """
-    skill_info_dict = skill_info.__dict__ if hasattr(skill_info, '__dict__') else skill_info
+    skill_info_dict = skill_info.__dict__ if hasattr(
+        skill_info, '__dict__') else skill_info
     skill_info_dict = skill_info_dict.copy()
     skill_info_dict.setdefault("tenant_id", tenant_id)
     skill_info_dict.setdefault("user_id", user_id)
@@ -176,7 +177,6 @@ def delete_skill_instances_by_tenant(tenant_id: str, user_id: str) -> int:
         })
         session.commit()
         return count
-
 
 
 # ============== SkillInfo Repository Functions ==============
@@ -323,8 +323,10 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
             skill_description=skill_data.get("description", ""),
             skill_tags=skill_data.get("tags", []),
             skill_content=skill_data.get("content", ""),
-            config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
-            config_values=_params_value_for_db(skill_data.get("config_values")),
+            config_schemas=_params_value_for_db(
+                skill_data.get("config_schemas")),
+            config_values=_params_value_for_db(
+                skill_data.get("config_values")),
             source=skill_data.get("source", "custom"),
             created_by=skill_data.get("created_by"),
             create_time=datetime.now(),
@@ -397,9 +399,11 @@ def update_skill(
         if "source" in skill_data:
             row_values["source"] = skill_data["source"]
         if "config_schemas" in skill_data:
-            row_values["config_schemas"] = _params_value_for_db(skill_data["config_schemas"])
+            row_values["config_schemas"] = _params_value_for_db(
+                skill_data["config_schemas"])
         if "config_values" in skill_data:
-            row_values["config_values"] = _params_value_for_db(skill_data["config_values"])
+            row_values["config_values"] = _params_value_for_db(
+                skill_data["config_values"])
 
         session.execute(
             sa_update(SkillInfo)
@@ -486,9 +490,11 @@ def update_skill_by_id(
         if "source" in skill_data:
             row_values["source"] = skill_data["source"]
         if "config_schemas" in skill_data:
-            row_values["config_schemas"] = _params_value_for_db(skill_data["config_schemas"])
+            row_values["config_schemas"] = _params_value_for_db(
+                skill_data["config_schemas"])
         if "config_values" in skill_data:
-            row_values["config_values"] = _params_value_for_db(skill_data["config_values"])
+            row_values["config_values"] = _params_value_for_db(
+                skill_data["config_values"])
 
         session.execute(
             sa_update(SkillInfo)
@@ -690,8 +696,10 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
                 existing.skill_description = skill_data.get("description", "")
                 existing.skill_tags = skill_data.get("tags", [])
                 existing.skill_content = skill_data.get("content", "")
-                existing.config_schemas = _params_value_for_db(skill_data.get("config_schemas"))
-                existing.config_values = _params_value_for_db(skill_data.get("config_values"))
+                existing.config_schemas = _params_value_for_db(
+                    skill_data.get("config_schemas"))
+                existing.config_values = _params_value_for_db(
+                    skill_data.get("config_values"))
                 existing.updated_by = user_id
             else:
                 new_skill = SkillInfo(
@@ -700,8 +708,10 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
                     skill_description=skill_data.get("description", ""),
                     skill_tags=skill_data.get("tags", []),
                     skill_content=skill_data.get("content", ""),
-                    config_schemas=_params_value_for_db(skill_data.get("config_schemas")),
-                    config_values=_params_value_for_db(skill_data.get("config_values")),
+                    config_schemas=_params_value_for_db(
+                        skill_data.get("config_schemas")),
+                    config_values=_params_value_for_db(
+                        skill_data.get("config_values")),
                     source=skill_data.get("source", "official"),
                     created_by=user_id,
                     updated_by=user_id,

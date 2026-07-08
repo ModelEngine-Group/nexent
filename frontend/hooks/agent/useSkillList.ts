@@ -2,9 +2,20 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSkills } from "@/services/agentConfigService";
 import { useMemo } from "react";
 import { Skill, SkillGroup } from "@/types/agentConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useTranslation } from "react-i18next";
+
+const OFFICIAL_SKILL_SOURCES = new Set(["official", "官方"]);
+
+function isOfficialSkill(skill: Skill) {
+	const source = (skill.source || "").trim();
+	return OFFICIAL_SKILL_SOURCES.has(source);
+}
 
 export function useSkillList(options?: { enabled?: boolean; staleTime?: number }) {
 	const queryClient = useQueryClient();
+	const { user } = useAuthorizationContext();
+	const { t } = useTranslation("common");
 
 	const query = useQuery({
 		queryKey: ["skills"],
@@ -20,18 +31,21 @@ export function useSkillList(options?: { enabled?: boolean; staleTime?: number }
 	});
 
 	const skills = query.data ?? [];
+	const currentUserId = user?.id ?? null;
 
 	const availableSkills = useMemo(() => {
-		return skills;
-	}, [skills]);
+		return skills.filter((skill: Skill) => {
+			if (isOfficialSkill(skill)) return true;
+			return Boolean(currentUserId && skill.created_by === currentUserId);
+		});
+	}, [skills, currentUserId]);
 
 	const groupedSkills = useMemo(() => {
 		const groups: SkillGroup[] = [];
 		const groupMap = new Map<string, Skill[]>();
 
 		availableSkills.forEach((skill: Skill) => {
-			const source = skill.source || "custom";
-			const groupKey = source;
+			const groupKey = isOfficialSkill(skill) ? "official" : "custom";
 
 			if (!groupMap.has(groupKey)) {
 				groupMap.set(groupKey, []);
@@ -47,7 +61,10 @@ export function useSkillList(options?: { enabled?: boolean; staleTime?: number }
 				return b.update_time.localeCompare(a.update_time);
 			});
 
-			let label = key;
+			const label =
+				key === "official"
+					? t("skillPool.group.official")
+					: t("skillPool.group.custom");
 
 			groups.push({
 				key,
@@ -65,7 +82,7 @@ export function useSkillList(options?: { enabled?: boolean; staleTime?: number }
 			};
 			return getPriority(a.key) - getPriority(b.key);
 		});
-	}, [availableSkills]);
+	}, [availableSkills, t]);
 
 	return {
 		...query,

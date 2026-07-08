@@ -1050,6 +1050,8 @@ export const fetchSkills = async (tenantId?: string | null) => {
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,
       tool_ids: Array.isArray(skill.tool_ids) ? skill.tool_ids.map(Number) : [],
+      created_by: skill.created_by ?? null,
+      updated_by: skill.updated_by ?? null,
       update_time: skill.update_time,
       create_time: skill.create_time,
     }));

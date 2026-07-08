@@ -228,7 +228,8 @@ def list_skill_repository_summaries(
 
         total = query.count()
         order_by_fields = (
-            (SkillRepository.update_time.desc(), SkillRepository.skill_repository_id.desc())
+            (SkillRepository.update_time.desc(),
+             SkillRepository.skill_repository_id.desc())
             if sort_by_update_time
             else (SkillRepository.skill_repository_id.desc(),)
         )
@@ -457,7 +458,8 @@ def sum_skill_repository_downloads_by_skill_ids(
         rows = (
             session.query(
                 SkillRepository.skill_id,
-                func.coalesce(func.sum(SkillRepository.downloads), 0).label("downloads"),
+                func.coalesce(func.sum(SkillRepository.downloads),
+                              0).label("downloads"),
             )
             .filter(
                 SkillRepository.delete_flag != "Y",

@@ -23,13 +23,16 @@ skill_repository_router = APIRouter(prefix="/repository/skill")
 
 @skill_repository_router.get("")
 async def list_skill_repository_listings_api(
-    status: Optional[str] = Query(None, description="Filter by listing status"),
-    skill_id: Optional[int] = Query(None, description="Filter by source skill ID"),
+    status: Optional[str] = Query(
+        None, description="Filter by listing status"),
+    skill_id: Optional[int] = Query(
+        None, description="Filter by source skill ID"),
     category_id: Optional[int] = Query(
         None,
         description="Filter by marketplace category ID",
     ),
-    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
+    page: Annotated[int, Query(
+        ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[
         int, Query(ge=1, le=100, description="Page size from 1 to 100")
     ] = 10,
@@ -73,7 +76,8 @@ async def list_my_editable_skills_api(
         "all",
         description="Filter by ownership: all / created / others",
     ),
-    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
+    page: Annotated[int, Query(
+        ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[
         int, Query(ge=1, le=100, description="Page size from 1 to 100")
     ] = 10,
@@ -188,7 +192,8 @@ async def create_skill_repository_listing_api(
     """Create or update a marketplace repository listing from a skill snapshot."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        card_fields = payload.model_dump(exclude_none=True) if payload else None
+        card_fields = payload.model_dump(
+            exclude_none=True) if payload else None
         result = create_skill_repository_listing_impl(
             skill_id=skill_id,
             tenant_id=tenant_id,
